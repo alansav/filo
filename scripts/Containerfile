@@ -1,0 +1,34 @@
+# Dev container for Filo (Go). Build and run it with scripts/dev.sh.
+#
+# GO_IMAGE tracks the newest Go 1.x image so a rebuild picks up current releases.
+# Once you have checked https://go.dev/dl and the golang tags on Docker Hub, pin an exact tag
+# (e.g. docker.io/library/golang:1.xx.y) so every clean checkout builds the same toolchain.
+ARG GO_IMAGE=docker.io/library/golang:1.273
+FROM ${GO_IMAGE}
+
+# Match the host user so files written to the mounted repo are owned by you (rootless podman, --userns=keep-id).
+ARG UID=1000
+ARG GID=1000
+
+# sqlite3 is for inspecting filo.db by hand; the rest are everyday tools.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends sqlite3 ripgrep less procps \
+ && rm -rf /var/lib/apt/lists/*
+
+RUN groupadd --gid "${GID}" dev \
+ && useradd --create-home --uid "${UID}" --gid "${GID}" --shell /bin/bash dev \
+ && mkdir -p /workspace /home/dev/go/pkg/mod /home/dev/.cache/go-build \
+ && chown -R dev:dev /workspace /home/dev
+
+USER dev
+ENV GOPATH=/home/dev/go \
+    GOCACHE=/home/dev/.cache/go-build \
+    PATH=/home/dev/go/bin:/usr/local/go/bin:${PATH}
+
+# Language server and linter. Unpinned on purpose while the project is young; pin them when it settles.
+RUN go install golang.org/x/tools/gopls@latest \
+ && go install honnef.co/go/tools/cmd/staticcheck@latest \
+ && git config --global --add safe.directory /workspace
+
+WORKDIR /workspace
+CMD ["bash"]
