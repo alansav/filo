@@ -19,9 +19,11 @@ repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 image="${FILO_DEV_IMAGE:-filo-dev}"
 
 build() {
+  local claude=0
+  [ "${1:-}" = "--claude" ] && claude=1
   podman build \
     --build-arg "UID=$(id -u)" --build-arg "GID=$(id -g)" \
-    --build-arg "INSTALL_CLAUDE=${FILO_DEV_CLAUDE:-0}" \
+    --build-arg "INSTALL_CLAUDE=$claude" \
     -f "$repo/.devcontainer/Containerfile" \
     -t "$image" \
     "$repo/.devcontainer"
@@ -53,7 +55,7 @@ usage() {
 }
 
 case "${1:-}" in
-  build) build ;;
+  build) shift; build "$@" ;;
   shell) run bash ;;
   run)
     shift
