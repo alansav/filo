@@ -31,6 +31,7 @@ type Entry struct {
 	Kind       Kind
 	Size       int64
 	MtimeNS    int64  // Unix nanoseconds
+	CtimeNS    int64  // status change time, Unix nanoseconds; 0 = not known
 	Ino        uint64 // inode, from the lstat; 0 = not known
 	LinkTarget string
 	LinkBroken bool
@@ -205,7 +206,8 @@ func (w *walker) dir(ctx context.Context, rel, abs string) error {
 			w.symlink(childRel, childAbs, info)
 		case mode.IsRegular():
 			w.res.Entries = append(w.res.Entries, Entry{
-				Path: childRel, Kind: KindFile, Size: info.Size(), MtimeNS: info.ModTime().UnixNano(), Ino: inode(info),
+				Path: childRel, Kind: KindFile, Size: info.Size(), MtimeNS: info.ModTime().UnixNano(),
+				CtimeNS: fsid.ChangeTimeNS(info), Ino: inode(info),
 			})
 		default:
 			// FIFOs, sockets, devices: not files Filo manages.
@@ -259,8 +261,8 @@ func (w *walker) symlink(rel, abs string, info fs.FileInfo) {
 		}
 	}
 	w.res.Entries = append(w.res.Entries, Entry{
-		Path: rel, Kind: KindSymlink, Size: info.Size(), MtimeNS: info.ModTime().UnixNano(), Ino: inode(info),
-		LinkTarget: target, LinkBroken: broken,
+		Path: rel, Kind: KindSymlink, Size: info.Size(), MtimeNS: info.ModTime().UnixNano(),
+		CtimeNS: fsid.ChangeTimeNS(info), Ino: inode(info), LinkTarget: target, LinkBroken: broken,
 	})
 }
 

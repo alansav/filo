@@ -2,6 +2,7 @@ package reconcile
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"os"
 	"os/exec"
@@ -196,6 +197,18 @@ func skipIfRoot(t *testing.T) {
 	}
 }
 
+// skipIfNoCtime skips on platforms that record no status change time.
+func skipIfNoCtime(e *env) {
+	e.t.Helper()
+	fi, err := os.Lstat(e.base)
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	if fsid.ChangeTimeNS(fi) == 0 {
+		e.t.Skip("no status change time on " + runtime.GOOS)
+	}
+}
+
 type step struct {
 	do    func(e *env)
 	opt   Options // Target defaults to the root
@@ -356,8 +369,11 @@ func TestScenarios(t *testing.T) {
 			{do: func(e *env) { e.write("a", "content") }, want: counts{New: 1}},
 			{do: func(e *env) { e.link("a", "b") }, want: counts{New: 1},
 				check: func(t *testing.T, e *env, sum Summary, prev map[string]store.Known) {
+					// The new link changes the original's ctime, so it is rehashed quietly and only its ctime moves.
 					k := e.known()
-					if k["a"] != prev["a"] || k["b"].Ino != k["a"].Ino {
+					a, was := k["a"], prev["a"]
+					a.CtimeNS, was.CtimeNS = 0, 0
+					if a != was || k["b"].Ino != k["a"].Ino {
 						t.Errorf("a %+v -> %+v, b %+v", prev["a"], k["a"], k["b"])
 					}
 				}},
@@ -450,23 +466,72 @@ func TestScenarios(t *testing.T) {
 			{do: func(e *env) { e.write("f", "a") }, want: counts{New: 1}},
 			{do: func(e *env) { skipIfRoot(e.t); e.appendTo("f", "bc"); e.chmod("f", 0) }, want: counts{Errors: 1},
 				check: func(t *testing.T, e *env, sum Summary, prev map[string]store.Known) {
-					if now := e.known()["f"]; now != prev["f"] {
-						t.Errorf("row changed after a failed hash: %+v -> %+v", prev["f"], now)
+					now, want := e.known()["f"], prev["f"]
+					want.Unreadable = sum.ScanID
+					if now != want {
+						t.Errorf("after a failed hash: %+v, want %+v (only flagged)", now, want)
 					}
 				}},
-			{do: func(e *env) { e.chmod("f", 0o600) }, want: counts{Changed: 1}},
-		}},
-		{"a new file that can't be hashed is recorded without a hash, then filled in", []step{
-			{do: func(e *env) { skipIfRoot(e.t); e.write("f", "a"); e.chmod("f", 0) }, want: counts{New: 1, Errors: 1},
+			{do: func(e *env) { e.chmod("f", 0o600) }, want: counts{Changed: 1},
 				check: func(t *testing.T, e *env, sum Summary, prev map[string]store.Known) {
-					if h := e.known()["f"].Hash; h != "" {
-						t.Errorf("hash = %q, want none", h)
+					if u := e.known()["f"].Unreadable; u != 0 {
+						t.Errorf("still flagged unreadable since scan %d after a successful hash", u)
+					}
+				}},
+		}},
+		{"losing read access with nothing else changed is noticed through the ctime, and flagged", []step{
+			{do: func(e *env) { skipIfNoCtime(e); e.write("f", "a") }, want: counts{New: 1}},
+			{do: func(e *env) { skipIfRoot(e.t); e.chmod("f", 0) }, want: counts{Errors: 1},
+				check: func(t *testing.T, e *env, sum Summary, prev map[string]store.Known) {
+					now := e.known()["f"]
+					if now.Unreadable != sum.ScanID || now.Hash != prev["f"].Hash || now.CtimeNS != prev["f"].CtimeNS {
+						t.Errorf("after losing access: %+v, want flagged since scan %d with the old hash and ctime",
+							now, sum.ScanID)
+					}
+					rows, total, err := e.s.UnreadableFiles(context.Background(), 10)
+					if err != nil || total != 1 || len(rows) != 1 || rows[0].Path != e.abs("f") || rows[0].Since != sum.ScanID {
+						t.Errorf("UnreadableFiles = %+v, %d, %v", rows, total, err)
+					}
+				}},
+			{want: counts{Errors: 1},
+				check: func(t *testing.T, e *env, sum Summary, prev map[string]store.Known) {
+					if got := e.known()["f"].Unreadable; got != prev["f"].Unreadable {
+						t.Errorf("unreadable since scan %d, want it kept at %d", got, prev["f"].Unreadable)
 					}
 				}},
 			{do: func(e *env) { e.chmod("f", 0o600) }, want: counts{},
 				check: func(t *testing.T, e *env, sum Summary, prev map[string]store.Known) {
-					if e.known()["f"].Hash == "" {
-						t.Error("hash not filled in")
+					now := e.known()["f"]
+					if now.Unreadable != 0 || now.Hash != prev["f"].Hash || now.CtimeNS == prev["f"].CtimeNS {
+						t.Errorf("after regaining access: %+v, want unflagged, same hash, new ctime", now)
+					}
+				}},
+		}},
+		{"an in-place rewrite that restores size and mtime is a change, through the ctime", []step{
+			{do: func(e *env) { skipIfNoCtime(e); e.write("f", "content A"); e.touch("f", old) }, want: counts{New: 1}},
+			{do: func(e *env) {
+				ino := e.known()["f"].Ino
+				if err := os.WriteFile(e.abs("f"), []byte("content B"), 0o600); err != nil {
+					e.t.Fatal(err)
+				}
+				e.touch("f", old)
+				if now := e.known()["f"]; now.Ino != ino {
+					e.t.Fatal("rewrite changed the inode")
+				}
+			}, want: counts{Changed: 1}},
+		}},
+		{"a new file that can't be hashed is recorded without a hash, then filled in", []step{
+			{do: func(e *env) { skipIfRoot(e.t); e.write("f", "a"); e.chmod("f", 0) }, want: counts{New: 1, Errors: 1},
+				check: func(t *testing.T, e *env, sum Summary, prev map[string]store.Known) {
+					if k := e.known()["f"]; k.Hash != "" || k.Unreadable != sum.ScanID {
+						t.Errorf("hash = %q, unreadable since %d; want none, flagged since scan %d", k.Hash, k.Unreadable,
+							sum.ScanID)
+					}
+				}},
+			{do: func(e *env) { e.chmod("f", 0o600) }, want: counts{},
+				check: func(t *testing.T, e *env, sum Summary, prev map[string]store.Known) {
+					if k := e.known()["f"]; k.Hash == "" || k.Unreadable != 0 {
+						t.Errorf("hash %q, unreadable since %d: want filled in and unflagged", k.Hash, k.Unreadable)
 					}
 				}},
 		}},
@@ -803,5 +868,40 @@ func TestProgressCounters(t *testing.T) {
 				t.Errorf("phase after the scan = %d, want idle", ph)
 			}
 		})
+	}
+}
+
+// A database from before ctimes were kept has ctime 0 everywhere: the next scan records each ctime without an event.
+func TestCtimeFilledInQuietly(t *testing.T) {
+	e := newEnv(t, nil)
+	skipIfNoCtime(e)
+	e.write("f", "content")
+	if _, err := Scan(context.Background(), e.s, Options{Target: e.base}); err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", e.s.DBPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(`UPDATE files SET ctime_ns = 0`); err != nil {
+		t.Fatal(err)
+	}
+	before := e.known()["f"]
+
+	sum, err := Scan(context.Background(), e.s, Options{Target: e.base})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := countsOf(sum); got != (counts{}) {
+		t.Errorf("counts = %+v, want none; events %+v", got, e.events(sum.ScanID))
+	}
+	after := e.known()["f"]
+	if after.CtimeNS == 0 {
+		t.Error("ctime not filled in")
+	}
+	after.CtimeNS = 0
+	if after != before {
+		t.Errorf("row %+v -> %+v, want only the ctime filled in", before, after)
 	}
 }

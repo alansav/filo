@@ -104,7 +104,10 @@ Principles. These are not negotiable:
   `--allow-empty` records it anyway. For other roots an empty walk is recorded: if the files are gone, they are gone.
 - Scans are read-only on user files and safe to run while files are changing. A file caught mid-write appears
   correctly on the next scan.
-- Size, mtime and **inode** decide whether a file is rehashed; only new or changed files are hashed. A different inode
+- Size, mtime, **ctime** and **inode** decide whether a file is rehashed; only new or changed files are hashed. A
+  different ctime means the file's metadata changed (permissions, owner, a rewrite that restored its mtime), so it is
+  rehashed even when size and mtime match; ctime cannot be set by the user. Where the platform gives no change time
+  (Windows), 0 is recorded and ctime is not compared, as with inodes. A different inode
   at the same path means a different file (moved onto the path, or saved by writing a new file and renaming it over
   the old one), even when size and mtime match. Only the inode is stored, never the device number, which can change
   across reboots and remounts; a root never leaves its filesystem anyway. Filesystems whose inode numbers are not
@@ -120,6 +123,14 @@ Principles. These are not negotiable:
   regular files are hashed. If size or mtime changes while the file is read, or fewer bytes are read than its size,
   the hash is discarded and the file is retried on the next scan. The stored size and mtime are the ones the file had
   while it was hashed.
+- **Unreadable files are flagged, not dropped.** A file that is listed but cannot be opened or read (permission denied,
+  I/O error, or any other unexpected error: the flag only ever holds a file back) gets `files.unreadable_since_scan`, the first scan in a row that failed to read it; it stays set across
+  later failing scans and is cleared by the first scan that hashes the file again. Its last good hash, size and mtime
+  are kept, so its identity and history survive, but the hash is stale while the flag is set. A file that vanished or
+  changed while it was read is not unreadable: it is retried as before and the flag is untouched. Losing read access
+  changes the file's ctime, so the next scan notices it (see above). Files under a directory that cannot be listed are
+  not flagged: Filo cannot tell what happened to them, so they are simply not covered by that scan and their "last
+  verified" time stops advancing (see section 3). Decided 2026-11-11.
 
 ### Move detection
 - Hash match: a missing file and a new file with the same hash are one file that moved (or was renamed). A copy of a
@@ -141,7 +152,8 @@ Principles. These are not negotiable:
   A file moved from one root to another is linked the same way when the old root is scanned first; scanned the other
   way round it is new plus missing.
 - **Known limits.** Two files that swap contents show as two changes, not two moves. A file rewritten in place (same
-  inode) that keeps both its size and its mtime is not noticed. Symlinks have no hash, so a moved symlink is missing
+  inode) that keeps both its size and its mtime is noticed only through its ctime, so not on a platform without one
+  (Windows). Symlinks have no hash, so a moved symlink is missing
   plus new. Hard links are separate files in Filo (one per path) that happen to share an inode.
 - Pairing moves by inode instead of hash (to avoid hashing moved files) is a later optimisation; the inode is only
   used to decide what to rehash.
@@ -158,7 +170,7 @@ Principles. These are not negotiable:
 
 ### Disposal (iteration 3 onward)
 - Dry run first. Quarantine before deletion, for a set period.
-- Checks at the moment of acting: retain-until floor passed, no hold, hash unchanged, file not modified in the last few
+- Checks at the moment of acting: retain-until floor passed, no hold, not flagged unreadable, hash unchanged, file not modified in the last few
   minutes, no sync temp file present (`.syncthing.*.tmp`, `*.part`, `.~lock.*`), optionally no process holds it open.
 - A history table of retired files (path, hash, date, reason) stays after the file is gone.
 - **Syncthing propagates deletes.** Roots that are synced need a flag; quarantine for them must live outside the synced
@@ -182,7 +194,7 @@ Principles. These are not negotiable:
   so timer and cron logs stay clean. Ctrl-C or SIGTERM cancels a scan; nothing is written and the lock is released.
 - A systemd user timer running `filo scan` is enough. No daemon. (`Persistent=true`, low CPU and I/O priority.)
 
-## 3. Data model (iteration 1, proposed)
+## 3. Data model (iteration 1, schema version 2)
 
 Carried over from the C# prototype. Adjust freely in the Go port, but keep the interval history and the partial unique
 index.
@@ -208,7 +220,9 @@ CREATE TABLE files (
     id INTEGER PRIMARY KEY,
     kind TEXT NOT NULL,                 -- 'file' | 'symlink'
     size INTEGER NOT NULL, mtime_ns INTEGER NOT NULL,   -- Unix nanoseconds
-    hash TEXT,                          -- NULL for symlinks and unreadable files
+    ctime_ns INTEGER NOT NULL DEFAULT 0,                -- status change time; 0 = not known
+    hash TEXT,                          -- NULL for symlinks and files never read; stale while unreadable_since_scan is set
+    unreadable_since_scan INTEGER REFERENCES scans(id), -- NULL = read fine the last time it was hashed
     inode INTEGER,                      -- NULL for symlinks, or where the platform gives none
     link_target TEXT, link_broken INTEGER NOT NULL DEFAULT 0,
     first_seen_scan INTEGER NOT NULL REFERENCES scans(id));
@@ -231,8 +245,10 @@ CREATE TABLE events (
 
 "Present" means a file has a path interval with `valid_to_scan IS NULL`; there is no status column. "New" means
 `first_seen_scan` equals the scan. A file's "last verified" time is derived, not stored: it is the latest completed scan
-whose scope covers its path. Disposal (iteration 3) refuses files that no recent scan covers, and re-checks the file
-itself at action time. Later iterations add review columns (or a table), holds, and the retired-files history.
+whose scope covers its path. Disposal (iteration 3) refuses files that no recent scan covers or that are flagged
+unreadable, and re-checks the file itself at action time. `ctime_ns` and `unreadable_since_scan` are schema version 2,
+the first migration (two `ALTER TABLE ... ADD COLUMN`s; existing rows start with ctime 0, so the first scan after the
+upgrade rehashes nothing extra and records each file's ctime quietly). Later iterations add review columns (or a table), holds, and the retired-files history.
 
 Location history gives snapshots without storing them: the tree at any scan is the set of intervals that cover it.
 A revert moves each file back to the path it had then, with a dry run that reports and skips conflicts. It reverts
@@ -244,12 +260,14 @@ A revert moves each file back to the path it had then, with a dry run that repor
    Load the root's current known entries (current path to file row).
 2. Walk the scope. Record size and mtime from the directory listing. Note directories that failed to list. Apply the
    empty-walk guard.
-3. Classify by path: new; same path with matching size, mtime and inode and a hash on record (unchanged, nothing
-   written); same path with a different size, mtime or inode, or no hash (candidate: rehash). Symlinks compare target and broken flag. A
+3. Classify by path: new; same path with matching size, mtime, ctime and inode, a hash on record and no unreadable
+   flag (unchanged, nothing written; a recorded ctime of 0 is filled in quietly); same path with a different size,
+   mtime, ctime or inode, no hash, or the unreadable flag set (candidate: rehash). Symlinks compare target and broken flag. A
    path whose kind changed (file and symlink) counts as the old one gone plus a new one.
 4. Hash only what needs it (new files and candidates). A candidate that cannot be hashed (unreadable, or changed while
-   it was read) is left untouched and reported as an error, so the next scan tries again; a new file that cannot be
-   hashed is recorded without a hash.
+   it was read) is left untouched and reported as an error, so the next scan tries again; if it could not be opened or
+   read, its `unreadable_since_scan` is set unless already set. A new file that cannot be hashed is recorded without a
+   hash, and flagged unreadable if it could not be opened or read. A successful hash clears the flag.
 5. Same path, same hash: only the mtime moved, so update it quietly. A first hash for a file that never had one is
    also quiet. Same path, different hash: changed, unless step 7 finds another file moved onto the path.
 6. Known but not seen, and **covered by this walk** (see Scan): missing.
@@ -261,7 +279,8 @@ A revert moves each file back to the path it had then, with a dry run that repor
 9. Print a summary: counts plus samples of moved, missing, changed, possible moves and errors.
 
 `filo report` shows each root's totals (present files, size, symlinks) and last scan, the largest files, duplicate
-groups with reclaimable space, broken symlinks and the most recent events (`--top N` per list, default 10). A
+groups with reclaimable space, broken symlinks, unreadable files (path and the scan they became unreadable in) and the
+most recent events (`--top N` per list, default 10). A
 **duplicate group** is present regular files (size > 0, with a hash) sharing a hash, across all roots; each copy keeps
 its own identity. Reclaimable space is size × (copies − 1) per group. Paths are shown absolute.
 

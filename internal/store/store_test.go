@@ -460,3 +460,45 @@ func TestLock(t *testing.T) {
 		})
 	}
 }
+
+// schemaV1Files is the files table of schema version 1, before ctime_ns and unreadable_since_scan.
+const schemaV1Files = `
+CREATE TABLE files (
+    id INTEGER PRIMARY KEY,
+    kind TEXT NOT NULL,
+    size INTEGER NOT NULL,
+    mtime_ns INTEGER NOT NULL,
+    hash TEXT,
+    inode INTEGER,
+    link_target TEXT,
+    link_broken INTEGER NOT NULL DEFAULT 0,
+    first_seen_scan INTEGER NOT NULL REFERENCES scans(id)
+);
+CREATE INDEX ix_files_hash ON files(hash);`
+
+func TestMigrateFromV1(t *testing.T) {
+	db := tempDB(t)
+	mustClose(t, mustOpen(t, Options{DBPath: db}))
+	rawExec(t, db,
+		`DROP TABLE files`, schemaV1Files,
+		`UPDATE meta SET value = '1' WHERE key = 'schema_version'`,
+		`INSERT INTO roots (id, path, added_utc) VALUES (1, '/r', '2026-01-01T00:00:00Z')`,
+		`INSERT INTO scans (id, started_utc, root_id) VALUES (1, '2026-01-01T00:00:00Z', 1)`,
+		`INSERT INTO files (id, kind, size, mtime_ns, hash, inode, first_seen_scan) VALUES (1, 'file', 3, 42, 'abc', 7, 1)`,
+		`INSERT INTO paths (file_id, root_id, path, valid_from_scan) VALUES (1, 1, 'a', 1)`,
+	)
+
+	s := mustOpen(t, Options{DBPath: db})
+	defer mustClose(t, s)
+	if v := readMeta(t, s)[metaSchemaVersion]; v != strconv.Itoa(SchemaVersion) {
+		t.Fatalf("schema_version = %s after upgrade, want %d", v, SchemaVersion)
+	}
+	ks, err := s.Known(context.Background(), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := Known{PathID: 1, FileID: 1, Path: "a", Kind: "file", Size: 3, MtimeNS: 42, Hash: "abc", Ino: 7}
+	if len(ks) != 1 || ks[0] != want {
+		t.Errorf("Known = %+v, want [%+v]: the row survives with ctime 0 and no unreadable flag", ks, want)
+	}
+}

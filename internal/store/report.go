@@ -210,6 +210,42 @@ func (s *Store) BrokenLinks(ctx context.Context, n int) ([]LinkRow, int64, error
 	return out, total, rows.Err()
 }
 
+// UnreadableRow is a present file flagged unreadable.
+type UnreadableRow struct {
+	Path  string // absolute
+	Since int64  // the first scan in a row that could not read it
+}
+
+// UnreadableFiles returns up to n present files flagged unreadable, longest-flagged first, and how many there are in
+// total.
+func (s *Store) UnreadableFiles(ctx context.Context, n int) ([]UnreadableRow, int64, error) {
+	var total int64
+	if err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM paths p JOIN files f ON f.id = p.file_id
+		WHERE p.valid_to_scan IS NULL AND f.unreadable_since_scan IS NOT NULL`).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("unreadable files: %w", err)
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT r.path, p.path, f.unreadable_since_scan
+		FROM paths p JOIN files f ON f.id = p.file_id JOIN roots r ON r.id = p.root_id
+		WHERE p.valid_to_scan IS NULL AND f.unreadable_since_scan IS NOT NULL
+		ORDER BY f.unreadable_since_scan, r.path, p.path LIMIT ?`, n)
+	if err != nil {
+		return nil, 0, fmt.Errorf("unreadable files: %w", err)
+	}
+	defer rows.Close()
+	var out []UnreadableRow
+	for rows.Next() {
+		var root, rel string
+		var u UnreadableRow
+		if err := rows.Scan(&root, &rel, &u.Since); err != nil {
+			return nil, 0, fmt.Errorf("unreadable files: %w", err)
+		}
+		u.Path = absPath(root, rel)
+		out = append(out, u)
+	}
+	return out, total, rows.Err()
+}
+
 // EventRow is a recorded event with its scan's root and time.
 type EventRow struct {
 	Event

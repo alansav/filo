@@ -212,11 +212,13 @@ func check(ctx context.Context, db *sql.DB) error {
 	if err != nil {
 		return fmt.Errorf("%w: unreadable value %q", ErrSchemaVersion, version)
 	}
-	switch {
-	case v > SchemaVersion:
+	if v > SchemaVersion {
 		return fmt.Errorf("%w: database is version %d, this filo supports %d; upgrade filo", ErrSchemaVersion, v, SchemaVersion)
-	case v < SchemaVersion:
-		return fmt.Errorf("%w: database is version %d, this filo supports %d and has no migration", ErrSchemaVersion, v, SchemaVersion)
+	}
+	for m := v; m < SchemaVersion; m++ {
+		if _, ok := migrations[m]; !ok {
+			return fmt.Errorf("%w: database is version %d, this filo supports %d and has no migration", ErrSchemaVersion, v, SchemaVersion)
+		}
 	}
 
 	// Hashes made with different algorithms must never be compared.
@@ -230,6 +232,31 @@ func check(ctx context.Context, db *sql.DB) error {
 	}
 	if algo != hasher.Algorithm {
 		return fmt.Errorf("%w: database hashes are %s, this filo uses %s", ErrSchemaVersion, algo, hasher.Algorithm)
+	}
+	for ; v < SchemaVersion; v++ {
+		if err := migrate(ctx, db, v); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// migrate upgrades the database from version v to v+1 in one transaction. The caller holds the lock.
+func migrate(ctx context.Context, db *sql.DB, v int) error {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, migrations[v]); err != nil {
+		return fmt.Errorf("upgrade database from version %d to %d: %w", v, v+1, err)
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE meta SET value = ? WHERE key = ?`, strconv.Itoa(v+1),
+		metaSchemaVersion); err != nil {
+		return fmt.Errorf("upgrade database from version %d to %d: %w", v, v+1, err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("upgrade database from version %d to %d: %w", v, v+1, err)
 	}
 	return nil
 }

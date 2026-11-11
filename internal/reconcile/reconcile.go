@@ -141,12 +141,14 @@ func ScanAll(ctx context.Context, s *store.Store, opt Options) ([]RootResult, er
 }
 
 type newItem struct {
-	e       walk.Entry
-	hash    string
-	size    int64
-	mtimeNS int64
-	ino     uint64
-	skip    bool // vanished before it could be hashed: not recorded
+	e          walk.Entry
+	hash       string
+	size       int64
+	mtimeNS    int64
+	ctimeNS    int64
+	ino        uint64
+	skip       bool // vanished before it could be hashed: not recorded
+	unreadable bool // could not be opened or read: recorded without a hash and flagged
 }
 
 // Scan scans one target. On any error nothing is written.
@@ -220,12 +222,13 @@ func Scan(ctx context.Context, s *store.Store, opt Options) (Summary, error) {
 		k, ok := known[e.Path]
 		switch {
 		case !ok:
-			news = append(news, newItem{e: e, size: e.Size, mtimeNS: e.MtimeNS, ino: e.Ino})
+			news = append(news, newItem{e: e, size: e.Size, mtimeNS: e.MtimeNS, ctimeNS: e.CtimeNS, ino: e.Ino})
 		case k.Kind != string(e.Kind):
 			gone = append(gone, k)
-			news = append(news, newItem{e: e, size: e.Size, mtimeNS: e.MtimeNS, ino: e.Ino})
+			news = append(news, newItem{e: e, size: e.Size, mtimeNS: e.MtimeNS, ctimeNS: e.CtimeNS, ino: e.Ino})
 		case e.Kind == walk.KindSymlink:
-			u := store.FileUpdate{FileID: k.FileID, Size: e.Size, MtimeNS: e.MtimeNS,
+			// A symlink's ctime is recorded but not compared: it has no content to read.
+			u := store.FileUpdate{FileID: k.FileID, Size: e.Size, MtimeNS: e.MtimeNS, CtimeNS: e.CtimeNS,
 				LinkTarget: e.LinkTarget, LinkBroken: e.LinkBroken}
 			if k.LinkTarget == e.LinkTarget && k.LinkBroken == e.LinkBroken {
 				if k.Size != e.Size || k.MtimeNS != e.MtimeNS {
@@ -238,8 +241,14 @@ func Scan(ctx context.Context, s *store.Store, opt Options) (Summary, error) {
 				Detail: "symlink: " + linkText(k.LinkTarget, k.LinkBroken) + " -> " + linkText(e.LinkTarget, e.LinkBroken)})
 			sum.Changed++
 		default:
-			if k.Size == e.Size && k.MtimeNS == e.MtimeNS && sameInode(k.Ino, e.Ino) && k.Hash != "" {
-				continue // unchanged: nothing to write
+			if k.Size == e.Size && k.MtimeNS == e.MtimeNS && sameInode(k.Ino, e.Ino) && sameCtime(k.CtimeNS, e.CtimeNS) &&
+				k.Hash != "" && k.Unreadable == 0 {
+				if k.CtimeNS == 0 && e.CtimeNS != 0 {
+					// No ctime on record (a database from before ctimes were kept): record it quietly.
+					ch.Updates = append(ch.Updates, store.FileUpdate{FileID: k.FileID, Size: k.Size, MtimeNS: k.MtimeNS,
+						CtimeNS: e.CtimeNS, Hash: k.Hash, Ino: k.Ino})
+				}
+				continue // unchanged: nothing else to write
 			}
 			cands = append(cands, cand{e: e, k: k})
 		}
@@ -291,9 +300,12 @@ func Scan(ctx context.Context, s *store.Store, opt Options) (Summary, error) {
 	for i, c := range cands {
 		o := outs[i]
 		if o.Err != nil {
-			// The file is there but could not be hashed. Leave its row alone: its size/mtime still differ from the
-			// register, so the next scan tries again.
+			// The file is there but could not be hashed. Leave its row alone: its size, mtime or ctime still differ
+			// from the register, so the next scan tries again. If it could not be read at all, flag it.
 			event(store.Event{Kind: Error, FileID: c.k.FileID, Path: c.e.Path, Detail: "hash: " + o.Err.Error()})
+			if hasher.Unreadable(o.Err) {
+				ch.Unreadable = append(ch.Unreadable, c.k.FileID)
+			}
 			continue
 		}
 		if c.k.Hash != "" && c.k.Hash != string(o.Sum) {
@@ -302,19 +314,20 @@ func Scan(ctx context.Context, s *store.Store, opt Options) (Summary, error) {
 		}
 		// Same content (only size/mtime moved), or a hash recorded for the first time: a quiet update.
 		ch.Updates = append(ch.Updates, store.FileUpdate{FileID: c.k.FileID, Size: o.Size, MtimeNS: o.MtimeNS,
-			Hash: string(o.Sum), Ino: o.Ino})
+			CtimeNS: o.CtimeNS, Hash: string(o.Sum), Ino: o.Ino})
 	}
 	for j, i := range newFileIdx {
 		o := outs[len(cands)+j]
 		n := &news[i]
 		switch {
 		case o.Err == nil:
-			n.hash, n.size, n.mtimeNS, n.ino = string(o.Sum), o.Size, o.MtimeNS, o.Ino
+			n.hash, n.size, n.mtimeNS, n.ctimeNS, n.ino = string(o.Sum), o.Size, o.MtimeNS, o.CtimeNS, o.Ino
 		case errors.Is(o.Err, fs.ErrNotExist):
 			n.skip = true
 			event(store.Event{Kind: Error, Path: n.e.Path, Detail: "vanished during the scan"})
 		default:
 			// Recorded without a hash; known files with no hash are hashed again on every scan.
+			n.unreadable = hasher.Unreadable(o.Err)
 			event(store.Event{Kind: Error, Path: n.e.Path, Detail: "hash: " + o.Err.Error()})
 		}
 	}
@@ -329,8 +342,8 @@ func Scan(ctx context.Context, s *store.Store, opt Options) (Summary, error) {
 	pairedGone := map[int]bool{} // index into gone
 	moveTo := func(fileID int64, toPath string, n newItem, otherPath, detail string) {
 		ch.Open = append(ch.Open, store.OpenPath{FileID: fileID, Path: toPath})
-		ch.Updates = append(ch.Updates, store.FileUpdate{FileID: fileID, Size: n.size, MtimeNS: n.mtimeNS, Hash: n.hash,
-			Ino: n.ino})
+		ch.Updates = append(ch.Updates, store.FileUpdate{FileID: fileID, Size: n.size, MtimeNS: n.mtimeNS,
+			CtimeNS: n.ctimeNS, Hash: n.hash, Ino: n.ino})
 		event(store.Event{Kind: Moved, FileID: fileID, Path: toPath, OtherPath: otherPath, Detail: detail})
 		sum.Moved++
 	}
@@ -370,15 +383,15 @@ func Scan(ctx context.Context, s *store.Store, opt Options) (Summary, error) {
 		displacedSet[p[1]-len(news)] = true
 		displaced = append(displaced, c)
 		ch.Close = append(ch.Close, c.k.PathID) // closed before any path is opened, so g can take it
-		moveTo(g.FileID, c.path, newItem{hash: string(c.o.Sum), size: c.o.Size, mtimeNS: c.o.MtimeNS, ino: c.o.Ino},
-			g.Path, "")
+		moveTo(g.FileID, c.path, newItem{hash: string(c.o.Sum), size: c.o.Size, mtimeNS: c.o.MtimeNS,
+			ctimeNS: c.o.CtimeNS, ino: c.o.Ino}, g.Path, "")
 	}
 	for i, c := range changedCands {
 		if displacedSet[i] {
 			continue
 		}
 		ch.Updates = append(ch.Updates, store.FileUpdate{FileID: c.k.FileID, Size: c.o.Size, MtimeNS: c.o.MtimeNS,
-			Hash: string(c.o.Sum), Ino: c.o.Ino})
+			CtimeNS: c.o.CtimeNS, Hash: string(c.o.Sum), Ino: c.o.Ino})
 		event(store.Event{Kind: Changed, FileID: c.k.FileID, Path: c.path, Detail: "content"})
 		sum.Changed++
 	}
@@ -463,7 +476,8 @@ func Scan(ctx context.Context, s *store.Store, opt Options) (Summary, error) {
 			continue
 		}
 		ch.New = append(ch.New, store.NewFile{Path: n.e.Path, Kind: string(n.e.Kind), Size: n.size, MtimeNS: n.mtimeNS,
-			Hash: n.hash, Ino: n.ino, LinkTarget: n.e.LinkTarget, LinkBroken: n.e.LinkBroken})
+			CtimeNS: n.ctimeNS, Hash: n.hash, Ino: n.ino, LinkTarget: n.e.LinkTarget, LinkBroken: n.e.LinkBroken,
+			Unreadable: n.unreadable})
 		sum.New++
 		leftNew = append(leftNew, side{ID: j, Name: path.Base(n.e.Path)})
 	}
@@ -507,6 +521,12 @@ func Scan(ctx context.Context, s *store.Store, opt Options) (Summary, error) {
 		}
 	}
 	return sum, nil
+}
+
+// sameCtime compares change times only when both are known: a platform without them, or a row from before they were
+// kept, records 0.
+func sameCtime(a, b int64) bool {
+	return a == 0 || b == 0 || a == b
 }
 
 // sameInode compares inodes only when both are known: a platform without inode lookup records 0.

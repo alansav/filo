@@ -1,8 +1,9 @@
 package store
 
 // SchemaVersion is the schema this build reads and writes. It is stored in meta.schema_version when a database is
-// created. There are no migrations yet: a database with any other version is refused.
-const SchemaVersion = 1
+// created. An older database with a migration in migrations is upgraded when it is opened; any other version is
+// refused.
+const SchemaVersion = 2
 
 // Meta keys.
 const (
@@ -44,7 +45,9 @@ CREATE TABLE files (
     kind TEXT NOT NULL,
     size INTEGER NOT NULL,
     mtime_ns INTEGER NOT NULL,
+    ctime_ns INTEGER NOT NULL DEFAULT 0,
     hash TEXT,
+    unreadable_since_scan INTEGER REFERENCES scans(id),
     inode INTEGER,
     link_target TEXT,
     link_broken INTEGER NOT NULL DEFAULT 0,
@@ -73,3 +76,12 @@ CREATE TABLE events (
     detail TEXT
 );
 `
+
+// migrations[v] upgrades a database from version v to v+1. Each runs in one transaction with the version bump.
+var migrations = map[int]string{
+	// 1 -> 2: status change time (0 = not known: filled in quietly by the next scan) and the unreadable flag.
+	1: `
+ALTER TABLE files ADD COLUMN ctime_ns INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE files ADD COLUMN unreadable_since_scan INTEGER REFERENCES scans(id);
+`,
+}

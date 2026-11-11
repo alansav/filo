@@ -284,3 +284,46 @@ func TestFileInode(t *testing.T) {
 		t.Errorf("Ino = %d, want %d", r.Ino, want.Ino)
 	}
 }
+
+func TestUnreadable(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"no error", nil, false},
+		{"permission denied", &fs.PathError{Op: "open", Path: "/x", Err: fs.ErrPermission}, true},
+		{"unexpected error", errors.New("input/output error"), true},
+		{"vanished", &fs.PathError{Op: "open", Path: "/x", Err: fs.ErrNotExist}, false},
+		{"no longer a regular file", fmt.Errorf("/x: %w", ErrNotRegular), false},
+		{"changed while read", fmt.Errorf("/x: %w", ErrChanged), false},
+		{"cancelled", context.Canceled, false},
+		{"timed out", context.DeadlineExceeded, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := Unreadable(tc.err); got != tc.want {
+				t.Errorf("Unreadable(%v) = %v, want %v", tc.err, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestFileCtime(t *testing.T) {
+	p := write(t, filepath.Join(t.TempDir(), "f"), []byte("x"))
+	r, err := File(context.Background(), p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fi, err := os.Lstat(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := fsid.ChangeTimeNS(fi)
+	if r.CtimeNS != want {
+		t.Errorf("CtimeNS = %d, want %d", r.CtimeNS, want)
+	}
+	if want == 0 && (runtime.GOOS == "linux" || runtime.GOOS == "darwin") {
+		t.Errorf("no ctime on %s", runtime.GOOS)
+	}
+}

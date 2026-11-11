@@ -17,17 +17,20 @@ type Known struct {
 	Kind       string // "file" | "symlink"
 	Size       int64
 	MtimeNS    int64
+	CtimeNS    int64  // 0 = not known
 	Hash       string // "" = none
 	Ino        uint64 // 0 = not known
 	LinkTarget string
 	LinkBroken bool
+	Unreadable int64 // unreadable_since_scan; 0 = readable the last time it was hashed
 }
 
 // Known returns every current path of a root.
 func (s *Store) Known(ctx context.Context, rootID int64) ([]Known, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT p.id, p.file_id, p.path, f.kind, f.size, f.mtime_ns,
-		       coalesce(f.hash, ''), coalesce(f.inode, 0), coalesce(f.link_target, ''), f.link_broken
+		SELECT p.id, p.file_id, p.path, f.kind, f.size, f.mtime_ns, f.ctime_ns,
+		       coalesce(f.hash, ''), coalesce(f.inode, 0), coalesce(f.link_target, ''), f.link_broken,
+		       coalesce(f.unreadable_since_scan, 0)
 		FROM paths p JOIN files f ON f.id = p.file_id
 		WHERE p.root_id = ? AND p.valid_to_scan IS NULL`, rootID)
 	if err != nil {
@@ -38,8 +41,8 @@ func (s *Store) Known(ctx context.Context, rootID int64) ([]Known, error) {
 	for rows.Next() {
 		var k Known
 		var ino int64
-		if err := rows.Scan(&k.PathID, &k.FileID, &k.Path, &k.Kind, &k.Size, &k.MtimeNS,
-			&k.Hash, &ino, &k.LinkTarget, &k.LinkBroken); err != nil {
+		if err := rows.Scan(&k.PathID, &k.FileID, &k.Path, &k.Kind, &k.Size, &k.MtimeNS, &k.CtimeNS,
+			&k.Hash, &ino, &k.LinkTarget, &k.LinkBroken, &k.Unreadable); err != nil {
 			return nil, fmt.Errorf("load known files: %w", err)
 		}
 		k.Ino = uint64(ino)
@@ -112,11 +115,13 @@ type ScanRecord struct {
 	ErrorCount    int
 }
 
-// FileUpdate sets every stored property of an existing file.
+// FileUpdate sets every stored property of an existing file, and clears its unreadable flag: an update is only made
+// from a successful read or from a listing that needs no read.
 type FileUpdate struct {
 	FileID     int64
 	Size       int64
 	MtimeNS    int64
+	CtimeNS    int64  // 0 = not known
 	Hash       string // "" = none
 	Ino        uint64 // 0 = not known
 	LinkTarget string
@@ -135,10 +140,12 @@ type NewFile struct {
 	Kind       string
 	Size       int64
 	MtimeNS    int64
+	CtimeNS    int64  // 0 = not known
 	Hash       string // "" = none
 	Ino        uint64 // 0 = not known
 	LinkTarget string
 	LinkBroken bool
+	Unreadable bool // could not be opened or read: flagged unreadable since this scan
 }
 
 // Event is one reported change. FileID 0 means no file.
@@ -157,6 +164,9 @@ type Changes struct {
 	Open    []OpenPath
 	New     []NewFile
 	Events  []Event
+	// Unreadable are existing files that could not be opened or read. Each is flagged unreadable since this scan
+	// unless it already is; the rest of its row is left alone. Applied after Updates.
+	Unreadable []int64
 }
 
 // ApplyScan records a scan and its changes in one transaction. Paths are closed before any are opened, so a path
@@ -200,14 +210,23 @@ func (s *Store) ApplyScan(ctx context.Context, rec ScanRecord, ch Changes) (int6
 		return 0, fmt.Errorf("close paths: %w", err)
 	}
 
-	if err := eachStmt(ctx, tx, `UPDATE files SET size = ?, mtime_ns = ?, hash = ?, inode = ?, link_target = ?,
-		link_broken = ? WHERE id = ?`, len(ch.Updates), func(st *sql.Stmt, i int) error {
-		u := ch.Updates[i]
-		_, err := st.ExecContext(ctx, u.Size, u.MtimeNS, nullString(u.Hash), nullIno(u.Ino), nullString(u.LinkTarget),
-			u.LinkBroken, u.FileID)
+	if err := eachStmt(ctx, tx, `UPDATE files SET size = ?, mtime_ns = ?, ctime_ns = ?, hash = ?, inode = ?,
+		link_target = ?, link_broken = ?, unreadable_since_scan = NULL WHERE id = ?`, len(ch.Updates),
+		func(st *sql.Stmt, i int) error {
+			u := ch.Updates[i]
+			_, err := st.ExecContext(ctx, u.Size, u.MtimeNS, u.CtimeNS, nullString(u.Hash), nullIno(u.Ino),
+				nullString(u.LinkTarget), u.LinkBroken, u.FileID)
+			return err
+		}); err != nil {
+		return 0, fmt.Errorf("update files: %w", err)
+	}
+
+	if err := eachStmt(ctx, tx, `UPDATE files SET unreadable_since_scan = coalesce(unreadable_since_scan, ?)
+		WHERE id = ?`, len(ch.Unreadable), func(st *sql.Stmt, i int) error {
+		_, err := st.ExecContext(ctx, scanID, ch.Unreadable[i])
 		return err
 	}); err != nil {
-		return 0, fmt.Errorf("update files: %w", err)
+		return 0, fmt.Errorf("flag unreadable files: %w", err)
 	}
 
 	openPath := `INSERT INTO paths (file_id, root_id, path, valid_from_scan) VALUES (?, ?, ?, ?)`
@@ -220,7 +239,8 @@ func (s *Store) ApplyScan(ctx context.Context, rec ScanRecord, ch Changes) (int6
 
 	if len(ch.New) > 0 {
 		insFile, err := tx.PrepareContext(ctx, `INSERT INTO files
-			(kind, size, mtime_ns, hash, inode, link_target, link_broken, first_seen_scan) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+			(kind, size, mtime_ns, ctime_ns, hash, inode, link_target, link_broken, unreadable_since_scan, first_seen_scan)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 		if err != nil {
 			return 0, err
 		}
@@ -231,8 +251,12 @@ func (s *Store) ApplyScan(ctx context.Context, rec ScanRecord, ch Changes) (int6
 		}
 		defer insPath.Close()
 		for _, n := range ch.New {
-			r, err := insFile.ExecContext(ctx, n.Kind, n.Size, n.MtimeNS, nullString(n.Hash), nullIno(n.Ino),
-				nullString(n.LinkTarget), n.LinkBroken, scanID)
+			var unreadable any
+			if n.Unreadable {
+				unreadable = scanID
+			}
+			r, err := insFile.ExecContext(ctx, n.Kind, n.Size, n.MtimeNS, n.CtimeNS, nullString(n.Hash), nullIno(n.Ino),
+				nullString(n.LinkTarget), n.LinkBroken, unreadable, scanID)
 			if err != nil {
 				return 0, fmt.Errorf("insert file %s: %w", n.Path, err)
 			}

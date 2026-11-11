@@ -39,7 +39,25 @@ type Result struct {
 	Sum     Sum
 	Size    int64
 	MtimeNS int64  // Unix nanoseconds
+	CtimeNS int64  // status change time after the read, Unix nanoseconds; 0 = not known
 	Ino     uint64 // inode of the open file; 0 = not known
+}
+
+// Unreadable reports whether err from File or HashAll means the file is there but cannot be opened or read
+// (permission denied, I/O error, anything unexpected), as opposed to a file that vanished, stopped being a regular
+// file or changed while it was read, which are retried as they are, or a cancelled scan. Unknown errors count as
+// unreadable: the flag only ever holds a file back.
+func Unreadable(err error) bool {
+	switch {
+	case err == nil,
+		errors.Is(err, fs.ErrNotExist),
+		errors.Is(err, ErrNotRegular),
+		errors.Is(err, ErrChanged),
+		errors.Is(err, context.Canceled),
+		errors.Is(err, context.DeadlineExceeded):
+		return false
+	}
+	return true
 }
 
 // Progress counts work done, for a progress display. Safe to read while HashAll runs.
@@ -108,6 +126,7 @@ func file(ctx context.Context, path string, buf []byte, p *Progress) (Result, er
 		Sum:     Sum(hex.EncodeToString(h.Sum(nil))),
 		Size:    after.Size(),
 		MtimeNS: after.ModTime().UnixNano(),
+		CtimeNS: fsid.ChangeTimeNS(after),
 		Ino:     inode(after),
 	}, nil
 }

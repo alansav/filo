@@ -17,6 +17,8 @@ type Report struct {
 	Duplicates  store.Duplicates
 	Broken      []store.LinkRow
 	BrokenTotal int64
+	Unreadable  []store.UnreadableRow
+	UnreadTotal int64
 	Events      []store.EventRow
 }
 
@@ -34,6 +36,9 @@ func Build(ctx context.Context, s *store.Store, top int) (Report, error) {
 		return r, err
 	}
 	if r.Broken, r.BrokenTotal, err = s.BrokenLinks(ctx, top); err != nil {
+		return r, err
+	}
+	if r.Unreadable, r.UnreadTotal, err = s.UnreadableFiles(ctx, top); err != nil {
 		return r, err
 	}
 	if r.Events, err = s.RecentEvents(ctx, top); err != nil {
@@ -111,6 +116,19 @@ func (r Report) WriteText(w io.Writer) error {
 		}
 		if int64(len(r.Broken)) < r.BrokenTotal {
 			p.line("  and %s more", Count(r.BrokenTotal-int64(len(r.Broken))))
+		}
+	}
+
+	p.blank()
+	if r.UnreadTotal == 0 {
+		p.line("Unreadable files: none")
+	} else {
+		p.line("Unreadable files: %s", Count(r.UnreadTotal))
+		for _, u := range r.Unreadable {
+			p.line("  since scan %d  %s", u.Since, u.Path)
+		}
+		if int64(len(r.Unreadable)) < r.UnreadTotal {
+			p.line("  and %s more", Count(r.UnreadTotal-int64(len(r.Unreadable))))
 		}
 	}
 
