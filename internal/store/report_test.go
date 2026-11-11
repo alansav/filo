@@ -134,3 +134,77 @@ func TestInodeRoundTrip(t *testing.T) {
 		t.Errorf("%d NULL inodes, want 1 (0 is stored as NULL)", nulls)
 	}
 }
+
+func TestUnreadableFiles(t *testing.T) {
+	skipNonUnix(t)
+	(&fakeFS{}).install(t)
+	ctx := context.Background()
+	s := mustOpen(t, Options{DBPath: tempDB(t)})
+	defer mustClose(t, s)
+	rootA, rootB := tree(t), tree(t)
+	a, err := s.AddRoot(ctx, rootA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := s.AddRoot(ctx, rootB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	apply := func(root Root, ch Changes) {
+		t.Helper()
+		if _, err := s.ApplyScan(ctx, ScanRecord{RootID: root.ID, Started: time.Now()}, ch); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ids := func(root Root) map[string]Known {
+		t.Helper()
+		ks, err := s.Known(ctx, root.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		m := map[string]Known{}
+		for _, k := range ks {
+			m[k.Path] = k
+		}
+		return m
+	}
+
+	// Scan 1: a/new-unreadable is flagged on arrival; the others read fine.
+	apply(a, Changes{New: []NewFile{
+		{Path: "new-unreadable", Kind: "file", Size: 1, MtimeNS: 1, Unreadable: true},
+		{Path: "later", Kind: "file", Size: 1, MtimeNS: 1, Hash: "h1"},
+		{Path: "goes", Kind: "file", Size: 1, MtimeNS: 1, Hash: "h2"},
+		{Path: "recovers", Kind: "file", Size: 1, MtimeNS: 1, Hash: "h3"},
+	}})
+	// Scan 2: b/z is flagged on arrival.
+	apply(b, Changes{New: []NewFile{{Path: "z", Kind: "file", Size: 1, MtimeNS: 1, Unreadable: true}}})
+	// Scan 3: three files in a become unreadable; new-unreadable fails again and keeps scan 1.
+	ka := ids(a)
+	apply(a, Changes{Unreadable: []int64{ka["later"].FileID, ka["goes"].FileID, ka["recovers"].FileID,
+		ka["new-unreadable"].FileID}})
+	// Scan 4: goes is deleted (not present: not listed), recovers is read again (flag cleared).
+	r := ka["recovers"]
+	apply(a, Changes{Close: []int64{ka["goes"].PathID},
+		Updates: []FileUpdate{{FileID: r.FileID, Size: r.Size, MtimeNS: r.MtimeNS, Hash: r.Hash}}})
+
+	want := []UnreadableRow{
+		{Path: filepath.Join(rootA, "new-unreadable"), Since: 1},
+		{Path: filepath.Join(rootB, "z"), Since: 2},
+		{Path: filepath.Join(rootA, "later"), Since: 3},
+	}
+	got, total, err := s.UnreadableFiles(ctx, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total != 3 || !slices.Equal(got, want) {
+		t.Errorf("UnreadableFiles = %+v (total %d), want %+v (total 3)", got, total, want)
+	}
+
+	got, total, err = s.UnreadableFiles(ctx, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total != 3 || !slices.Equal(got, want[:2]) {
+		t.Errorf("UnreadableFiles(2) = %+v (total %d), want %+v (total 3)", got, total, want[:2])
+	}
+}

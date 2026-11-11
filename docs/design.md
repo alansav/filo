@@ -160,8 +160,16 @@ Principles. These are not negotiable:
 
 ### Review (iteration 2)
 - Export a CSV, review it in a spreadsheet, import it back. A UI replaces the CSV later.
-- The CSV holds the **queue only**: files with no review date, files past their review date, and possible moves. Not the
-  whole database.
+- The CSV holds the **queue only**: files with no review date, files past their review date, possible moves, and
+  present files flagged unreadable that have not been reviewed since they were flagged. Not the whole database. Each
+  row says why it is queued; an unreadable row also says since when (the scan that flagged it, and its time).
+- **Unreadable files** (decided 2026-11-11). A file flagged unreadable joins the queue even if its review date has
+  not come, because its stored hash is stale and nothing about it can be checked. Reviewing it while it is still flagged
+  takes it out of the queue until its review date; if it is read again and later becomes unreadable again, it rejoins.
+  "Reviewed since flagged" compares the review's time with the finish time of the scan that set the flag. The import
+  accepts only a review date for a file still flagged at import time: a delete action is refused for that row (one
+  clear line naming the file; the other rows are still applied), because its content cannot be checked at action
+  time. Disposal refuses flagged files anyway (see Disposal).
 - Rows are keyed on the database row ID. The import touches only the decision columns, never path or hash.
 - Separate `review_date` and `action` columns. ISO dates, UTF-8, proper quoting.
 - The hash at export is stored; it is **re-checked at action time**. A file edited since review goes back to the queue.
