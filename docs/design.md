@@ -71,6 +71,17 @@ Principles. These are not negotiable:
 - **Nesting only across filesystems.** A root may be inside another root (by path or identity) only if the two are on
   different filesystems, for example `~` and a disk mounted at `~/mnt/disk`. A walk never leaves its root's
   filesystem, so no file belongs to two roots.
+- **A new root absorbs the roots inside it** (decided 2026-11-11, automatically: no flag, no prompt). Adding `~` when
+  `~/Documents` and `~/Pictures` are roots on the same filesystem merges them into `~` in the same transaction: their
+  paths get the folder as a prefix (`a.txt` becomes `Documents/a.txt`), their scans become scans of `~` scoped to
+  that folder, their event paths are prefixed (except a returned file's `other_path`, which is relative to the root
+  named in the event's detail), and the old root rows are deleted. Files keep their IDs, so history and review
+  decisions are kept, and the first scan of `~` finds those files unchanged. Nothing on disk changes. `roots add`
+  says which roots it absorbed, and notes any under a hidden or noise folder, which a default scan skips (their files
+  are then neither verified nor marked missing until a scan with `--include-hidden`). Refused instead: absorbing a
+  root that cannot be checked now (not reachable or its disk not mounted), since Filo cannot tell whether it is on the
+  same filesystem; and the reverse, a directory inside an existing root on the same filesystem, which is already
+  covered (the message suggests `filo scan` on it). Roots inside the new one on other filesystems stay roots.
 - Each root records the **mount point it lives under** (`mount_path`): the deepest directory, the root itself or an
   ancestor, on a different device from its parent; NULL when the root is on the filesystem of `/`. A scan is refused
   as **unmounted** if that directory is now on its parent's device, or the root is no longer on it. So
@@ -240,7 +251,10 @@ the files being reviewed.
 
 ### Commands and scheduling
 - Plain names: `scan`, `report`, `review`, `restore`, `revert`, `roots`. No themed subcommands.
-- `filo roots` lists roots (mount point, files, size, last scan); `filo roots add PATH` registers one; later
+- **Keep flags and options to a minimum** (2026-11-11). Prefer a safe default and clear output over a flag; prefer
+  doing the obvious thing and saying what was done over asking. Filo has no interactive prompts, so it works the
+  same from a terminal, a script or a timer.
+- `filo roots` lists roots (mount point, files, size, last scan); `filo roots add PATH` registers one (absorbing any roots inside it on the same filesystem, see Roots); later
   `filo roots remove PATH`.
 - `filo scan [PATH] [--include-hidden] [--ignore NAME]... [--workers N] [--allow-empty]` scans PATH, which must be
   inside a registered root (see Roots); with no PATH, every root in turn, each in its own transaction. A root that
@@ -410,10 +424,9 @@ register to change shape.
   date N from first seen") applied by each scan would save rerunning it, but it relaxes principle 4's default that a
   new file needs review. Open: whether to have rules at all, whether a rule-dated file still gets one look first,
   how rules on nested folders combine, and whether a rule may ever imply delete (it should not).
-- **Absorbing nested roots** (to do next, 2026-11-11): adding `~` when `~/Documents` is already a root is refused
-  (nesting only across filesystems), and there is no way out. Planned: `filo roots add PATH --absorb`, with a dry run,
-  rewrites the nested roots' paths, scans and events into the new root (a scan of `~/Documents` is a scan of `~`
-  with scope `Documents`), so file identities, history and review decisions are kept.
+- **Review commands feel cumbersome** (raised 2026-11-11, to revisit): `filo review`, `review set-date`,
+  `review export -o`, `review import [--dry-run]`. Keep flags and options to a minimum; look again at the names, the
+  number of steps in a review round, and whether some steps can be merged or made the default.
 - UI technology.
 
 ## 7. Rejected or deferred

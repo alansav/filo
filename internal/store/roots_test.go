@@ -6,7 +6,11 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
+	"strconv"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/alansav/filo/internal/fsid"
 )
@@ -71,9 +75,10 @@ func skipNonUnix(t *testing.T) {
 func TestAddRoot(t *testing.T) {
 	skipNonUnix(t)
 	type step struct {
-		path    string // relative to the tree base
-		wantErr error  // nil = must succeed; errAny = any error
-		mount   string // expected mount path on success, relative to base; "" = none
+		path    string   // relative to the tree base
+		wantErr error    // nil = must succeed; errAny = any error
+		mount   string   // expected mount path on success, relative to base; "" = none
+		absorbs []string // roots it absorbs (relative to base), on success
 	}
 
 	tests := []struct {
@@ -118,9 +123,28 @@ func TestAddRoot(t *testing.T) {
 			steps: []step{{path: "home"}, {path: "home/docs", wantErr: ErrRootOverlap}},
 		},
 		{
-			name:  "nested on the same filesystem, outer second",
+			name:  "nested on the same filesystem, outer second: absorbed",
 			dirs:  []string{"home/docs"},
-			steps: []step{{path: "home/docs"}, {path: "home", wantErr: ErrRootOverlap}},
+			steps: []step{{path: "home/docs"}, {path: "home", absorbs: []string{"home/docs"}}},
+		},
+		{
+			name: "two roots absorbed at once",
+			dirs: []string{"home/Documents", "home/Pictures", "other"},
+			steps: []step{{path: "home/Documents"}, {path: "home/Pictures"}, {path: "other"},
+				{path: "home", absorbs: []string{"home/Documents", "home/Pictures"}}},
+		},
+		{
+			name:  "absorbed below an alias of the new root (a bind mount)",
+			dirs:  []string{"home/docs", "mnt/home/docs"},
+			fake:  fakeFS{aliases: map[string]string{"mnt/home": "home"}},
+			steps: []step{{path: "mnt/home/docs"}, {path: "home", absorbs: []string{"mnt/home/docs"}}},
+		},
+		{
+			name: "only the same filesystem is absorbed; a mounted disk inside stays a root",
+			dirs: []string{"home/docs", "home/mnt/disk"},
+			fake: fakeFS{devs: map[string]uint64{"home/mnt/disk": 999}},
+			steps: []step{{path: "home/docs"}, {path: "home/mnt/disk", mount: "home/mnt/disk"},
+				{path: "home", absorbs: []string{"home/docs"}}},
 		},
 		{
 			name:  "nested across filesystems, inner second",
@@ -187,7 +211,7 @@ func TestAddRoot(t *testing.T) {
 			defer mustClose(t, s)
 			added := 0
 			for i, st := range tc.steps {
-				r, err := s.AddRoot(context.Background(), abs(st.path))
+				r, absorbed, err := s.AddRootAbsorb(context.Background(), abs(st.path))
 				switch {
 				case st.wantErr == nil:
 					if err != nil {
@@ -201,6 +225,17 @@ func TestAddRoot(t *testing.T) {
 					if r.Path != abs(st.path) || r.MountPath != wantMount || r.ID == 0 {
 						t.Errorf("step %d: got %+v, want path %s, mount path %q", i, r, abs(st.path), wantMount)
 					}
+					var got, want []string
+					for _, a := range absorbed {
+						got = append(got, a.Path)
+					}
+					for _, a := range st.absorbs {
+						want = append(want, abs(a))
+					}
+					if !slices.Equal(got, want) {
+						t.Errorf("step %d absorbed %v, want %v", i, got, want)
+					}
+					added -= len(absorbed)
 				case st.wantErr == errAny:
 					if err == nil {
 						t.Fatalf("step %d AddRoot(%s) succeeded, want an error", i, st.path)
@@ -358,3 +393,155 @@ func TestResolve(t *testing.T) {
 }
 
 var errAny = errors.New("any error")
+
+func TestAbsorbKeepsHistoryAndReviews(t *testing.T) {
+	skipNonUnix(t)
+	(&fakeFS{}).install(t)
+	ctx := context.Background()
+	db := tempDB(t)
+	s := mustOpen(t, Options{DBPath: db})
+	defer mustClose(t, s)
+	base := tree(t, "home/Documents/tax", "home/Pictures", "home/notes")
+	abs := func(rel string) string { return filepath.Join(base, filepath.FromSlash(rel)) }
+	docs, err := s.AddRoot(ctx, abs("home/Documents"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pics, err := s.AddRoot(ctx, abs("home/Pictures"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	apply := func(root Root, scope string, ch Changes) int64 {
+		t.Helper()
+		id, err := s.ApplyScan(ctx, ScanRecord{RootID: root.ID, Scope: scope, Started: time.Now()}, ch)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	file := func(p, h string) NewFile { return NewFile{Path: p, Kind: "file", Size: 1, MtimeNS: 1, Hash: h} }
+	apply(docs, "", Changes{New: []NewFile{file("tax/2024.pdf", "h1"), file("old.txt", "h2")}})
+	apply(pics, "", Changes{New: []NewFile{file("beach.jpg", "h3")}})
+	kd := map[string]Known{}
+	ks, _ := s.Known(ctx, docs.ID)
+	for _, k := range ks {
+		kd[k.Path] = k
+	}
+	// A move inside Documents, a scoped scan of Documents, and a file returned to Pictures from Documents.
+	apply(docs, "", Changes{Close: []int64{kd["old.txt"].PathID}, Open: []OpenPath{{FileID: kd["old.txt"].FileID,
+		Path: "tax/old.txt"}}, Events: []Event{{Kind: "moved", FileID: kd["old.txt"].FileID, Path: "tax/old.txt",
+		OtherPath: "old.txt"}}})
+	apply(docs, "tax", Changes{})
+	apply(pics, "", Changes{Events: []Event{{Kind: "moved", FileID: 99, Path: "beach.jpg", OtherPath: "x/beach.jpg",
+		Detail: "returned (missing since scan 1) from root " + abs("home/Documents")}}})
+
+	// A review decision on a Documents file.
+	q, err := s.Queue(ctx, "2026-11-11", QueueFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	exportID, err := s.RecordExport(ctx, "", now, q, func(int64) error { return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res, err := s.ApplyDecisions(ctx, []Decision{{Line: 2, ExportID: exportID, FileID: kd["tax/2024.pdf"].FileID,
+		RetainUntil: "2032-01-01"}}, now, "2026-11-11", "r.csv", false); err != nil || res.Dates != 1 {
+		t.Fatalf("decision: %+v, %v", res, err)
+	}
+
+	home, absorbed, err := s.AddRootAbsorb(ctx, abs("home"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []Absorbed{{Path: abs("home/Documents"), Prefix: "Documents"}, {Path: abs("home/Pictures"), Prefix: "Pictures"}}
+	if !slices.Equal(absorbed, want) {
+		t.Errorf("absorbed = %+v, want %+v", absorbed, want)
+	}
+	roots, err := s.Roots(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(roots) != 1 || roots[0].ID != home.ID {
+		t.Fatalf("roots = %+v, want only the new one", roots)
+	}
+
+	// Same files, same IDs, paths under their folders.
+	ks, err = s.Known(ctx, home.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]int64{}
+	for _, k := range ks {
+		got[k.Path] = k.FileID
+	}
+	if len(got) != 3 || got["Documents/tax/2024.pdf"] != kd["tax/2024.pdf"].FileID ||
+		got["Documents/tax/old.txt"] != kd["old.txt"].FileID || got["Pictures/beach.jpg"] == 0 {
+		t.Errorf("known after absorb = %v", got)
+	}
+	// History intervals moved too.
+	hist, err := s.History(ctx, kd["old.txt"].FileID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hist) != 2 || hist[0].Path != "Documents/old.txt" || hist[1].Path != "Documents/tax/old.txt" ||
+		hist[0].RootID != home.ID {
+		t.Errorf("history = %+v", hist)
+	}
+
+	// Scans became scoped scans of the new root.
+	if v := rawQueryString(t, db, `SELECT group_concat(scope, '|') FROM (SELECT scope FROM scans ORDER BY id)`); v !=
+		"Documents|Pictures|Documents|Documents/tax|Pictures" {
+		t.Errorf("scopes = %q", v)
+	}
+	if v := rawQueryString(t, db, `SELECT count(*) FROM scans WHERE root_id != `+strconv.FormatInt(home.ID, 10)); v != "0" {
+		t.Errorf("%s scans left on old roots", v)
+	}
+	// Event paths: prefixed, except a returned file's path in the root it came from.
+	if v := rawQueryString(t, db, `SELECT path || ' <- ' || other_path FROM events WHERE detail IS NULL`); v !=
+		"Documents/tax/old.txt <- Documents/old.txt" {
+		t.Errorf("moved event = %q", v)
+	}
+	if v := rawQueryString(t, db, `SELECT path || ' <- ' || other_path FROM events WHERE detail LIKE 'returned%'`); v !=
+		"Pictures/beach.jpg <- x/beach.jpg" {
+		t.Errorf("returned event = %q", v)
+	}
+
+	// The review decision survived: the file is not queued, and its floor is kept.
+	q, err = s.Queue(ctx, "2026-11-11", QueueFilter{RootID: home.ID, Scope: "Documents"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(q) != 1 || q[0].Path != "Documents/tax/old.txt" {
+		t.Errorf("queue under Documents = %+v, want only tax/old.txt (2024.pdf is decided)", q)
+	}
+}
+
+func TestAbsorbRefusesAnUnreachableRoot(t *testing.T) {
+	skipNonUnix(t)
+	(&fakeFS{}).install(t)
+	ctx := context.Background()
+	s := mustOpen(t, Options{DBPath: tempDB(t)})
+	defer mustClose(t, s)
+	base := tree(t, "home/Documents", "home/gone")
+	if _, err := s.AddRoot(ctx, filepath.Join(base, "home", "Documents")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AddRoot(ctx, filepath.Join(base, "home", "gone")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(base, "home", "gone")); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err := s.AddRootAbsorb(ctx, filepath.Join(base, "home"))
+	if !errors.Is(err, ErrRootOverlap) || !strings.Contains(err.Error(), "cannot be checked now") {
+		t.Fatalf("err = %v, want a refusal naming the unreachable root", err)
+	}
+	roots, err := s.Roots(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(roots) != 2 {
+		t.Errorf("roots = %+v: a refused add must change nothing", roots)
+	}
+}

@@ -16,6 +16,7 @@ import (
 	"github.com/alansav/filo/internal/reconcile"
 	"github.com/alansav/filo/internal/report"
 	"github.com/alansav/filo/internal/store"
+	"github.com/alansav/filo/internal/walk"
 )
 
 // Exit codes.
@@ -48,6 +49,9 @@ var commandUsage = map[string]string{
 	"roots": `Usage:
   filo roots [--db PATH]            list roots
   filo roots add PATH [--db PATH]   register a directory as a root
+
+A root that contains existing roots on the same filesystem takes them in, keeping their files' history and review
+decisions. A directory inside an existing root is already covered: scan it with filo scan PATH.
 `,
 	"scan": `Usage:
   filo scan [PATH] [flags]
@@ -263,11 +267,25 @@ func (e *env) roots(ctx context.Context, dbBefore string, args []string) error {
 			return err
 		}
 		defer s.Close()
-		r, err := s.AddRoot(ctx, pos[1])
+		r, absorbed, err := s.AddRootAbsorb(ctx, pos[1])
 		if err != nil {
 			return err
 		}
 		fmt.Fprintf(e.stdout, "Added root %s\n", r.Path)
+		if len(absorbed) > 0 {
+			var paths []string
+			for _, a := range absorbed {
+				paths = append(paths, a.Path)
+			}
+			fmt.Fprintf(e.stdout, "It now includes the %s %s, with %s history and review decisions.\n",
+				pluralWord(len(absorbed), "root", "roots"), joinAnd(paths), pluralWord(len(absorbed), "its", "their"))
+			for _, a := range absorbed {
+				if hiddenPrefix(a.Prefix) {
+					fmt.Fprintf(e.stdout, "Note: %s is hidden or skipped by default, so a scan of %s covers it only "+
+						"with --include-hidden.\n", a.Path, r.Path)
+				}
+			}
+		}
 		if r.MountPath != "" {
 			fmt.Fprintf(e.stdout, "It is on the filesystem mounted at %s; scans are refused while that is not mounted.\n",
 				r.MountPath)
@@ -508,4 +526,29 @@ func progressLine(p *reconcile.Progress) string {
 		return fmt.Sprintf("scanning %s: writing the register", root)
 	}
 	return ""
+}
+
+func pluralWord(n int, one, many string) string {
+	if n == 1 {
+		return one
+	}
+	return many
+}
+
+// joinAnd joins items as "a", "a and b", or "a, b and c".
+func joinAnd(items []string) string {
+	if len(items) <= 1 {
+		return strings.Join(items, "")
+	}
+	return strings.Join(items[:len(items)-1], ", ") + " and " + items[len(items)-1]
+}
+
+// hiddenPrefix reports whether a default scan skips something on this '/'-separated path.
+func hiddenPrefix(prefix string) bool {
+	for _, name := range strings.Split(prefix, "/") {
+		if walk.SkippedByDefault(name) {
+			return true
+		}
+	}
+	return false
 }

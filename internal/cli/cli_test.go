@@ -430,3 +430,75 @@ func TestBinary(t *testing.T) {
 		}
 	}
 }
+
+func TestRootsAddAbsorbs(t *testing.T) {
+	skipWindows(t)
+	sameDevice(t, nil)
+	dir := canonicalTemp(t)
+	home := filepath.Join(dir, "home")
+	write := func(rel, content string) {
+		t.Helper()
+		p := filepath.Join(home, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("Documents/tax/2024.pdf", "tax")
+	write("Pictures/📷 beach.jpg", "sand")
+	write(".config/app.conf", "x")
+	write("notes.txt", "n")
+	env := map[string]string{"FILO_DB": filepath.Join(dir, "filo.db")}
+	ctx := context.Background()
+	must := func(args ...string) string {
+		t.Helper()
+		r := run(t, ctx, env, args...)
+		if r.code != ExitOK {
+			t.Fatalf("filo %v: code %d\n%s%s", args, r.code, r.stdout, r.stderr)
+		}
+		return r.stdout
+	}
+	in := func(rel string) string { return filepath.Join(home, filepath.FromSlash(rel)) }
+
+	must("roots", "add", in("Documents"))
+	must("roots", "add", in("Pictures"))
+	must("roots", "add", in(".config"))
+	must("scan")
+
+	out := must("roots", "add", home)
+	for _, want := range []string{
+		"Added root " + home,
+		"It now includes the roots " + in(".config") + ", " + in("Documents") + " and " + in("Pictures") +
+			", with their history and review decisions.",
+		"Note: " + in(".config") + " is hidden or skipped by default, so a scan of " + home +
+			" covers it only with --include-hidden.",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("roots add lacks %q:\n%s", want, out)
+		}
+	}
+	var listed []string
+	for _, l := range strings.Split(must("roots"), "\n") {
+		if l != "" && !strings.HasPrefix(l, " ") {
+			listed = append(listed, l)
+		}
+	}
+	if !reflect.DeepEqual(listed, []string{home}) {
+		t.Errorf("roots after absorbing = %q, want only %s", listed, home)
+	}
+
+	// The first scan of home: only notes.txt is new; Documents and Pictures are known; .config is skipped, not missing.
+	out = must("scan", home)
+	if !strings.Contains(out, "new 1   changed 0   moved 0   missing 0") {
+		t.Errorf("first scan after absorbing:\n%s", out)
+	}
+
+	// The reverse: a folder inside a root is not a new root.
+	r := run(t, ctx, env, "roots", "add", in("Documents"))
+	if r.code != ExitError || !strings.Contains(r.stderr, "is already inside root "+home+
+		"; scan just that folder with: filo scan "+in("Documents")) {
+		t.Errorf("adding a folder inside a root: code %d\n%s", r.code, r.stderr)
+	}
+}

@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"os"
@@ -34,75 +35,155 @@ type Root struct {
 	AddedUTC  string
 }
 
-// AddRoot registers a directory as a root. It refuses an alias of an existing root, and a root inside or around
-// another root on the same filesystem.
+// Absorbed is an existing root that a new root took in.
+type Absorbed struct {
+	Path   string // the old root, absolute
+	Prefix string // its place in the new root, '/'-separated
+}
+
+// AddRoot registers a directory as a root; see AddRootAbsorb.
 func (s *Store) AddRoot(ctx context.Context, path string) (Root, error) {
+	r, _, err := s.AddRootAbsorb(ctx, path)
+	return r, err
+}
+
+// AddRootAbsorb registers a directory as a root. It refuses an alias of an existing root, and a directory inside an
+// existing root on the same filesystem (it is already covered). An existing root inside the new one on the same
+// filesystem is absorbed: its paths, scans and events move into the new root under its folder, in the same
+// transaction, so file identities, history and review decisions are kept. A root that cannot be checked now (not
+// reachable, or its disk not mounted) is never absorbed: the add is refused instead.
+func (s *Store) AddRootAbsorb(ctx context.Context, path string) (Root, []Absorbed, error) {
 	p, err := canonicalDir(path)
 	if err != nil {
-		return Root{}, err
+		return Root{}, nil, err
 	}
 	id, err := statID(p)
 	if err != nil {
-		return Root{}, fmt.Errorf("root %s: %w", p, err)
+		return Root{}, nil, fmt.Errorf("root %s: %w", p, err)
 	}
 	mountPath, err := mountPathOf(p, id)
 	if err != nil {
-		return Root{}, err
+		return Root{}, nil, err
 	}
 
 	existing, err := s.Roots(ctx)
 	if err != nil {
-		return Root{}, err
+		return Root{}, nil, err
 	}
+	type take struct {
+		e      Root
+		prefix string
+	}
+	var takes []take
 	for _, e := range existing {
-		if err := checkNoOverlap(p, id, e); err != nil {
-			return Root{}, err
+		prefix, err := overlap(p, id, e)
+		if err != nil {
+			return Root{}, nil, err
+		}
+		if prefix != "" {
+			takes = append(takes, take{e, prefix})
 		}
 	}
 
 	r := Root{Path: p, MountPath: mountPath, AddedUTC: time.Now().UTC().Format(time.RFC3339)}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return Root{}, err
+		return Root{}, nil, err
 	}
 	defer tx.Rollback()
 	res, err := tx.ExecContext(ctx, `INSERT INTO roots (path, mount_path, added_utc) VALUES (?, ?, ?)`,
 		r.Path, nullString(r.MountPath), r.AddedUTC)
 	if err != nil {
-		return Root{}, fmt.Errorf("add root %s: %w", p, err)
+		return Root{}, nil, fmt.Errorf("add root %s: %w", p, err)
 	}
 	if r.ID, err = res.LastInsertId(); err != nil {
-		return Root{}, err
+		return Root{}, nil, err
+	}
+	var absorbed []Absorbed
+	for _, t := range takes {
+		if err := absorb(ctx, tx, t.e.ID, r.ID, t.prefix); err != nil {
+			return Root{}, nil, fmt.Errorf("absorb root %s into %s: %w", t.e.Path, p, err)
+		}
+		absorbed = append(absorbed, Absorbed{Path: t.e.Path, Prefix: t.prefix})
 	}
 	if err := tx.Commit(); err != nil {
-		return Root{}, err
+		return Root{}, nil, err
 	}
-	return r, nil
+	return r, absorbed, nil
 }
 
-// checkNoOverlap compares a candidate root p (identity id) with an existing root e.
-func checkNoOverlap(p string, id fsid.ID, e Root) error {
+// absorb moves root old into root into, under prefix: its paths, scans (a scan of the old root is a scan of the new
+// one scoped to prefix) and events, then deletes the old root. Files keep their IDs, so their history and review
+// decisions are untouched.
+func absorb(ctx context.Context, tx *sql.Tx, old, into int64, prefix string) error {
+	under := func(col string) string {
+		return `CASE WHEN ` + col + ` IS NULL OR ` + col + ` = '' THEN ? ELSE ? || '/' || ` + col + ` END`
+	}
+	stmts := []struct {
+		q    string
+		args []any
+	}{
+		// Event paths are relative to their scan's root. A returned file's other_path is relative to the root it
+		// came from, which the detail names ("... from root /x"): that one stays as it is.
+		{`UPDATE events SET path = ` + under("path") + `,
+			other_path = CASE WHEN other_path IS NULL OR other_path = '' OR detail LIKE '% from root %' THEN other_path
+			                  ELSE ? || '/' || other_path END
+			WHERE scan_id IN (SELECT id FROM scans WHERE root_id = ?)`, []any{prefix, prefix, prefix, old}},
+		{`UPDATE paths SET root_id = ?, path = ? || '/' || path WHERE root_id = ?`, []any{into, prefix, old}},
+		{`UPDATE scans SET root_id = ?, scope = ` + under("scope") + ` WHERE root_id = ?`,
+			[]any{into, prefix, prefix, old}},
+		{`DELETE FROM roots WHERE id = ?`, []any{old}},
+	}
+	for _, st := range stmts {
+		if _, err := tx.ExecContext(ctx, st.q, st.args...); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// overlap compares a candidate root p (identity id) with an existing root e. It returns e's place inside p
+// ('/'-separated) if p should absorb e, "" if they do not overlap or are nested across filesystems, or an error if p
+// must be refused.
+func overlap(p string, id fsid.ID, e Root) (string, error) {
 	if p == e.Path {
-		return fmt.Errorf("%w: %s", ErrRootExists, e.Path)
+		return "", fmt.Errorf("%w: %s", ErrRootExists, e.Path)
 	}
 	eid, reachable := reachableID(e)
 	if reachable && eid == id {
-		return fmt.Errorf("%w: %s is the same directory as root %s", ErrRootExists, p, e.Path)
+		return "", fmt.Errorf("%w: %s is the same directory as root %s", ErrRootExists, p, e.Path)
 	}
 
 	inside := isWithin(p, e.Path) || (reachable && hasAncestor(p, eid))
 	around := isWithin(e.Path, p) || hasAncestor(e.Path, id)
 	if !inside && !around {
-		return nil
+		return "", nil
 	}
 	if !reachable {
-		return fmt.Errorf("%w: %s and root %s are nested, and %s cannot be checked now (not reachable or not mounted)",
-			ErrRootOverlap, p, e.Path, e.Path)
+		return "", fmt.Errorf("%w: %s and root %s are nested, and %s cannot be checked now (not reachable or not "+
+			"mounted); make it reachable and try again", ErrRootOverlap, p, e.Path, e.Path)
 	}
-	if eid.Dev == id.Dev {
-		return fmt.Errorf("%w: %s and root %s are nested on the same filesystem", ErrRootOverlap, p, e.Path)
+	if eid.Dev != id.Dev {
+		return "", nil // nested across filesystems: both stay roots
 	}
-	return nil
+	if inside {
+		return "", fmt.Errorf("%w: %s is already inside root %s; scan just that folder with: filo scan %s",
+			ErrRootOverlap, p, e.Path, p)
+	}
+	// e is inside p: by path, or below an alias of p (a bind mount).
+	base := p
+	if !isWithin(e.Path, p) {
+		d, ok := ancestorWithID(e.Path, id, false)
+		if !ok {
+			return "", fmt.Errorf("%w: cannot place root %s inside %s", ErrRootOverlap, e.Path, p)
+		}
+		base = d
+	}
+	rel, err := filepath.Rel(base, e.Path)
+	if err != nil || rel == "." || strings.HasPrefix(rel, "..") {
+		return "", fmt.Errorf("%w: cannot place root %s inside %s", ErrRootOverlap, e.Path, p)
+	}
+	return filepath.ToSlash(rel), nil
 }
 
 // reachableID returns a root's identity if it can be checked now: it exists and its mount, if any, is mounted.
