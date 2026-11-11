@@ -266,6 +266,11 @@ the files being reviewed.
   see Review. A subcommand may follow `--db`.
 - `--db PATH` is accepted before or after any command; `FILO_DB` is the fallback, then the default location. Flags may
   come before or after PATH. Built on the standard library's `flag` package (no CLI framework).
+- **A path that starts with `~` is refused** (2026-11-11): every PATH, FOLDER and FILE, `-o`, `--db` and `FILO_DB`.
+  The shell expands `~` only when it is unquoted, so `"~/Documents"` would otherwise name a folder called `~` in the
+  current directory (and `--db "~/f.db"` would create one). Filo does not expand it itself, because a name starting
+  with `~` is legal. The one-line error suggests `$HOME/...` (or the full path for `~user`), and `./~...` for a name
+  that really starts with `~`. Checked before the database is opened, so nothing is created.
 - Output is plain text. Errors are one line, `filo: <message>`. Exit codes: 0 success (files that could not be read
   inside a completed scan are reported but do not fail it); 1 an error, or any root that failed in a scan of every
   root; 2 a usage error.

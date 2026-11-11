@@ -221,8 +221,12 @@ func dbFlag(fs *flag.FlagSet, before string) *string {
 }
 
 func (e *env) open(ctx context.Context, db string) (*store.Store, error) {
+	what := "--db"
 	if db == "" {
-		db = e.getenv("FILO_DB")
+		db, what = e.getenv("FILO_DB"), "FILO_DB"
+	}
+	if err := checkTilde(what, db); err != nil {
+		return nil, err
 	}
 	return store.Open(ctx, store.Options{DBPath: db})
 }
@@ -262,6 +266,9 @@ func (e *env) roots(ctx context.Context, dbBefore string, args []string) error {
 		}
 		return nil
 	case pos[0] == "add" && len(pos) == 2:
+		if err := checkTilde("PATH", pos[1]); err != nil {
+			return err
+		}
 		s, err := e.open(ctx, *db)
 		if err != nil {
 			return err
@@ -328,6 +335,9 @@ func (e *env) scan(ctx context.Context, dbBefore string, args []string) error {
 	}
 	if len(pos) > 1 {
 		return usageError{"scan takes at most one PATH"}
+	}
+	if err := checkTildes("PATH", pos...); err != nil {
+		return err
 	}
 	if *workers < 1 || *workers > hasher.MaxWorkers {
 		return usageError{fmt.Sprintf("--workers must be between 1 and %d", hasher.MaxWorkers)}

@@ -87,6 +87,9 @@ func (e *env) reviewSummary(ctx context.Context, dbBefore string, args []string)
 	if len(pos) > 1 {
 		return usageError{"review takes at most one PATH"}
 	}
+	if err := checkTildes("PATH", pos...); err != nil {
+		return err
+	}
 	if *top < 1 || *depth < 1 {
 		return usageError{"--top and --depth must be at least 1"}
 	}
@@ -196,6 +199,12 @@ func (e *env) reviewExport(ctx context.Context, dbBefore string, args []string) 
 	if len(pos) > 1 {
 		return usageError{"review export takes at most one PATH"}
 	}
+	if err := checkTildes("PATH", pos...); err != nil {
+		return err
+	}
+	if err := checkTilde("-o", *out); err != nil {
+		return err
+	}
 	s, err := e.open(ctx, *db)
 	if err != nil {
 		return err
@@ -275,6 +284,9 @@ func (e *env) reviewImport(ctx context.Context, dbBefore string, args []string) 
 	}
 	if len(pos) != 1 {
 		return usageError{"review import takes exactly one FILE"}
+	}
+	if err := checkTilde("FILE", pos[0]); err != nil {
+		return err
 	}
 	path, err := filepath.Abs(pos[0])
 	if err != nil {
@@ -370,6 +382,9 @@ func (e *env) reviewSetDate(ctx context.Context, dbBefore string, args []string)
 	}
 	if len(pos) != 2 {
 		return usageError{"review set-date takes a FOLDER and a DATE"}
+	}
+	if err := checkTilde("FOLDER", pos[0]); err != nil {
+		return err
 	}
 	t := now()
 	date, err := review.ParseDate(pos[1], t.Local())
