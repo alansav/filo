@@ -34,7 +34,8 @@ prefix.)
 - Vet and lint: `go vet ./...` and `staticcheck ./...`
 - Format: `gofmt -l -w .`
 - Throwaway test tree: `scripts/testtree.sh init DIR` then `scripts/testtree.sh mutate DIR`, with DIR under your own
-  home directory (for example `~/FiloTest`) or a temp directory
+  home directory (for example `~/FiloTest`) or a temp directory. `mutate` makes a directory and a file unreadable;
+  `scripts/testtree.sh unlock DIR` undoes that, and is needed before `rm -rf DIR`
 - Example dev run, always with a throwaway database and tree:
   `bin/filo --db /tmp/f.db roots add DIR`, `bin/filo --db /tmp/f.db scan`, `bin/filo --db /tmp/f.db report`
 

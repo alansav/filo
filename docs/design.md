@@ -1,7 +1,8 @@
 # Filo: design
 
-Status: iteration 1 (scan, register, report) is not yet implemented in Go. A C# prototype exists as a reference
-spec only; its schema and reconcile rules are carried over below. Last updated: 2026-11-11.
+Status: iteration 1 (scan, register, report) is implemented in Go and passes its test-tree criterion; the scans of a
+real home directory in its "done when" (section 5) are still to be run. A C# prototype exists as a reference spec
+only; its schema and reconcile rules were carried over. Last updated: 2026-11-11.
 
 This file records settled decisions, the planned data model and the open questions. When a decision changes,
 change it here in the same commit.
@@ -295,7 +296,8 @@ its own identity. Reclaimable space is size × (copies − 1) per group. Paths a
 ## 5. Iterations
 
 1. **Scan, register, report** (read-only). Done when: on a generated test tree, every kind of change (rename, move,
-   edit, delete, duplicate, symlink, unreadable directory) is reported exactly on rescan; a first scan of the real home
+   edit, delete, duplicate, symlink, unreadable directory, unreadable file) is reported exactly on rescan
+   (`scripts/testtree.sh`, checked by the walk and reconcile tests); a first scan of the real home
    directory completes and shows the size of the backlog; a second scan takes seconds to a couple of minutes.
 2. **Review CSV export and import.** Backlog handled by bulk-setting initial review dates by folder, so the first
    queue is manageable.

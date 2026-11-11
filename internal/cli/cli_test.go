@@ -206,16 +206,25 @@ func TestEndToEnd(t *testing.T) {
 	if out := must("roots"); !strings.Contains(out, "never scanned") {
 		t.Errorf("roots: %s", out)
 	}
-	if out := must("scan", tree); !strings.Contains(out, "13 files seen") || !strings.Contains(out, "new 13 ") {
+	if out := must("scan", tree); !strings.Contains(out, "15 files seen") || !strings.Contains(out, "new 15 ") {
 		t.Errorf("first scan: %s", out)
 	}
 	sh("mutate")
-	out := must("scan") // every root
-	for _, want := range []string{
-		"new 3   changed 2   moved 2   missing 2   possible moves 1   errors 0",
+	t.Cleanup(func() { sh("unlock") }) // or the temp dir cannot be removed
+	// mutate makes a directory and a file unreadable; root ignores permissions, so as root there are no errors.
+	asRoot := os.Geteuid() == 0
+	wantSecond := []string{
 		"moved     docs/contract.txt -> notes/contract-final.txt",
 		"possible  docs/report-2024.txt -> archive/report-2024.txt ?",
-	} {
+	}
+	if asRoot {
+		wantSecond = append(wantSecond, "new 3   changed 2   moved 2   missing 2   possible moves 1   errors 0")
+	} else {
+		wantSecond = append(wantSecond, "new 3   changed 2   moved 2   missing 2   possible moves 1   errors 2",
+			"error     docs/private.txt (hash: ", "error     locked (")
+	}
+	out := must("scan") // every root
+	for _, want := range wantSecond {
 		if !strings.Contains(out, want) {
 			t.Errorf("second scan output lacks %q:\n%s", want, out)
 		}
@@ -235,6 +244,13 @@ func TestEndToEnd(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("report lacks %q:\n%s", want, out)
 		}
+	}
+	wantUnreadable := "Unreadable files: 1\n  since scan 2  " + filepath.Join(tree, "docs", "private.txt") + "\n"
+	if asRoot {
+		wantUnreadable = "Unreadable files: none\n"
+	}
+	if !strings.Contains(out, wantUnreadable) {
+		t.Errorf("report lacks %q:\n%s", wantUnreadable, out)
 	}
 }
 

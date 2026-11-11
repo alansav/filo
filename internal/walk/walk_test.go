@@ -412,21 +412,37 @@ func TestTestTree(t *testing.T) {
 		"notes/ideas.md": "file", "notes/todo.md": "file",
 		"projects/app/app.csproj": "file", "projects/app/src/main.cs": "file",
 		"empty.txt": "file", "broken-link": "broken:nowhere",
+		"docs/private.txt": "file", // listed even when unreadable: listing needs no read access to the file
+	}
+	// mutate makes locked/ unreadable. Root ignores permissions, so as root it is still listed.
+	root := os.Geteuid() == 0
+	mutated := map[string]string{
+		"notes/contract-final.txt": "file", "photos/img2-renamed.bin": "file", "photos/img1-copy2.bin": "file",
+		"notes/new-note.md": "file", "archive/report-2024.txt": "file",
+		"link-to-report": "broken:docs/report-2024.txt",
+	}
+	var mutatedFailed []string
+	if root {
+		mutated["locked/kept.txt"] = "file"
+	} else {
+		mutatedFailed = []string{"locked"}
 	}
 	steps := []struct {
-		cmd  string
-		want map[string]string
+		cmd        string
+		want       map[string]string
+		wantFailed []string
 	}{
 		{"init", map[string]string{
 			"docs/report-2024.txt": "file", "docs/contract.txt": "file", "docs/receipt-tyre.txt": "file",
-			"photos/img2.bin": "file", "link-to-report": "symlink:docs/report-2024.txt",
-		}},
-		{"mutate", map[string]string{
-			"notes/contract-final.txt": "file", "photos/img2-renamed.bin": "file", "photos/img1-copy2.bin": "file",
-			"notes/new-note.md": "file", "archive/report-2024.txt": "file",
-			"link-to-report": "broken:docs/report-2024.txt",
-		}},
+			"photos/img2.bin": "file", "link-to-report": "symlink:docs/report-2024.txt", "locked/kept.txt": "file",
+		}, nil},
+		{"mutate", mutated, mutatedFailed},
 	}
+	t.Cleanup(func() {
+		if _, err := os.Stat(dir); err == nil {
+			run("unlock") // or the temp dir cannot be removed
+		}
+	})
 	for _, st := range steps {
 		run(st.cmd)
 		res, err := Walk(context.Background(), Options{Root: dir})
@@ -451,8 +467,12 @@ func TestTestTree(t *testing.T) {
 				t.Errorf("after %s: unexpected entry %s", st.cmd, p)
 			}
 		}
-		if len(res.Problems) != 0 || len(res.FailedDirs) != 0 {
-			t.Errorf("after %s: problems %v, failed %v", st.cmd, res.Problems, res.FailedDirs)
+		if len(res.Problems) != len(st.wantFailed) || !equalStrings(res.FailedDirs, st.wantFailed) {
+			t.Errorf("after %s: problems %v, failed %v; want failed %v", st.cmd, res.Problems, res.FailedDirs,
+				st.wantFailed)
+		}
+		if len(st.wantFailed) > 0 && res.Covers("locked/kept.txt") {
+			t.Errorf("after %s: Covers(locked/kept.txt) = true under a directory that failed to list", st.cmd)
 		}
 		for _, p := range []string{"projects/app/bin/out.dll", ".hiddendir/secret.txt"} {
 			if res.Covers(p) {

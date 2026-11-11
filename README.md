@@ -20,13 +20,18 @@ renames or deletes anything outside its own database. Reviewing files and dispos
   Ambiguous cases are reported, never guessed. A file edited and moved at once shows as a **possible move**, and
   several identical copies are only paired when their names make it unambiguous.
 - **Reports** totals per root, the largest files, **duplicate groups with the space you could reclaim**, broken
-  symlinks, and recent changes.
-- **Rescans quickly.** A file is only re-read when its size, modification time or inode changes.
+  symlinks, unreadable files, and recent changes.
+- **Rescans quickly.** A file is only re-read when its size, modification time, change time (ctime) or inode changes.
+  The change time is what catches a file whose permissions changed, or one rewritten with its old modification time
+  put back. Windows has no change time, so there it isn't compared.
 
 It is built to fail safe:
 
 - **Partial scans are safe.** Scanning one folder never marks files elsewhere as missing.
 - **Unreadable directories are harmless.** A directory that can't be read never makes its files "missing".
+- **Unreadable files are flagged.** A file Filo can see but not read (for example permission denied) is reported as an
+  error and flagged as unreadable since that scan, including a file you could read before. It keeps its record and its
+  last known hash, and the flag clears the next time it can be read. `filo report` lists flagged files.
 - **Unplugged disks are noticed.** A root on a disk that isn't mounted is refused, rather than looking as if every
   file was deleted. So is a mounted disk that turns out to be empty.
 - **Files that come back are recognised.** If they return after going missing (a disk that was briefly unreadable,
@@ -51,24 +56,32 @@ Copy `bin/filo` somewhere on your `PATH`, or run it from the repository.
 ```sh
 filo roots add ~          # register a directory as a root
 filo scan                 # scan every root; the first scan hashes everything, so it is the slow one
-filo report               # totals, largest files, duplicates, broken symlinks, recent changes
+filo report               # totals, largest files, duplicates, broken symlinks, unreadable files, recent changes
 ```
 
 After that, `filo scan` again only rehashes what changed. A scan prints a summary like this:
 
 ```
-/home/you/FiloTest: 14 files seen in 10ms (scan 2)
-  new 3   changed 2   moved 2   missing 2   possible moves 1   errors 0
+/home/you/FiloTest: 15 files seen in 10ms (scan 2)
+  new 3   changed 2   moved 2   missing 2   possible moves 1   errors 2
   moved:
     moved     docs/contract.txt -> notes/contract-final.txt
     moved     photos/img2.bin -> photos/img2-renamed.bin
   changed:
+    changed   link-to-report (symlink: docs/report-2024.txt -> docs/report-2024.txt (broken))
     changed   notes/todo.md (content)
   missing:
     missing   docs/receipt-tyre.txt
+    missing   docs/report-2024.txt
   possible moves (not applied):
     possible  docs/report-2024.txt -> archive/report-2024.txt ? (same name, different content)
+  errors:
+    error     docs/private.txt (hash: open /home/you/FiloTest/docs/private.txt: permission denied)
+    error     locked (open /home/you/FiloTest/locked: permission denied)
 ```
+
+The two errors are a file and a directory made unreadable. The files inside `locked` aren't reported missing,
+because Filo couldn't look.
 
 And `filo report` includes, among other things:
 
@@ -78,6 +91,9 @@ Duplicates: 1 group, 3 files, 195 KiB reclaimable
     /home/you/FiloTest/photos/img1-copy.bin
     /home/you/FiloTest/photos/img1-copy2.bin
     /home/you/FiloTest/photos/img1.bin
+
+Unreadable files: 1
+  since scan 2  /home/you/FiloTest/docs/private.txt
 ```
 
 ## Commands
@@ -143,6 +159,9 @@ synced folders (the default location already is).
 
 You can look inside it with `sqlite3`; hashes are the same as `sha256sum` prints.
 
+A newer Filo upgrades an older database automatically the first time it opens it, including for `filo report`. After
+that, older versions of Filo refuse to open it, so upgrade Filo on a device before running it there.
+
 ## Scheduling
 
 A daily scan only ever reads. A systemd user timer is enough, and no daemon is needed. This example hasn't been
@@ -202,8 +221,10 @@ go vet ./... && staticcheck ./...
 ```
 
 `scripts/testtree.sh init DIR` builds a throwaway tree of test files, and `scripts/testtree.sh mutate DIR` applies a
-known set of changes and prints what a rescan should report. When developing, always use a throwaway database and
-tree, never your real home directory:
+known set of changes and prints what a rescan should report. The changes include making a directory and a file
+unreadable, so run it as a normal user (root ignores permissions); `scripts/testtree.sh unlock DIR` makes them readable
+again, which you need before you can delete the tree. When developing, always use a throwaway database and tree, never
+your real home directory:
 
 ```sh
 scripts/testtree.sh init /tmp/FiloTest
@@ -212,6 +233,9 @@ bin/filo --db /tmp/f.db scan
 scripts/testtree.sh mutate /tmp/FiloTest
 bin/filo --db /tmp/f.db scan
 bin/filo --db /tmp/f.db report
+scripts/testtree.sh unlock /tmp/FiloTest
+bin/filo --db /tmp/f.db scan        # nothing new, changed or missing; the unreadable flag clears
+rm -rf /tmp/FiloTest /tmp/f.db*
 ```
 
 Project conventions for contributors (and for Claude Code) are in [CLAUDE.md](CLAUDE.md).

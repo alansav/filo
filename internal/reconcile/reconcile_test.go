@@ -773,27 +773,61 @@ func TestTestTree(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := countsOf(first); got != (counts{New: 13}) {
-		t.Fatalf("first scan = %+v, want 13 new", got)
+	if got := countsOf(first); got != (counts{New: 15}) {
+		t.Fatalf("first scan = %+v, want 15 new", got)
 	}
 
 	run("mutate")
+	t.Cleanup(func() { run("unlock") }) // or the temp dir cannot be removed
 	sum, err := Scan(context.Background(), e.s, Options{Target: dir})
 	if err != nil {
 		t.Fatal(err)
 	}
-	// "expected: moved 2, changed 2 (todo.md, link-to-report), missing 2, new 3, possible move 1"
-	if got := countsOf(sum); got != (counts{Moved: 2, Changed: 2, Missing: 2, New: 3, Possible: 1}) {
-		t.Fatalf("after mutate = %+v; events %+v", got, e.events(sum.ScanID))
+	// "expected: moved 2, changed 2 (todo.md, link-to-report), missing 2, new 3, possible move 1,
+	//  errors 2 (locked, docs/private.txt)". Root ignores permissions, so there are no errors.
+	want := counts{Moved: 2, Changed: 2, Missing: 2, New: 3, Possible: 1, Errors: 2}
+	if os.Geteuid() == 0 {
+		want.Errors = 0
 	}
-	changed := map[string]bool{}
+	if got := countsOf(sum); got != want {
+		t.Fatalf("after mutate = %+v, want %+v; events %+v", got, want, e.events(sum.ScanID))
+	}
+	changed, errored := map[string]bool{}, map[string]bool{}
 	for _, ev := range e.events(sum.ScanID) {
-		if ev.Kind == Changed {
+		switch ev.Kind {
+		case Changed:
 			changed[ev.Path] = true
+		case Error:
+			errored[ev.Path] = true
 		}
 	}
 	if !changed["FiloTest/notes/todo.md"] || !changed["FiloTest/link-to-report"] {
 		t.Errorf("changed = %v, want todo.md and link-to-report", changed)
+	}
+	known := e.known()
+	if _, ok := known["FiloTest/locked/kept.txt"]; !ok {
+		t.Error("locked/kept.txt was marked missing because its directory could not be read")
+	}
+	if os.Geteuid() != 0 {
+		if !errored["FiloTest/locked"] || !errored["FiloTest/docs/private.txt"] {
+			t.Errorf("errors = %v, want locked and docs/private.txt", errored)
+		}
+		if known["FiloTest/docs/private.txt"].Unreadable != sum.ScanID {
+			t.Errorf("docs/private.txt: %+v, want flagged unreadable since scan %d", known["FiloTest/docs/private.txt"],
+				sum.ScanID)
+		}
+	}
+
+	run("unlock")
+	sum, err = Scan(context.Background(), e.s, Options{Target: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := countsOf(sum); got != (counts{}) {
+		t.Fatalf("after unlock = %+v, want nothing; events %+v", got, e.events(sum.ScanID))
+	}
+	if u := e.known()["FiloTest/docs/private.txt"].Unreadable; u != 0 {
+		t.Errorf("docs/private.txt still flagged unreadable since scan %d after unlock", u)
 	}
 }
 
