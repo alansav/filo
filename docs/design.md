@@ -204,17 +204,24 @@ the files being reviewed.
   the intervals are what the reviewer types; nothing is filled in.
 - **Outcomes.** Each row gets either a review date or the action `delete`, not both; there is no "keep where it is"
   without a date. A blank row is left alone. `delete` is only recorded in iteration 2. `retain_until` (a floor, see
-  principle 1) is optional and goes with a date or delete; the export fills in the current floor, so a row with only
-  that unchanged value counts as blank, and a changed floor on its own is refused. A blank `retain_until` keeps the
+  principle 1) is optional with a date or delete. **On its own** (changed 2026-11-11; it was refused) it means "keep
+  it until then": the floor is recorded and is also the review date, so the file comes back as *review due* on that
+  day and is decided then. Passing the floor never marks a file delete. It must be after today. The export fills in
+  the current floor, so a row with only that unchanged value counts as blank. A blank `retain_until` keeps the
   current floor (clearing one is not supported yet).
-- **The import refuses a row**, with one line naming the CSV line and the file, and still applies the others, when:
-  the export or the file is not in the register or not in that export; the file's hash differs from the export's
-  (changed since export: it stays queued); the file was imported from a later export since; a delete is asked for a
-  file that is flagged unreadable, is a possible move (only a date is accepted, so moves are never confirmed by
-  guesswork), or has a retain-until floor after today; a value does not parse; the same (export, id) appears more than
-  once (every copy is refused). Importing the same row from the same export again does nothing. The valid rows are
-  applied in one transaction; `--dry-run` checks everything and writes nothing. The exit code is 1 if any row was
-  refused.
+- **Misplaced values** (decided 2026-11-11). The import reads only `review_date`, `action` and `retain_until`, so a
+  value typed anywhere else would otherwise pass as an untouched row. A row with none of those three filled in is
+  refused, with a line saying where to put the value, if its `reason` cell no longer reads as one Filo wrote or it has
+  a value past the last column. `size` and `modified` are not checked: spreadsheets rewrite dates and long numbers on
+  save. When no row has a decision at all, the import says which columns it reads.
+- **The import refuses a row**, with one line naming the CSV line and the file, and still applies the others, when: a
+  value is misplaced (above); the export or the file is not in the register or not in that export; the file's hash
+  differs from the export's (changed since export: it stays queued); the file was imported from a later export since;
+  a delete is asked for a file that is flagged unreadable, is a possible move (only a date is accepted, so moves are
+  never confirmed by guesswork), or has a retain-until floor after today; a value does not parse; the same (export,
+  id) appears more than once (every copy is refused). Importing the same row from the same export again does nothing.
+  The valid rows are applied in one transaction; `--dry-run` checks everything and writes nothing. The exit code is 1
+  if any row was refused.
 - **Bulk first dates by folder**: `filo review set-date FOLDER DATE` gives every present file under FOLDER with no
   review date and no action that date. It never overwrites a decision, and it is not a review: it leaves unreadable
   files and possible moves in the queue and sets no reviewed hash. Every change is a row in `reviews` under its own
@@ -398,6 +405,11 @@ register to change shape.
   For now it is entered during review; the register is the source of truth either way.
 - How a synced-folder flag is configured (needed for disposal, iteration 3).
 - Confirming a possible move during review, and undoing a `set-date` batch.
+- **Folder rules for new files.** `filo review set-date` is a one-off: it dates the files under a folder that exist
+  now, and a file added later arrives undated and joins the queue. A stored rule ("new files under FOLDER get a review
+  date N from first seen") applied by each scan would save rerunning it, but it relaxes principle 4's default that a
+  new file needs review. Open: whether to have rules at all, whether a rule-dated file still gets one look first,
+  how rules on nested folders combine, and whether a rule may ever imply delete (it should not).
 - **Absorbing nested roots** (to do next, 2026-11-11): adding `~` when `~/Documents` is already a root is refused
   (nesting only across filesystems), and there is no way out. Planned: `filo roots add PATH --absorb`, with a dry run,
   rewrites the nested roots' paths, scans and events into the new root (a scan of `~/Documents` is a scan of `~`

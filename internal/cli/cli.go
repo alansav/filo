@@ -81,10 +81,12 @@ set-date     gives every file under FOLDER that has no review date and no decisi
              changes a decision already made, and it does not take unreadable files or possible moves out of the
              queue.
 export       writes the queue as CSV (UTF-8) to FILE, which must not exist, or to standard output.
-import       reads an exported CSV after you fill in, per row, either review_date or action, and optionally
-             retain_until. Rows left blank are left alone. A row is refused, with one line saying why, if the file
-             changed since the export, or if it asks to delete a file that is unreadable, a possible move, or retained
-             past today. The other rows are still applied.
+import       reads an exported CSV after you fill in, per row, review_date or action (not both), optionally with
+             retain_until; or retain_until alone, which keeps the file until that date and brings it back for review
+             then. Only those three columns are read. Rows left blank are left alone. A row is refused, with one line
+             saying why, if the file changed since the export, if it asks to delete a file that is unreadable, a
+             possible move, or retained past today, or if a value was typed in another column. The other rows are
+             still applied.
 
 Dates are YYYY-MM-DD, or +N followed by d, w, m or y (days, weeks, months, years from today). A review date must be
 after today. The only action is delete, and it is only recorded: filo deletes nothing in this version.

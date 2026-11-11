@@ -330,6 +330,10 @@ func (e *env) reviewImport(ctx context.Context, dbBefore string, args []string) 
 	fmt.Fprintf(w, "%s %s: %s, %s.\n", verb, report.Plural(int64(res.Dates+res.Deletes), "decision", "decisions"),
 		report.Plural(int64(res.Dates), "review date", "review dates"), report.Plural(int64(res.Deletes),
 			"file marked delete", "files marked delete"))
+	if res.Retained > 0 {
+		fmt.Fprintf(w, "%s only a retain_until date: kept until then, when it comes back for review.\n",
+			report.Plural(int64(res.Retained), "file has", "files have"))
+	}
 	if res.Deletes > 0 {
 		fmt.Fprintln(w, "Marked delete is only recorded: filo deletes nothing in this version.")
 	}
@@ -345,6 +349,10 @@ func (e *env) reviewImport(ctx context.Context, dbBefore string, args []string) 
 	}
 	if len(notes) > 0 {
 		fmt.Fprintf(w, "%s.\n", strings.Join(notes, ", "))
+	}
+	if len(parsed.Decisions) == 0 && len(bad) == 0 {
+		fmt.Fprintln(w, "No row has a review_date, action or retain_until filled in. Those are the only columns filo "+
+			"reads (G, H and I as exported).")
 	}
 	if len(bad) > 0 {
 		return errReported

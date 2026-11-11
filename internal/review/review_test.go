@@ -146,7 +146,7 @@ func TestReadCSV(t *testing.T) {
 				{Line: 5, ExportID: 2, FileID: 4, ReviewDate: "2027-05-11", RetainUntil: "2033-11-11"},
 			}},
 		{name: "blank rows and empty spreadsheet rows",
-			in:    head + "1,2,r,/p,1,m,,,\n,,,,,,,,\n\n2,2,r,/q,1,m,,,\n",
+			in:    head + "1,2,no review date,/p,1,m,,,\n,,,,,,,,\n\n2,2,no review date,/q,1,m,,,\n",
 			blank: 2},
 		{name: "semicolons, BOM, CRLF, reordered and extra columns, DELETE in capitals",
 			in: "\ufeffaction;notes;review_date;export;id\r\nDELETE;mine;;5;1\r\n;;2027-02-03;5;2\r\n",
@@ -160,7 +160,7 @@ func TestReadCSV(t *testing.T) {
 		{name: "tabs", in: "id\texport\treview_date\taction\n1\t2\t2027-01-01\t\n",
 			want: []store.Decision{{Line: 2, ExportID: 2, FileID: 1, ReviewDate: "2027-01-01"}}},
 		{name: "a quoted path with commas and a newline keeps the line numbers",
-			in:   head + "1,2,r,\"/a,b\nc\",1,m,,,\n2,2,r,/q,1,m,2027-01-01,,\n",
+			in:   head + "1,2,no review date,\"/a,b\nc\",1,m,,,\n2,2,r,/q,1,m,2027-01-01,,\n",
 			want: []store.Decision{{Line: 4, ExportID: 2, FileID: 2, ReviewDate: "2027-01-01"}}, blank: 1},
 		{name: "bad rows are refused one by one",
 			in: head +
@@ -179,6 +179,18 @@ func TestReadCSV(t *testing.T) {
 			in:       head + "1,2,r,/p,1,m,2027-01-01,,\n1,2,r,/p,1,m,2028-01-01,,\n3,2,r,/q,1,m,,delete,\n",
 			want:     []store.Decision{{Line: 4, ExportID: 2, FileID: 3, Action: "delete"}},
 			problems: []string{"more than once", "more than once"}},
+		{name: "a value typed in the reason column or past the last column is refused, not taken as blank",
+			in: head +
+				"1,2,+6y,/p,1,m,,,\n" +
+				"2,2,no review date,/q,1,m,,,,+6y\n" +
+				"3,2,my note,/r,1,m,2027-01-01,,\n" +
+				"4,2,review due (2026-01-01),/s,1,m,,,\n",
+			want:     []store.Decision{{Line: 4, ExportID: 2, FileID: 3, ReviewDate: "2027-01-01"}},
+			blank:    1,
+			problems: []string{`reason column was changed to "+6y"`, `"+6y" is outside the columns`}},
+		{name: "retain_until alone goes to the register",
+			in:   head + "1,2,r,/p,1,m,,,+6y\n",
+			want: []store.Decision{{Line: 2, ExportID: 2, FileID: 1, RetainUntil: "2032-11-11"}}},
 		{name: "not a review CSV", in: "a,b,c\n1,2,3\n", err: ErrNotReviewCSV},
 		{name: "empty file", in: "", err: ErrNotReviewCSV},
 	}

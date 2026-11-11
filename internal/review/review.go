@@ -160,6 +160,7 @@ func ReadCSV(r io.Reader, today time.Time) (Parsed, error) {
 
 	var cr *csv.Reader
 	var cols map[string]int
+	var width int // header fields
 	for _, sep := range []rune{',', ';', '\t'} {
 		c := csv.NewReader(bytes.NewReader(data))
 		c.Comma = sep
@@ -176,7 +177,7 @@ func ReadCSV(r io.Reader, today time.Time) (Parsed, error) {
 			}
 		}
 		if hasAll(m, "id", "export", "review_date", "action") {
-			cr, cols = c, m
+			cr, cols, width = c, m, len(head)
 			break
 		}
 	}
@@ -221,6 +222,16 @@ func ReadCSV(r io.Reader, today time.Time) (Parsed, error) {
 			continue
 		}
 		if rawDate == "" && rawAction == "" && rawRetain == "" {
+			// Nothing to read, but a value typed in the wrong place must not pass as an untouched row.
+			if v := beyond(rec, width); v != "" {
+				bad("%q is outside the columns; put it under review_date, action or retain_until", v)
+				continue
+			}
+			if v := get("reason"); v != "" && !exportedReason(v) {
+				bad("the reason column was changed to %q, and filo does not read it; put it under review_date, "+
+					"action or retain_until", v)
+				continue
+			}
 			p.Blank++
 			continue
 		}
@@ -276,6 +287,27 @@ func ReadCSV(r io.Reader, today time.Time) (Parsed, error) {
 		p.Decisions = kept
 	}
 	return p, nil
+}
+
+// beyond returns the first non-empty value past the header's columns, or "".
+func beyond(rec []string, width int) string {
+	for i := width; i < len(rec); i++ {
+		if v := strings.TrimSpace(rec[i]); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// exportedReason reports whether a reason cell still reads as one ReasonText wrote.
+func exportedReason(v string) bool {
+	for _, prefix := range []string{"no review date", "review due (", "unreadable since scan ", "changed since review",
+		"possible move of "} {
+		if strings.HasPrefix(v, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func hasAll(m map[string]int, names ...string) bool {

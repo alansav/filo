@@ -223,7 +223,8 @@ func TestImportDecisions(t *testing.T) {
 	const today = "2026-11-11"
 	now := time.Date(2026, 11, 11, 12, 0, 0, 0, time.UTC)
 	e.apply(Changes{New: []NewFile{f("keep", "h1"), f("del", "h2"), f("edited", "h3"), f("flagged", "h4"),
-		f("floor", "h5"), f("again", "h6"), f("untouched", "h7"), f("old/pm", "h8")}})
+		f("floor", "h5"), f("again", "h6"), f("untouched", "h7"), f("old/pm", "h8"), f("retained", "h10"),
+		f("past-floor", "h11")}})
 	k := e.known()
 	e.apply(Changes{
 		Close: []int64{k["old/pm"].PathID}, New: []NewFile{f("new/pm", "h9")},
@@ -231,8 +232,8 @@ func TestImportDecisions(t *testing.T) {
 	})
 	k = e.known()
 	exportID, items := e.export(today, now)
-	if len(items) != 8 {
-		t.Fatalf("exported %d rows, want 8", len(items))
+	if len(items) != 10 {
+		t.Fatalf("exported %d rows, want 10", len(items))
 	}
 
 	// After the export: edited changes, flagged becomes unreadable.
@@ -251,6 +252,9 @@ func TestImportDecisions(t *testing.T) {
 		{Line: 8, ExportID: exportID + 1, FileID: id("keep"), ReviewDate: "2027-11-11"},
 		{Line: 9, ExportID: exportID, FileID: 9999, ReviewDate: "2027-11-11"},
 		{Line: 10, ExportID: exportID, FileID: id("again"), ReviewDate: "2027-11-11", RetainUntil: "2033-12-31"},
+		{Line: 11, ExportID: exportID, FileID: id("retained"), RetainUntil: "2032-11-11"},
+		{Line: 12, ExportID: exportID, FileID: id("past-floor"), RetainUntil: "2026-11-11"},
+		{Line: 13, ExportID: exportID, FileID: id("untouched")}, // retain_until blank, as exported: untouched
 	}
 
 	before, err := e.s.RowCounts(e.ctx)
@@ -276,12 +280,12 @@ func TestImportDecisions(t *testing.T) {
 	if res.Dates != dry.Dates || res.Deletes != dry.Deletes || len(res.Refusals) != len(dry.Refusals) {
 		t.Errorf("dry run %+v differs from the real one %+v", dry, res)
 	}
-	if res.Dates != 2 || res.Deletes != 1 || res.Already != 0 {
-		t.Errorf("result = %+v, want 2 dates (keep, again) and 1 delete (del)", res)
+	if res.Dates != 3 || res.Retained != 1 || res.Deletes != 1 || res.Already != 0 || res.Untouched != 1 {
+		t.Errorf("result = %+v, want 3 dates (keep, again, retained by its floor), 1 delete (del), 1 untouched", res)
 	}
 	wantRefused := map[int]string{
 		4: "changed since export", 5: "flagged unreadable", 6: "retained until 2030-01-01", 7: "possible move",
-		8: "not in this register", 9: "not in export",
+		8: "not in this register", 9: "not in export", 12: "retain_until 2026-11-11 is not after today",
 	}
 	if len(res.Refusals) != len(wantRefused) {
 		t.Errorf("refusals = %+v", res.Refusals)
@@ -299,12 +303,20 @@ func TestImportDecisions(t *testing.T) {
 
 	// The queue now: keep, again and del are decided; the rest are still queued.
 	wantQueue := map[string]Reason{"edited": ReasonUndated, "flagged": ReasonUnreadable, "floor": ReasonUndated,
-		"untouched": ReasonUndated, "new/pm": ReasonPossibleMove}
+		"untouched": ReasonUndated, "new/pm": ReasonPossibleMove, "past-floor": ReasonUndated}
 	if got := e.queue(today); !maps.Equal(got, wantQueue) {
 		t.Errorf("queue after import = %v, want %v", got, wantQueue)
 	}
 	if v := rawQueryString(t, e.db, `SELECT retain_until FROM files WHERE id = `+itoa(id("again"))); v != "2033-12-31" {
 		t.Errorf("retain_until = %q", v)
+	}
+	// retain_until alone: the floor is recorded and is also the review date; the file comes back then, as due.
+	if v := rawQueryString(t, e.db, `SELECT retain_until || ' ' || review_date || ' ' || coalesce(action, '-')
+		FROM files WHERE id = `+itoa(id("retained"))); v != "2032-11-11 2032-11-11 -" {
+		t.Errorf("retained: retain_until, review_date, action = %q", v)
+	}
+	if got := e.queue("2032-11-11")["retained"]; got != ReasonDue {
+		t.Errorf("retained on its floor: %q, want due (a floor brings it back for review, never marks it delete)", got)
 	}
 
 	// Importing the same file again is a no-op, and changes nothing.

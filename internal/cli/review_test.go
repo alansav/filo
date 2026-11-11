@@ -163,6 +163,10 @@ func TestReviewRoundTrip(t *testing.T) {
 			row["review_date"] = "30/06/2027" // ambiguous: refused
 		case in("projects/app/app.csproj"):
 			row["review_date"], row["retain_until"] = "2028-01-01", "+7y"
+		case in("photos/img1-copy.bin"):
+			row["retain_until"] = "+6y" // alone: kept until then, reviewed on that date
+		case in("projects/app/src/main.cs"):
+			row["reason"] = "+6y" // the wrong column: refused, not skipped
 		}
 	})
 
@@ -178,17 +182,20 @@ func TestReviewRoundTrip(t *testing.T) {
 		in("photos/img1.bin") + ": changed since export 1",
 		in("archive/report-2024.txt") + ": a possible move: only a review date is accepted",
 		`"30/06/2027" is not a date`,
+		`reason column was changed to "+6y"`,
 	}
 	if !asRoot {
 		wantErr = append(wantErr, in("docs/private.txt")+": flagged unreadable")
 	}
 	contains("import stderr", r.stderr, wantErr...)
 	// receipt-tyre.txt went missing in the mutate scan, so it is not in the queue at all.
-	applied, queued, already, edited := "Applied 3 decisions: 2 review dates, 1 file marked delete.", "10", "3", "11"
+	// On re-import the retain_until-only row matches the recorded floor, so it counts as blank, not imported again.
+	applied, queued, already, edited := "Applied 4 decisions: 3 review dates, 1 file marked delete.", "9", "3", "10"
 	if asRoot { // private.txt is readable, so its delete is accepted
-		applied, queued, already, edited = "Applied 4 decisions: 2 review dates, 2 files marked delete.", "9", "4", "10"
+		applied, queued, already, edited = "Applied 5 decisions: 3 review dates, 2 files marked delete.", "8", "4", "9"
 	}
-	contains("import stdout", r.stdout, applied, "filo deletes nothing", "left blank")
+	contains("import stdout", r.stdout, applied, "filo deletes nothing", "left blank",
+		"1 file has only a retain_until date: kept until then, when it comes back for review.")
 	for _, l := range strings.Split(strings.TrimSpace(r.stderr), "\n") {
 		if !strings.HasPrefix(l, "filo: review 🗂️.csv line ") {
 			t.Errorf("refusal line not in the expected form: %q", l)
@@ -280,5 +287,32 @@ func TestSplitSubcommand(t *testing.T) {
 		if sub != tc.sub || strings.Join(rest, " ") != strings.Join(tc.rest, " ") {
 			t.Errorf("splitSubcommand(%q) = %q, %q; want %q, %q", tc.args, sub, rest, tc.sub, tc.rest)
 		}
+	}
+}
+
+func TestImportNothingFilledIn(t *testing.T) {
+	skipWindows(t)
+	sameDevice(t, nil)
+	setNow(t, time.Date(2026, 11, 11, 12, 0, 0, 0, time.Local))
+	dir := canonicalTemp(t)
+	tree := filepath.Join(dir, "tree")
+	if err := os.MkdirAll(tree, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tree, "a.txt"), []byte("a"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	env := map[string]string{"FILO_DB": filepath.Join(dir, "filo.db")}
+	ctx := context.Background()
+	csvPath := filepath.Join(dir, "r.csv")
+	for _, args := range [][]string{{"roots", "add", tree}, {"scan"}, {"review", "export", "-o", csvPath}} {
+		if r := run(t, ctx, env, args...); r.code != ExitOK {
+			t.Fatalf("filo %v: %d %s", args, r.code, r.stderr)
+		}
+	}
+	r := run(t, ctx, env, "review", "import", csvPath)
+	if r.code != ExitOK || !strings.Contains(r.stdout, "1 row left blank") ||
+		!strings.Contains(r.stdout, "No row has a review_date, action or retain_until filled in") {
+		t.Errorf("code %d\n%s%s", r.code, r.stdout, r.stderr)
 	}
 }

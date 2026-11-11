@@ -243,8 +243,9 @@ type Refusal struct {
 
 // ImportResult counts what an import did (or, in a dry run, would do).
 type ImportResult struct {
-	Dates     int // new review dates
+	Dates     int // new review dates, including RetainOnly
 	Deletes   int // marked for deletion
+	Retained  int // of Dates: only retain_until given, so the review date is that floor
 	Already   int // already imported from the same export
 	Untouched int // only retain_until given, and it is the value already recorded
 	Refusals  []Refusal
@@ -290,6 +291,10 @@ func (s *Store) ApplyDecisions(ctx context.Context, ds []Decision, now time.Time
 		case c.untouched:
 			res.Untouched++
 		default:
+			if c.reviewDate != "" {
+				d.ReviewDate = c.reviewDate
+				res.Retained++
+			}
 			apply = append(apply, ok{d: d, hash: c.exportHash, afterScan: ex.afterScan})
 			if d.Action == ActionDelete {
 				res.Deletes++
@@ -355,6 +360,7 @@ type checked struct {
 	refusal    string // "" = passes
 	already    bool   // imported from this export before: nothing to do
 	untouched  bool   // a row with only the retain_until the export filled in
+	reviewDate string // a row with only a new retain_until: review on that floor
 	exportHash sql.NullString
 }
 
@@ -393,15 +399,20 @@ func checkDecision(ctx context.Context, tx *sql.Tx, d Decision, ex exportInfo, t
 		return c, fmt.Errorf("read file %d: %w", d.FileID, err)
 	}
 
-	// A row with only retain_until: the export fills that column in, so an unchanged value is an untouched row. A
-	// changed floor on its own is not a review outcome.
+	// A row with only retain_until: the export fills that column in, so an unchanged value is an untouched row. A new
+	// floor on its own means "keep it until then": the file comes back for review on that date (a floor is never a
+	// trigger for deletion).
 	if d.ReviewDate == "" && d.Action == "" {
-		if d.RetainUntil == retain {
+		switch {
+		case d.RetainUntil == retain:
 			c.untouched = true
-		} else {
-			c.refusal = "retain_until needs a review date or delete with it"
+			return c, nil
+		case d.RetainUntil <= today:
+			c.refusal = fmt.Sprintf("retain_until %s is not after today: give a review date or delete as well",
+				d.RetainUntil)
+			return c, nil
 		}
-		return c, nil
+		c.reviewDate = d.RetainUntil
 	}
 
 	// The latest review that came from an import: an earlier import of this export, or a later review.
