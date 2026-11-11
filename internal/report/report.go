@@ -20,15 +20,44 @@ type Report struct {
 	Unreadable  []store.UnreadableRow
 	UnreadTotal int64
 	Events      []store.EventRow
+	Queue       map[store.Reason]int64 // queued files by reason
+	QueueTotal  int64
 }
 
-// Build reads the report from the register, with top entries in each list.
-func Build(ctx context.Context, s *store.Store, top int) (Report, error) {
+// ReasonLabel names a queue reason for people.
+func ReasonLabel(r store.Reason) string {
+	switch r {
+	case store.ReasonUnreadable:
+		return "unreadable"
+	case store.ReasonChanged:
+		return "changed since review"
+	case store.ReasonPossibleMove:
+		return "possible moves"
+	case store.ReasonDue:
+		return "review due"
+	case store.ReasonUndated:
+		return "no review date"
+	}
+	return string(r)
+}
+
+// Build reads the report from the register, with top entries in each list. today (YYYY-MM-DD) decides which review
+// dates are due.
+func Build(ctx context.Context, s *store.Store, top int, today string) (Report, error) {
 	var r Report
 	var err error
 	if r.Roots, err = s.RootTotals(ctx); err != nil {
 		return r, err
 	}
+	q, err := s.Queue(ctx, today, store.QueueFilter{})
+	if err != nil {
+		return r, err
+	}
+	r.Queue = map[store.Reason]int64{}
+	for _, it := range q {
+		r.Queue[it.Reason]++
+	}
+	r.QueueTotal = int64(len(q))
 	if r.Largest, err = s.Largest(ctx, top); err != nil {
 		return r, err
 	}
@@ -77,6 +106,19 @@ func (r Report) WriteText(w io.Writer) error {
 	}
 	if len(r.Roots) > 1 {
 		p.line("  total: %s, %s", Plural(files, "file", "files"), Size(bytes))
+	}
+
+	p.blank()
+	if r.QueueTotal == 0 {
+		p.line("Review queue: empty")
+	} else {
+		var parts []string
+		for _, reason := range store.Reasons {
+			if n := r.Queue[reason]; n > 0 {
+				parts = append(parts, ReasonLabel(reason)+" "+Count(n))
+			}
+		}
+		p.line("Review queue: %s (%s); see filo review", Plural(r.QueueTotal, "file", "files"), strings.Join(parts, ", "))
 	}
 
 	p.blank()

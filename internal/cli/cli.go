@@ -31,7 +31,14 @@ Usage:
   filo roots                    list roots
   filo roots add PATH           register a directory as a root
   filo scan [PATH] [flags]      scan PATH (inside a root), or every root
-  filo report [--top N]         totals, largest files, duplicates, broken symlinks, recent events
+  filo report [--top N]         totals, review queue, largest files, duplicates, broken symlinks, recent events
+  filo review [PATH]            the review queue: why files are in it, and the folders holding most of them
+  filo review set-date FOLDER DATE [--dry-run]
+                                give every undated file under FOLDER a first review date
+  filo review export [PATH] [-o FILE]
+                                write the review queue as CSV, to FILE (never overwritten) or standard output
+  filo review import FILE [--dry-run]
+                                apply the review dates and actions filled in to an exported CSV
   filo help [COMMAND]
 
 Every command accepts --db PATH (default: $FILO_DB, then the user data directory).
@@ -56,8 +63,31 @@ Flags:
 	"report": `Usage:
   filo report [--top N] [--db PATH]
 
-Shows each root's totals and last scan, the largest files, duplicate groups with reclaimable space, broken symlinks
-and recent events. --top sets how many entries each list shows (default 10).
+Shows each root's totals and last scan, the size of the review queue, the largest files, duplicate groups with
+reclaimable space, broken symlinks and recent events. --top sets how many entries each list shows (default 10).
+`,
+	"review": `Usage:
+  filo review [PATH] [--top N] [--depth N]
+  filo review set-date FOLDER DATE [--dry-run]
+  filo review export [PATH] [-o FILE]
+  filo review import FILE [--dry-run]
+
+A file is queued for review when it has no review date, its review date has come, it is flagged unreadable, its
+content changed since it was reviewed, or it may be a file that moved. PATH limits a command to a folder inside a root.
+
+review       shows the queue by reason, and the folders with the most queued files (--top, default 15; --depth
+             levels below the root, default 2).
+set-date     gives every file under FOLDER that has no review date and no decision the review date DATE. It never
+             changes a decision already made, and it does not take unreadable files or possible moves out of the
+             queue.
+export       writes the queue as CSV (UTF-8) to FILE, which must not exist, or to standard output.
+import       reads an exported CSV after you fill in, per row, either review_date or action, and optionally
+             retain_until. Rows left blank are left alone. A row is refused, with one line saying why, if the file
+             changed since the export, or if it asks to delete a file that is unreadable, a possible move, or retained
+             past today. The other rows are still applied.
+
+Dates are YYYY-MM-DD, or +N followed by d, w, m or y (days, weeks, months, years from today). A review date must be
+after today. The only action is delete, and it is only recorded: filo deletes nothing in this version.
 `,
 }
 
@@ -130,6 +160,8 @@ func (e *env) run(ctx context.Context, args []string) error {
 		return e.scan(ctx, *db, rest)
 	case "report":
 		return e.report(ctx, *db, rest)
+	case "review":
+		return e.review(ctx, *db, rest)
 	default:
 		return usageError{fmt.Sprintf("unknown command %q", cmd)}
 	}
@@ -356,7 +388,7 @@ func (e *env) report(ctx context.Context, dbBefore string, args []string) error 
 		return err
 	}
 	defer s.Close()
-	r, err := report.Build(ctx, s, *top)
+	r, err := report.Build(ctx, s, *top, today())
 	if err != nil {
 		return err
 	}

@@ -1,8 +1,10 @@
 # Filo: design
 
-Status: iteration 1 (scan, register, report) is implemented in Go and passes its test-tree criterion; the scans of a
-real home directory in its "done when" (section 5) are still to be run. A C# prototype exists as a reference spec
-only; its schema and reconcile rules were carried over. Last updated: 2026-11-11.
+Status: iteration 1 (scan, register, report) is done: it passes its test-tree criterion, and on 2026-11-11 a real home
+directory (5,582 files, about 3.7 GB) scanned completely and rescanned quickly, reporting only real changes. Iteration
+2 (review) is implemented and passes its test-tree criterion; trimming the real home directory's first queue to about
+100 rows with `filo review set-date` is still to be done. A C# prototype exists as a reference spec only; its schema
+and reconcile rules were carried over. Last updated: 2026-11-11.
 
 This file records settled decisions, the planned data model and the open questions. When a decision changes,
 change it here in the same commit.
@@ -48,8 +50,9 @@ Principles. These are not negotiable:
 - **Never synced.** The default location is outside every root, so the register is never inside a synced folder and
   never scanned. That is also why there is no device column. Revisit only if a shared register is ever wanted.
 - Driver: `modernc.org/sqlite` (pure Go, no CGO, plain `database/sql`), chosen 2026-11-11 at v1.62.0.
-- `meta.schema_version` must equal the build's version; there are no migrations yet, so any other version (older or
-  newer) is refused, as is a SQLite file without Filo's `meta` keys. WAL mode is set only after those checks pass, so
+- `meta.schema_version` must equal the build's version. An older database is upgraded when it is opened, one version
+  at a time, each step in its own transaction with the version bump (1 to 2, then 2 to 3); a newer version, or an older
+  one with no migration, is refused, as is a SQLite file without Filo's `meta` keys. WAL mode is set only after those checks pass, so
   a foreign database is never modified.
 - One writer at a time: an `flock` on `<db>.lock`, taken before the database is opened. The kernel drops it if Filo
   dies, so there are no stale locks. Non-unix platforms refuse to open until locking is implemented for them. Each
@@ -160,22 +163,64 @@ Principles. These are not negotiable:
   used to decide what to rehash.
 
 ### Review (iteration 2)
+Decided 2026-11-11 unless noted. Review writes only the register and the CSV file the user names; it never touches
+the files being reviewed.
+
 - Export a CSV, review it in a spreadsheet, import it back. A UI replaces the CSV later.
-- The CSV holds the **queue only**: files with no review date, files past their review date, possible moves, and
-  present files flagged unreadable that have not been reviewed since they were flagged. Not the whole database. Each
-  row says why it is queued; an unreadable row also says since when (the scan that flagged it, and its time).
+- **The queue** is present files (regular files and symlinks) with one reason each, the first that applies:
+  1. *unreadable*: flagged unreadable and not reviewed since the scan that flagged it;
+  2. *changed since review*: a regular file whose hash is not the one its decision was made on (or that was reviewed
+     without a hash, or has none now). While a file is flagged unreadable its hash is stale, so rule 1 governs instead;
+  3. *possible move*: the new side of a possible move recorded after its last review. The event names the old file;
+     the new one is the file whose path opened at the event's path in that scan;
+  4. a file with an action (delete) is otherwise out of the queue: it waits for disposal;
+  5. *review due*: its review date is today or earlier (local date);
+  6. *no review date*.
+  The CSV holds the queue only, not the whole register. Each row says why it is queued; an unreadable row says since
+  when (the scan that flagged it, and its time), a possible move says where it may have come from.
+- **"Reviewed since"** is measured in scans, not clock times (changed 2026-11-11 from comparing the review's time
+  with the flagging scan's finish time). Each export records the latest finished scan (`exports.after_scan`); a
+  decision imported from it is stamped with that scan (`files.reviewed_after_scan`). The decision covers what the
+  export showed, so a file flagged unreadable, or recorded as a possible move, in a scan after the export stays
+  queued after the import.
 - **Unreadable files** (decided 2026-11-11). A file flagged unreadable joins the queue even if its review date has
   not come, because its stored hash is stale and nothing about it can be checked. Reviewing it while it is still flagged
   takes it out of the queue until its review date; if it is read again and later becomes unreadable again, it rejoins.
-  "Reviewed since flagged" compares the review's time with the finish time of the scan that set the flag. The import
-  accepts only a review date for a file still flagged at import time: a delete action is refused for that row (one
-  clear line naming the file; the other rows are still applied), because its content cannot be checked at action
-  time. Disposal refuses flagged files anyway (see Disposal).
-- Rows are keyed on the database row ID. The import touches only the decision columns, never path or hash.
-- Separate `review_date` and `action` columns. ISO dates, UTF-8, proper quoting.
-- The hash at export is stored; it is **re-checked at action time**. A file edited since review goes back to the queue.
-- Every reviewed file ends with one of two outcomes: a new review date, or an action (delete). There is no "keep where
-  it is" without a date.
+  The import accepts only a review date for a file still flagged at import time: a delete action is refused for that
+  row (one clear line naming the file; the other rows are still applied), because its content cannot be checked at
+  action time. Disposal refuses flagged files anyway (see Disposal).
+- **CSV columns**, in order: `id` (file row ID), `export` (export number), `reason`, `path` (absolute), `size` (bytes),
+  `modified` (local time), `review_date`, `action`, `retain_until`. The import finds columns by header name and reads
+  only `id`, `export`, `review_date`, `action` and `retain_until`, so a spreadsheet may reorder columns or add its own.
+  Rows are keyed on (export, id). The hash is not in the CSV: each export's rows and hashes are stored in the register
+  (`export_rows`).
+- **Encoding.** UTF-8 with a byte order mark (so spreadsheets detect UTF-8), standard quoting. File names are written
+  as they are, emoji and all; bytes that are not valid UTF-8 are shown as U+FFFD, which is harmless because the import
+  never reads the path. A display cell that starts with `= + - @`, tab or CR gets a leading `'` so a spreadsheet does
+  not run it as a formula. The import accepts a byte order mark, CRLF, `;` or tab separators, and empty rows.
+- **Dates**: `YYYY-MM-DD`, or `+N` followed by `d`, `w`, `m` or `y` from today (a month step that lands past a month's
+  end stops on its last day). An interval is resolved at import and stored as a date. Anything else, such as
+  `06/07/2027`, is refused, never guessed. A review date must be after today. This settles "default review intervals":
+  the intervals are what the reviewer types; nothing is filled in.
+- **Outcomes.** Each row gets either a review date or the action `delete`, not both; there is no "keep where it is"
+  without a date. A blank row is left alone. `delete` is only recorded in iteration 2. `retain_until` (a floor, see
+  principle 1) is optional and goes with a date or delete; the export fills in the current floor, so a row with only
+  that unchanged value counts as blank, and a changed floor on its own is refused. A blank `retain_until` keeps the
+  current floor (clearing one is not supported yet).
+- **The import refuses a row**, with one line naming the CSV line and the file, and still applies the others, when:
+  the export or the file is not in the register or not in that export; the file's hash differs from the export's
+  (changed since export: it stays queued); the file was imported from a later export since; a delete is asked for a
+  file that is flagged unreadable, is a possible move (only a date is accepted, so moves are never confirmed by
+  guesswork), or has a retain-until floor after today; a value does not parse; the same (export, id) appears more than
+  once (every copy is refused). Importing the same row from the same export again does nothing. The valid rows are
+  applied in one transaction; `--dry-run` checks everything and writes nothing. The exit code is 1 if any row was
+  refused.
+- **Bulk first dates by folder**: `filo review set-date FOLDER DATE` gives every present file under FOLDER with no
+  review date and no action that date. It never overwrites a decision, and it is not a review: it leaves unreadable
+  files and possible moves in the queue and sets no reviewed hash. Every change is a row in `reviews` under its own
+  batch, so a batch can be undone later (no undo command yet).
+- The hash at export is stored; it is **re-checked at action time** (iteration 3) against `files.reviewed_hash`. A
+  file edited since review goes back to the queue.
 
 ### Disposal (iteration 3 onward)
 - Dry run first. Quarantine before deletion, for a set period.
@@ -194,6 +239,10 @@ Principles. These are not negotiable:
   inside a registered root (see Roots); with no PATH, every root in turn, each in its own transaction. A root that
   fails (for example unmounted) is reported and the others are still scanned. `--workers` is 1–64, default 4.
 - `filo report [--top N]`: see section 4.
+- `filo review [PATH] [--top N] [--depth N]` shows the queue by reason and the folders holding most of it;
+  `filo review set-date FOLDER DATE [--dry-run]`, `filo review export [PATH] [-o FILE]` (FILE is created with mode
+  0600 and never overwritten; without `-o` the CSV goes to standard output) and `filo review import FILE [--dry-run]`:
+  see Review. A subcommand may follow `--db`.
 - `--db PATH` is accepted before or after any command; `FILO_DB` is the fallback, then the default location. Flags may
   come before or after PATH. Built on the standard library's `flag` package (no CLI framework).
 - Output is plain text. Errors are one line, `filo: <message>`. Exit codes: 0 success (files that could not be read
@@ -203,7 +252,7 @@ Principles. These are not negotiable:
   so timer and cron logs stay clean. Ctrl-C or SIGTERM cancels a scan; nothing is written and the lock is released.
 - A systemd user timer running `filo scan` is enough. No daemon. (`Persistent=true`, low CPU and I/O priority.)
 
-## 3. Data model (iteration 1, schema version 2)
+## 3. Data model (schema version 3)
 
 Carried over from the C# prototype. Adjust freely in the Go port, but keep the interval history and the partial unique
 index.
@@ -234,7 +283,14 @@ CREATE TABLE files (
     unreadable_since_scan INTEGER REFERENCES scans(id), -- NULL = read fine the last time it was hashed
     inode INTEGER,                      -- NULL for symlinks, or where the platform gives none
     link_target TEXT, link_broken INTEGER NOT NULL DEFAULT 0,
-    first_seen_scan INTEGER NOT NULL REFERENCES scans(id));
+    first_seen_scan INTEGER NOT NULL REFERENCES scans(id),
+    -- the current review decision (version 3); the history is in reviews
+    review_date TEXT,                   -- YYYY-MM-DD; NULL = none
+    action TEXT,                        -- 'delete' | NULL; recorded only until disposal exists
+    retain_until TEXT,                  -- YYYY-MM-DD floor; NULL = none known
+    reviewed_utc TEXT,                  -- when the decision was imported; NULL = never reviewed (set-date is not a review)
+    reviewed_after_scan INTEGER REFERENCES scans(id), -- the latest scan the reviewed export had seen
+    reviewed_hash TEXT);                -- the content the decision was made on
 
 CREATE TABLE paths (
     id INTEGER PRIMARY KEY, file_id INTEGER NOT NULL REFERENCES files(id),
@@ -250,6 +306,26 @@ CREATE TABLE events (
     id INTEGER PRIMARY KEY, scan_id INTEGER NOT NULL REFERENCES scans(id),
     kind TEXT NOT NULL,                 -- moved | missing | changed | possible_move | error | other_fs
     file_id INTEGER, path TEXT, other_path TEXT, detail TEXT);
+
+-- version 3: review
+CREATE TABLE exports (
+    id INTEGER PRIMARY KEY, created_utc TEXT NOT NULL,
+    path TEXT,                          -- the CSV written; NULL = standard output
+    after_scan INTEGER REFERENCES scans(id));          -- the latest finished scan at export
+CREATE TABLE export_rows (
+    export_id INTEGER NOT NULL REFERENCES exports(id), file_id INTEGER NOT NULL REFERENCES files(id),
+    reason TEXT NOT NULL,               -- unreadable | changed | possible_move | due | undated
+    hash TEXT,                          -- the content shown; the import refuses the row if it has changed
+    PRIMARY KEY (export_id, file_id));
+CREATE TABLE review_batches (
+    id INTEGER PRIMARY KEY, created_utc TEXT NOT NULL,
+    command TEXT NOT NULL,              -- 'import' | 'set-date'
+    detail TEXT);                       -- the CSV imported, or the folder and date
+CREATE TABLE reviews (                  -- append-only: every decision ever recorded
+    id INTEGER PRIMARY KEY, batch_id INTEGER NOT NULL REFERENCES review_batches(id),
+    file_id INTEGER NOT NULL REFERENCES files(id), export_id INTEGER REFERENCES exports(id),
+    review_date TEXT, action TEXT, retain_until TEXT, hash TEXT);
+CREATE INDEX ix_reviews_file ON reviews(file_id);
 ```
 
 "Present" means a file has a path interval with `valid_to_scan IS NULL`; there is no status column. "New" means
@@ -257,7 +333,9 @@ CREATE TABLE events (
 whose scope covers its path. Disposal (iteration 3) refuses files that no recent scan covers or that are flagged
 unreadable, and re-checks the file itself at action time. `ctime_ns` and `unreadable_since_scan` are schema version 2,
 the first migration (two `ALTER TABLE ... ADD COLUMN`s; existing rows start with ctime 0, so the first scan after the
-upgrade rehashes nothing extra and records each file's ctime quietly). Later iterations add review columns (or a table), holds, and the retired-files history.
+upgrade rehashes nothing extra and records each file's ctime quietly). Version 3 adds the review columns on `files`
+(all NULL for existing rows, so every file starts in the queue as undated) and the four review tables. Later
+iterations add holds and the retired-files history.
 
 Location history gives snapshots without storing them: the tree at any scan is the set of intervals that cover it.
 A revert moves each file back to the path it had then, with a dry run that reports and skips conflicts. It reverts
@@ -295,12 +373,16 @@ its own identity. Reclaimable space is size × (copies − 1) per group. Paths a
 
 ## 5. Iterations
 
-1. **Scan, register, report** (read-only). Done when: on a generated test tree, every kind of change (rename, move,
+1. **Scan, register, report** (read-only). Done 2026-11-11. Done when: on a generated test tree, every kind of change (rename, move,
    edit, delete, duplicate, symlink, unreadable directory, unreadable file) is reported exactly on rescan
    (`scripts/testtree.sh`, checked by the walk and reconcile tests); a first scan of the real home
    directory completes and shows the size of the backlog; a second scan takes seconds to a couple of minutes.
 2. **Review CSV export and import.** Backlog handled by bulk-setting initial review dates by folder, so the first
-   queue is manageable.
+   queue is manageable. Done when: on the test tree, an export, edit and import round trip records exactly the
+   decisions made, and refuses with one clear line each a changed file, a delete of an unreadable file or a possible
+   move, and an ambiguous date; a file edited after review, or a dated file whose date comes, rejoins the queue
+   (`TestReviewRoundTrip` in `internal/cli`, plus the store and review package tests); on the real home directory,
+   a few `filo review set-date` runs bring the first exported queue to about 100 rows.
 3. **Quarantine and delete** with the safety checks above, history table, holds.
 4. **Revert directory moves** from the path history.
 5. **UI** in place of the CSV.
@@ -312,10 +394,14 @@ register to change shape.
 ## 6. Open questions
 
 - Holds and asset links: modelled at project or asset level, not per file. Shape not yet decided.
-- Where a retain-until floor comes from (frontmatter, Office or PDF properties, extended attributes, or entered during
-  review). The register is the source of truth either way.
-- Default review intervals (for example 30 days, 12 months, 7 years) as suggestions at review time.
-- Exact CSV columns, and how a synced-folder flag is configured.
+- Reading a retain-until floor from the file itself (frontmatter, Office or PDF properties, extended attributes).
+  For now it is entered during review; the register is the source of truth either way.
+- How a synced-folder flag is configured (needed for disposal, iteration 3).
+- Confirming a possible move during review, and undoing a `set-date` batch.
+- **Absorbing nested roots** (to do next, 2026-11-11): adding `~` when `~/Documents` is already a root is refused
+  (nesting only across filesystems), and there is no way out. Planned: `filo roots add PATH --absorb`, with a dry run,
+  rewrites the nested roots' paths, scans and events into the new root (a scan of `~/Documents` is a scan of `~`
+  with scope `Documents`), so file identities, history and review decisions are kept.
 - UI technology.
 
 ## 7. Rejected or deferred

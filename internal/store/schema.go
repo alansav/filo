@@ -3,7 +3,7 @@ package store
 // SchemaVersion is the schema this build reads and writes. It is stored in meta.schema_version when a database is
 // created. An older database with a migration in migrations is upgraded when it is opened; any other version is
 // refused.
-const SchemaVersion = 2
+const SchemaVersion = 3
 
 // Meta keys.
 const (
@@ -51,7 +51,13 @@ CREATE TABLE files (
     inode INTEGER,
     link_target TEXT,
     link_broken INTEGER NOT NULL DEFAULT 0,
-    first_seen_scan INTEGER NOT NULL REFERENCES scans(id)
+    first_seen_scan INTEGER NOT NULL REFERENCES scans(id),
+    review_date TEXT,
+    action TEXT,
+    retain_until TEXT,
+    reviewed_utc TEXT,
+    reviewed_after_scan INTEGER REFERENCES scans(id),
+    reviewed_hash TEXT
 );
 
 CREATE TABLE paths (
@@ -75,6 +81,43 @@ CREATE TABLE events (
     other_path TEXT,
     detail TEXT
 );
+` + reviewSQL
+
+// reviewSQL is the review tables, added in schema version 3.
+const reviewSQL = `
+CREATE TABLE exports (
+    id INTEGER PRIMARY KEY,
+    created_utc TEXT NOT NULL,
+    path TEXT,
+    after_scan INTEGER REFERENCES scans(id)
+);
+
+CREATE TABLE export_rows (
+    export_id INTEGER NOT NULL REFERENCES exports(id),
+    file_id INTEGER NOT NULL REFERENCES files(id),
+    reason TEXT NOT NULL,
+    hash TEXT,
+    PRIMARY KEY (export_id, file_id)
+);
+
+CREATE TABLE review_batches (
+    id INTEGER PRIMARY KEY,
+    created_utc TEXT NOT NULL,
+    command TEXT NOT NULL,
+    detail TEXT
+);
+
+CREATE TABLE reviews (
+    id INTEGER PRIMARY KEY,
+    batch_id INTEGER NOT NULL REFERENCES review_batches(id),
+    file_id INTEGER NOT NULL REFERENCES files(id),
+    export_id INTEGER REFERENCES exports(id),
+    review_date TEXT,
+    action TEXT,
+    retain_until TEXT,
+    hash TEXT
+);
+CREATE INDEX ix_reviews_file ON reviews(file_id);
 `
 
 // migrations[v] upgrades a database from version v to v+1. Each runs in one transaction with the version bump.
@@ -84,4 +127,13 @@ var migrations = map[int]string{
 ALTER TABLE files ADD COLUMN ctime_ns INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE files ADD COLUMN unreadable_since_scan INTEGER REFERENCES scans(id);
 `,
+	// 2 -> 3: the current review decision on each file, and the export and review history.
+	2: `
+ALTER TABLE files ADD COLUMN review_date TEXT;
+ALTER TABLE files ADD COLUMN action TEXT;
+ALTER TABLE files ADD COLUMN retain_until TEXT;
+ALTER TABLE files ADD COLUMN reviewed_utc TEXT;
+ALTER TABLE files ADD COLUMN reviewed_after_scan INTEGER REFERENCES scans(id);
+ALTER TABLE files ADD COLUMN reviewed_hash TEXT;
+` + reviewSQL,
 }

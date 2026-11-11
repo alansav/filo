@@ -83,7 +83,7 @@ func (s *Store) Scan(ctx context.Context, id int64) (ScanInfo, bool, error) {
 // RowCounts returns the number of rows in each register table.
 func (s *Store) RowCounts(ctx context.Context) (map[string]int64, error) {
 	out := map[string]int64{}
-	for _, t := range []string{"roots", "scans", "files", "paths", "events"} {
+	for _, t := range []string{"roots", "scans", "files", "paths", "events", "exports", "export_rows", "review_batches", "reviews"} {
 		var n int64
 		if err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM `+t).Scan(&n); err != nil {
 			return nil, fmt.Errorf("count %s: %w", t, err)

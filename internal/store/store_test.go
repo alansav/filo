@@ -476,10 +476,11 @@ CREATE TABLE files (
 );
 CREATE INDEX ix_files_hash ON files(hash);`
 
-func TestMigrateFromV1(t *testing.T) {
+func TestMigrateFromV1ToCurrent(t *testing.T) {
 	db := tempDB(t)
 	mustClose(t, mustOpen(t, Options{DBPath: db}))
 	rawExec(t, db,
+		`DROP TABLE reviews`, `DROP TABLE review_batches`, `DROP TABLE export_rows`, `DROP TABLE exports`,
 		`DROP TABLE files`, schemaV1Files,
 		`UPDATE meta SET value = '1' WHERE key = 'schema_version'`,
 		`INSERT INTO roots (id, path, added_utc) VALUES (1, '/r', '2026-01-01T00:00:00Z')`,
@@ -500,5 +501,13 @@ func TestMigrateFromV1(t *testing.T) {
 	want := Known{PathID: 1, FileID: 1, Path: "a", Kind: "file", Size: 3, MtimeNS: 42, Hash: "abc", Ino: 7}
 	if len(ks) != 1 || ks[0] != want {
 		t.Errorf("Known = %+v, want [%+v]: the row survives with ctime 0 and no unreadable flag", ks, want)
+	}
+	// Version 3: the file has no review decision yet, so it is queued as undated.
+	q, err := s.Queue(context.Background(), "2026-11-11", QueueFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(q) != 1 || q[0].Reason != ReasonUndated {
+		t.Errorf("queue after upgrade = %+v, want the one file, undated", q)
 	}
 }

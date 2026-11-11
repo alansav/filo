@@ -392,6 +392,40 @@ func TestScenarios(t *testing.T) {
 					}
 				}},
 		}},
+		{"emoji and accented names are stored exactly and paired like any other", []step{
+			{do: func(e *env) {
+				e.write("📷 Pictures/🏖️ beach.jpg", "sand")
+				e.write("notes/👨‍👩‍👧 family.md", "us")
+				e.write("docs/café.txt", "coffee")
+			}, want: counts{New: 3},
+				check: func(t *testing.T, e *env, sum Summary, prev map[string]store.Known) {
+					k := e.known()
+					for _, p := range []string{"📷 Pictures/🏖️ beach.jpg", "notes/👨‍👩‍👧 family.md", "docs/café.txt"} {
+						if _, ok := k[p]; !ok {
+							t.Errorf("%q not stored exactly; known = %v", p, k)
+						}
+					}
+				}},
+			{do: func(e *env) {
+				e.mv("📷 Pictures/🏖️ beach.jpg", "🗂️ archive/🏖️ beach.jpg")
+				e.appendTo("notes/👨‍👩‍👧 family.md", " too")
+				e.mv("notes/👨‍👩‍👧 family.md", "old/👨‍👩‍👧 family.md")
+			}, want: counts{Moved: 1, New: 1, Missing: 1, Possible: 1},
+				check: func(t *testing.T, e *env, sum Summary, prev map[string]store.Known) {
+					if e.known()["🗂️ archive/🏖️ beach.jpg"].FileID != prev["📷 Pictures/🏖️ beach.jpg"].FileID {
+						t.Error("emoji rename not paired as a move")
+					}
+					var pm []store.Event
+					for _, ev := range e.events(sum.ScanID) {
+						if ev.Kind == PossibleMove {
+							pm = append(pm, ev)
+						}
+					}
+					if len(pm) != 1 || pm[0].Path != "old/👨‍👩‍👧 family.md" || pm[0].OtherPath != "notes/👨‍👩‍👧 family.md" {
+						t.Errorf("possible move = %+v", pm)
+					}
+				}},
+		}},
 		{"one moved plus a copy: the one with its name is the move", []step{
 			{do: func(e *env) { e.write("a.txt", "c") }, want: counts{New: 1}},
 			{do: func(e *env) { e.mv("a.txt", "x/a.txt"); e.write("x/b.txt", "c") }, want: counts{Moved: 1, New: 1}},

@@ -6,8 +6,11 @@ in the same commit when a design decision changes.
 
 ## Current state
 
-Iteration 1: scan, register, report. **Read-only on the user's files.** Later iterations (review CSV, quarantine and
-delete, revert, UI) are listed in `docs/design.md`. Stay inside the current iteration.
+Iteration 2: review CSV export and import, and bulk-setting initial review dates by folder. Iteration 1 (scan,
+register, report) is done. **Still read-only on the user's files:** iteration 2 writes only the register and the CSV
+file the user names, and never overwrites an existing file. A delete action is recorded as a decision, never carried
+out. Later iterations (quarantine and delete, revert, UI) are listed in `docs/design.md`. Stay inside the current
+iteration.
 
 ## Hard rules
 
@@ -37,15 +40,17 @@ prefix.)
   home directory (for example `~/FiloTest`) or a temp directory. `mutate` makes a directory and a file unreadable;
   `scripts/testtree.sh unlock DIR` undoes that, and is needed before `rm -rf DIR`
 - Example dev run, always with a throwaway database and tree:
-  `bin/filo --db /tmp/f.db roots add DIR`, `bin/filo --db /tmp/f.db scan`, `bin/filo --db /tmp/f.db report`
+  `bin/filo --db /tmp/f.db roots add DIR`, `bin/filo --db /tmp/f.db scan`, `bin/filo --db /tmp/f.db report`, then
+  `bin/filo --db /tmp/f.db review`, `review set-date DIR/notes +6m`, `review export -o /tmp/r.csv` and
+  `review import /tmp/r.csv` (export refuses an existing file, so remove `/tmp/r.csv` between runs)
 
 Run `go vet` and the tests before saying a change is done.
 
 ## Layout
 
 - `cmd/filo/`: the command-line entry point, kept thin.
-- `internal/`: the logic, in small packages (walking, hashing, the store, reconcile, report). Keep OS-specific code
-  (hidden files, inodes, symlinks, path separators) behind small functions.
+- `internal/`: the logic, in small packages (walking, hashing, the store, reconcile, report, review CSV). Keep OS-specific
+  code (hidden files, inodes, symlinks, path separators) behind small functions.
 - `scripts/`: helper scripts (`dev.sh`, `testtree.sh`).
 - `.devcontainer/Containerfile`: the dev container. `docs/design.md`: the design.
 
