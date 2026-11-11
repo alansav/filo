@@ -11,18 +11,18 @@ delete, revert, UI) are listed in `docs/design.md`. Stay inside the current iter
 
 ## Hard rules
 
-- Filo must not modify, move, rename or delete any file outside its own `.filo` directory until the iteration that
-  calls for it. Anything destructive defaults to dry-run.
+- Filo must not modify, move, rename or delete any file outside its own data directory (or the `--db` path given)
+  until the iteration that calls for it. Anything destructive defaults to dry-run.
 - Fail safe: a file with missing or ambiguous data is "new, needs review", never "eligible for deletion". A
   retain-until date is a floor, not a trigger. Holds veto everything.
 - Never guess. Duplicates and ambiguous moves are reported, not resolved. A directory that cannot be read must never
   cause its files to be marked missing.
 - During development, never run Filo against a real home directory or any path outside the repo or a throwaway test
-  tree. Always pass `--root` and, where useful, `--db`.
+  tree. Always pass `--db`, and only add roots inside the repo or a throwaway test tree.
 - Say clearly when code is untested. Check current library versions and docs instead of relying on memory.
 - Do not add a dependency without asking first.
 - Do not run `git commit` or `git push`, and do not set a git identity. The user commits from the host.
-- Command names stay plain: `scan`, `report`, `review`, `restore`, `revert`. No themed names.
+- Command names stay plain: `scan`, `report`, `review`, `restore`, `revert`, `roots`. No themed names.
 
 ## Commands
 
@@ -35,6 +35,8 @@ prefix.)
 - Format: `gofmt -l -w .`
 - Throwaway test tree: `scripts/testtree.sh init DIR` then `scripts/testtree.sh mutate DIR`, with DIR under your own
   home directory (for example `~/FiloTest`) or a temp directory
+- Example dev run, always with a throwaway database and tree:
+  `bin/filo --db /tmp/f.db roots add DIR`, `bin/filo --db /tmp/f.db scan`, `bin/filo --db /tmp/f.db report`
 
 Run `go vet` and the tests before saying a change is done.
 
@@ -51,6 +53,7 @@ Run `go vet` and the tests before saying a change is done.
 - Idiomatic Go: wrap errors with `%w`, return errors instead of panicking, pass `context.Context` where work can be
   cancelled. User-facing errors are one clear line.
 - Tests are table-driven and use `t.TempDir()`. No test may touch the real home directory.
-- The database is created automatically at `<root>/.filo/filo.db`. `--root`, `--db`, `FILO_ROOT` and `FILO_DB`
-  override the defaults. One writer at a time, and each scan is applied in a single transaction.
+- One database per device holds all roots. It is created automatically in the user data directory
+  (`~/.local/share/filo/filo.db` on Linux); `--db` and `FILO_DB` override it. Roots are added explicitly. One writer at a
+  time, and each scan is applied in a single transaction.
 - Keep the schema changes small and versioned (`meta.schema_version`).

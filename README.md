@@ -1,0 +1,221 @@
+# Filo
+
+Filo keeps a register of your files: what they are, where they live, and how that changes over time. It is the first
+part of a review-and-dispose workflow meant to stop files piling up forever ("keep it in case someone asks").
+
+**Status: iteration 1 of 5: scan, register, report.** Filo is **read-only on your files**: it never modifies, moves,
+renames or deletes anything outside its own database. Reviewing files and disposing of them come in later iterations
+(see [Roadmap](#roadmap)).
+
+## What it does today
+
+- **Registers files under one or more roots** (for example `~` and `/mnt/photos`) in a single SQLite database per
+  device.
+- **Tracks every file across scans**, comparing each scan with the register:
+  - **new** files, and files whose content **changed**;
+  - files that **moved** or were renamed (matched by SHA-256 content hash), keeping their identity and full location
+    history;
+  - files that are **missing**.
+
+  Ambiguous cases are reported, never guessed. A file edited and moved at once shows as a **possible move**, and
+  several identical copies are only paired when their names make it unambiguous.
+- **Reports** totals per root, the largest files, **duplicate groups with the space you could reclaim**, broken
+  symlinks, and recent changes.
+- **Rescans quickly.** A file is only re-read when its size, modification time or inode changes.
+
+It is built to fail safe:
+
+- **Partial scans are safe.** Scanning one folder never marks files elsewhere as missing.
+- **Unreadable directories are harmless.** A directory that can't be read never makes its files "missing".
+- **Unplugged disks are noticed.** A root on a disk that isn't mounted is refused, rather than looking as if every
+  file was deleted. So is a mounted disk that turns out to be empty.
+- **Files that come back are recognised.** If they return after going missing (a disk that was briefly unreadable,
+  a file moved out and back), they are relinked to their old record.
+- **Interrupting is safe.** Each scan is written in one transaction, so Ctrl-C leaves the register as it was.
+
+## Install
+
+Filo is pure Go (no C toolchain needed). It needs Go 1.27.3 or later and runs on Linux, macOS and the BSDs. Windows is
+not supported yet: file locking and inode lookup aren't implemented there.
+
+```sh
+git clone https://github.com/alansav/filo.git
+cd filo
+go build -o bin/filo ./cmd/filo
+```
+
+Copy `bin/filo` somewhere on your `PATH`, or run it from the repository.
+
+## Quick start
+
+```sh
+filo roots add ~          # register a directory as a root
+filo scan                 # scan every root; the first scan hashes everything, so it is the slow one
+filo report               # totals, largest files, duplicates, broken symlinks, recent changes
+```
+
+After that, `filo scan` again only rehashes what changed. A scan prints a summary like this:
+
+```
+/home/you/FiloTest: 14 files seen in 10ms (scan 2)
+  new 3   changed 2   moved 2   missing 2   possible moves 1   errors 0
+  moved:
+    moved     docs/contract.txt -> notes/contract-final.txt
+    moved     photos/img2.bin -> photos/img2-renamed.bin
+  changed:
+    changed   notes/todo.md (content)
+  missing:
+    missing   docs/receipt-tyre.txt
+  possible moves (not applied):
+    possible  docs/report-2024.txt -> archive/report-2024.txt ? (same name, different content)
+```
+
+And `filo report` includes, among other things:
+
+```
+Duplicates: 1 group, 3 files, 195 KiB reclaimable
+  3 copies of 97.7 KiB, 195 KiB reclaimable
+    /home/you/FiloTest/photos/img1-copy.bin
+    /home/you/FiloTest/photos/img1-copy2.bin
+    /home/you/FiloTest/photos/img1.bin
+```
+
+## Commands
+
+| Command | What it does |
+|---|---|
+| `filo roots` | List roots: path, mount point, file count, size, last scan. |
+| `filo roots add PATH` | Register a directory as a root. |
+| `filo scan [PATH]` | Scan `PATH` (a directory inside a root: a partial scan), or every root if omitted. |
+| `filo report [--top N]` | Show the overview; `--top` sets how many entries each list shows (default 10). |
+| `filo help [COMMAND]` | Show usage. `-h` works on every command. |
+
+Options for `filo scan`:
+
+| Option | Meaning |
+|---|---|
+| `--include-hidden` | Also scan hidden files and directories (skipped by default). |
+| `--ignore NAME` | Skip entries with this name, at any depth. Repeatable. |
+| `--workers N` | Files hashed in parallel, 1–64 (default 4; use 1 on a spinning disk). |
+| `--allow-empty` | Record a scan that finds no files on a mounted disk (normally refused as "probably the wrong disk"). |
+
+Every command accepts `--db PATH`. Options can come before or after `PATH`. A progress line is shown during long
+scans when the output is a terminal.
+
+Exit codes: `0` success (files that couldn't be read are reported but don't fail the scan), `1` an error, or a root
+that failed during `filo scan` of every root, `2` a usage error.
+
+## Roots
+
+- **Explicit roots.** Nothing becomes a root by accident: `filo scan` of a path outside every root is refused, with a
+  hint to add it.
+- **Aliases are detected.** The same directory can't be added twice, whether by another path, through a symlink, or
+  through a bind mount (for example `~` also mounted at `/mnt/home`). Filo compares device and inode numbers.
+- **Nesting only across disks.** A root may sit inside another root only if it is on a different filesystem, such as
+  a disk mounted at `~/mnt/disk`. A scan never crosses into another filesystem, so no file belongs to two roots.
+- **Scans map to their root.** `filo scan ~/Pictures` is a partial scan of the root that contains it.
+
+## What a scan skips
+
+- Hidden entries (names starting with `.`), unless you pass `--include-hidden`.
+- `node_modules`, `__pycache__`, `.filo`, and `bin`/`obj` next to a `.csproj` or `.fsproj` file.
+- Anything named with `--ignore`.
+- Other filesystems mounted inside the root (each can be its own root).
+- Filo's own database files.
+- FIFOs, sockets and devices.
+
+Symlinks are recorded with their target and whether they're broken, but never followed.
+
+## Where the data lives
+
+One database per device holds every root:
+
+| Platform | Default location |
+|---|---|
+| Linux, BSD | `$XDG_DATA_HOME/filo/filo.db`, usually `~/.local/share/filo/filo.db` |
+| macOS | `~/Library/Application Support/filo/filo.db` |
+
+Use `--db PATH` or the `FILO_DB` environment variable to choose another. The database is private to you (mode
+`0600`), and only one Filo process can use it at a time.
+
+**Don't sync the database between machines.** It describes one device's files. Keep it out of Syncthing or other
+synced folders (the default location already is).
+
+You can look inside it with `sqlite3`; hashes are the same as `sha256sum` prints.
+
+## Scheduling
+
+A daily scan only ever reads. A systemd user timer is enough, and no daemon is needed. This example hasn't been
+tested by the project yet:
+
+```ini
+# ~/.config/systemd/user/filo-scan.service
+[Service]
+Type=oneshot
+ExecStart=%h/bin/filo scan
+Nice=19
+IOSchedulingClass=idle
+
+# ~/.config/systemd/user/filo-scan.timer
+[Timer]
+OnCalendar=daily
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+```
+
+Enable it with `systemctl --user enable --now filo-scan.timer`.
+
+## Roadmap
+
+1. **Scan, register, report**, read-only (this release).
+2. **Review**: export a queue of files to review as CSV, set review dates or actions, import it back.
+3. **Quarantine and delete**, with safety checks at the moment of acting, holds that veto disposal, and a history of
+   retired files.
+4. **Revert directory moves** from the location history.
+5. **A UI** in place of the CSV.
+
+Principles that won't change:
+- A retain-until date is a floor, never a trigger for deletion.
+- Holds override everything.
+- Disposal is staged and reversible.
+- Anything ambiguous is reported, never guessed.
+
+The full design, settled decisions and open questions are in [docs/design.md](docs/design.md).
+
+## Development
+
+The repository includes a Podman dev container (`.devcontainer/Containerfile`), driven by `scripts/dev.sh`:
+
+```sh
+scripts/dev.sh run go test ./...        # run the tests in the container
+scripts/dev.sh shell                    # or work inside it
+```
+
+Inside the container (or with Go installed locally):
+
+```sh
+go build -o bin/filo ./cmd/filo
+go test ./...
+go vet ./... && staticcheck ./...
+```
+
+`scripts/testtree.sh init DIR` builds a throwaway tree of test files, and `scripts/testtree.sh mutate DIR` applies a
+known set of changes and prints what a rescan should report. When developing, always use a throwaway database and
+tree, never your real home directory:
+
+```sh
+scripts/testtree.sh init /tmp/FiloTest
+bin/filo --db /tmp/f.db roots add /tmp/FiloTest
+bin/filo --db /tmp/f.db scan
+scripts/testtree.sh mutate /tmp/FiloTest
+bin/filo --db /tmp/f.db scan
+bin/filo --db /tmp/f.db report
+```
+
+Project conventions for contributors (and for Claude Code) are in [CLAUDE.md](CLAUDE.md).
+
+## License
+
+Apache License 2.0; see [LICENSE](LICENSE).
