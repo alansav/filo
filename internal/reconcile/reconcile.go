@@ -238,7 +238,7 @@ func Scan(ctx context.Context, s *store.Store, opt Options) (Summary, error) {
 			}
 			ch.Updates = append(ch.Updates, u)
 			event(store.Event{Kind: Changed, FileID: k.FileID, Path: e.Path,
-				Detail: "symlink: " + linkText(k.LinkTarget, k.LinkBroken) + " -> " + linkText(e.LinkTarget, e.LinkBroken)})
+				Detail: symlinkDetail(k.LinkTarget, k.LinkBroken, e.LinkTarget, e.LinkBroken)})
 			sum.Changed++
 		default:
 			if k.Size == e.Size && k.MtimeNS == e.MtimeNS && sameInode(k.Ino, e.Ino) && sameCtime(k.CtimeNS, e.CtimeNS) &&
@@ -532,6 +532,18 @@ func sameCtime(a, b int64) bool {
 // sameInode compares inodes only when both are known: a platform without inode lookup records 0.
 func sameInode(a, b uint64) bool {
 	return a == 0 || b == 0 || a == b
+}
+
+// symlinkDetail describes how a symlink changed. When only the broken flag changed, the target is named once, so the
+// line does not read as a retarget.
+func symlinkDetail(oldTarget string, oldBroken bool, newTarget string, newBroken bool) string {
+	if oldTarget == newTarget {
+		if newBroken {
+			return "symlink: " + newTarget + " (now broken)"
+		}
+		return "symlink: " + newTarget + " (no longer broken)"
+	}
+	return "symlink: " + linkText(oldTarget, oldBroken) + " -> " + linkText(newTarget, newBroken)
 }
 
 func linkText(target string, broken bool) string {

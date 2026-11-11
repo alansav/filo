@@ -429,7 +429,13 @@ func TestScenarios(t *testing.T) {
 		}},
 		{"symlink retargeted is changed", []step{
 			{do: func(e *env) { e.write("a", "a"); e.write("b", "b"); e.symlink("a", "l") }, want: counts{New: 3}},
-			{do: func(e *env) { e.rm("l"); e.symlink("b", "l") }, want: counts{Changed: 1}},
+			{do: func(e *env) { e.rm("l"); e.symlink("b", "l") }, want: counts{Changed: 1},
+				check: func(t *testing.T, e *env, sum Summary, prev map[string]store.Known) {
+					evs := e.events(sum.ScanID)
+					if len(evs) != 1 || evs[0].Detail != "symlink: a -> b" {
+						t.Errorf("events = %+v", evs)
+					}
+				}},
 		}},
 		{"symlink whose target goes is changed (broken)", []step{
 			{do: func(e *env) { e.write("a", "a"); e.symlink("a", "l") }, want: counts{New: 2}},
@@ -437,6 +443,18 @@ func TestScenarios(t *testing.T) {
 				check: func(t *testing.T, e *env, sum Summary, prev map[string]store.Known) {
 					if !e.known()["l"].LinkBroken {
 						t.Error("link not marked broken")
+					}
+					if d := symlinkEventDetail(e, sum); d != "symlink: a (now broken)" {
+						t.Errorf("detail = %q", d)
+					}
+				}},
+			{do: func(e *env) { e.write("a", "a") }, want: counts{Changed: 1, Moved: 1},
+				check: func(t *testing.T, e *env, sum Summary, prev map[string]store.Known) {
+					if e.known()["l"].LinkBroken {
+						t.Error("link still marked broken")
+					}
+					if d := symlinkEventDetail(e, sum); d != "symlink: a (no longer broken)" {
+						t.Errorf("detail = %q", d)
 					}
 				}},
 		}},
@@ -938,4 +956,14 @@ func TestCtimeFilledInQuietly(t *testing.T) {
 	if after != before {
 		t.Errorf("row %+v -> %+v, want only the ctime filled in", before, after)
 	}
+}
+
+// symlinkEventDetail returns the detail of the scan's changed event for the symlink "l", or "" if there is none.
+func symlinkEventDetail(e *env, sum Summary) string {
+	for _, ev := range e.events(sum.ScanID) {
+		if ev.Kind == Changed && ev.Path == "l" {
+			return ev.Detail
+		}
+	}
+	return ""
 }
