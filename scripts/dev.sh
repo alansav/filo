@@ -5,6 +5,7 @@
 #   scripts/dev.sh shell          interactive shell in the container
 #   scripts/dev.sh run CMD...     run one command, e.g.  scripts/dev.sh run go test ./...
 #   scripts/dev.sh clean          remove the image and the Go cache volumes
+#   scripts/dev.sh claude         Claude Code
 #
 # Only the repo is mounted (at /workspace). The container has its own home directory, so a scan of
 # "home" inside it can only ever see the container's files, never yours.
@@ -20,6 +21,7 @@ image="${FILO_DEV_IMAGE:-filo-dev}"
 build() {
   podman build \
     --build-arg "UID=$(id -u)" --build-arg "GID=$(id -g)" \
+    --build-arg "INSTALL_CLAUDE=${FILO_DEV_CLAUDE:-0}" \
     -f "$repo/.devcontainer/Containerfile" \
     -t "$image" \
     "$repo/.devcontainer"

@@ -10,6 +10,8 @@ FROM ${GO_IMAGE}
 ARG UID=1000
 ARG GID=1000
 
+ARG INSTALL_CLAUDE=0
+
 # sqlite3 is for inspecting filo.db by hand; the rest are everyday tools.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends sqlite3 ripgrep less procps \
@@ -22,7 +24,7 @@ RUN groupadd --gid "${GID}" dev \
 
 USER dev
 ENV CLAUDE_CONFIG_DIR=/home/dev/.claude
-RUN curl -fsSL https://claude.ai/install.sh | bash
+RUN if [ "$INSTALL_CLAUDE" = "1" ]; then curl -fsSL https://claude.ai/install.sh | bash; fi
 ENV GOPATH=/home/dev/go \
     GOCACHE=/home/dev/.cache/go-build \
     PATH=/home/dev/.local/bin:/home/dev/go/bin:/usr/local/go/bin:${PATH}
