@@ -66,6 +66,6 @@ case "${1:-}" in
     podman rmi -f "$image" || true
     podman volume rm -f filo-gomod filo-gocache
     ;;
-  *) usage; exit 2 ;;
   claude) shift; run claude "$@" ;;
+  *) usage; exit 2 ;;
 esac
