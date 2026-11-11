@@ -39,6 +39,8 @@ run() {
     -v "$repo:/workspace:Z" \
     -v filo-gomod:/home/dev/go/pkg/mod \
     -v filo-gocache:/home/dev/.cache/go-build \
+    -v filo-claude:/home/dev/.claude \
+    -e CLAUDE_CONFIG_DIR=/home/dev/.claude \
     -e "TERM=${TERM:-xterm-256color}" \
     -w /workspace \
     "$image" "$@"
@@ -61,4 +63,5 @@ case "${1:-}" in
     podman volume rm -f filo-gomod filo-gocache
     ;;
   *) usage; exit 2 ;;
+  claude) shift; run claude "$@" ;;
 esac

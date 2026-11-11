@@ -17,13 +17,15 @@ RUN apt-get update \
 
 RUN groupadd --gid "${GID}" dev \
  && useradd --create-home --uid "${UID}" --gid "${GID}" --shell /bin/bash dev \
- && mkdir -p /workspace /home/dev/go/pkg/mod /home/dev/.cache/go-build \
+ && mkdir -p /workspace /home/dev/go/pkg/mod /home/dev/.cache/go-build /home/dev/.claude \
  && chown -R dev:dev /workspace /home/dev
 
 USER dev
+ENV CLAUDE_CONFIG_DIR=/home/dev/.claude
+RUN curl -fsSL https://claude.ai/install.sh | bash
 ENV GOPATH=/home/dev/go \
     GOCACHE=/home/dev/.cache/go-build \
-    PATH=/home/dev/go/bin:/usr/local/go/bin:${PATH}
+    PATH=/home/dev/.local/bin:/home/dev/go/bin:/usr/local/go/bin:${PATH}
 
 # Language server and linter. Unpinned on purpose while the project is young; pin them when it settles.
 RUN go install golang.org/x/tools/gopls@latest \

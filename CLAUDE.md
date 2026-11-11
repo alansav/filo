@@ -21,20 +21,20 @@ delete, revert, UI) are listed in `docs/design.md`. Stay inside the current iter
   tree. Always pass `--root` and, where useful, `--db`.
 - Say clearly when code is untested. Check current library versions and docs instead of relying on memory.
 - Do not add a dependency without asking first.
+- Do not run `git commit` or `git push`, and do not set a git identity. The user commits from the host.
 - Command names stay plain: `scan`, `report`, `review`, `restore`, `revert`. No themed names.
 
 ## Commands
 
-Go runs in the dev container. From the host, prefix commands with `scripts/dev.sh run`. If you are already inside the
-container, run them directly.
+You run inside the dev container, so run Go commands directly. (From the host they need the `scripts/dev.sh run`
+prefix.)
 
-- Build: `scripts/dev.sh run go build -o bin/filo ./cmd/filo`
-- Test: `scripts/dev.sh run go test ./...`
-- Vet and lint: `scripts/dev.sh run go vet ./...` and `scripts/dev.sh run staticcheck ./...`
-- Format: `scripts/dev.sh run gofmt -l -w .`
-- Shell in the container: `scripts/dev.sh shell`
-- Throwaway test tree: `scripts/testtree.sh init DIR` then `scripts/testtree.sh mutate DIR`, with DIR inside the
-  container's home or a temp directory
+- Build: `go build -o bin/filo ./cmd/filo`
+- Test: `go test ./...`
+- Vet and lint: `go vet ./...` and `staticcheck ./...`
+- Format: `gofmt -l -w .`
+- Throwaway test tree: `scripts/testtree.sh init DIR` then `scripts/testtree.sh mutate DIR`, with DIR under your own
+  home directory (for example `~/FiloTest`) or a temp directory
 
 Run `go vet` and the tests before saying a change is done.
 

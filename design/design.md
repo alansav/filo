@@ -32,8 +32,9 @@ Principles. These are not negotiable:
 - Dev environment: a Podman container defined in the repo (`.devcontainer/Containerfile`), driven by
   `scripts/dev.sh` (`build`, `shell`, `run CMD...`, `clean`). Only the repo is mounted at `/workspace`. The container
   has its own home directory, so a scan of "home" inside it can never reach the real one. Git runs on the host.
-- Claude Code is intended to run inside the container with normal permission prompts. Until then, Go commands go
-  through `scripts/dev.sh run`.
+- Claude Code runs inside the container (`scripts/dev.sh claude`) with normal permission prompts. Its login and
+  settings live in a named volume (`filo-claude`). Git commits and pushes happen on the host: the container has no git
+  identity and no SSH keys.
 - OS-specific behaviour (hidden-file rules, inode lookup, symlinks, path separators) lives behind small functions so a
   Windows build is possible later. No platform is prioritised.
 
@@ -43,6 +44,9 @@ Principles. These are not negotiable:
 - One database per device, **never synced** (add `.filo` to Syncthing's ignore list in any shared folder). That is why
   there is no device column. Revisit only if a shared register is ever wanted.
 - Paths are stored relative to the root, with `/` separators.
+- The root is fixed per database (`meta.root`, set at creation). A scan may cover the whole root or any subdirectory of
+  it. Each scan records its **scope** (a path relative to the root, empty for everything) and the hidden/ignore options
+  it ran with. A scan target outside the root is refused: use another database.
 - Location history: each file's paths are stored as intervals (`valid_from_scan`, `valid_to_scan`, NULL = current),
   so the tree can be reconstructed at any scan and directory moves can be reverted.
 - One writer at a time (lock file beside the database). Each scan is applied in a single transaction.
@@ -52,8 +56,10 @@ Principles. These are not negotiable:
 - Skips hidden entries by default (`--include-hidden` to override) plus noise: `node_modules`, `__pycache__`, `.filo`,
   user-supplied `--ignore NAME`, and `bin`/`obj` beside a `.csproj` or `.fsproj`.
 - Symlinks are recorded with their target and a broken flag, never followed. Checking them is a later iteration.
-- **Unreadable directories never cause files to be marked missing.** Entries under a directory that failed to list are
-  left untouched.
+- **A file can only be marked missing if this scan would have visited it.** Entries outside the scan's scope, entries
+  excluded by this scan's hidden or ignore rules, and entries under a directory that failed to list are left untouched.
+  This is what makes a scan of just `~/Pictures` safe after a scan of the whole home directory, and a scan without
+  `--include-hidden` safe after one with it.
 - If a walk finds nothing but the database knows many files, abort and change nothing (likely an unmounted root).
 - Scans are read-only on user files and safe to run while files are changing. A file caught mid-write appears
   correctly on the next scan.
@@ -65,6 +71,9 @@ Principles. These are not negotiable:
 - Empty files are never matched. Duplicates are never guessed: with several candidates, pair only when the file name is
   unique on both sides, otherwise report as new plus missing.
 - Same name, different content (edited then moved?) is reported as a **possible move** and never applied.
+- Pairing only happens inside a scan's scope. A file moved in from outside the scope appears as new, and its old path is
+  marked missing by the next scan that covers it, so the history link is lost. (Possible improvement: stat the old path
+  of same-hash files outside the scope.)
 - Inode matching is a later optimisation (cheap in Go via `syscall.Stat_t`).
 
 ### Review (iteration 2)
@@ -88,6 +97,7 @@ Principles. These are not negotiable:
 
 ### Commands and scheduling
 - Plain names: `scan`, `report`, `review`, `restore`, `revert`. No themed subcommands.
+- `filo scan [PATH]` scans PATH, which must be inside the root (default: the whole root).
 - A systemd user timer running `filo scan` is enough. No daemon. (`Persistent=true`, low CPU and I/O priority.)
 
 ## 3. Data model (iteration 1, proposed)
@@ -100,6 +110,8 @@ CREATE TABLE meta  (key TEXT PRIMARY KEY, value TEXT NOT NULL);          -- sche
 
 CREATE TABLE scans (
     id INTEGER PRIMARY KEY, started_utc TEXT NOT NULL, finished_utc TEXT, root TEXT NOT NULL,
+    scope TEXT NOT NULL DEFAULT '',     -- relative to root; '' = the whole root
+    include_hidden INTEGER NOT NULL DEFAULT 0, ignores TEXT,
     files_seen INTEGER, new_count INTEGER, changed_count INTEGER, moved_count INTEGER,
     missing_count INTEGER, error_count INTEGER, elapsed_ms INTEGER);
 
@@ -127,7 +139,9 @@ CREATE TABLE events (
 ```
 
 "Present" means a file has a path interval with `valid_to_scan IS NULL`; there is no status column. "New" means
-`first_seen_scan` equals the scan. Later iterations add review columns (or a table), holds, and the retired-files history.
+`first_seen_scan` equals the scan. A file's "last verified" time is derived, not stored: it is the latest completed scan
+whose scope covers its path. Disposal (iteration 3) refuses files that no recent scan covers, and re-checks the file
+itself at action time. Later iterations add review columns (or a table), holds, and the retired-files history.
 
 Location history gives snapshots without storing them: the tree at any scan is the set of intervals that cover it.
 A revert moves each file back to the path it had then, with a dry run that reports and skips conflicts. It reverts
@@ -141,7 +155,8 @@ A revert moves each file back to the path it had then, with a dry run that repor
    (candidate: rehash). Symlinks compare target and broken flag.
 4. Hash only what needs it (new files, candidates, and known files with no hash).
 5. Same path, same hash: only the mtime moved, so update it quietly. Same path, different hash: changed.
-6. Known but not seen, and not under a failed directory: missing.
+6. Known but not seen, and **visited by this scan** (inside its scope, not excluded by its rules, not under a failed
+   directory): missing.
 7. Pair missing and new files by hash (rules in section 2). Report same-name leftovers as possible moves.
 8. Apply in one transaction: close paths of missing and moved files **first**, so a path freed by one rename can be
    reused by another in the same scan; then updates; then open new paths and insert new files; then events.
