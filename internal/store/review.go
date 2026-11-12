@@ -8,10 +8,6 @@ import (
 	"time"
 )
 
-// Forever is the keep_until value for a file kept indefinitely. It is stored as this word, never as a far-off date,
-// and checked explicitly rather than by comparing it with dates.
-const Forever = "forever"
-
 // Status is where a present file stands in its lifespan. A file has one status: the first that applies, in the
 // order of Statuses.
 type Status string
@@ -53,8 +49,10 @@ type FileItem struct {
 	Size        int64
 	MtimeNS     int64
 	Hash        string // "" = none
-	KeepUntil   string // YYYY-MM-DD, Forever, or "" = none
-	ReviewedUTC string // when the current keep_until was set; "" = never
+	FileDate    string // YYYY-MM-DD the retention counts from, "" = none
+	Retention   string // as given: a period (7y), Forever or YYYY-MM-DD; "" = none
+	KeepUntil   string // worked out from the two: YYYY-MM-DD, Forever, or "" = none
+	ReviewedUTC string // when the current retention was set; "" = never
 	Status      Status
 
 	UnreadableSince    int64  // the scan that flagged it, 0 = not flagged
@@ -137,7 +135,8 @@ func (s *Store) Files(ctx context.Context, today string, f Filter) ([]FileItem, 
 			WHERE e.kind = 'possible_move'
 			GROUP BY np.file_id)
 		SELECT f.id, r.path, p.path, f.kind, f.size, f.mtime_ns, coalesce(f.hash, ''),
-		       coalesce(f.keep_until, ''), coalesce(f.reviewed_utc, ''), coalesce(f.reviewed_after_scan, 0),
+		       coalesce(f.file_date, ''), coalesce(f.retention, ''), coalesce(f.keep_until, ''),
+		       coalesce(f.reviewed_utc, ''), coalesce(f.reviewed_after_scan, 0),
 		       f.reviewed_hash, coalesce(f.unreadable_since_scan, 0), coalesce(us.finished_utc, us.started_utc, ''),
 		       coalesce(pe.scan_id, 0), coalesce(pr.path, ''), coalesce(pe.other_path, ''), coalesce(pe.detail, '')
 		FROM paths p
@@ -160,7 +159,7 @@ func (s *Store) Files(ctx context.Context, today string, f Filter) ([]FileItem, 
 		it := &r.item
 		var moveRoot, moveRel string
 		if err := rows.Scan(&it.FileID, &it.RootPath, &it.Path, &it.Kind, &it.Size, &it.MtimeNS, &it.Hash,
-			&it.KeepUntil, &it.ReviewedUTC, &r.reviewedAfter, &r.reviewedHash, &it.UnreadableSince,
+			&it.FileDate, &it.Retention, &it.KeepUntil, &it.ReviewedUTC, &r.reviewedAfter, &r.reviewedHash, &it.UnreadableSince,
 			&it.UnreadableSinceUTC, &r.possibleMoveIn, &moveRoot, &moveRel, &it.MoveDetail); err != nil {
 			return nil, fmt.Errorf("list files: %w", err)
 		}
@@ -187,7 +186,8 @@ func latestScan(ctx context.Context, tx *sql.Tx) (int64, error) {
 }
 
 // RecordExport stores an export of items (made at now, written to path) and calls write with its ID. Each row keeps
-// the file's hash and the keep_until it was exported with. The export is committed only if write succeeds, so a
+// the file's hash and the file_date, retention and keep_until it was exported with (so file_date as filled in from
+// the name, if it was). The export is committed only if write succeeds, so a
 // failed write leaves no trace in the register.
 func (s *Store) RecordExport(ctx context.Context, path string, now time.Time, items []FileItem,
 	write func(exportID int64) error) (int64, error) {
@@ -210,13 +210,14 @@ func (s *Store) RecordExport(ctx context.Context, path string, now time.Time, it
 		return 0, err
 	}
 	stmt, err := tx.PrepareContext(ctx,
-		`INSERT INTO export_rows (export_id, file_id, hash, keep_until) VALUES (?, ?, ?, ?)`)
+		`INSERT INTO export_rows (export_id, file_id, hash, file_date, retention, keep_until) VALUES (?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return 0, fmt.Errorf("record export: %w", err)
 	}
 	defer stmt.Close()
 	for _, it := range items {
-		if _, err := stmt.ExecContext(ctx, id, it.FileID, nullString(it.Hash), nullString(it.KeepUntil)); err != nil {
+		if _, err := stmt.ExecContext(ctx, id, it.FileID, nullString(it.Hash), nullString(it.FileDate),
+			nullString(it.Retention), nullString(it.KeepUntil)); err != nil {
 			return 0, fmt.Errorf("record export: %w", err)
 		}
 	}
@@ -231,10 +232,14 @@ func (s *Store) RecordExport(ctx context.Context, path string, now time.Time, it
 
 // LifespanRow is one row of an edited lifespan CSV.
 type LifespanRow struct {
-	Line      int // in the CSV, for messages
-	ExportID  int64
-	FileID    int64
-	KeepUntil string // YYYY-MM-DD or Forever, as typed; "" = blank
+	Line         int // in the CSV, for messages
+	ExportID     int64
+	FileID       int64
+	FileDate     string // YYYY-MM-DD, "" = blank
+	HasFileDate  bool   // the CSV has a file_date column; without one, the file_date exported is kept
+	Retention    string // a period (7y), Forever or YYYY-MM-DD, as checked; "" = blank
+	KeepUntil    string // the display cell as read, to check it was left alone
+	HasKeepUntil bool   // the CSV has a keep_until column
 }
 
 // Refusal is a row that was not applied, and why.
@@ -245,24 +250,26 @@ type Refusal struct {
 	Reason string
 }
 
-// Clear is a row whose blank keep_until would clear a stored date.
+// Clear is a row whose blank retention would clear a stored one.
 type Clear struct {
 	FileID    int64
 	Path      string
-	KeepUntil string // the stored date
+	Retention string // the stored retention
+	KeepUntil string // and the date it gave
 }
 
 // UpdateResult counts what an update did (or, in a dry run, would do).
 type UpdateResult struct {
-	Set           int // new keep_until dates
-	Cleared       int // dates cleared by a blank cell
-	ClearsSkipped int // blank cells that would clear a date, not confirmed
-	Unchanged     int // rows as exported, or with the date already stored
+	Set           int // rows whose file_date or retention changed, clears not included
+	Cleared       int // retentions cleared by a blank cell
+	ClearsSkipped int // blank cells that would clear a retention, not confirmed
+	NowPast       int // of Set: files whose keep_until is today or earlier, so deletion candidates if unchanged
+	Unchanged     int // rows as exported, or with the values already stored
 	Refusals      []Refusal
 }
 
 // UpdateLifespan checks each row against the register and applies the ones that pass, in one transaction. A blank
-// cell where a date is stored clears it, but only if confirm (given every such row, once) returns true; confirm is
+// retention where one is stored clears it, but only if confirm (given every such row, once) returns true; confirm is
 // not called in a dry run, or when there is nothing to clear. today is the local date (YYYY-MM-DD); detail names the
 // source for the history.
 func (s *Store) UpdateLifespan(ctx context.Context, rows []LifespanRow, now time.Time, today, detail string,
@@ -276,7 +283,7 @@ func (s *Store) UpdateLifespan(ctx context.Context, rows []LifespanRow, now time
 
 	type ok struct {
 		r         LifespanRow
-		hash      sql.NullString
+		c         checked
 		afterScan sql.NullInt64
 	}
 	var sets, clears []ok
@@ -290,7 +297,7 @@ func (s *Store) UpdateLifespan(ctx context.Context, rows []LifespanRow, now time
 			}
 			exports[r.ExportID] = ex
 		}
-		c, err := checkRow(ctx, tx, r, ex, today)
+		c, err := checkRow(ctx, tx, r, ex)
 		if err != nil {
 			return res, err
 		}
@@ -299,11 +306,15 @@ func (s *Store) UpdateLifespan(ctx context.Context, rows []LifespanRow, now time
 			res.Refusals = append(res.Refusals, Refusal{Line: r.Line, FileID: r.FileID, Path: c.path, Reason: c.refusal})
 		case c.unchanged:
 			res.Unchanged++
-		case r.KeepUntil == "":
-			clears = append(clears, ok{r: r, hash: c.exportHash, afterScan: ex.afterScan})
-			clearList = append(clearList, Clear{FileID: r.FileID, Path: c.path, KeepUntil: c.stored})
+		case c.clear:
+			clears = append(clears, ok{r: r, c: c, afterScan: ex.afterScan})
+			clearList = append(clearList, Clear{FileID: r.FileID, Path: c.path, Retention: c.storedRetention,
+				KeepUntil: c.storedKeepUntil})
 		default:
-			sets = append(sets, ok{r: r, hash: c.exportHash, afterScan: ex.afterScan})
+			sets = append(sets, ok{r: r, c: c, afterScan: ex.afterScan})
+			if c.keepUntil != "" && c.keepUntil != Forever && c.keepUntil <= today {
+				res.NowPast++
+			}
 		}
 	}
 	res.Set = len(sets)
@@ -326,19 +337,21 @@ func (s *Store) UpdateLifespan(ctx context.Context, rows []LifespanRow, now time
 		return res, err
 	}
 	for _, a := range apply {
-		r := a.r
-		if _, err := tx.ExecContext(ctx, `INSERT INTO reviews (batch_id, file_id, export_id, keep_until, hash)
-			VALUES (?, ?, ?, ?, ?)`, batch, r.FileID, r.ExportID, nullString(r.KeepUntil), a.hash); err != nil {
-			return res, fmt.Errorf("record keep_until: %w", err)
+		r, c := a.r, a.c
+		if _, err := tx.ExecContext(ctx, `INSERT INTO reviews (batch_id, file_id, export_id, file_date, retention,
+			keep_until, hash) VALUES (?, ?, ?, ?, ?, ?, ?)`, batch, r.FileID, r.ExportID, nullString(c.fileDate),
+			nullString(c.retention), nullString(c.keepUntil), c.exportHash); err != nil {
+			return res, fmt.Errorf("record retention: %w", err)
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE files SET keep_until = ?, reviewed_utc = ?, reviewed_after_scan = ?,
-			reviewed_hash = ? WHERE id = ?`, nullString(r.KeepUntil), utc(now), a.afterScan, a.hash,
+		if _, err := tx.ExecContext(ctx, `UPDATE files SET file_date = ?, retention = ?, keep_until = ?,
+			reviewed_utc = ?, reviewed_after_scan = ?, reviewed_hash = ? WHERE id = ?`, nullString(c.fileDate),
+			nullString(c.retention), nullString(c.keepUntil), utc(now), a.afterScan, c.exportHash,
 			r.FileID); err != nil {
-			return res, fmt.Errorf("record keep_until: %w", err)
+			return res, fmt.Errorf("record retention: %w", err)
 		}
 	}
 	if err := tx.Commit(); err != nil {
-		return res, fmt.Errorf("record keep_until: %w", err)
+		return res, fmt.Errorf("record retention: %w", err)
 	}
 	return res, nil
 }
@@ -370,21 +383,24 @@ func readExport(ctx context.Context, tx *sql.Tx, id int64) (exportInfo, error) {
 type checked struct {
 	path       string
 	refusal    string // "" = passes
-	unchanged  bool   // as exported, or already the stored date: nothing to do
-	stored     string // the file's current keep_until
+	unchanged  bool   // as exported, or already the stored values: nothing to do
+	clear      bool   // a blank retention where one is stored
 	exportHash sql.NullString
+
+	fileDate, retention, keepUntil   string // the values to store
+	storedRetention, storedKeepUntil string
 }
 
-// checkRow applies the update's rules to one row (design section 2, Lifespan).
-func checkRow(ctx context.Context, tx *sql.Tx, r LifespanRow, ex exportInfo, today string) (checked, error) {
+// checkRow applies the update's rules to one row (design section 2, Lifespan CSV, second shape).
+func checkRow(ctx context.Context, tx *sql.Tx, r LifespanRow, ex exportInfo) (checked, error) {
 	var c checked
 	if !ex.found {
 		c.refusal = fmt.Sprintf("export %d is not in this register", r.ExportID)
 		return c, nil
 	}
-	var exported sql.NullString
-	err := tx.QueryRowContext(ctx, `SELECT hash, keep_until FROM export_rows WHERE export_id = ? AND file_id = ?`,
-		r.ExportID, r.FileID).Scan(&c.exportHash, &exported)
+	var expDate, expRetention, expKeep sql.NullString
+	err := tx.QueryRowContext(ctx, `SELECT hash, file_date, retention, keep_until FROM export_rows
+		WHERE export_id = ? AND file_id = ?`, r.ExportID, r.FileID).Scan(&c.exportHash, &expDate, &expRetention, &expKeep)
 	if errors.Is(err, sql.ErrNoRows) {
 		c.refusal = fmt.Sprintf("file %d is not in export %d (rows cannot be added)", r.FileID, r.ExportID)
 		return c, nil
@@ -392,28 +408,42 @@ func checkRow(ctx context.Context, tx *sql.Tx, r LifespanRow, ex exportInfo, tod
 	if err != nil {
 		return c, fmt.Errorf("read export %d: %w", r.ExportID, err)
 	}
-	// A cell left as exported is not a decision, whatever happened since.
-	if r.KeepUntil == exported.String {
+	var root, rel string
+	err = tx.QueryRowContext(ctx, `SELECT r.path, p.path FROM paths p JOIN roots r ON r.id = p.root_id
+		WHERE p.file_id = ? AND p.valid_to_scan IS NULL`, r.FileID).Scan(&root, &rel)
+	present := err == nil
+	switch {
+	case present:
+		c.path = absPath(root, rel)
+	case !errors.Is(err, sql.ErrNoRows):
+		return c, fmt.Errorf("read file %d: %w", r.FileID, err)
+	}
+	// keep_until is worked out by filo; a changed cell means a date was typed in the wrong place.
+	if r.HasKeepUntil && r.KeepUntil != expKeep.String {
+		c.refusal = fmt.Sprintf("keep_until was changed to %q, but filo works it out; change retention instead",
+			r.KeepUntil)
+		return c, nil
+	}
+	c.fileDate, c.retention = r.FileDate, r.Retention
+	if !r.HasFileDate {
+		c.fileDate = expDate.String
+	}
+	// Cells left as exported are not a decision, whatever happened since.
+	if c.fileDate == expDate.String && c.retention == expRetention.String {
 		c.unchanged = true
 		return c, nil
 	}
 
 	var hash sql.NullString
-	if err := tx.QueryRowContext(ctx, `SELECT hash, coalesce(keep_until, '') FROM files WHERE id = ?`, r.FileID).
-		Scan(&hash, &c.stored); err != nil {
+	var storedDate string
+	if err := tx.QueryRowContext(ctx, `SELECT hash, coalesce(file_date, ''), coalesce(retention, ''),
+		coalesce(keep_until, '') FROM files WHERE id = ?`, r.FileID).
+		Scan(&hash, &storedDate, &c.storedRetention, &c.storedKeepUntil); err != nil {
 		return c, fmt.Errorf("read file %d: %w", r.FileID, err)
 	}
-	var root, rel string
-	err = tx.QueryRowContext(ctx, `SELECT r.path, p.path FROM paths p JOIN roots r ON r.id = p.root_id
-		WHERE p.file_id = ? AND p.valid_to_scan IS NULL`, r.FileID).Scan(&root, &rel)
-	switch {
-	case err == nil:
-		c.path = absPath(root, rel)
-	case errors.Is(err, sql.ErrNoRows):
+	if !present {
 		c.refusal = "no longer present; it is not in the register's current files"
 		return c, nil
-	default:
-		return c, fmt.Errorf("read file %d: %w", r.FileID, err)
 	}
 
 	// The latest update of this file: from this export (edited again: allowed) or a later one (refused, so an old CSV
@@ -428,22 +458,24 @@ func checkRow(ctx context.Context, tx *sql.Tx, r LifespanRow, ex exportInfo, tod
 	}
 	if err == nil && !(lastExport.Valid && lastExport.Int64 == r.ExportID) {
 		if t, perr := time.Parse(time.RFC3339Nano, lastCreated); perr == nil && t.After(ex.created) {
-			c.refusal = fmt.Sprintf("its keep_until was changed after export %d; export again", r.ExportID)
+			c.refusal = fmt.Sprintf("its retention was changed after export %d; export again", r.ExportID)
 			return c, nil
 		}
 	}
 
-	if r.KeepUntil == c.stored {
+	if c.fileDate == storedDate && c.retention == c.storedRetention {
 		c.unchanged = true
 		return c, nil
 	}
 	if hash != c.exportHash {
-		c.refusal = fmt.Sprintf("changed since export %d; export again to set its date", r.ExportID)
+		c.refusal = fmt.Sprintf("changed since export %d; export again to set its retention", r.ExportID)
 		return c, nil
 	}
-	if r.KeepUntil != "" && r.KeepUntil != Forever && r.KeepUntil <= today {
-		c.refusal = fmt.Sprintf("keep_until %s is not after today", r.KeepUntil)
+	if c.keepUntil, err = KeepUntil(c.fileDate, c.retention); err != nil {
+		c.refusal = err.Error()
+		return c, nil
 	}
+	c.clear = c.retention == "" && c.storedRetention != ""
 	return c, nil
 }
 

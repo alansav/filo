@@ -65,7 +65,7 @@ func TestWriteTextLifespan(t *testing.T) {
 	}{
 		{"nothing to decide", Report{Status: map[store.Status]int64{store.StatusKept: 3, store.StatusForever: 1}},
 			[]string{
-				"Needing a keep_until date: none",
+				"Needing a retention: none",
 				"Kept until a later date: 3 files",
 				"Kept forever: 1 file",
 			}},
@@ -74,16 +74,16 @@ func TestWriteTextLifespan(t *testing.T) {
 			Undecided:   1202,
 			UndecidedIn: []DirGroup{{Dir: "/r/docs", Files: 1202, Bytes: 2048}},
 		}, []string{
-			"Needing a keep_until date: 1,202 files (no keep_until 1,200, past keep_until, changed since it was set 2)",
+			"Needing a retention: 1,202 files (no retention 1,200, past retention, changed since it was set 2)",
 			"  directories with the most (to depth 2):",
 			"     1,202     2.0 KiB  /r/docs",
-			"  set dates with: filo export lifespan [DIR] -o FILE, then filo update FILE",
-			"Past keep_until: 1 file; see filo delete",
+			"  set retentions with: filo export lifespan [DIR] -o FILE, then filo update FILE",
+			"Past their retention: 1 file; see filo delete",
 		}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := section(t, tc.r, "Needing a keep_until date")
+			got := section(t, tc.r, "Needing a retention")
 			if strings.Join(got, "\n") != strings.Join(tc.want, "\n") {
 				t.Errorf("got:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(tc.want, "\n"))
 			}

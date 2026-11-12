@@ -6,8 +6,9 @@ in the same commit when a design decision changes.
 
 ## Current state
 
-Iteration 2: lifespan. Each file gets one `keep_until` date, set through the lifespan CSV (`filo export lifespan`, then
-`filo update`); roots carry their own scan settings. Iteration 1 (scan, register, report) is done. **Still read-only on
+Iteration 2: lifespan. Each file gets a retention (a period from its `file_date`, `forever`, or a date), set through
+the lifespan CSV (`filo export lifespan`, then `filo update`), from which Filo works out `keep_until`; roots carry
+their own scan settings. Iteration 3 (deletion) is designed in `docs/design.md` but not built. Iteration 1 (scan, register, report) is done. **Still read-only on
 the user's files:** iteration 2 writes only the register and the CSV file the user names, and never overwrites an
 existing file. `filo delete` only lists the files past their date; nothing is deleted. Later iterations (quarantine and
 delete, revert, UI) are listed in `docs/design.md`. Stay inside the current iteration.
@@ -43,8 +44,8 @@ prefix.)
   `scripts/testtree.sh unlock DIR` undoes that, and is needed before `rm -rf DIR`
 - Example dev run, always with a throwaway database and tree:
   `bin/filo --db /tmp/f.db roots add DIR` (adds and scans), `bin/filo --db /tmp/f.db scan`,
-  `bin/filo --db /tmp/f.db report`, then `bin/filo --db /tmp/f.db export lifespan DIR/notes -o /tmp/l.csv`, edit
-  `keep_until`, `update /tmp/l.csv` and `delete` (export refuses an existing file, so remove `/tmp/l.csv` between runs)
+  `bin/filo --db /tmp/f.db report`, then `bin/filo --db /tmp/f.db export lifespan DIR/notes -o /tmp/l.csv`, fill in
+  `retention`, `update /tmp/l.csv` and `delete` (export refuses an existing file, so remove `/tmp/l.csv` between runs)
 
 Run `go vet` and the tests before saying a change is done.
 

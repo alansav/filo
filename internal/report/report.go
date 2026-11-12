@@ -38,11 +38,11 @@ func StatusLabel(s store.Status) string {
 	case store.StatusPossibleMove:
 		return "possible moves"
 	case store.StatusUndated:
-		return "no keep_until"
+		return "no retention"
 	case store.StatusChanged:
-		return "past keep_until, changed since it was set"
+		return "past retention, changed since it was set"
 	case store.StatusExpired:
-		return "past keep_until"
+		return "past retention"
 	case store.StatusKept:
 		return "kept"
 	case store.StatusForever:
@@ -125,7 +125,7 @@ func (r Report) WriteText(w io.Writer) error {
 
 	p.blank()
 	if r.Undecided == 0 {
-		p.line("Needing a keep_until date: none")
+		p.line("Needing a retention: none")
 	} else {
 		var parts []string
 		for _, st := range store.Statuses {
@@ -133,12 +133,12 @@ func (r Report) WriteText(w io.Writer) error {
 				parts = append(parts, StatusLabel(st)+" "+Count(n))
 			}
 		}
-		p.line("Needing a keep_until date: %s (%s)", Plural(r.Undecided, "file", "files"), strings.Join(parts, ", "))
+		p.line("Needing a retention: %s (%s)", Plural(r.Undecided, "file", "files"), strings.Join(parts, ", "))
 		p.line("  directories with the most (to depth %d):", DirDepth)
 		for _, g := range r.UndecidedIn {
 			p.line("  %8s  %10s  %s", Count(g.Files), Size(g.Bytes), g.Dir)
 		}
-		p.line("  set dates with: filo export lifespan [DIR] -o FILE, then filo update FILE")
+		p.line("  set retentions with: filo export lifespan [DIR] -o FILE, then filo update FILE")
 	}
 	if n := r.Status[store.StatusKept]; n > 0 {
 		p.line("Kept until a later date: %s", Plural(n, "file", "files"))
@@ -147,7 +147,7 @@ func (r Report) WriteText(w io.Writer) error {
 		p.line("Kept forever: %s", Plural(n, "file", "files"))
 	}
 	if n := r.Status[store.StatusExpired]; n > 0 {
-		p.line("Past keep_until: %s; see filo delete", Plural(n, "file", "files"))
+		p.line("Past their retention: %s; see filo delete", Plural(n, "file", "files"))
 	}
 
 	p.blank()

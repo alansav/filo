@@ -3,7 +3,7 @@ package store
 // SchemaVersion is the schema this build reads and writes. It is stored in meta.schema_version when a database is
 // created. An older database with a migration in migrations is upgraded when it is opened; any other version is
 // refused.
-const SchemaVersion = 4
+const SchemaVersion = 5
 
 // Meta keys.
 const (
@@ -54,7 +54,9 @@ CREATE TABLE files (
     link_target TEXT,
     link_broken INTEGER NOT NULL DEFAULT 0,
     first_seen_scan INTEGER NOT NULL REFERENCES scans(id),
-    keep_until TEXT,                    -- YYYY-MM-DD, or 'forever'
+    file_date TEXT,                     -- YYYY-MM-DD: the date a retention period counts from
+    retention TEXT,                     -- as given: a period (7y), 'forever' or YYYY-MM-DD
+    keep_until TEXT,                    -- worked out from the two: YYYY-MM-DD or 'forever'
     reviewed_utc TEXT,
     reviewed_after_scan INTEGER REFERENCES scans(id),
     reviewed_hash TEXT
@@ -83,7 +85,7 @@ CREATE TABLE events (
 );
 ` + reviewSQL
 
-// reviewSQL is the export and review tables, as of schema version 4.
+// reviewSQL is the export and review tables, as of schema version 5.
 const reviewSQL = `
 CREATE TABLE exports (
     id INTEGER PRIMARY KEY,
@@ -97,6 +99,8 @@ CREATE TABLE export_rows (
     file_id INTEGER NOT NULL REFERENCES files(id),
     hash TEXT,
     keep_until TEXT,
+    file_date TEXT,
+    retention TEXT,
     PRIMARY KEY (export_id, file_id)
 );
 
@@ -113,7 +117,9 @@ CREATE TABLE reviews (
     file_id INTEGER NOT NULL REFERENCES files(id),
     export_id INTEGER REFERENCES exports(id),
     keep_until TEXT,
-    hash TEXT
+    hash TEXT,
+    file_date TEXT,
+    retention TEXT
 );
 CREATE INDEX ix_reviews_file ON reviews(file_id);
 `
@@ -162,6 +168,19 @@ ALTER TABLE export_rows ADD COLUMN keep_until TEXT;
 
 ALTER TABLE roots ADD COLUMN include_hidden INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE roots ADD COLUMN ignores TEXT NOT NULL DEFAULT '[]';
+`,
+	// 4 -> 5: a retention (a period counted from file_date, forever or a date) works out keep_until. An existing
+	// keep_until becomes the retention it was: its date, or forever.
+	4: `
+ALTER TABLE files ADD COLUMN file_date TEXT;
+ALTER TABLE files ADD COLUMN retention TEXT;
+UPDATE files SET retention = keep_until WHERE keep_until IS NOT NULL;
+ALTER TABLE export_rows ADD COLUMN file_date TEXT;
+ALTER TABLE export_rows ADD COLUMN retention TEXT;
+UPDATE export_rows SET retention = keep_until WHERE keep_until IS NOT NULL;
+ALTER TABLE reviews ADD COLUMN file_date TEXT;
+ALTER TABLE reviews ADD COLUMN retention TEXT;
+UPDATE reviews SET retention = keep_until WHERE keep_until IS NOT NULL;
 `,
 }
 

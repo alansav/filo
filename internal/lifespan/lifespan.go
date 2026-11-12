@@ -1,4 +1,5 @@
-// Package lifespan reads and writes the lifespan CSV: every present file with the date it is kept until. The register
+// Package lifespan reads and writes the lifespan CSV: every present file with its file_date, retention and the date it
+// is kept until, works out keep_until from a retention, and reads dates from file names. The register
 // side (listing files, recording exports, applying updates) is in package store.
 package lifespan
 
@@ -17,18 +18,35 @@ import (
 )
 
 // Header is the CSV's columns, in order. The update finds columns by name, so a spreadsheet may reorder them or add
-// its own; it reads only id, export and keep_until.
-var Header = []string{"id", "export", "directory", "name", "size", "modified", "keep_until"}
+// its own; it reads only id, export, file_date and retention, and checks that keep_until (worked out by filo, for
+// display) was left alone.
+var Header = []string{"id", "export", "directory", "name", "size", "modified", "file_date", "retention", "keep_until"}
 
 const dateLayout = "2006-01-02"
 
 // bom marks the file as UTF-8 for spreadsheets that would otherwise guess another encoding.
 const bom = "\ufeff"
 
-// ParseDate checks a typed keep_until: "" stays "" (a blank cell), forever (in any case) is store.Forever, and
-// YYYY-MM-DD must be a real date (2027-02-29 is not). Anything else is refused: a date like 06/07/2027 is ambiguous
-// and is never guessed.
+const formatHint = " (a spreadsheet may have rewritten it; format the column as text)"
+
+// ParseDate checks a typed date: "" stays "" (a blank cell), and YYYY-MM-DD must be a real date (2027-02-29 is not).
+// Anything else is refused: a date like 06/07/2027 is ambiguous and is never guessed.
 func ParseDate(s string) (string, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return "", nil
+	}
+	t, err := time.Parse(dateLayout, s)
+	if err != nil {
+		return "", fmt.Errorf("%q is not a date: use YYYY-MM-DD, for example 2023-03-14%s", s, formatHint)
+	}
+	return t.Format(dateLayout), nil
+}
+
+// ParseRetention checks a typed retention: "" stays "" (a blank cell); forever (in any case) is store.Forever; a
+// period is N followed by y, m, w or d (years, months, weeks, days; N from 1 to 1000), returned in lower case; and a
+// date is YYYY-MM-DD, a real date. Anything else is refused.
+func ParseRetention(s string) (string, error) {
 	s = strings.TrimSpace(s)
 	if s == "" {
 		return "", nil
@@ -36,13 +54,97 @@ func ParseDate(s string) (string, error) {
 	if strings.EqualFold(s, store.Forever) {
 		return store.Forever, nil
 	}
+	if store.IsPeriod(s) {
+		return strings.ToLower(s), nil
+	}
 	t, err := time.Parse(dateLayout, s)
 	if err != nil {
-		return "", fmt.Errorf("%q is not a date: use YYYY-MM-DD, for example 2027-06-30, or forever (a spreadsheet "+
-			"may have rewritten it; format the column as text)", s)
+		return "", fmt.Errorf("%q is not a retention: use a period such as 7y, 18m, 6w or 30d (counted from "+
+			"file_date), forever, or a date YYYY-MM-DD%s", s, formatHint)
 	}
 	return t.Format(dateLayout), nil
 }
+
+// DateFromName reads a file_date from a file name, or returns "". Accepted, with a non-digit (or the start or end of
+// the name) on both sides: YYYY-MM-DD (also with _ or . as the separator), YYYYMMDD, and YYYY-MM (also _ or .),
+// which gives the last day of that month so a file is never kept for less time than meant. The date must be real and
+// between 1900-01-01 and 30 days after today (YYYY-MM-DD). A name with two different dates gives "": never guessed.
+func DateFromName(name, today string) string {
+	t, err := time.Parse(dateLayout, today)
+	if err != nil {
+		return ""
+	}
+	latest := t.AddDate(0, 0, 30).Format(dateLayout)
+	found := ""
+	for i := 0; i < len(name); i++ {
+		if !isDigit(name[i]) || (i > 0 && isDigit(name[i-1])) {
+			continue // a date starts a run of digits
+		}
+		d, ok := dateAt(name, i)
+		if !ok || d < "1900-01-01" || d > latest {
+			continue
+		}
+		if found != "" && found != d {
+			return ""
+		}
+		found = d
+	}
+	return found
+}
+
+// dateAt reads a date starting at s[i], which starts a run of digits.
+func dateAt(s string, i int) (string, bool) {
+	digits := func(at, n int) (string, bool) {
+		if at+n > len(s) {
+			return "", false
+		}
+		for k := at; k < at+n; k++ {
+			if !isDigit(s[k]) {
+				return "", false
+			}
+		}
+		return s[at : at+n], true
+	}
+	endsAt := func(at int) bool { return at == len(s) || !isDigit(s[at]) }
+	isSep := func(at int) bool { return at < len(s) && strings.IndexByte("-_.", s[at]) >= 0 }
+	realDate := func(y, m, d string) (string, bool) {
+		t, err := time.Parse(dateLayout, y+"-"+m+"-"+d)
+		return t.Format(dateLayout), err == nil
+	}
+
+	y, ok := digits(i, 4)
+	if !ok {
+		return "", false
+	}
+	if isSep(i + 4) {
+		m, ok := digits(i+5, 2)
+		if !ok {
+			return "", false
+		}
+		if isSep(i+7) && s[i+7] == s[i+4] {
+			if d, ok := digits(i+8, 2); ok && endsAt(i+10) {
+				return realDate(y, m, d)
+			}
+		}
+		// Anything more after the month (more digits, or a separator and digits that are not a day) makes this
+		// something other than a month: not read.
+		if !endsAt(i+7) || (isSep(i+7) && i+8 < len(s) && isDigit(s[i+8])) {
+			return "", false
+		}
+		// YYYY-MM: the last day of the month.
+		t, err := time.Parse("2006-01", y+"-"+m)
+		if err != nil {
+			return "", false
+		}
+		return t.AddDate(0, 1, -1).Format(dateLayout), true
+	}
+	if all, ok := digits(i, 8); ok && endsAt(i+8) {
+		return realDate(all[:4], all[4:6], all[6:])
+	}
+	return "", false
+}
+
+func isDigit(c byte) bool { return c >= '0' && c <= '9' }
 
 // Today is t's date in its location, as YYYY-MM-DD.
 func Today(t time.Time) string { return t.Format(dateLayout) }
@@ -57,7 +159,8 @@ func cell(s string) string {
 	return s
 }
 
-// WriteCSV writes items as one export. Times are shown in loc.
+// WriteCSV writes items as one export: the file_date, retention and keep_until they carry (the caller fills in
+// file_date from the name first, and records the same values with the export). Times are shown in loc.
 func WriteCSV(w io.Writer, exportID int64, items []store.FileItem, loc *time.Location) error {
 	if _, err := io.WriteString(w, bom); err != nil {
 		return err
@@ -75,7 +178,7 @@ func WriteCSV(w io.Writer, exportID int64, items []store.FileItem, loc *time.Loc
 		}
 		rec := []string{
 			strconv.FormatInt(it.FileID, 10), ex, cell(directory), cell(name), strconv.FormatInt(it.Size, 10),
-			time.Unix(0, it.MtimeNS).In(loc).Format("2006-01-02 15:04"), it.KeepUntil,
+			time.Unix(0, it.MtimeNS).In(loc).Format("2006-01-02 15:04"), it.FileDate, it.Retention, it.KeepUntil,
 		}
 		if err := cw.Write(rec); err != nil {
 			return err
@@ -99,9 +202,9 @@ type Parsed struct {
 
 var (
 	// ErrNotLifespanCSV means the file has no header with the columns the update needs.
-	ErrNotLifespanCSV = errors.New("not a filo lifespan CSV: the header needs id, export and keep_until columns")
-	// ErrOldReviewCSV means the file is a review CSV from before keep_until.
-	ErrOldReviewCSV = errors.New("this is a review CSV from an older filo; export again with: filo export lifespan")
+	ErrNotLifespanCSV = errors.New("not a filo lifespan CSV: the header needs id, export and retention columns")
+	// ErrOldCSV means the file is a review or lifespan CSV from an older filo.
+	ErrOldCSV = errors.New("this CSV is from an older filo; export again with: filo export lifespan")
 )
 
 // ReadCSV reads an edited lifespan CSV. It accepts what spreadsheets do to a file: a byte order mark, CRLF line ends,
@@ -134,17 +237,17 @@ func ReadCSV(r io.Reader) (Parsed, error) {
 				m[name] = i
 			}
 		}
-		if hasAll(m, "id", "export", "keep_until") {
+		if hasAll(m, "id", "export", "retention") {
 			cr, cols, width = c, m, len(head)
 			break
 		}
-		if hasAll(m, "id", "export", "review_date") {
+		if hasAll(m, "id", "export", "review_date") || hasAll(m, "id", "export", "keep_until") {
 			old = true
 		}
 	}
 	if cr == nil {
 		if old {
-			return p, ErrOldReviewCSV
+			return p, ErrOldCSV
 		}
 		return p, ErrNotLifespanCSV
 	}
@@ -183,19 +286,33 @@ func ReadCSV(r io.Reader) (Parsed, error) {
 			bad("export %q is not an export number", get("export"))
 			continue
 		}
-		// filo reads only keep_until, so a value typed past the last column would otherwise be lost silently.
+		// A value typed past the last column would otherwise be lost silently.
 		if v := beyond(rec, width); v != "" {
-			bad("%q is outside the columns; put the date under keep_until", v)
+			bad("%q is outside the columns; put it under file_date or retention", v)
 			continue
 		}
-		date, err := ParseDate(get("keep_until"))
-		if err != nil {
-			bad("keep_until %v", err)
+		row := store.LifespanRow{Line: line, ExportID: ex, FileID: id}
+		if row.Retention, err = ParseRetention(get("retention")); err != nil {
+			bad("retention %v", err)
 			continue
+		}
+		if _, ok := cols["file_date"]; ok {
+			row.HasFileDate = true
+			if row.FileDate, err = ParseDate(get("file_date")); err != nil {
+				bad("file_date %v", err)
+				continue
+			}
+		}
+		if _, ok := cols["keep_until"]; ok {
+			row.HasKeepUntil = true
+			row.KeepUntil = get("keep_until")
+			if strings.EqualFold(row.KeepUntil, store.Forever) {
+				row.KeepUntil = store.Forever
+			}
 		}
 		key := [2]int64{ex, id}
 		seen[key] = append(seen[key], len(p.Rows))
-		p.Rows = append(p.Rows, store.LifespanRow{Line: line, ExportID: ex, FileID: id, KeepUntil: date})
+		p.Rows = append(p.Rows, row)
 	}
 
 	// Drop every copy of a row that appears more than once.

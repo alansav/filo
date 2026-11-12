@@ -8,6 +8,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -69,12 +70,12 @@ func (e *env) export(ctx context.Context, dbBefore string, args []string) error 
 	if err := checkTilde("-o", *out); err != nil {
 		return err
 	}
-	path, err := filepath.Abs(*out)
+	csvPath, err := filepath.Abs(*out)
 	if err != nil {
 		return err
 	}
-	if _, err := os.Lstat(path); err == nil {
-		return fmt.Errorf("%s already exists; choose another name (filo never overwrites a file)", path)
+	if _, err := os.Lstat(csvPath); err == nil {
+		return fmt.Errorf("%s already exists; choose another name (filo never overwrites a file)", csvPath)
 	}
 
 	s, err := e.open(ctx, *db)
@@ -90,6 +91,17 @@ func (e *env) export(ctx context.Context, dbBefore string, args []string) error 
 	if err != nil {
 		return err
 	}
+	// Fill in a blank file_date from the file name where it holds one unambiguous date. The export records it as
+	// written, so an untouched suggestion is no change; it takes effect only through a retention period typed later.
+	suggested := 0
+	for i := range items {
+		if items[i].FileDate == "" {
+			if d := lifespan.DateFromName(path.Base(items[i].Path), today()); d != "" {
+				items[i].FileDate = d
+				suggested++
+			}
+		}
+	}
 	if where != "" {
 		where = " under " + where
 	}
@@ -99,14 +111,14 @@ func (e *env) export(ctx context.Context, dbBefore string, args []string) error 
 	}
 
 	// O_EXCL: an existing file is never overwritten, whatever it is.
-	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	file, err := os.OpenFile(csvPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if errors.Is(err, fs.ErrExist) {
-		return fmt.Errorf("%s already exists; choose another name (filo never overwrites a file)", path)
+		return fmt.Errorf("%s already exists; choose another name (filo never overwrites a file)", csvPath)
 	}
 	if err != nil {
-		return fmt.Errorf("create %s: %w", path, err)
+		return fmt.Errorf("create %s: %w", csvPath, err)
 	}
-	id, err := s.RecordExport(ctx, path, now(), items, func(id int64) error {
+	id, err := s.RecordExport(ctx, csvPath, now(), items, func(id int64) error {
 		bw := bufio.NewWriter(file)
 		if err := lifespan.WriteCSV(bw, id, items, time.Local); err != nil {
 			return err
@@ -121,19 +133,23 @@ func (e *env) export(ctx context.Context, dbBefore string, args []string) error 
 	})
 	if err != nil {
 		file.Close()
-		os.Remove(path) // created by this command a moment ago, and incomplete
-		return fmt.Errorf("export to %s: %w", path, err)
+		os.Remove(csvPath) // created by this command a moment ago, and incomplete
+		return fmt.Errorf("export to %s: %w", csvPath, err)
 	}
 	undated := 0
 	for _, it := range items {
-		if it.KeepUntil == "" {
+		if it.Retention == "" {
 			undated++
 		}
 	}
-	fmt.Fprintf(e.stdout, "Exported %s%s to %s (export %d), %s without a keep_until.\n",
-		report.Plural(int64(len(items)), "file", "files"), where, path, id, report.Count(int64(undated)))
-	fmt.Fprintf(e.stdout, "Set keep_until (YYYY-MM-DD after today, or forever) where you want it, then run:\n"+
-		"  filo update %s\n", path)
+	fmt.Fprintf(e.stdout, "Exported %s%s to %s (export %d), %s without a retention.\n",
+		report.Plural(int64(len(items)), "file", "files"), where, csvPath, id, report.Count(int64(undated)))
+	if suggested > 0 {
+		fmt.Fprintf(e.stdout, "file_date was filled in from the name of %s; check it before counting from it.\n",
+			report.Plural(int64(suggested), "file", "files"))
+	}
+	fmt.Fprintf(e.stdout, "Set retention (a period from file_date such as 7y or 18m, forever, or a date YYYY-MM-DD) "+
+		"where you want it, then run:\n  filo update %s\n", csvPath)
 	return nil
 }
 
@@ -209,19 +225,26 @@ func (e *env) update(ctx context.Context, dbBefore string, args []string) error 
 	w := e.stdout
 	if *dry {
 		fmt.Fprintln(w, "Dry run: nothing was written.")
-		fmt.Fprintf(w, "Would set %s and clear %s.\n", report.Plural(int64(res.Set), "keep_until date", "keep_until dates"),
-			report.Plural(int64(res.Cleared), "date", "dates"))
+		fmt.Fprintf(w, "Would update %s and clear %s.\n", report.Plural(int64(res.Set), "file", "files"),
+			report.Plural(int64(res.Cleared), "retention", "retentions"))
 	} else {
-		fmt.Fprintf(w, "Set %s, cleared %s.\n", report.Plural(int64(res.Set), "keep_until date", "keep_until dates"),
-			report.Plural(int64(res.Cleared), "date", "dates"))
+		fmt.Fprintf(w, "Updated %s, cleared %s.\n", report.Plural(int64(res.Set), "file", "files"),
+			report.Plural(int64(res.Cleared), "retention", "retentions"))
+	}
+	if res.NowPast > 0 {
+		what := report.Plural(int64(res.NowPast), "file is", "files are")
+		if *dry {
+			what = report.Plural(int64(res.NowPast), "file would be", "files would be")
+		}
+		fmt.Fprintf(w, "%s past their retention; see filo delete.\n", what)
 	}
 	if res.ClearsSkipped > 0 {
 		why := "not confirmed"
 		if !asked {
 			why = "there is no terminal to ask in; run filo update in a terminal to clear them"
 		}
-		fmt.Fprintf(w, "Left %s whose keep_until cell is blank (%s).\n",
-			report.Plural(int64(res.ClearsSkipped), "date", "dates"), why)
+		fmt.Fprintf(w, "Left %s whose cell is blank (%s).\n",
+			report.Plural(int64(res.ClearsSkipped), "retention", "retentions"), why)
 	}
 	var notes []string
 	if res.Unchanged > 0 {
@@ -239,10 +262,10 @@ func (e *env) update(ctx context.Context, dbBefore string, args []string) error 
 	return nil
 }
 
-// confirmClears lists the dates a blank cell would clear and asks once. Only "y" or "yes" confirms.
+// confirmClears lists the retentions a blank cell would clear and asks once. Only "y" or "yes" confirms.
 func (e *env) confirmClears(cs []store.Clear) bool {
 	w := e.stdout
-	fmt.Fprintf(w, "%s a keep_until date but a blank cell in the CSV:\n",
+	fmt.Fprintf(w, "%s a retention but a blank cell in the CSV:\n",
 		report.Plural(int64(len(cs)), "file has", "files have"))
 	for i, c := range cs {
 		if i == clearsShown {
@@ -253,9 +276,13 @@ func (e *env) confirmClears(cs []store.Clear) bool {
 		if where == "" {
 			where = fmt.Sprintf("file %d", c.FileID)
 		}
-		fmt.Fprintf(w, "  %s  %s\n", c.KeepUntil, where)
+		what := c.Retention
+		if c.KeepUntil != c.Retention {
+			what += " (until " + c.KeepUntil + ")"
+		}
+		fmt.Fprintf(w, "  %s  %s\n", what, where)
 	}
-	fmt.Fprintf(w, "Clear the keep_until date of %s? [y/n] ", report.Plural(int64(len(cs)), "file", "files"))
+	fmt.Fprintf(w, "Clear the retention of %s? [y/n] ", report.Plural(int64(len(cs)), "file", "files"))
 	answer, err := bufio.NewReader(e.stdin).ReadString('\n')
 	if err != nil && !errors.Is(err, io.EOF) {
 		return false
@@ -298,15 +325,15 @@ func (e *env) deleteList(ctx context.Context, dbBefore string, args []string) er
 	}
 	w := e.stdout
 	if len(expired) == 0 {
-		fmt.Fprintln(w, "No files are past their keep_until date.")
+		fmt.Fprintln(w, "No files are past their retention.")
 		return nil
 	}
-	fmt.Fprintf(w, "Past their keep_until date: %s, %s\n", report.Plural(int64(len(expired)), "file", "files"),
+	fmt.Fprintf(w, "Past their retention: %s, %s\n", report.Plural(int64(len(expired)), "file", "files"),
 		report.Size(bytes))
 	for _, it := range expired {
 		fmt.Fprintf(w, "  %s  %10s  %s\n", it.KeepUntil, report.Size(it.Size), it.AbsPath())
 	}
-	fmt.Fprintln(w, "filo deletes nothing in this version. To keep a file longer, give it a later keep_until "+
+	fmt.Fprintln(w, "filo deletes nothing in this version. To keep a file longer, give it a later retention "+
 		"(filo export lifespan, then filo update).")
 	return nil
 }

@@ -5,8 +5,9 @@ directory (5,582 files, about 3.7 GB) scanned completely and rescanned quickly, 
 2 was reshaped on 2026-11-12 from a review queue into one keep-until date per file (the lifespan CSV, `filo export
 lifespan` and `filo update`), with root settings stored on the root; it passes its test-tree criterion, and setting
 dates on the real home directory is still to be done. A C# prototype exists as a reference spec only; its schema and
-reconcile rules were carried over. Iteration 3 (deletion) and a second shape of the lifespan CSV (`file_date`,
-`retention`) were designed on 2026-11-12 and are not implemented yet; both are marked as such below. Last updated:
+reconcile rules were carried over. The second shape of the lifespan CSV (`file_date`, `retention`, schema version
+5) is implemented. Iteration 3 (deletion) was designed on 2026-11-12 and is not implemented yet; it is marked as such
+below. Last updated:
 2026-11-12.
 
 This file records settled decisions, the planned data model and the open questions. When a decision changes,
@@ -197,14 +198,14 @@ Principles. These are not negotiable:
 Decided 2026-11-12, replacing the review queue, review dates, actions and retain-until floors of 2026-11-11. The
 lifespan CSV and `filo update` write only the register and the CSV file the user names; they never touch the files.
 
-- **Forever** (decided 2026-11-12): `keep_until` may be the word `forever` instead of a date, for files kept
+- **Forever** (decided 2026-11-12): the retention (and so `keep_until`) may be the word `forever` instead of a date, for files kept
   indefinitely. It is stored as that word, never as a far-off date such as 9999-12-31 (which would look like a
   chosen date in the CSV, sort among real dates, and need special-casing everywhere), and checked explicitly, not by
   comparing it with dates. A `forever` file is never a deletion candidate, however old it is or however often it
   changes; `filo report` counts them so the pile stays visible, and typing a date over it later is how it ends. One
-  word only, in any case (`Forever`): no aliases such as `indefinitely` or `never`. No schema change: the column is
-  text already.
-- **One date per file: `keep_until`.** Keep the file until then. On that date it becomes a deletion candidate, never
+  word only, in any case (`Forever`): no aliases such as `indefinitely` or `never`.
+- **One date per file: `keep_until`**, worked out from the file's retention (see second shape). Keep the file until
+  then. On that date it becomes a deletion candidate, never
   deleted automatically: `filo delete` lists the candidates, and deleting each is the person's call (iteration 3). A
   recurring check on a file (an annual look at a seven-year record) is a task, a later iteration; this iteration
   tracks lifespan only. Hard legal retention is a later retention or `forever` (holds were dropped on 2026-11-12).
@@ -225,54 +226,57 @@ lifespan CSV and `filo update` write only the register and the CSV file the user
   (`exports.after_scan`); a date set from it is stamped with that scan (`files.reviewed_after_scan`), the content it
   was exported with (`reviewed_hash`) and when (`reviewed_utc`). A file flagged unreadable, or recorded as a possible
   move, in a scan after the export keeps that status after the update.
-- **The CSV has one purpose**: take the files into a spreadsheet, filter, sort, edit `keep_until`, update back. So it
+- **The CSV has one purpose**: take the files into a spreadsheet, filter, sort, edit the retention, update back. So it
   holds **every present file** under DIR (or every root), with its current date, not a queue: dated files are
-  reviewed too, and filtering on a blank `keep_until` gives the undated ones. Missing and moved files are not in it;
+  reviewed too, and filtering on a blank `retention` gives the undated ones. Missing and moved files are not in it;
   they are in `filo report`. On a large system, export one directory at a time so a spreadsheet can open it.
 - **Columns**, in order: `id` (file row ID), `export` (export number), `directory` (absolute), `name`, `size`
-  (bytes), `modified` (local time; a cue to when the file was last worked on), `keep_until`. The name is a column of
-  its own because file names often carry dates. Left out on purpose: a reason (one purpose only), an action (a
+  (bytes), `modified` (local time; a cue to when the file was last worked on), `file_date`, `retention`, `keep_until`
+  (see Lifespan CSV, second shape). The name is a column of its own because file names often carry dates. Left out on purpose: a reason (one purpose only), an action (a
   delete column in a spreadsheet is unsafe: a one-column sort or a fill-down puts it on the wrong rows), and creation
   or first-seen dates (not reliable: many filesystems do not record a birth time, and a copy, restore or sync resets
-  it). `filo update` finds columns by header name and reads only `id`, `export` and `keep_until`, so a spreadsheet may
-  reorder columns or add its own. Rows are keyed on (export, id). Each export's rows, hashes and dates are stored in
+  it). `filo update` finds columns by header name and reads only `id`, `export`, `file_date` and `retention` (and
+  checks `keep_until` was left alone), so a spreadsheet may reorder columns or add its own. Rows are keyed on (export, id). Each export's rows, hashes and dates are stored in
   the register (`export_rows`).
 - **Encoding.** UTF-8 with a byte order mark (so spreadsheets detect UTF-8), standard quoting. File names are written
   as they are, emoji and all; bytes that are not valid UTF-8 are shown as U+FFFD, which is harmless because the update
   never reads the name. A display cell that starts with `= + - @`, tab or CR gets a leading `'` so a spreadsheet does
   not run it as a formula. The update accepts a byte order mark, CRLF, `;` or tab separators, and empty rows.
-- **Dates**: `YYYY-MM-DD` only, and a real date (`2027-02-29` is refused), or `forever`. Anything else, such as
-  `06/07/2027` or `+1y`, is refused, never guessed; the message suggests formatting the column as text, since spreadsheets may
-  rewrite dates in the locale's format. A new date must be after today. Durations (`+1y`) were dropped from the CSV on
-  2026-11-12: a duration is relative to the day of the update, so the same cell meant different dates on different
-  days. Whether commands take durations is open.
+- **Dates**: `YYYY-MM-DD` only, and a real date (`2027-02-29` is refused). Anything else, such as `06/07/2027`, is
+  refused, never guessed; the message suggests formatting the column as text, since spreadsheets may rewrite dates in
+  the locale's format. Past dates are accepted (see second shape). Periods counted from today (`+1y`) were dropped
+  from the CSV on 2026-11-12: the same cell meant different dates on different days. A period counted from the row's
+  `file_date` (`7y`) replaced them.
 - **`-o FILE` is required**: the CSV is never written to the terminal. FILE is created with mode 0600 and never
   overwritten.
 - **What the update does with each row**:
-  - the cell as exported (the date it was exported with, or blank): nothing, whatever happened since;
-  - the date already stored: nothing;
-  - a new date: replaces the stored one. Editing the same CSV again and updating again replaces the date again (the
-    old "already imported" rule, which silently ignored a re-edited row, is gone);
-  - blank where a date is stored: clears it, so the file is undated again. Before clearing, the update lists those
-    files (the first ten, then a count) and asks once, `Clear the keep_until date of N files? [y/n]`. Anything but
-    `y` or `yes`, or no terminal on standard input, leaves those rows alone, and the summary says how many and why.
-    `--dry-run` counts them without asking.
+  - `file_date` and `retention` as exported: nothing, whatever happened since. Without a `file_date` column, the
+    `file_date` exported is kept;
+  - the values already stored: nothing;
+  - a new `file_date` or `retention`: replaces the stored ones and works `keep_until` out again. Editing the same CSV
+    again and updating again replaces them again (the old "already imported" rule, which silently ignored a
+    re-edited row, is gone);
+  - a blank `retention` where one is stored: clears it, so the file is undated again (its `file_date` stays). Before
+    clearing, the update lists those files (the first ten, then a count) and asks once,
+    `Clear the retention of N files? [y/n]`. Anything but `y` or `yes`, or no terminal on standard input, leaves those
+    rows alone, and the summary says how many and why. `--dry-run` counts them without asking.
 - **The update refuses a row**, with one line naming the CSV line and the file, and still applies the others, when:
   a value does not parse, or is typed past the last column; the export is not in the register, or the file is not in
   that export (a row added in the spreadsheet); the file is no longer present; the file's hash differs from the
   export's (changed since the export); its date was changed from a later export since (an old CSV never overwrites a
-  newer decision); the date is not after today; the same (export, id) appears more than once (every copy is
-  refused). A deleted row changes nothing. The applied rows go in one transaction; `--dry-run` checks everything and
-  writes nothing. The exit code is 1 if any row was refused. A CSV without a `keep_until` header is refused as a
-  whole, with a pointer to `filo export lifespan` if it is an old review CSV.
+  newer decision); a retention period has no `file_date`; `keep_until` was changed; the same (export, id) appears
+  more than once (every copy is refused). A deleted row changes nothing. The applied rows go in one transaction;
+  `--dry-run` checks everything and writes nothing. The exit code is 1 if any row was refused. A CSV without a
+  `retention` header is refused as a whole, with a pointer to `filo export lifespan` if it is a review CSV or a
+  lifespan CSV from before schema version 5.
 - **Bulk dates**: set in the spreadsheet (filter on `directory`, fill down). `filo review set-date` was dropped on
   2026-11-12, at least for now.
 - The hash at export is stored; it is **re-checked at action time** (iteration 3) against `files.reviewed_hash`.
 
-### Lifespan CSV, second shape (decided 2026-11-12; not implemented yet)
+### Lifespan CSV, second shape (decided and implemented 2026-11-12)
 Retention is usually counted from a document's own date ("keep tax records for seven years"), not from today or from
 when the file reached the disk. So the CSV gains a date to count from and a retention that can be a period. This
-replaces the single `keep_until` input above; the rest of the Lifespan section (one purpose, every present file,
+replaced the single `keep_until` input of the first shape; the rest of the Lifespan section (one purpose, every present file,
 encoding, refusals, the clear prompt, "since" measured in scans) stays.
 
 - **Columns**, in order: `id, export, directory, name, size, modified, file_date, retention, keep_until`.
@@ -297,7 +301,7 @@ encoding, refusals, the clear prompt, "since" measured in scans) stays.
   file_date") and nothing is set for that file. The other rows still apply.
 - **Changing `file_date`** on a file whose retention is a period works its `keep_until` out again; a fixed date or
   `forever` does not depend on it.
-- **A blank `retention`** where one is stored clears it, behind the same prompt as today's blank `keep_until`.
+- **A blank `retention`** where one is stored clears it, behind the prompt described above.
 - **Dates read from file names**, to fill in `file_date` on export where it is blank. Accepted, with non-digit
   characters (or the start or end of the name) on both sides:
   - `YYYY-MM-DD`, also with `_` or `.` as the separator;
@@ -406,7 +410,7 @@ holds and several checks at the moment of acting.
   so timer and cron logs stay clean. Ctrl-C or SIGTERM cancels a scan; nothing is written and the lock is released.
 - A systemd user timer running `filo scan` is enough. No daemon. (`Persistent=true`, low CPU and I/O priority.)
 
-## 3. Data model (schema version 4)
+## 3. Data model (schema version 5)
 
 Carried over from the C# prototype. Adjust freely in the Go port, but keep the interval history and the partial unique
 index.
@@ -440,11 +444,13 @@ CREATE TABLE files (
     inode INTEGER,                      -- NULL for symlinks, or where the platform gives none
     link_target TEXT, link_broken INTEGER NOT NULL DEFAULT 0,
     first_seen_scan INTEGER NOT NULL REFERENCES scans(id),
-    -- the current lifespan (version 4); the history is in reviews
-    keep_until TEXT,                    -- YYYY-MM-DD or 'forever'; NULL = undated, needs a decision
-    reviewed_utc TEXT,                  -- when keep_until was last set by an update; NULL = never
+    -- the current lifespan (versions 4 and 5); the history is in reviews
+    keep_until TEXT,                    -- worked out: YYYY-MM-DD or 'forever'; NULL = undated, needs a decision
+    reviewed_utc TEXT,                  -- when the retention was last set by an update; NULL = never
     reviewed_after_scan INTEGER REFERENCES scans(id), -- the latest scan that update's export had seen
-    reviewed_hash TEXT);                -- the content the date was set on
+    reviewed_hash TEXT,                 -- the content the retention was set on
+    file_date TEXT,                     -- version 5: YYYY-MM-DD a retention period counts from; NULL = none
+    retention TEXT);                    -- version 5: as given: a period (7y), 'forever' or YYYY-MM-DD; NULL = none
 
 CREATE TABLE paths (
     id INTEGER PRIMARY KEY, file_id INTEGER NOT NULL REFERENCES files(id),
@@ -461,7 +467,7 @@ CREATE TABLE events (
     kind TEXT NOT NULL,                 -- moved | missing | changed | possible_move | error | other_fs
     file_id INTEGER, path TEXT, other_path TEXT, detail TEXT);
 
--- versions 3 and 4: exports and the history of keep_until dates
+-- versions 3 to 5: exports and the history of retentions
 CREATE TABLE exports (
     id INTEGER PRIMARY KEY, created_utc TEXT NOT NULL,
     path TEXT,                          -- the CSV written (NULL only for exports to standard output before version 4)
@@ -469,7 +475,9 @@ CREATE TABLE exports (
 CREATE TABLE export_rows (
     export_id INTEGER NOT NULL REFERENCES exports(id), file_id INTEGER NOT NULL REFERENCES files(id),
     hash TEXT,                          -- the content shown; the update refuses the row if it has changed
-    keep_until TEXT,                    -- version 4: the date exported; a cell left as this is untouched
+    keep_until TEXT,                    -- version 4: the date exported
+    file_date TEXT, retention TEXT,     -- version 5: as exported (file_date as filled in from the name); cells
+                                        -- left as these are untouched
     PRIMARY KEY (export_id, file_id));
 CREATE TABLE review_batches (
     id INTEGER PRIMARY KEY, created_utc TEXT NOT NULL,
@@ -479,7 +487,8 @@ CREATE TABLE reviews (                  -- append-only: every keep_until ever se
     id INTEGER PRIMARY KEY, batch_id INTEGER NOT NULL REFERENCES review_batches(id),
     file_id INTEGER NOT NULL REFERENCES files(id), export_id INTEGER REFERENCES exports(id),
     keep_until TEXT,                    -- NULL = cleared
-    hash TEXT);
+    hash TEXT,
+    file_date TEXT, retention TEXT);    -- version 5
 CREATE INDEX ix_reviews_file ON reviews(file_id);
 ```
 
@@ -494,11 +503,12 @@ upgrade rehashes nothing extra and records each file's ctime quietly). Version 3
 recorded `delete` becomes `keep_until` = the day it was decided, so the file is a deletion candidate; the same in
 `reviews`; `export_rows` loses `reason` and gains `keep_until`; `import` batches are renamed `update`; roots gain
 their settings (defaults for existing roots: hidden skipped, no extra ignores). Columns are dropped with `ALTER TABLE
-... DROP COLUMN`. Iteration 3 adds the deleted marker (the deleted rows are the history of deleted files).
+... DROP COLUMN`. Version 5 (2026-11-12) adds `file_date` and `retention` to `files`, `export_rows` and
+`reviews`; each existing `keep_until` becomes the retention it was (its date, or `forever`). Iteration 3 adds the
+deleted marker (the deleted rows are the history of deleted files).
 
-**Planned changes**, not implemented yet: schema version 5 adds `files.file_date` and `files.retention`, and the same
-two columns on `export_rows` and `reviews` (see Lifespan CSV, second shape); iteration 3 adds `files.deleted_utc`
-and the `deleted` event kind (see Disposal).
+**Planned changes**, not implemented yet: iteration 3 adds `files.deleted_utc` and the `deleted` event kind (see
+Disposal).
 
 Location history gives snapshots without storing them: the tree at any scan is the set of intervals that cover it.
 A revert moves each file back to the path it had then, with a dry run that reports and skips conflicts. It reverts
@@ -546,11 +556,11 @@ its own identity. Reclaimable space is size × (copies − 1) per group. Paths a
    queue). Done when: on a test tree, an export, edit and update round trip records exactly the dates set, refuses
    with one clear line each a changed file, an impossible or ambiguous date, a stale export and an added row; a
    cleared date asks first; a file past its date is listed by `filo delete`, and once edited needs a new date instead
-   (`TestLifespanRoundTrip` in `internal/cli`, plus the store and lifespan package tests). Still to do: the second
-   shape of the CSV (`file_date`, `retention`, display-only `keep_until`, dates from file names, past dates allowed;
-   schema version 5), designed 2026-11-12, with the round trip extended to periods, `file_date` from names and the
-   display column; then, on the real home directory, every file gets a retention or `forever`, a directory at a time
-   (filter on `directory`, fill down), through a few directory-sized exports.
+   (`TestLifespanRoundTrip` in `internal/cli`, plus the store and lifespan package tests). The second shape of the
+   CSV (`file_date`, `retention`, display-only `keep_until`, dates from file names, past dates allowed; schema
+   version 5) is done, and the round trip covers periods, `file_date` from names, the display column and clears.
+   Still to do: on the real home directory, every file gets a retention or `forever`, a directory at a time (filter
+   on `directory`, fill down), through a few directory-sized exports.
 3. **Delete.** `filo delete [DIR] [-y]` deletes the candidates after the prompt, with the re-hash check, deleted rows,
    the "freed" line in the report and empty folders removed (see Disposal). Done when: on a test tree, a confirmed
    run deletes exactly the unchanged candidates; a file changed, unreadable, replaced or moved after its retention was

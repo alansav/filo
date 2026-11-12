@@ -611,6 +611,15 @@ func TestMigrateFromV3(t *testing.T) {
 	if len(roots) != 1 || !roots[0].Settings.Equal(Settings{}) {
 		t.Errorf("roots after upgrade = %+v, want default settings", roots)
 	}
+	// Version 5: each keep_until is the retention it was (a date, or forever), with no file_date.
+	if v := rawQueryString(t, db, `SELECT count(*) FROM files WHERE coalesce(retention, '') != coalesce(keep_until, '')
+		OR file_date IS NOT NULL`); v != "0" {
+		t.Errorf("%s files whose retention is not their old keep_until", v)
+	}
+	if v := rawQueryString(t, db, `SELECT group_concat(coalesce(retention, '-'), ' ') FROM (SELECT retention FROM
+		reviews ORDER BY id)`); v != "2026-11-05 2030-06-30 2027-06-30" {
+		t.Errorf("review history retention = %q", v)
+	}
 	for _, col := range []string{"review_date", "action", "retain_until"} {
 		if v := rawQueryString(t, db, `SELECT count(*) FROM pragma_table_info('files') WHERE name = '`+col+`'`); v != "0" {
 			t.Errorf("files.%s still there", col)

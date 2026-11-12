@@ -34,11 +34,11 @@ Usage:
   filo roots add DIR [flags]        register a directory as a root, then scan it
   filo roots set DIR [flags]        replace a root's settings
   filo scan [DIR]                   scan every root, or DIR inside a root
-  filo report [--top N]             totals, files needing a keep_until date, largest files, duplicates, events
+  filo report [--top N]             totals, files needing a retention, largest files, duplicates, events
   filo export lifespan [DIR] -o FILE
-                                    write every file under DIR (or every root) with its keep_until, as CSV
-  filo update FILE [--dry-run]      apply the keep_until dates edited in an exported CSV
-  filo delete                       list the files past their keep_until date
+                                    write every file under DIR (or every root) with its retention, as CSV
+  filo update FILE [--dry-run]      apply the retentions edited in an exported CSV
+  filo delete                       list the files past their retention
   filo help [COMMAND]
 
 Every command accepts --db PATH (default: $FILO_DB, then the user data directory).
@@ -59,7 +59,7 @@ roots add scans the new root straight away; --no-scan only registers it. roots s
 name every --ignore you want to keep.
 
 A root that contains existing roots on the same filesystem takes them in, keeping their files' history and
-keep_until dates; its settings then apply to all of it. A directory inside an existing root is already covered:
+retentions; its settings then apply to all of it. A directory inside an existing root is already covered:
 scan it with filo scan DIR.
 `,
 	"scan": `Usage:
@@ -73,31 +73,33 @@ settings (see filo help roots).
 	"report": `Usage:
   filo report [--top N]
 
-Shows each root's totals and last scan, the files needing a keep_until date and the directories holding most of
-them, the largest files, duplicate groups with reclaimable space, broken symlinks, unreadable files and recent
+Shows each root's totals and last scan, the files needing a retention and the directories holding most of them, the largest files, duplicate groups with reclaimable space, broken symlinks, unreadable files and recent
 events (moves and missing files among them). --top sets how many entries each list shows (default 10).
 `,
 	"export": `Usage:
   filo export lifespan [DIR] -o FILE
 
 Writes every file under DIR (inside a root), or under every root, as CSV (UTF-8) to FILE, which must not exist.
-Columns: id, export, directory, name, size, modified, keep_until. Edit keep_until in a spreadsheet (a date, or
-forever), then run filo update FILE. On a large system, export one directory at a time.
+Columns: id, export, directory, name, size, modified, file_date, retention, keep_until. Fill in retention in a
+spreadsheet, then run filo update FILE. A blank file_date is filled in from the file name when the name holds one
+clear date (2023-03-14, 20230314, or 2023-03 for the month's last day); check it. On a large system, export one
+directory at a time.
 `,
 	"update": `Usage:
   filo update FILE [--dry-run]
 
-Reads an exported lifespan CSV and applies the keep_until dates you changed. Only id, export and keep_until are
-read; rows can be sorted, filtered or deleted, but not added. A date is YYYY-MM-DD and must be after today, or
-forever to keep a file indefinitely (it is then never a deletion candidate). A blank cell clears a stored date (the file then needs a date again); filo lists those files and asks first, and
-without a terminal it leaves them alone. A row is refused, with one line saying why, if the file changed since
-the export or its date was changed from a later export. The other rows are still applied.
---dry-run checks everything and writes nothing.
+Reads an exported lifespan CSV and applies the file_date and retention you changed. retention is a period counted
+from file_date (7y, 18m, 6w, 30d), forever, or a date (YYYY-MM-DD); file_date is a date. keep_until is worked out
+by filo: leave it alone. Dates in the past are fine: the file is then past its retention (see filo delete). Rows can
+be sorted, filtered or deleted, but not added. A blank retention clears a stored one; filo lists those files and
+asks first, and without a terminal leaves them alone. A row is refused, with one line saying why, if a value does
+not parse, a period has no file_date, the file changed since the export, or its retention was changed from a later
+export. The other rows are still applied. --dry-run checks everything and writes nothing.
 `,
 	"delete": `Usage:
   filo delete
 
-Lists the files past their keep_until date whose content has not changed since the date was set. filo never
+Lists the files past their retention whose content has not changed since the retention was set. filo never
 deletes on its own: in this version the list is all it does.
 `,
 }
