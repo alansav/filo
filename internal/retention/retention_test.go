@@ -1,4 +1,4 @@
-package lifespan
+package retention
 
 import (
 	"bytes"
@@ -183,11 +183,11 @@ func TestWriteThenRead(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	row := func(line int, id int64, date, ret, keep string) store.LifespanRow {
-		return store.LifespanRow{Line: line, ExportID: 3, FileID: id, FileDate: date, HasFileDate: true,
+	row := func(line int, id int64, date, ret, keep string) store.RetentionRow {
+		return store.RetentionRow{Line: line, ExportID: 3, FileID: id, FileDate: date, HasFileDate: true,
 			Retention: ret, KeepUntil: keep, HasKeepUntil: true}
 	}
-	want := []store.LifespanRow{
+	want := []store.RetentionRow{
 		row(2, 7, "2023-03-31", "", ""),
 		row(3, 8, "", "2026-01-01", "2026-01-01"),
 		row(4, 9, "2023-01-01", "7y", "2030-01-01"),
@@ -206,42 +206,42 @@ func TestWriteThenRead(t *testing.T) {
 
 func TestReadCSV(t *testing.T) {
 	const head = "id,export,directory,name,size,modified,file_date,retention,keep_until\n"
-	r := func(line int, id int64, date, ret, keep string) store.LifespanRow {
-		return store.LifespanRow{Line: line, ExportID: 2, FileID: id, FileDate: date, HasFileDate: true,
+	r := func(line int, id int64, date, ret, keep string) store.RetentionRow {
+		return store.RetentionRow{Line: line, ExportID: 2, FileID: id, FileDate: date, HasFileDate: true,
 			Retention: ret, KeepUntil: keep, HasKeepUntil: true}
 	}
 	tests := []struct {
 		name     string
 		in       string
-		want     []store.LifespanRow
+		want     []store.RetentionRow
 		problems []string // substrings, one per problem, in order
 		err      error
 	}{
 		{name: "periods, dates, forever and blanks",
 			in: head + "1,2,/d,a,1,m,2023-03-14,7Y,\n2,2,/d,b,1,m,,,\n3,2,/d,c,1,m,,Forever,\n4,2,/d,e,1,m,,2015-06-30,\n",
-			want: []store.LifespanRow{r(2, 1, "2023-03-14", "7y", ""), r(3, 2, "", "", ""), r(4, 3, "", "forever", ""),
+			want: []store.RetentionRow{r(2, 1, "2023-03-14", "7y", ""), r(3, 2, "", "", ""), r(4, 3, "", "forever", ""),
 				r(5, 4, "", "2015-06-30", "")}},
 		{name: "keep_until cells are passed on for the register to compare",
 			in:   head + "1,2,/d,a,1,m,2023-03-14,7y, 2030-03-14 \n2,2,/d,b,1,m,,forever,FOREVER\n",
-			want: []store.LifespanRow{r(2, 1, "2023-03-14", "7y", "2030-03-14"), r(3, 2, "", "forever", "forever")}},
+			want: []store.RetentionRow{r(2, 1, "2023-03-14", "7y", "2030-03-14"), r(3, 2, "", "forever", "forever")}},
 		{name: "a keep_until a spreadsheet rewrote is refused with the format hint",
 			in:       head + "1,2,/d,a,1,m,2023-03-14,7y,3/14/2030\n",
 			problems: []string{`keep_until "3/14/2030" is not a date: use YYYY-MM-DD, for example 2023-03-14 (a spreadsheet may have rewritten it; format the column as text)`}},
 		{name: "empty spreadsheet rows are skipped",
 			in:   head + "1,2,/d,a,1,m,,2027-01-01,\n,,,,,,,,\n\n",
-			want: []store.LifespanRow{r(2, 1, "", "2027-01-01", "")}},
+			want: []store.RetentionRow{r(2, 1, "", "2027-01-01", "")}},
 		{name: "semicolons, BOM, CRLF, reordered and extra columns, no keep_until or file_date",
 			in: "\ufeffretention;notes;export;id\r\n2027-02-03;mine;5;1\r\n;;5;2\r\n",
-			want: []store.LifespanRow{
+			want: []store.RetentionRow{
 				{Line: 2, ExportID: 5, FileID: 1, Retention: "2027-02-03"},
 				{Line: 3, ExportID: 5, FileID: 2},
 			}},
 		{name: "tabs", in: "id\texport\tfile_date\tretention\n1\t2\t2023-01-01\t10y\n",
-			want: []store.LifespanRow{{Line: 2, ExportID: 2, FileID: 1, FileDate: "2023-01-01", HasFileDate: true,
+			want: []store.RetentionRow{{Line: 2, ExportID: 2, FileID: 1, FileDate: "2023-01-01", HasFileDate: true,
 				Retention: "10y"}}},
 		{name: "a quoted name with commas and a newline keeps the line numbers",
 			in:   head + "1,2,/d,\"a,b\nc\",1,m,,,\n2,2,/d,q,1,m,,2027-01-01,\n",
-			want: []store.LifespanRow{r(2, 1, "", "", ""), r(4, 2, "", "2027-01-01", "")}},
+			want: []store.RetentionRow{r(2, 1, "", "", ""), r(4, 2, "", "2027-01-01", "")}},
 		{name: "bad rows are refused one by one",
 			in: head +
 				"x,2,/d,a,1,m,,7y,\n" +
@@ -252,23 +252,23 @@ func TestReadCSV(t *testing.T) {
 				"5,2,/d,a,1,m,14/03/2023,7y,\n" +
 				"6,2,/d,a,1,m,,,,2027-01-01\n" +
 				"7,2,/d,a,1,m,2023-01-01,7y,\n",
-			want: []store.LifespanRow{r(9, 7, "2023-01-01", "7y", "")},
+			want: []store.RetentionRow{r(9, 7, "2023-01-01", "7y", "")},
 			problems: []string{"not a file ID", "not an export number", `retention "30/06/2027" is not a retention`,
 				`retention "2027-02-29" is not a retention`, `retention "+1y" is not a retention`,
 				`file_date "14/03/2023" is not a date`, `"2027-01-01" is outside the columns`}},
 		{name: "a file listed twice is refused both times",
 			in:       head + "1,2,/d,a,1,m,,1y,\n1,2,/d,a,1,m,,2y,\n3,2,/d,c,1,m,,,\n",
-			want:     []store.LifespanRow{r(4, 3, "", "", "")},
+			want:     []store.RetentionRow{r(4, 3, "", "", "")},
 			problems: []string{"more than once", "more than once"}},
 		{name: "an old review CSV", in: "id,export,reason,path,size,modified,review_date,action,retain_until\n",
 			err: ErrOldCSV},
-		{name: "an old lifespan CSV", in: "id,export,directory,name,size,modified,keep_until\n", err: ErrOldCSV},
+		{name: "an old retention CSV", in: "id,export,directory,name,size,modified,keep_until\n", err: ErrOldCSV},
 		{name: "a current CSV whose retention column was deleted",
 			in: "id,export,directory,name,size,modified,file_date,keep_until\n", err: ErrNoRetention},
 		{name: "a current CSV whose retention column was renamed",
 			in: "id,export,directory,name,size,modified,file_date,keep for,keep_until\n", err: ErrNoRetention},
-		{name: "not a lifespan CSV", in: "a,b,c\n1,2,3\n", err: ErrNotLifespanCSV},
-		{name: "empty file", in: "", err: ErrNotLifespanCSV},
+		{name: "not a retention CSV", in: "a,b,c\n1,2,3\n", err: ErrNotRetentionCSV},
+		{name: "empty file", in: "", err: ErrNotRetentionCSV},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

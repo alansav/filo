@@ -134,7 +134,7 @@ func TestUsageAndHelp(t *testing.T) {
 		{"help export", []string{"help", "export"}, ExitOK, "keep_until", ""},
 		{"scan no longer takes root settings", []string{"--db", db, "scan", "--include-hidden"}, ExitUsage, "",
 			"include-hidden"},
-		{"review is gone", []string{"--db", db, "review"}, ExitUsage, "", "export lifespan and update"},
+		{"review is gone", []string{"--db", db, "review"}, ExitUsage, "", "export retention and update"},
 		{"unknown roots command", []string{"--db", db, "roots", "bogus"}, ExitUsage, "", `unknown roots command "bogus"`},
 		{"roots set without a dir", []string{"--db", db, "roots", "set"}, ExitUsage, "", "exactly one DIR"},
 		{"roots set both ways", []string{"--db", db, "roots", "set", "x", "--include-hidden", "--skip-hidden"},

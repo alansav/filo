@@ -445,7 +445,7 @@ func TestAbsorbKeepsHistoryAndReviews(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res, err := s.UpdateLifespan(ctx, []LifespanRow{{Line: 2, ExportID: exportID, FileID: kd["tax/2024.pdf"].FileID,
+	if res, err := s.UpdateRetention(ctx, []RetentionRow{{Line: 2, ExportID: exportID, FileID: kd["tax/2024.pdf"].FileID,
 		Retention: "2032-01-01"}}, now, "2026-11-11", "r.csv", false, nil); err != nil || res.Set != 1 {
 		t.Fatalf("update: %+v, %v", res, err)
 	}

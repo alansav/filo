@@ -54,8 +54,8 @@ func TestQuotedTildeRefused(t *testing.T) {
 		{"roots add", nil, []string{"--db", db, "roots", "add", "~/docs"}, "DIR ~/docs"},
 		{"roots set", nil, []string{"--db", db, "roots", "set", "~/docs"}, "DIR ~/docs"},
 		{"scan", nil, []string{"--db", db, "scan", "~/docs"}, "DIR ~/docs"},
-		{"export dir", nil, []string{"--db", db, "export", "lifespan", "~/docs", "-o", "r.csv"}, "DIR ~/docs"},
-		{"export -o", nil, []string{"--db", db, "export", "lifespan", "-o", "~/r.csv"}, "-o ~/r.csv"},
+		{"export dir", nil, []string{"--db", db, "export", "retention", "~/docs", "-o", "r.csv"}, "DIR ~/docs"},
+		{"export -o", nil, []string{"--db", db, "export", "retention", "-o", "~/r.csv"}, "-o ~/r.csv"},
 		{"update", nil, []string{"--db", db, "update", "~/r.csv"}, "FILE ~/r.csv"},
 	}
 	for _, tt := range tests {

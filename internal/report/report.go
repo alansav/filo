@@ -138,7 +138,7 @@ func (r Report) WriteText(w io.Writer) error {
 		for _, g := range r.UndecidedIn {
 			p.line("  %8s  %10s  %s", Count(g.Files), Size(g.Bytes), g.Dir)
 		}
-		p.line("  set retentions with: filo export lifespan [DIR] -o FILE, then filo update FILE")
+		p.line("  set retentions with: filo export retention [DIR] -o FILE, then filo update FILE")
 	}
 	if n := r.Status[store.StatusKept]; n > 0 {
 		p.line("Kept until a later date: %s", Plural(n, "file", "files"))

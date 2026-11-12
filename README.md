@@ -106,7 +106,7 @@ Unreadable files: 1
 ## Setting retentions
 
 ```sh
-filo export lifespan ~/Documents -o docs.csv    # every file under ~/Documents, with its retention
+filo export retention ~/Documents -o docs.csv    # every file under ~/Documents, with its retention
 # open docs.csv in a spreadsheet, fill in retention, save it as CSV
 filo update docs.csv                            # apply what you changed
 filo delete                                     # list the files past their retention (deletes nothing yet)
@@ -158,7 +158,7 @@ deleting each one.
 | `filo roots set DIR` | Replace a root's settings. |
 | `filo scan [DIR]` | Scan `DIR` (a directory inside a root: a partial scan), or every root if omitted. |
 | `filo report [--top N]` | Show the overview; `--top` sets how many entries each list shows (default 10). |
-| `filo export lifespan [DIR] -o FILE` | Write every file under `DIR` (or every root) with its retention, as CSV. |
+| `filo export retention [DIR] -o FILE` | Write every file under `DIR` (or every root) with its retention, as CSV. |
 | `filo update FILE [--dry-run]` | Apply the retentions edited in an exported CSV. |
 | `filo delete` | List the files past their retention. Deletes nothing in this version. |
 | `filo help [COMMAND]` | Show usage. `-h` works on every command. |
@@ -306,7 +306,7 @@ bin/filo --db /tmp/f.db scan
 bin/filo --db /tmp/f.db report
 scripts/testtree.sh unlock /tmp/FiloTest
 bin/filo --db /tmp/f.db scan        # nothing new, changed or missing; the unreadable flag clears
-bin/filo --db /tmp/f.db export lifespan /tmp/FiloTest/notes -o /tmp/l.csv
+bin/filo --db /tmp/f.db export retention /tmp/FiloTest/notes -o /tmp/l.csv
 # fill in retention in /tmp/l.csv
 bin/filo --db /tmp/f.db update /tmp/l.csv
 bin/filo --db /tmp/f.db delete

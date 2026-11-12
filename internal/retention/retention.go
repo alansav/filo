@@ -1,7 +1,7 @@
-// Package lifespan reads and writes the lifespan CSV: every present file with its file_date, retention and the date it
+// Package retention reads and writes the retention CSV: every present file with its file_date, retention and the date it
 // is kept until, works out keep_until from a retention, and reads dates from file names. The register
 // side (listing files, recording exports, applying updates) is in package store.
-package lifespan
+package retention
 
 import (
 	"bytes"
@@ -222,21 +222,21 @@ type Problem struct {
 
 // Parsed is what ReadCSV found.
 type Parsed struct {
-	Rows     []store.LifespanRow // every readable row; the register decides which changed
+	Rows     []store.RetentionRow // every readable row; the register decides which changed
 	Problems []Problem
 }
 
 var (
-	// ErrNotLifespanCSV means the file has no header with the columns the update needs.
-	ErrNotLifespanCSV = errors.New("not a filo lifespan CSV: the header needs id, export and retention columns")
-	// ErrOldCSV means the file is a review or lifespan CSV from an older filo.
-	ErrOldCSV = errors.New("this CSV is from an older filo; export again with: filo export lifespan")
-	// ErrNoRetention means a current lifespan CSV lost its retention column (deleted or renamed in the spreadsheet).
+	// ErrNotRetentionCSV means the file has no header with the columns the update needs.
+	ErrNotRetentionCSV = errors.New("not a filo retention CSV: the header needs id, export and retention columns")
+	// ErrOldCSV means the file is a review or retention CSV from an older filo.
+	ErrOldCSV = errors.New("this CSV is from an older filo; export again with: filo export retention")
+	// ErrNoRetention means a current retention CSV lost its retention column (deleted or renamed in the spreadsheet).
 	ErrNoRetention = errors.New("the CSV has no retention column, which filo update needs; put it back with that " +
 		"name, or export again")
 )
 
-// ReadCSV reads an edited lifespan CSV. It accepts what spreadsheets do to a file: a byte order mark, CRLF line ends,
+// ReadCSV reads an edited retention CSV. It accepts what spreadsheets do to a file: a byte order mark, CRLF line ends,
 // ';' or tab as the separator, columns moved or added, and empty rows. A row listed more than once is refused every
 // time it appears, rather than guessing which one is meant.
 func ReadCSV(r io.Reader) (Parsed, error) {
@@ -284,7 +284,7 @@ func ReadCSV(r io.Reader) (Parsed, error) {
 		case old:
 			return p, ErrOldCSV
 		}
-		return p, ErrNotLifespanCSV
+		return p, ErrNotRetentionCSV
 	}
 
 	seen := map[[2]int64][]int{} // (export, id) -> indexes into p.Rows
@@ -326,7 +326,7 @@ func ReadCSV(r io.Reader) (Parsed, error) {
 			bad("%q is outside the columns; put it under file_date or retention", v)
 			continue
 		}
-		row := store.LifespanRow{Line: line, ExportID: ex, FileID: id}
+		row := store.RetentionRow{Line: line, ExportID: ex, FileID: id}
 		if row.Retention, err = ParseRetention(get("retention")); err != nil {
 			bad("retention %v", err)
 			continue

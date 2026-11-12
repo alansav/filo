@@ -21,7 +21,7 @@ func setNow(t *testing.T, at time.Time) {
 	t.Cleanup(func() { now = old })
 }
 
-// editCSV rewrites an exported lifespan CSV: edit gets each row by column name.
+// editCSV rewrites an exported retention CSV: edit gets each row by column name.
 func editCSV(t *testing.T, path string, edit func(row map[string]string)) {
 	t.Helper()
 	data, err := os.ReadFile(path)
@@ -73,7 +73,7 @@ type terminalInput struct{ *strings.Reader }
 
 func (terminalInput) IsTerminal() bool { return true }
 
-func TestLifespanRoundTrip(t *testing.T) {
+func TestRetentionRoundTrip(t *testing.T) {
 	skipWindows(t)
 	sameDevice(t, nil)
 	day := func(d int) time.Time { return time.Date(2026, 11, d, 12, 0, 0, 0, time.Local) }
@@ -147,16 +147,16 @@ func TestLifespanRoundTrip(t *testing.T) {
 
 	filo(ExitOK, "", false, "roots", "add", root)
 	contains("report", filo(ExitOK, "", false, "report").stdout,
-		"Needing a retention: 4 files (no retention 4)", root+"/docs", "filo export lifespan")
+		"Needing a retention: 4 files (no retention 4)", root+"/docs", "filo export retention")
 
 	// Export: -o is required, and an existing file is never overwritten.
 	r1 := filepath.Join(work, "r1.csv")
-	filo(ExitUsage, "", false, "export", "lifespan")
+	filo(ExitUsage, "", false, "export", "retention")
 	filo(ExitUsage, "", false, "export", "-o", r1)
-	contains("export", filo(ExitOK, "", false, "export", "lifespan", "-o", r1).stdout,
+	contains("export", filo(ExitOK, "", false, "export", "retention", "-o", r1).stdout,
 		"Exported 4 files to "+r1+" (export 1), 4 without a retention.",
 		"file_date was filled in from the name of 1 file", "filo update "+r1)
-	contains("export again", filo(ExitError, "", false, "export", "lifespan", "-o", r1).stderr, "already exists")
+	contains("export again", filo(ExitError, "", false, "export", "retention", "-o", r1).stderr, "already exists")
 	contains("CSV", string(mustRead(t, r1)), "id,export,directory,name,size,modified,file_date,retention,keep_until\n",
 		","+root+"/docs,2023-03 invoice.pdf,1,", ",2023-03-31,,\n", // file_date read from the name
 		","+root+"/📷 Pictures,🏖️ beach.jpg,4,")
@@ -199,7 +199,7 @@ func TestLifespanRoundTrip(t *testing.T) {
 	// A day later, the re-export shows what was set, with keep_until worked out.
 	setNow(t, day(12))
 	r2 := filepath.Join(work, "r2.csv")
-	filo(ExitOK, "", false, "export", "lifespan", "-o", r2)
+	filo(ExitOK, "", false, "export", "retention", "-o", r2)
 	contains("re-export", string(mustRead(t, r2)), ",2026-01-15,7y,2033-01-15\n", ",,forever,forever\n",
 		",,2027-01-01,2027-01-01\n", ",2023-03-31,,\n")
 
@@ -219,7 +219,7 @@ func TestLifespanRoundTrip(t *testing.T) {
 
 	// A file changed since the export is refused; once past its retention, a changed file needs a new one.
 	r3 := filepath.Join(work, "r3.csv")
-	filo(ExitOK, "", false, "export", "lifespan", in("docs"), "-o", r3)
+	filo(ExitOK, "", false, "export", "retention", in("docs"), "-o", r3)
 	write("docs/c.txt", "changed")
 	write("docs/2023-03 invoice.pdf", "changed too")
 	filo(ExitOK, "", false, "scan")
@@ -245,7 +245,7 @@ func mustRead(t *testing.T, path string) []byte {
 	return b
 }
 
-func TestUpdateNotALifespanCSV(t *testing.T) {
+func TestUpdateNotARetentionCSV(t *testing.T) {
 	dir := t.TempDir()
 	env := map[string]string{"FILO_DB": filepath.Join(dir, "filo.db")}
 	old := filepath.Join(dir, "old.csv")
@@ -253,7 +253,7 @@ func TestUpdateNotALifespanCSV(t *testing.T) {
 		t.Fatal(err)
 	}
 	r := run(t, context.Background(), env, "update", old)
-	if r.code != ExitError || !strings.Contains(r.stderr, "from an older filo; export again with: filo export lifespan") {
+	if r.code != ExitError || !strings.Contains(r.stderr, "from an older filo; export again with: filo export retention") {
 		t.Errorf("code %d\n%s", r.code, r.stderr)
 	}
 }

@@ -213,7 +213,7 @@ func TestFilesStatusAndScope(t *testing.T) {
 	}
 }
 
-func TestUpdateLifespan(t *testing.T) {
+func TestUpdateRetention(t *testing.T) {
 	e := newReviewEnv(t)
 	const today = "2026-11-11"
 	now := time.Date(2026, 11, 11, 12, 0, 0, 0, time.UTC)
@@ -228,13 +228,13 @@ func TestUpdateLifespan(t *testing.T) {
 	k = e.known()
 	id := func(p string) int64 { return k[p].FileID }
 	// row builds a CSV row with a file_date column and no keep_until column.
-	row := func(line int, ex int64, file, date, ret string) LifespanRow {
-		return LifespanRow{Line: line, ExportID: ex, FileID: id(file), FileDate: date, HasFileDate: true, Retention: ret}
+	row := func(line int, ex int64, file, date, ret string) RetentionRow {
+		return RetentionRow{Line: line, ExportID: ex, FileID: id(file), FileDate: date, HasFileDate: true, Retention: ret}
 	}
 
 	// Give dated a retention first, so the export carries it.
 	ex0, _ := e.export(today, now.Add(-time.Hour))
-	if res, err := e.s.UpdateLifespan(e.ctx, []LifespanRow{row(2, ex0, "dated", "2020-05-01", "10y")},
+	if res, err := e.s.UpdateRetention(e.ctx, []RetentionRow{row(2, ex0, "dated", "2020-05-01", "10y")},
 		now.Add(-time.Hour), today, "first.csv", false, nil); err != nil || res.Set != 1 {
 		t.Fatalf("first update = %+v, %v", res, err)
 	}
@@ -254,8 +254,8 @@ func TestUpdateLifespan(t *testing.T) {
 
 	typed := row(13, exportID, "typed", "", "2027-01-01")
 	typed.HasKeepUntil, typed.KeepUntil = true, "2027-06-30" // a date typed in the display column
-	noFileDateColumn := LifespanRow{Line: 14, ExportID: exportID, FileID: id("dated"), Retention: "10y"}
-	rows := []LifespanRow{
+	noFileDateColumn := RetentionRow{Line: 14, ExportID: exportID, FileID: id("dated"), Retention: "10y"}
+	rows := []RetentionRow{
 		row(2, exportID, "keep", "", "2027-11-11"),
 		row(3, exportID, "edited", "", "2027-11-11"),
 		row(4, exportID, "flagged", "", "2027-11-11"), // unreadable: a retention is fine
@@ -275,7 +275,7 @@ func TestUpdateLifespan(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	dry, err := e.s.UpdateLifespan(e.ctx, rows, now, today, "dry.csv", true, nil)
+	dry, err := e.s.UpdateRetention(e.ctx, rows, now, today, "dry.csv", true, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -287,7 +287,7 @@ func TestUpdateLifespan(t *testing.T) {
 		t.Errorf("dry run wrote: before %v after %v", before, after)
 	}
 
-	res, err := e.s.UpdateLifespan(e.ctx, rows, now, today, "lifespan.csv", false, nil)
+	res, err := e.s.UpdateRetention(e.ctx, rows, now, today, "retention.csv", false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -339,12 +339,12 @@ func TestUpdateLifespan(t *testing.T) {
 
 	// The same rows again: nothing to do. An edited row from the same export replaces the retention, and a new
 	// file_date works keep_until out again.
-	res, err = e.s.UpdateLifespan(e.ctx, rows[:1], now, today, "lifespan.csv", false, nil)
+	res, err = e.s.UpdateRetention(e.ctx, rows[:1], now, today, "retention.csv", false, nil)
 	if err != nil || res.Set != 0 || res.Unchanged != 1 {
 		t.Errorf("same rows again = %+v, %v; want 1 unchanged", res, err)
 	}
-	res, err = e.s.UpdateLifespan(e.ctx, []LifespanRow{row(2, exportID, "keep", "", "2028-11-11"),
-		row(8, exportID, "past", "2024-03-31", "7y")}, now.Add(time.Minute), today, "lifespan.csv", false, nil)
+	res, err = e.s.UpdateRetention(e.ctx, []RetentionRow{row(2, exportID, "keep", "", "2028-11-11"),
+		row(8, exportID, "past", "2024-03-31", "7y")}, now.Add(time.Minute), today, "retention.csv", false, nil)
 	if err != nil || res.Set != 2 || len(res.NowPast) != 0 {
 		t.Errorf("re-edited rows = %+v, %v; want both set, none past", res, err)
 	}
@@ -357,7 +357,7 @@ func TestUpdateLifespan(t *testing.T) {
 		AND file_id IN (?, ?)`, exportID, id("nodate"), id("untouched")); err != nil {
 		t.Fatal(err)
 	}
-	res, err = e.s.UpdateLifespan(e.ctx, []LifespanRow{row(2, exportID, "nodate", "2019-01-01", "forever"),
+	res, err = e.s.UpdateRetention(e.ctx, []RetentionRow{row(2, exportID, "nodate", "2019-01-01", "forever"),
 		row(3, exportID, "untouched", "2019-01-01", "7y")}, now.Add(2*time.Minute), today, "s.csv", false, nil)
 	if err != nil || res.Set != 2 {
 		t.Errorf("suggested file_dates = %+v, %v", res, err)
@@ -370,9 +370,9 @@ func TestUpdateLifespan(t *testing.T) {
 	}
 
 	// A blank retention where one is stored is a clear: only when confirmed.
-	clear := []LifespanRow{row(2, exportID, "dated", "2020-05-01", "")}
+	clear := []RetentionRow{row(2, exportID, "dated", "2020-05-01", "")}
 	var asked []Clear
-	res, err = e.s.UpdateLifespan(e.ctx, clear, now, today, "c.csv", false, func(cs []Clear) bool {
+	res, err = e.s.UpdateRetention(e.ctx, clear, now, today, "c.csv", false, func(cs []Clear) bool {
 		asked = cs
 		return false
 	})
@@ -383,10 +383,10 @@ func TestUpdateLifespan(t *testing.T) {
 		asked[0].Path != filepath.Join(e.root.Path, "dated") {
 		t.Errorf("asked about %+v", asked)
 	}
-	if res, err = e.s.UpdateLifespan(e.ctx, clear, now, today, "c.csv", false, nil); err != nil || res.ClearsSkipped != 1 {
+	if res, err = e.s.UpdateRetention(e.ctx, clear, now, today, "c.csv", false, nil); err != nil || res.ClearsSkipped != 1 {
 		t.Errorf("clear with no one to ask = %+v, %v; want it skipped", res, err)
 	}
-	if res, err = e.s.UpdateLifespan(e.ctx, clear, now, today, "c.csv", true, func([]Clear) bool {
+	if res, err = e.s.UpdateRetention(e.ctx, clear, now, today, "c.csv", true, func([]Clear) bool {
 		t.Error("asked in a dry run")
 		return true
 	}); err != nil || res.Cleared != 1 {
@@ -395,7 +395,7 @@ func TestUpdateLifespan(t *testing.T) {
 	if got := e.statuses(today)["dated"]; got != StatusKept {
 		t.Errorf("dated after declined clears: %q, want kept", got)
 	}
-	res, err = e.s.UpdateLifespan(e.ctx, clear, now, today, "c.csv", false, func([]Clear) bool { return true })
+	res, err = e.s.UpdateRetention(e.ctx, clear, now, today, "c.csv", false, func([]Clear) bool { return true })
 	if err != nil || res.Cleared != 1 {
 		t.Errorf("confirmed clear = %+v, %v", res, err)
 	}
@@ -406,12 +406,12 @@ func TestUpdateLifespan(t *testing.T) {
 	// A newer export's retention wins; the older export can no longer override it.
 	later := now.Add(time.Hour)
 	export2, _ := e.export(today, later)
-	if _, err := e.s.UpdateLifespan(e.ctx, []LifespanRow{row(2, export2, "untouched", "2019-01-01", "2028-01-01")},
+	if _, err := e.s.UpdateRetention(e.ctx, []RetentionRow{row(2, export2, "untouched", "2019-01-01", "2028-01-01")},
 		later, today, "second.csv", false, nil); err != nil {
 		t.Fatal(err)
 	}
-	res, err = e.s.UpdateLifespan(e.ctx, []LifespanRow{row(2, exportID, "untouched", "2019-01-01", "2029-01-01")},
-		later.Add(time.Hour), today, "lifespan.csv", false, nil)
+	res, err = e.s.UpdateRetention(e.ctx, []RetentionRow{row(2, exportID, "untouched", "2019-01-01", "2029-01-01")},
+		later.Add(time.Hour), today, "retention.csv", false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

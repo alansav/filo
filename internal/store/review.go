@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-// Status is where a present file stands in its lifespan. A file has one status: the first that applies, in the
+// Status is where a present file stands in its retention. A file has one status: the first that applies, in the
 // order of Statuses.
 type Status string
 
@@ -40,7 +40,7 @@ func (s Status) NeedsDecision() bool {
 	return s == StatusUnreadable || s == StatusPossibleMove || s == StatusUndated || s == StatusChanged
 }
 
-// FileItem is one present file with its lifespan.
+// FileItem is one present file with its retention.
 type FileItem struct {
 	FileID      int64
 	RootPath    string // absolute
@@ -230,8 +230,8 @@ func (s *Store) RecordExport(ctx context.Context, path string, now time.Time, it
 	return id, nil
 }
 
-// LifespanRow is one row of an edited lifespan CSV.
-type LifespanRow struct {
+// RetentionRow is one row of an edited retention CSV.
+type RetentionRow struct {
 	Line         int // in the CSV, for messages
 	ExportID     int64
 	FileID       int64
@@ -275,11 +275,11 @@ type UpdateResult struct {
 	Refusals      []Refusal
 }
 
-// UpdateLifespan checks each row against the register and applies the ones that pass, in one transaction. A blank
+// UpdateRetention checks each row against the register and applies the ones that pass, in one transaction. A blank
 // retention where one is stored clears it, but only if confirm (given every such row, once) returns true; confirm is
 // not called in a dry run, or when there is nothing to clear. today is the local date (YYYY-MM-DD); detail names the
 // source for the history.
-func (s *Store) UpdateLifespan(ctx context.Context, rows []LifespanRow, now time.Time, today, detail string,
+func (s *Store) UpdateRetention(ctx context.Context, rows []RetentionRow, now time.Time, today, detail string,
 	dryRun bool, confirm func([]Clear) bool) (UpdateResult, error) {
 	var res UpdateResult
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -289,7 +289,7 @@ func (s *Store) UpdateLifespan(ctx context.Context, rows []LifespanRow, now time
 	defer tx.Rollback()
 
 	type ok struct {
-		r         LifespanRow
+		r         RetentionRow
 		c         checked
 		afterScan sql.NullInt64
 	}
@@ -398,8 +398,8 @@ type checked struct {
 	storedRetention, storedKeepUntil string
 }
 
-// checkRow applies the update's rules to one row (design section 2, Lifespan CSV, second shape).
-func checkRow(ctx context.Context, tx *sql.Tx, r LifespanRow, ex exportInfo) (checked, error) {
+// checkRow applies the update's rules to one row (design section 2, Retention CSV, second shape).
+func checkRow(ctx context.Context, tx *sql.Tx, r RetentionRow, ex exportInfo) (checked, error) {
 	var c checked
 	if !ex.found {
 		c.refusal = fmt.Sprintf("export %d is not in this register", r.ExportID)

@@ -2,10 +2,10 @@
 
 Status: iteration 1 (scan, register, report) is done: it passes its test-tree criterion, and on 2026-11-11 a real home
 directory (5,582 files, about 3.7 GB) scanned completely and rescanned quickly, reporting only real changes. Iteration
-2 was reshaped on 2026-11-12 from a review queue into one keep-until date per file (the lifespan CSV, `filo export
-lifespan` and `filo update`), with root settings stored on the root; it passes its test-tree criterion, and setting
+2 was reshaped on 2026-11-12 from a review queue into one keep-until date per file (the retention CSV, `filo export
+retention` and `filo update`), with root settings stored on the root; it passes its test-tree criterion, and setting
 dates on the real home directory is still to be done. A C# prototype exists as a reference spec only; its schema and
-reconcile rules were carried over. The second shape of the lifespan CSV (`file_date`, `retention`, schema version
+reconcile rules were carried over. The second shape of the retention CSV (`file_date`, `retention`, schema version
 5) is implemented. Iteration 3 (deletion) was designed on 2026-11-12 and is not implemented yet; it is marked as such
 below. Last updated:
 2026-11-12.
@@ -196,7 +196,7 @@ Principles. These are not negotiable:
 
 ### Lifespan (iteration 2)
 Decided 2026-11-12, replacing the review queue, review dates, actions and retain-until floors of 2026-11-11. The
-lifespan CSV and `filo update` write only the register and the CSV file the user names; they never touch the files.
+retention CSV and `filo update` write only the register and the CSV file the user names; they never touch the files.
 
 - **Forever** (decided 2026-11-12): the retention (and so `keep_until`) may be the word `forever` instead of a date, for files kept
   indefinitely. It is stored as that word, never as a far-off date such as 9999-12-31 (which would look like a
@@ -232,7 +232,7 @@ lifespan CSV and `filo update` write only the register and the CSV file the user
   they are in `filo report`. On a large system, export one directory at a time so a spreadsheet can open it.
 - **Columns**, in order: `id` (file row ID), `export` (export number), `directory` (absolute), `name`, `size`
   (bytes), `modified` (local time; a cue to when the file was last worked on), `file_date`, `retention`, `keep_until`
-  (see Lifespan CSV, second shape). The name is a column of its own because file names often carry dates. Left out on purpose: a reason (one purpose only), an action (a
+  (see Retention CSV, second shape). The name is a column of its own because file names often carry dates. Left out on purpose: a reason (one purpose only), an action (a
   delete column in a spreadsheet is unsafe: a one-column sort or a fill-down puts it on the wrong rows), and creation
   or first-seen dates (not reliable: many filesystems do not record a birth time, and a copy, restore or sync resets
   it). `filo update` finds columns by header name and reads only `id`, `export`, `file_date` and `retention` (and
@@ -268,14 +268,14 @@ lifespan CSV and `filo update` write only the register and the CSV file the user
   newer decision); a retention period has no `file_date`; `keep_until` was changed; the same (export, id) appears
   more than once (every copy is refused). A deleted row changes nothing. The applied rows go in one transaction;
   `--dry-run` checks everything and writes nothing. The exit code is 1 if any row was refused. A CSV without a
-  `retention` header is refused as a whole: with a pointer to `filo export lifespan` if it is a review CSV or a
-  lifespan CSV from before schema version 5, or, if it has a `file_date` column (a current CSV whose `retention`
+  `retention` header is refused as a whole: with a pointer to `filo export retention` if it is a review CSV or a
+  retention CSV from before schema version 5, or, if it has a `file_date` column (a current CSV whose `retention`
   column was deleted or renamed), saying the `retention` column is missing.
 - **Bulk dates**: set in the spreadsheet (filter on `directory`, fill down). `filo review set-date` was dropped on
   2026-11-12, at least for now.
 - The hash at export is stored; it is **re-checked at action time** (iteration 3) against `files.reviewed_hash`.
 
-### Lifespan CSV, second shape (decided and implemented 2026-11-12)
+### Retention CSV, second shape (decided and implemented 2026-11-12)
 Retention is usually counted from a document's own date ("keep tax records for seven years"), not from today or from
 when the file reached the disk. So the CSV gains a date to count from and a retention that can be a period. This
 replaced the single `keep_until` input of the first shape; the rest of the Lifespan section (one purpose, every present file,
@@ -388,7 +388,8 @@ holds and several checks at the moment of acting.
   subcommands. (`restore` was dropped on 2026-11-12: a file restored from a backup comes back as a new file.)
   (Reshaped 2026-11-12: `review` and its subcommands `set-date`, `export` and
   `import` were replaced by `export lifespan` and `update`; "update" says that only existing files change, which
-  "import" did not.)
+  "import" did not. `export lifespan` was renamed `export retention` the same day: the CSV's word names what is
+  set in it, and the lifespan CSV became the retention CSV (package `internal/retention`).)
 - **Keep flags and options to a minimum** (2026-11-11). Prefer a safe default and clear output over a flag; prefer
   doing the obvious thing and saying what was done over asking.
 - **Prompts only in a terminal** (2026-11-12, replacing "no interactive prompts"). A command asks only where a person
@@ -402,7 +403,7 @@ holds and several checks at the moment of acting.
   the root's settings; with no DIR, every root in turn, each in its own transaction. A root that fails (for example
   unmounted) is reported and the others are still scanned. `--workers` is 1–64, default 4.
 - `filo report [--top N]`: see section 4.
-- `filo export lifespan [DIR] -o FILE` and `filo update FILE [--dry-run]`: see Lifespan. The word after `export`
+- `filo export retention [DIR] -o FILE` and `filo update FILE [--dry-run]`: see Lifespan. The word after `export`
   names the CSV, so a later CSV is a new word, not a new command; `update` tells the kind from the CSV's header.
 - `filo delete`: lists the files past their keep-until date. In iteration 3, `filo delete [DIR] [-y]` deletes them
   (see Disposal).
@@ -562,11 +563,11 @@ its own identity. Reclaimable space is size × (copies − 1) per group. Paths a
    edit, delete, duplicate, symlink, unreadable directory, unreadable file) is reported exactly on rescan
    (`scripts/testtree.sh`, checked by the walk and reconcile tests); a first scan of the real home
    directory completes and shows the size of the backlog; a second scan takes seconds to a couple of minutes.
-2. **Lifespan: one keep-until date per file**, set through the lifespan CSV (reshaped 2026-11-12 from a review
+2. **Lifespan: one keep-until date per file**, set through the retention CSV (reshaped 2026-11-12 from a review
    queue). Done when: on a test tree, an export, edit and update round trip records exactly the dates set, refuses
    with one clear line each a changed file, an impossible or ambiguous date, a stale export and an added row; a
    cleared date asks first; a file past its date is listed by `filo delete`, and once edited needs a new date instead
-   (`TestLifespanRoundTrip` in `internal/cli`, plus the store and lifespan package tests). The second shape of the
+   (`TestRetentionRoundTrip` in `internal/cli`, plus the store and retention package tests). The second shape of the
    CSV (`file_date`, `retention`, display-only `keep_until`, dates from file names, past dates allowed; schema
    version 5) is done, and the round trip covers periods, `file_date` from names, the display column and clears.
    Still to do: on the real home directory, every file gets a retention or `forever`, a directory at a time (filter

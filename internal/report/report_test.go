@@ -77,7 +77,7 @@ func TestWriteTextLifespan(t *testing.T) {
 			"Needing a retention: 1,202 files (no retention 1,200, past retention, changed since it was set 2)",
 			"  directories with the most (to depth 2):",
 			"     1,202     2.0 KiB  /r/docs",
-			"  set retentions with: filo export lifespan [DIR] -o FILE, then filo update FILE",
+			"  set retentions with: filo export retention [DIR] -o FILE, then filo update FILE",
 			"Past their retention: 1 file; see filo delete",
 		}},
 	}

@@ -14,18 +14,18 @@ import (
 	"strings"
 	"time"
 
-	"github.com/alansav/filo/internal/lifespan"
 	"github.com/alansav/filo/internal/report"
+	"github.com/alansav/filo/internal/retention"
 	"github.com/alansav/filo/internal/store"
 )
 
 // now is the clock for keep_until dates; tests replace it.
 var now = time.Now
 
-func today() string { return lifespan.Today(now().Local()) }
+func today() string { return retention.Today(now().Local()) }
 
 // exportKinds are the CSVs filo can export. Each names what the CSV is for.
-var exportKinds = []string{"lifespan"}
+var exportKinds = []string{"retention"}
 
 // filterFor maps an optional DIR to a filter, and says where it points.
 func filterFor(ctx context.Context, s *store.Store, pos []string) (store.Filter, string, error) {
@@ -52,14 +52,14 @@ func (e *env) export(ctx context.Context, dbBefore string, args []string) error 
 		return err
 	}
 	if len(pos) == 0 {
-		return usageError{"export needs what to export: filo export lifespan [DIR] -o FILE"}
+		return usageError{"export needs what to export: filo export retention [DIR] -o FILE"}
 	}
 	if !slices.Contains(exportKinds, pos[0]) {
-		return usageError{fmt.Sprintf("unknown export %q; the one export is lifespan", pos[0])}
+		return usageError{fmt.Sprintf("unknown export %q; the one export is retention", pos[0])}
 	}
 	pos = pos[1:]
 	if len(pos) > 1 {
-		return usageError{"export lifespan takes at most one DIR"}
+		return usageError{"export retention takes at most one DIR"}
 	}
 	if *out == "" {
 		return usageError{"export needs -o FILE: the CSV is written to a file, never to the terminal"}
@@ -94,7 +94,7 @@ func (e *env) export(ctx context.Context, dbBefore string, args []string) error 
 	// Fill in a blank file_date from the file name where it holds one unambiguous date. The export records it as
 	// written, so an untouched suggestion is no change; it takes effect only through a retention period typed later.
 	suggested := 0
-	names := lifespan.NewDateReader(today()) // one day for the whole export
+	names := retention.NewDateReader(today()) // one day for the whole export
 	for i := range items {
 		if items[i].FileDate == "" {
 			if d := names.Read(path.Base(items[i].Path)); d != "" {
@@ -121,7 +121,7 @@ func (e *env) export(ctx context.Context, dbBefore string, args []string) error 
 	}
 	id, err := s.RecordExport(ctx, csvPath, now(), items, func(id int64) error {
 		bw := bufio.NewWriter(file)
-		if err := lifespan.WriteCSV(bw, id, items, time.Local); err != nil {
+		if err := retention.WriteCSV(bw, id, items, time.Local); err != nil {
 			return err
 		}
 		if err := bw.Flush(); err != nil {
@@ -179,7 +179,7 @@ func (e *env) update(ctx context.Context, dbBefore string, args []string) error 
 	if err != nil {
 		return fmt.Errorf("open %s: %w", path, err)
 	}
-	parsed, err := lifespan.ReadCSV(file)
+	parsed, err := retention.ReadCSV(file)
 	file.Close()
 	if err != nil {
 		return fmt.Errorf("%s: %w", path, err)
@@ -198,7 +198,7 @@ func (e *env) update(ctx context.Context, dbBefore string, args []string) error 
 		asked = true
 		return e.confirmClears(cs)
 	}
-	res, err := s.UpdateLifespan(ctx, parsed.Rows, now(), today(), path, *dry, confirm)
+	res, err := s.UpdateRetention(ctx, parsed.Rows, now(), today(), path, *dry, confirm)
 	if err != nil {
 		return err
 	}
@@ -346,6 +346,6 @@ func (e *env) deleteList(ctx context.Context, dbBefore string, args []string) er
 		fmt.Fprintf(w, "  %s  %10s  %s\n", it.KeepUntil, report.Size(it.Size), it.AbsPath())
 	}
 	fmt.Fprintln(w, "filo deletes nothing in this version. To keep a file longer, give it a later retention "+
-		"(filo export lifespan, then filo update).")
+		"(filo export retention, then filo update).")
 	return nil
 }

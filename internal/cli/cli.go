@@ -35,7 +35,7 @@ Usage:
   filo roots set DIR [flags]        replace a root's settings
   filo scan [DIR]                   scan every root, or DIR inside a root
   filo report [--top N]             totals, files needing a retention, largest files, duplicates, events
-  filo export lifespan [DIR] -o FILE
+  filo export retention [DIR] -o FILE
                                     write every file under DIR (or every root) with its retention, as CSV
   filo update FILE [--dry-run]      apply the retentions edited in an exported CSV
   filo delete                       list the files past their retention
@@ -77,7 +77,7 @@ Shows each root's totals and last scan, the files needing a retention and the di
 events (moves and missing files among them). --top sets how many entries each list shows (default 10).
 `,
 	"export": `Usage:
-  filo export lifespan [DIR] -o FILE
+  filo export retention [DIR] -o FILE
 
 Writes every file under DIR (inside a root), or under every root, as CSV (UTF-8) to FILE, which must not exist.
 Columns: id, export, directory, name, size, modified, file_date, retention, keep_until. Fill in retention in a
@@ -88,7 +88,7 @@ directory at a time.
 	"update": `Usage:
   filo update FILE [--dry-run]
 
-Reads an exported lifespan CSV and applies the file_date and retention you changed. retention is a period counted
+Reads an exported retention CSV and applies the file_date and retention you changed. retention is a period counted
 from file_date (7y, 18m, 6w, 30d), forever, or a date (YYYY-MM-DD); file_date is a date. keep_until is worked out
 by filo: leave it alone. Dates in the past are fine: the file is then past its retention (see filo delete). Rows can
 be sorted, filtered or deleted, but not added. A blank retention clears a stored one; filo lists those files and
@@ -181,7 +181,7 @@ func (e *env) run(ctx context.Context, args []string) error {
 	case "delete":
 		return e.deleteList(ctx, *db, rest)
 	case "review":
-		return usageError{"review was replaced by export lifespan and update; see filo help"}
+		return usageError{"review was replaced by export retention and update; see filo help"}
 	default:
 		return usageError{fmt.Sprintf("unknown command %q", cmd)}
 	}
