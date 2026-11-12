@@ -171,7 +171,8 @@ func TestLifespanRoundTrip(t *testing.T) {
 	wantDates("after a dry run", map[string]string{"a.txt": " undated"})
 	r = filo(ExitError, "", false, "update", r1)
 	contains("update", r.stdout, "Updated 3 files, cleared 0 retentions.",
-		"1 file is past their retention; see filo delete", "1 row refused")
+		"1 file is past their retention (check for a typo, such as 7d for 7y); see filo delete:",
+		"  3y (until 2026-03-31)  "+in("docs/2023-03 invoice.pdf"), "1 row refused")
 	contains("update", r.stderr, `r1.csv line 4: retention "2027-02-29" is not a retention`)
 	wantDates("after update", map[string]string{"a.txt": "2027-01-01 kept",
 		"docs/2023-03 invoice.pdf": "2026-03-31 expired", "docs/c.txt": " undated",

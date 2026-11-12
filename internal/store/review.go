@@ -258,13 +258,20 @@ type Clear struct {
 	KeepUntil string // and the date it gave
 }
 
+// Past is a file an update left past its retention, for the summary to list (a typo such as 7d for 7y shows here).
+type Past struct {
+	Path      string
+	Retention string
+	KeepUntil string
+}
+
 // UpdateResult counts what an update did (or, in a dry run, would do).
 type UpdateResult struct {
-	Set           int // rows whose file_date or retention changed, clears not included
-	Cleared       int // retentions cleared by a blank cell
-	ClearsSkipped int // blank cells that would clear a retention, not confirmed
-	NowPast       int // of Set: files whose keep_until is today or earlier, so deletion candidates if unchanged
-	Unchanged     int // rows as exported, or with the values already stored
+	Set           int    // rows whose file_date or retention changed, clears not included
+	Cleared       int    // retentions cleared by a blank cell
+	ClearsSkipped int    // blank cells that would clear a retention, not confirmed
+	NowPast       []Past // of Set: files whose keep_until is today or earlier, so deletion candidates if unchanged
+	Unchanged     int    // rows as exported, or with the values already stored
 	Refusals      []Refusal
 }
 
@@ -313,7 +320,7 @@ func (s *Store) UpdateLifespan(ctx context.Context, rows []LifespanRow, now time
 		default:
 			sets = append(sets, ok{r: r, c: c, afterScan: ex.afterScan})
 			if c.keepUntil != "" && c.keepUntil != Forever && c.keepUntil <= today {
-				res.NowPast++
+				res.NowPast = append(res.NowPast, Past{Path: c.path, Retention: c.retention, KeepUntil: c.keepUntil})
 			}
 		}
 	}
@@ -408,18 +415,25 @@ func checkRow(ctx context.Context, tx *sql.Tx, r LifespanRow, ex exportInfo) (ch
 	if err != nil {
 		return c, fmt.Errorf("read export %d: %w", r.ExportID, err)
 	}
-	var root, rel string
-	err = tx.QueryRowContext(ctx, `SELECT r.path, p.path FROM paths p JOIN roots r ON r.id = p.root_id
-		WHERE p.file_id = ? AND p.valid_to_scan IS NULL`, r.FileID).Scan(&root, &rel)
-	present := err == nil
-	switch {
-	case present:
-		c.path = absPath(root, rel)
-	case !errors.Is(err, sql.ErrNoRows):
-		return c, fmt.Errorf("read file %d: %w", r.FileID, err)
+	// The file's current path, for messages; looked up only once a row needs one, so untouched rows cost one query.
+	present := false
+	lookupPath := func() error {
+		var root, rel string
+		err := tx.QueryRowContext(ctx, `SELECT r.path, p.path FROM paths p JOIN roots r ON r.id = p.root_id
+			WHERE p.file_id = ? AND p.valid_to_scan IS NULL`, r.FileID).Scan(&root, &rel)
+		switch {
+		case err == nil:
+			present, c.path = true, absPath(root, rel)
+		case !errors.Is(err, sql.ErrNoRows):
+			return fmt.Errorf("read file %d: %w", r.FileID, err)
+		}
+		return nil
 	}
 	// keep_until is worked out by filo; a changed cell means a date was typed in the wrong place.
 	if r.HasKeepUntil && r.KeepUntil != expKeep.String {
+		if err := lookupPath(); err != nil {
+			return c, err
+		}
 		c.refusal = fmt.Sprintf("keep_until was changed to %q, but filo works it out; change retention instead",
 			r.KeepUntil)
 		return c, nil
@@ -434,6 +448,9 @@ func checkRow(ctx context.Context, tx *sql.Tx, r LifespanRow, ex exportInfo) (ch
 		return c, nil
 	}
 
+	if err := lookupPath(); err != nil {
+		return c, err
+	}
 	var hash sql.NullString
 	var storedDate string
 	if err := tx.QueryRowContext(ctx, `SELECT hash, coalesce(file_date, ''), coalesce(retention, ''),
@@ -463,6 +480,12 @@ func checkRow(ctx context.Context, tx *sql.Tx, r LifespanRow, ex exportInfo) (ch
 		}
 	}
 
+	// A file_date the export suggested from the name, left as it was, is a guess nobody has checked. It is stored
+	// only when the row's retention is a period, which is when it is used; otherwise a later period could count from
+	// it without anyone having looked.
+	if storedDate == "" && expDate.String != "" && c.fileDate == expDate.String && !IsPeriod(c.retention) {
+		c.fileDate = ""
+	}
 	if c.fileDate == storedDate && c.retention == c.storedRetention {
 		c.unchanged = true
 		return c, nil

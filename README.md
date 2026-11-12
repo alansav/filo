@@ -123,8 +123,10 @@ and filter it however you like.
   date). If it's blank, the export fills it in from the file name when the name holds one clear date:
   `2023-03-14 invoice.pdf`, `IMG_20230714_1032.jpg`, or `2023-03 rent.pdf` (the month's last day, so nothing is kept
   for less time than meant). A lone year, a name with two dates, or `14-03-2023` (is that day or month first?) are
-  left blank. Check what was filled in before counting from it.
-- **`keep_until`** is worked out by Filo, so you can sort by it. Leave it alone: a changed cell is refused.
+  left blank. A filled-in date you leave as it is only counts when you give that file a period; otherwise it is
+  dropped. Check it before counting from it.
+- **`keep_until`** is worked out by Filo, so you can sort by it. Leave it alone: a cell holding a different date is
+  refused.
 
 To set a whole folder at once, filter on `directory` and fill the retention down. Filtering on a blank `retention`
 shows the files still to decide.
@@ -133,8 +135,8 @@ shows the files still to decide.
   can be sorted, filtered or deleted, but not added.
 - Dates are `YYYY-MM-DD` and must be real (`2027-02-29` is refused). Anything else is refused rather than guessed.
   If your spreadsheet turns dates into `01/06/2027`, format those columns as text.
-- Dates in the past are fine: a 2015 invoice with `7y` ended in 2022, so it's simply past its retention, and
-  `filo update` tells you how many files that is.
+- Dates in the past are fine: a 2015 invoice with `7y` ended in 2022, so it's simply past its retention.
+  `filo update` lists the files it left past their retention, so a typo like `7d` for `7y` shows straight away.
 - A period with no `file_date` is refused for that row, since there's nothing to count from.
 - Cells left as exported change nothing. Editing the same CSV again and running `filo update` again replaces what it
   set.

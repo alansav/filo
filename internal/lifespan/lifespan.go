@@ -22,7 +22,7 @@ import (
 // display) was left alone.
 var Header = []string{"id", "export", "directory", "name", "size", "modified", "file_date", "retention", "keep_until"}
 
-const dateLayout = "2006-01-02"
+const dateLayout = store.DateLayout
 
 // bom marks the file as UTF-8 for spreadsheets that would otherwise guess another encoding.
 const bom = "\ufeff"
@@ -54,27 +54,53 @@ func ParseRetention(s string) (string, error) {
 	if strings.EqualFold(s, store.Forever) {
 		return store.Forever, nil
 	}
-	if store.IsPeriod(s) {
-		return strings.ToLower(s), nil
+	if p, ok := store.NormalPeriod(s); ok {
+		return p, nil
 	}
-	t, err := time.Parse(dateLayout, s)
+	d, err := ParseDate(s)
 	if err != nil {
 		return "", fmt.Errorf("%q is not a retention: use a period such as 7y, 18m, 6w or 30d (counted from "+
 			"file_date), forever, or a date YYYY-MM-DD%s", s, formatHint)
 	}
-	return t.Format(dateLayout), nil
+	return d, nil
 }
 
-// DateFromName reads a file_date from a file name, or returns "". Accepted, with a non-digit (or the start or end of
-// the name) on both sides: YYYY-MM-DD (also with _ or . as the separator), YYYYMMDD, and YYYY-MM (also _ or .),
-// which gives the last day of that month so a file is never kept for less time than meant. The date must be real and
-// between 1900-01-01 and 30 days after today (YYYY-MM-DD). A name with two different dates gives "": never guessed.
-func DateFromName(name, today string) string {
+// parseKeepUntil reads the display-only keep_until cell, so that a cell a spreadsheet merely reformatted compares
+// equal to what was exported: "" , forever (any case) or a date. A value that is none of these is refused with the
+// same hint as the other date columns.
+func parseKeepUntil(s string) (string, error) {
+	s = strings.TrimSpace(s)
+	if strings.EqualFold(s, store.Forever) {
+		return store.Forever, nil
+	}
+	return ParseDate(s)
+}
+
+// DateReader reads file_dates from file names against one fixed day, so a long export uses the same bounds for every
+// file even if it runs past midnight.
+type DateReader struct{ latest string }
+
+// NewDateReader makes a DateReader for today (YYYY-MM-DD). With an invalid today it reads no dates.
+func NewDateReader(today string) DateReader {
 	t, err := time.Parse(dateLayout, today)
 	if err != nil {
+		return DateReader{}
+	}
+	return DateReader{latest: t.AddDate(0, 0, 30).Format(dateLayout)}
+}
+
+// DateFromName reads a file_date from a file name against today (YYYY-MM-DD); see DateReader.Read.
+func DateFromName(name, today string) string { return NewDateReader(today).Read(name) }
+
+// Read reads a file_date from a file name, or returns "". Accepted, with a non-digit (or the start or end of the name)
+// on both sides: YYYY-MM-DD (also with _ or . as the separator), YYYYMMDD, and YYYY-MM (also _ or .), which gives the
+// last day of that month so a file is never kept for less time than meant. The date must be real and between
+// 1900-01-01 and 30 days after the reader's today. A name with two different dates gives "": never guessed.
+func (r DateReader) Read(name string) string {
+	latest := r.latest
+	if latest == "" {
 		return ""
 	}
-	latest := t.AddDate(0, 0, 30).Format(dateLayout)
 	found := ""
 	for i := 0; i < len(name); i++ {
 		if !isDigit(name[i]) || (i > 0 && isDigit(name[i-1])) {
@@ -205,6 +231,9 @@ var (
 	ErrNotLifespanCSV = errors.New("not a filo lifespan CSV: the header needs id, export and retention columns")
 	// ErrOldCSV means the file is a review or lifespan CSV from an older filo.
 	ErrOldCSV = errors.New("this CSV is from an older filo; export again with: filo export lifespan")
+	// ErrNoRetention means a current lifespan CSV lost its retention column (deleted or renamed in the spreadsheet).
+	ErrNoRetention = errors.New("the CSV has no retention column, which filo update needs; put it back with that " +
+		"name, or export again")
 )
 
 // ReadCSV reads an edited lifespan CSV. It accepts what spreadsheets do to a file: a byte order mark, CRLF line ends,
@@ -221,7 +250,7 @@ func ReadCSV(r io.Reader) (Parsed, error) {
 	var cr *csv.Reader
 	var cols map[string]int
 	var width int // header fields
-	old := false
+	old, missing := false, false
 	for _, sep := range []rune{',', ';', '\t'} {
 		c := csv.NewReader(bytes.NewReader(data))
 		c.Comma = sep
@@ -241,12 +270,18 @@ func ReadCSV(r io.Reader) (Parsed, error) {
 			cr, cols, width = c, m, len(head)
 			break
 		}
-		if hasAll(m, "id", "export", "review_date") || hasAll(m, "id", "export", "keep_until") {
+		switch {
+		case hasAll(m, "id", "export", "file_date"):
+			missing = true // a current CSV without its retention column
+		case hasAll(m, "id", "export", "review_date") || hasAll(m, "id", "export", "keep_until"):
 			old = true
 		}
 	}
 	if cr == nil {
-		if old {
+		switch {
+		case missing:
+			return p, ErrNoRetention
+		case old:
 			return p, ErrOldCSV
 		}
 		return p, ErrNotLifespanCSV
@@ -305,9 +340,9 @@ func ReadCSV(r io.Reader) (Parsed, error) {
 		}
 		if _, ok := cols["keep_until"]; ok {
 			row.HasKeepUntil = true
-			row.KeepUntil = get("keep_until")
-			if strings.EqualFold(row.KeepUntil, store.Forever) {
-				row.KeepUntil = store.Forever
+			if row.KeepUntil, err = parseKeepUntil(get("keep_until")); err != nil {
+				bad("keep_until %v", err)
+				continue
 			}
 		}
 		key := [2]int64{ex, id}

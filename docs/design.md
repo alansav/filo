@@ -256,7 +256,8 @@ lifespan CSV and `filo update` write only the register and the CSV file the user
   - a new `file_date` or `retention`: replaces the stored ones and works `keep_until` out again. Editing the same CSV
     again and updating again replaces them again (the old "already imported" rule, which silently ignored a
     re-edited row, is gone);
-  - a blank `retention` where one is stored: clears it, so the file is undated again (its `file_date` stays). Before
+  - a blank `retention` where one is stored: clears it, so the file is undated again. Clearing a retention does not
+    clear `file_date`; blanking the `file_date` cell as well is a separate change and clears it too. Before
     clearing, the update lists those files (the first ten, then a count) and asks once,
     `Clear the retention of N files? [y/n]`. Anything but `y` or `yes`, or no terminal on standard input, leaves those
     rows alone, and the summary says how many and why. `--dry-run` counts them without asking.
@@ -267,8 +268,9 @@ lifespan CSV and `filo update` write only the register and the CSV file the user
   newer decision); a retention period has no `file_date`; `keep_until` was changed; the same (export, id) appears
   more than once (every copy is refused). A deleted row changes nothing. The applied rows go in one transaction;
   `--dry-run` checks everything and writes nothing. The exit code is 1 if any row was refused. A CSV without a
-  `retention` header is refused as a whole, with a pointer to `filo export lifespan` if it is a review CSV or a
-  lifespan CSV from before schema version 5.
+  `retention` header is refused as a whole: with a pointer to `filo export lifespan` if it is a review CSV or a
+  lifespan CSV from before schema version 5, or, if it has a `file_date` column (a current CSV whose `retention`
+  column was deleted or renamed), saying the `retention` column is missing.
 - **Bulk dates**: set in the spreadsheet (filter on `directory`, fill down). `filo review set-date` was dropped on
   2026-11-12, at least for now.
 - The hash at export is stored; it is **re-checked at action time** (iteration 3) against `files.reviewed_hash`.
@@ -284,19 +286,24 @@ encoding, refusals, the clear prompt, "since" measured in scans) stays.
     person, or filled in by the export from the file name (below). Not the filesystem's creation date, which is not
     reliable. Kept in the register even when no retention uses it.
   - `retention`, one cell for the decision, whose value says what kind it is:
-    - a period, `Ny`, `Nm`, `Nw` or `Nd` (years, months, weeks, days): keep until `file_date` plus that period. A
+    - a period, `Ny`, `Nm`, `Nw` or `Nd` (years, months, weeks, days; any case, stored without leading zeros, so
+      `07Y` is `7y`): keep until `file_date` plus that period. A
       month step that lands past a month's end stops on its last day. Unlike the dropped `+1y`, a period counts from
       a date written in the same row, so the same row means the same date whichever day it is applied;
     - `forever` (any case);
     - a date, `YYYY-MM-DD`: a fixed end date.
   - `keep_until`: **display only**. The export fills in the end date Filo worked out (or `forever`), so the
-    spreadsheet can sort and filter by it; the update never reads it. A row whose `keep_until` was changed is refused:
-    "keep_until is worked out; change retention instead".
+    spreadsheet can sort and filter by it. The update only checks it was left alone, comparing it as a date (so
+    surrounding spaces or `FOREVER` do not count as a change): a row whose `keep_until` holds another date is refused,
+    "keep_until is worked out; change retention instead", and one holding a value that is not a date at all (a
+    spreadsheet rewrote it as `3/14/2030`) is refused with the same "format the column as text" hint as the other
+    date columns.
   - The update reads `id`, `export`, `file_date` and `retention`.
 - **Past dates are accepted** (changed 2026-11-12; the update used to refuse a date not after today), whether typed
   or worked out from a period: a 2015 invoice with `7y` ends in 2022, which means it is already past its retention.
-  The file simply becomes a deletion candidate. The update's summary says how many files are now past their
-  retention ("see filo delete"); nothing is deleted until `filo delete` is run.
+  The file simply becomes a deletion candidate. Since that also lets a typo through (`7d` for `7y`, 2016 for 2026),
+  the update's summary **lists** the files it left past their retention (the first ten, then a count), with their
+  retention and end date, and suggests checking for a typo; nothing is deleted until `filo delete` is run.
 - **A period without a `file_date`** cannot be worked out: that row is refused with one line ("retention 7y needs a
   file_date") and nothing is set for that file. The other rows still apply.
 - **Changing `file_date`** on a file whose retention is a period works its `keep_until` out again; a fixed date or
@@ -308,11 +315,14 @@ encoding, refusals, the clear prompt, "since" measured in scans) stays.
   - `YYYYMMDD`, as in camera names (`IMG_20230714_1032.jpg`);
   - `YYYY-MM` (also `_`, `.`): the last day of that month, so a file is never kept for less time than meant.
 
-  The result must be a real date between 1900-01-01 and 30 days after today; anything else is not a date
+  The result must be a real date between 1900-01-01 and 30 days after today (one day for the whole export, even if
+  it runs past midnight); anything else is not a date
   (`1245-06`, `2099-01-01`). A lone year (`2019 report.pdf`) is not read: it may be a model number or part of a title.
   A name with two different dates (`2023-01-01 to 2023-12-31 statement.pdf`) gets none: the person types it. A
-  filled-in `file_date` is a suggestion shown in the spreadsheet; it takes effect only through a retention period the
-  person types. Dates from photos' EXIF data: later (needs a library).
+  filled-in `file_date` is a suggestion shown in the spreadsheet. Left untouched, it is stored only when the row's
+  retention is a period, which is when it is used and the person has had reason to look at it; with `forever`, a
+  fixed date or no retention it is dropped, so a later period can never count from a guess nobody checked. (Found in
+  a code review on 2026-11-12: `scan 20190101 id.pdf` would otherwise keep 2019-01-01 as its file_date.) Dates from photos' EXIF data: later (needs a library).
 - **Register (schema version 5)**: `files.file_date` (YYYY-MM-DD, NULL = none), `files.retention` (the value as
   given: a period, `forever` or a date; NULL = none), and `files.keep_until`, now always worked out from those two
   (YYYY-MM-DD or `forever`). Statuses and `filo delete` keep using `keep_until` only. Migration: an existing

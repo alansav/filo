@@ -291,10 +291,10 @@ func TestUpdateLifespan(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Set != dry.Set || res.NowPast != dry.NowPast || len(res.Refusals) != len(dry.Refusals) {
+	if res.Set != dry.Set || len(res.NowPast) != len(dry.NowPast) || len(res.Refusals) != len(dry.Refusals) {
 		t.Errorf("dry run %+v differs from the real one %+v", dry, res)
 	}
-	if res.Set != 5 || res.NowPast != 2 || res.Unchanged != 2 || res.Cleared != 0 {
+	if res.Set != 5 || len(res.NowPast) != 2 || res.Unchanged != 2 || res.Cleared != 0 {
 		t.Errorf("result = %+v, want 5 set (keep, flagged, new/pm, past, tax), 2 now past, 2 unchanged", res)
 	}
 	wantRefused := map[int]string{
@@ -321,6 +321,10 @@ func TestUpdateLifespan(t *testing.T) {
 	if got := e.statuses(today); !maps.Equal(got, wantStatus) {
 		t.Errorf("statuses after update = %v, want %v", got, wantStatus)
 	}
+	if len(res.NowPast) == 2 && (res.NowPast[0] != Past{Path: filepath.Join(e.root.Path, "past"), Retention: "7y",
+		KeepUntil: "2022-03-14"} || res.NowPast[1].Path != filepath.Join(e.root.Path, "tax")) {
+		t.Errorf("now past = %+v", res.NowPast)
+	}
 	stored := func(file string) string {
 		return rawQueryString(t, e.db, `SELECT coalesce(file_date, '-') || ' ' || coalesce(retention, '-') || ' ' ||
 			coalesce(keep_until, '-') FROM files WHERE id = `+itoa(id(file)))
@@ -341,11 +345,28 @@ func TestUpdateLifespan(t *testing.T) {
 	}
 	res, err = e.s.UpdateLifespan(e.ctx, []LifespanRow{row(2, exportID, "keep", "", "2028-11-11"),
 		row(8, exportID, "past", "2024-03-31", "7y")}, now.Add(time.Minute), today, "lifespan.csv", false, nil)
-	if err != nil || res.Set != 2 || res.NowPast != 0 {
+	if err != nil || res.Set != 2 || len(res.NowPast) != 0 {
 		t.Errorf("re-edited rows = %+v, %v; want both set, none past", res, err)
 	}
 	if v := stored("past"); v != "2024-03-31 7y 2031-03-31" {
 		t.Errorf("past after a new file_date = %q", v)
+	}
+
+	// A file_date the export suggested from the name, left untouched, is stored only with a period retention.
+	if _, err := e.s.db.ExecContext(e.ctx, `UPDATE export_rows SET file_date = '2019-01-01' WHERE export_id = ?
+		AND file_id IN (?, ?)`, exportID, id("nodate"), id("untouched")); err != nil {
+		t.Fatal(err)
+	}
+	res, err = e.s.UpdateLifespan(e.ctx, []LifespanRow{row(2, exportID, "nodate", "2019-01-01", "forever"),
+		row(3, exportID, "untouched", "2019-01-01", "7y")}, now.Add(2*time.Minute), today, "s.csv", false, nil)
+	if err != nil || res.Set != 2 {
+		t.Errorf("suggested file_dates = %+v, %v", res, err)
+	}
+	if v := stored("nodate"); v != "- forever forever" {
+		t.Errorf("suggestion with forever: %q, want no file_date stored", v)
+	}
+	if v := stored("untouched"); v != "2019-01-01 7y 2026-01-01" {
+		t.Errorf("suggestion with a period: %q, want it stored and counted from", v)
 	}
 
 	// A blank retention where one is stored is a clear: only when confirmed.
@@ -385,11 +406,11 @@ func TestUpdateLifespan(t *testing.T) {
 	// A newer export's retention wins; the older export can no longer override it.
 	later := now.Add(time.Hour)
 	export2, _ := e.export(today, later)
-	if _, err := e.s.UpdateLifespan(e.ctx, []LifespanRow{row(2, export2, "untouched", "", "2028-01-01")}, later,
-		today, "second.csv", false, nil); err != nil {
+	if _, err := e.s.UpdateLifespan(e.ctx, []LifespanRow{row(2, export2, "untouched", "2019-01-01", "2028-01-01")},
+		later, today, "second.csv", false, nil); err != nil {
 		t.Fatal(err)
 	}
-	res, err = e.s.UpdateLifespan(e.ctx, []LifespanRow{row(2, exportID, "untouched", "", "2029-01-01")},
+	res, err = e.s.UpdateLifespan(e.ctx, []LifespanRow{row(2, exportID, "untouched", "2019-01-01", "2029-01-01")},
 		later.Add(time.Hour), today, "lifespan.csv", false, nil)
 	if err != nil {
 		t.Fatal(err)

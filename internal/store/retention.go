@@ -11,7 +11,8 @@ import (
 // far-off date such as 9999-12-31, and checked explicitly rather than by comparing it with dates.
 const Forever = "forever"
 
-const dateLayout = "2006-01-02"
+// DateLayout is the one date format in the register and the CSV: YYYY-MM-DD.
+const DateLayout = "2006-01-02"
 
 // period splits a retention period like 7y into its count and unit (y, m, w or d, in lower case). The count is 1 to
 // 1000.
@@ -42,6 +43,16 @@ func IsPeriod(retention string) bool {
 	return ok
 }
 
+// NormalPeriod returns a period in the form it is stored in, with no leading zeros and a lower-case unit (07Y gives
+// 7y), and whether s is a period at all.
+func NormalPeriod(s string) (string, bool) {
+	n, unit, ok := period(s)
+	if !ok {
+		return "", false
+	}
+	return strconv.Itoa(n) + string(unit), true
+}
+
 // KeepUntil works out the date a file is kept until from its file_date (YYYY-MM-DD or "") and a retention: a period
 // counts from fileDate (an error if there is none), forever stays forever, and a date is itself. "" gives "". A month
 // step that lands past the end of a month stops on its last day.
@@ -53,7 +64,7 @@ func KeepUntil(fileDate, retention string) (string, error) {
 	if fileDate == "" {
 		return "", fmt.Errorf("retention %s needs a file_date to count from", retention)
 	}
-	t, err := time.Parse(dateLayout, fileDate)
+	t, err := time.Parse(DateLayout, fileDate)
 	if err != nil {
 		return "", fmt.Errorf("file_date %q is not a date", fileDate)
 	}
@@ -68,7 +79,7 @@ func KeepUntil(fileDate, retention string) (string, error) {
 	default:
 		t = t.AddDate(0, 0, n)
 	}
-	return t.Format(dateLayout), nil
+	return t.Format(DateLayout), nil
 }
 
 // addMonths adds n months to y-m-d, keeping the day but no later than the target month's last day.

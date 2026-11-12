@@ -94,9 +94,10 @@ func (e *env) export(ctx context.Context, dbBefore string, args []string) error 
 	// Fill in a blank file_date from the file name where it holds one unambiguous date. The export records it as
 	// written, so an untouched suggestion is no change; it takes effect only through a retention period typed later.
 	suggested := 0
+	names := lifespan.NewDateReader(today()) // one day for the whole export
 	for i := range items {
 		if items[i].FileDate == "" {
-			if d := lifespan.DateFromName(path.Base(items[i].Path), today()); d != "" {
+			if d := names.Read(path.Base(items[i].Path)); d != "" {
 				items[i].FileDate = d
 				suggested++
 			}
@@ -231,12 +232,23 @@ func (e *env) update(ctx context.Context, dbBefore string, args []string) error 
 		fmt.Fprintf(w, "Updated %s, cleared %s.\n", report.Plural(int64(res.Set), "file", "files"),
 			report.Plural(int64(res.Cleared), "retention", "retentions"))
 	}
-	if res.NowPast > 0 {
-		what := report.Plural(int64(res.NowPast), "file is", "files are")
+	if n := int64(len(res.NowPast)); n > 0 {
+		what := report.Plural(n, "file is", "files are")
 		if *dry {
-			what = report.Plural(int64(res.NowPast), "file would be", "files would be")
+			what = report.Plural(n, "file would be", "files would be")
 		}
-		fmt.Fprintf(w, "%s past their retention; see filo delete.\n", what)
+		fmt.Fprintf(w, "%s past their retention (check for a typo, such as 7d for 7y); see filo delete:\n", what)
+		for i, p := range res.NowPast {
+			if i == clearsShown {
+				fmt.Fprintf(w, "  and %s more\n", report.Count(n-clearsShown))
+				break
+			}
+			what := p.Retention
+			if p.KeepUntil != p.Retention {
+				what += " (until " + p.KeepUntil + ")"
+			}
+			fmt.Fprintf(w, "  %s  %s\n", what, p.Path)
+		}
 	}
 	if res.ClearsSkipped > 0 {
 		why := "not confirmed"

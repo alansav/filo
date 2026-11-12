@@ -55,6 +55,8 @@ func TestParseRetention(t *testing.T) {
 		{"6w", "6w", false},
 		{"30d", "30d", false},
 		{"1000y", "1000y", false},
+		{"07y", "7y", false}, // stored without leading zeros
+		{"0030D", "30d", false},
 		{"forever", "forever", false},
 		{"Forever", "forever", false},
 		{"2030-03-14", "2030-03-14", false},
@@ -113,10 +115,17 @@ func TestDateFromName(t *testing.T) {
 		"notes.md":                               "",
 		"":                                       "",
 	}
+	r := NewDateReader(today)
 	for name, want := range tests {
+		if got := r.Read(name); got != want {
+			t.Errorf("Read(%q) = %q, want %q", name, got, want)
+		}
 		if got := DateFromName(name, today); got != want {
 			t.Errorf("DateFromName(%q) = %q, want %q", name, got, want)
 		}
+	}
+	if got := NewDateReader("not a day").Read("2023-03-14.pdf"); got != "" {
+		t.Errorf("a reader with no valid today read %q", got)
 	}
 }
 
@@ -213,8 +222,11 @@ func TestReadCSV(t *testing.T) {
 			want: []store.LifespanRow{r(2, 1, "2023-03-14", "7y", ""), r(3, 2, "", "", ""), r(4, 3, "", "forever", ""),
 				r(5, 4, "", "2015-06-30", "")}},
 		{name: "keep_until cells are passed on for the register to compare",
-			in:   head + "1,2,/d,a,1,m,2023-03-14,7y,2030-03-14\n2,2,/d,b,1,m,,forever,FOREVER\n",
+			in:   head + "1,2,/d,a,1,m,2023-03-14,7y, 2030-03-14 \n2,2,/d,b,1,m,,forever,FOREVER\n",
 			want: []store.LifespanRow{r(2, 1, "2023-03-14", "7y", "2030-03-14"), r(3, 2, "", "forever", "forever")}},
+		{name: "a keep_until a spreadsheet rewrote is refused with the format hint",
+			in:       head + "1,2,/d,a,1,m,2023-03-14,7y,3/14/2030\n",
+			problems: []string{`keep_until "3/14/2030" is not a date: use YYYY-MM-DD, for example 2023-03-14 (a spreadsheet may have rewritten it; format the column as text)`}},
 		{name: "empty spreadsheet rows are skipped",
 			in:   head + "1,2,/d,a,1,m,,2027-01-01,\n,,,,,,,,\n\n",
 			want: []store.LifespanRow{r(2, 1, "", "2027-01-01", "")}},
@@ -251,6 +263,10 @@ func TestReadCSV(t *testing.T) {
 		{name: "an old review CSV", in: "id,export,reason,path,size,modified,review_date,action,retain_until\n",
 			err: ErrOldCSV},
 		{name: "an old lifespan CSV", in: "id,export,directory,name,size,modified,keep_until\n", err: ErrOldCSV},
+		{name: "a current CSV whose retention column was deleted",
+			in: "id,export,directory,name,size,modified,file_date,keep_until\n", err: ErrNoRetention},
+		{name: "a current CSV whose retention column was renamed",
+			in: "id,export,directory,name,size,modified,file_date,keep for,keep_until\n", err: ErrNoRetention},
 		{name: "not a lifespan CSV", in: "a,b,c\n1,2,3\n", err: ErrNotLifespanCSV},
 		{name: "empty file", in: "", err: ErrNotLifespanCSV},
 	}
