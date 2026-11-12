@@ -5,7 +5,9 @@ directory (5,582 files, about 3.7 GB) scanned completely and rescanned quickly, 
 2 was reshaped on 2026-11-12 from a review queue into one keep-until date per file (the lifespan CSV, `filo export
 lifespan` and `filo update`), with root settings stored on the root; it passes its test-tree criterion, and setting
 dates on the real home directory is still to be done. A C# prototype exists as a reference spec only; its schema and
-reconcile rules were carried over. Last updated: 2026-11-12.
+reconcile rules were carried over. Iteration 3 (deletion) and a second shape of the lifespan CSV (`file_date`,
+`retention`) were designed on 2026-11-12 and are not implemented yet; both are marked as such below. Last updated:
+2026-11-12.
 
 This file records settled decisions, the planned data model and the open questions. When a decision changes,
 change it here in the same commit.
@@ -18,18 +20,22 @@ who can find any old file. Filo is a register and review workflow that makes dis
 
 Principles. These are not negotiable:
 
-1. **A keep-until date is a floor, not a trigger.** Reaching it makes a file a deletion candidate that the person
-   confirms, one by one; nothing is ever deleted because a date passed. (Until 2026-11-12 there were two dates, a
-   review date and a retain-until floor; since every deletion goes through a person anyway, they became one.)
-2. **Holds override everything.** Legal, tax and dispute holds veto any disposal and are checked last, at the moment
-   of disposal, not when the date was set.
-3. **Disposal is staged and reversible:** review, then quarantine, then (much later) deletion.
-4. **Fail safe.** A file that loses its metadata, or whose state is ambiguous, becomes "new, needs review", never
-   "eligible for deletion".
-5. **Record only what is known.** At creation that is at most a keep-until date and a link to an asset or project.
+1. **A keep-until date is not a trigger.** Reaching it makes a file a deletion candidate; nothing is ever deleted
+   because a date passed. Deleting is a command the person runs (`filo delete`), after seeing the list and confirming
+   it, or by passing `-y`. Filo never schedules deletion itself. (Until 2026-11-12 there were two dates, a review date
+   and a retain-until floor; since every deletion goes through a person anyway, they became one.)
+2. **Deletion is permanent; backups make it recoverable** (decided 2026-11-12, replacing "disposal is staged and
+   reversible": review, quarantine, then deletion). Filo deletes files outright, without a quarantine or the recycle
+   bin. What stays: the person sees and confirms the list, and each file is re-read and re-hashed at the moment of
+   deleting and deleted only if it is still exactly what its retention was set on. Holds were dropped the same day: a
+   file that must be kept gets a later retention or `forever`.
+3. **Fail safe.** A file that loses its metadata, or whose state is ambiguous, becomes "new, needs a decision", never
+   "eligible for deletion". A file that cannot be read is never deleted.
+4. **Record only what is known.** At creation that is at most a keep-until date and a link to an asset or project.
    Never invent one: a file without a date needs a decision.
-6. **Nothing destructive before its iteration.** Destructive commands default to dry-run.
-7. **Never guess.** Duplicates and ambiguous moves are reported, not resolved.
+5. **Nothing destructive before its iteration.** A destructive command shows what it will do and asks first, or needs
+   `-y`.
+6. **Never guess.** Duplicates and ambiguous moves are reported, not resolved.
 
 ## 2. Settled decisions
 
@@ -201,7 +207,7 @@ lifespan CSV and `filo update` write only the register and the CSV file the user
 - **One date per file: `keep_until`.** Keep the file until then. On that date it becomes a deletion candidate, never
   deleted automatically: `filo delete` lists the candidates, and deleting each is the person's call (iteration 3). A
   recurring check on a file (an annual look at a seven-year record) is a task, a later iteration; this iteration
-  tracks lifespan only. Hard legal retention may become a hold with an end date (see Open questions).
+  tracks lifespan only. Hard legal retention is a later retention or `forever` (holds were dropped on 2026-11-12).
 - **Status of a present file** (regular files and symlinks), the first that applies:
   1. *unreadable*: flagged unreadable and its date not set since the scan that flagged it; or flagged and past its
      date (its content cannot be checked);
@@ -263,21 +269,110 @@ lifespan CSV and `filo update` write only the register and the CSV file the user
   2026-11-12, at least for now.
 - The hash at export is stored; it is **re-checked at action time** (iteration 3) against `files.reviewed_hash`.
 
-### Disposal (iteration 3 onward)
-- Dry run first. Quarantine before deletion, for a set period.
-- `filo delete` lists the candidates (expired files). In iteration 3, run in a terminal, it then asks
-  `Delete [a]ll, [s]elect or [n]one?`; *select* goes file by file (`[d]elete, [k]eep until…, [s]kip, [q]uit`). Without
-  a terminal it only lists. In iteration 2 it only lists.
-- Checks at the moment of acting: keep-until passed, no hold, not flagged unreadable, hash unchanged, file not modified in the last few
-  minutes, no sync temp file present (`.syncthing.*.tmp`, `*.part`, `.~lock.*`), optionally no process holds it open.
-- A history table of retired files (path, hash, date, reason) stays after the file is gone.
-- **Syncthing propagates deletes.** Roots that are synced need a flag; quarantine for them must live outside the synced
-  folder or deletion must be handled on one device only. Surface `*.sync-conflict-*` files in review.
-- Scheduled runs only ever scan. Quarantine and deletion are always manual, after review.
+### Lifespan CSV, second shape (decided 2026-11-12; not implemented yet)
+Retention is usually counted from a document's own date ("keep tax records for seven years"), not from today or from
+when the file reached the disk. So the CSV gains a date to count from and a retention that can be a period. This
+replaces the single `keep_until` input above; the rest of the Lifespan section (one purpose, every present file,
+encoding, refusals, the clear prompt, "since" measured in scans) stays.
+
+- **Columns**, in order: `id, export, directory, name, size, modified, file_date, retention, keep_until`.
+  - `file_date`: the date the file is about or was issued, the date a retention period counts from. Typed by the
+    person, or filled in by the export from the file name (below). Not the filesystem's creation date, which is not
+    reliable. Kept in the register even when no retention uses it.
+  - `retention`, one cell for the decision, whose value says what kind it is:
+    - a period, `Ny`, `Nm`, `Nw` or `Nd` (years, months, weeks, days): keep until `file_date` plus that period. A
+      month step that lands past a month's end stops on its last day. Unlike the dropped `+1y`, a period counts from
+      a date written in the same row, so the same row means the same date whichever day it is applied;
+    - `forever` (any case);
+    - a date, `YYYY-MM-DD`: a fixed end date.
+  - `keep_until`: **display only**. The export fills in the end date Filo worked out (or `forever`), so the
+    spreadsheet can sort and filter by it; the update never reads it. A row whose `keep_until` was changed is refused:
+    "keep_until is worked out; change retention instead".
+  - The update reads `id`, `export`, `file_date` and `retention`.
+- **Past dates are accepted** (changed 2026-11-12; the update used to refuse a date not after today), whether typed
+  or worked out from a period: a 2015 invoice with `7y` ends in 2022, which means it is already past its retention.
+  The file simply becomes a deletion candidate. The update's summary says how many files are now past their
+  retention ("see filo delete"); nothing is deleted until `filo delete` is run.
+- **A period without a `file_date`** cannot be worked out: that row is refused with one line ("retention 7y needs a
+  file_date") and nothing is set for that file. The other rows still apply.
+- **Changing `file_date`** on a file whose retention is a period works its `keep_until` out again; a fixed date or
+  `forever` does not depend on it.
+- **A blank `retention`** where one is stored clears it, behind the same prompt as today's blank `keep_until`.
+- **Dates read from file names**, to fill in `file_date` on export where it is blank. Accepted, with non-digit
+  characters (or the start or end of the name) on both sides:
+  - `YYYY-MM-DD`, also with `_` or `.` as the separator;
+  - `YYYYMMDD`, as in camera names (`IMG_20230714_1032.jpg`);
+  - `YYYY-MM` (also `_`, `.`): the last day of that month, so a file is never kept for less time than meant.
+
+  The result must be a real date between 1900-01-01 and 30 days after today; anything else is not a date
+  (`1245-06`, `2099-01-01`). A lone year (`2019 report.pdf`) is not read: it may be a model number or part of a title.
+  A name with two different dates (`2023-01-01 to 2023-12-31 statement.pdf`) gets none: the person types it. A
+  filled-in `file_date` is a suggestion shown in the spreadsheet; it takes effect only through a retention period the
+  person types. Dates from photos' EXIF data: later (needs a library).
+- **Register (schema version 5)**: `files.file_date` (YYYY-MM-DD, NULL = none), `files.retention` (the value as
+  given: a period, `forever` or a date; NULL = none), and `files.keep_until`, now always worked out from those two
+  (YYYY-MM-DD or `forever`). Statuses and `filo delete` keep using `keep_until` only. Migration: an existing
+  `keep_until` becomes `retention` (its date, or `forever`) with the same `keep_until`. `export_rows` and `reviews`
+  gain the same two columns, so an untouched cell is still recognised and the history shows what was typed.
+
+### Disposal (iteration 3)
+Decided 2026-11-12; not implemented yet (`filo delete` only lists). Replaces the earlier plan of a quarantine,
+holds and several checks at the moment of acting.
+
+- **Deletion is permanent.** No quarantine folder and no recycle bin: the bin can fill up with large files, and is
+  missing on network disks; backups are what make a deletion recoverable. So the list the person confirms, and the
+  check below, are what keep it safe.
+- **`filo delete [DIR] [-y]`** lists the candidates (expired files) under DIR, or under every root, with their end date,
+  size and path, and their total size. All of them are listed, however many: that list is what is being confirmed;
+  `filo delete DIR` narrows it. In a terminal it then asks `Delete [a]ll, [s]elect or [n]one?`:
+  - *a* deletes them all, each through the check below. No second confirmation: the list was it;
+  - *s* goes file by file: `[d]elete, [r]etention…, [s]kip, [q]uit?`. *r* asks for a new retention (a date, a
+    period counted from `file_date`, or `forever`, as in the CSV), saves it at once and drops the file from the list;
+    a period on a file without a `file_date` is refused and asked again. *s* leaves it a candidate. *q* stops: what
+    was deleted stays deleted, the rest is untouched;
+  - *n*, anything else, or end of input: nothing.
+  Without a terminal it only lists. **`-y`** deletes them all without asking, in a terminal or not, so deletion can
+  be run from a script: that is the person's choice, never Filo's.
+- **The check at the moment of deleting** (one check; decided 2026-11-12). Each file is re-read and re-hashed just
+  before it is deleted, after a quick size and modification-time comparison that skips a changed file without reading
+  it. It is deleted only if:
+  - it is still at its recorded path, as the same file (same inode);
+  - it can be read: otherwise it is not deleted, a warning says why, and it is flagged unreadable as a scan would;
+  - its content hash is the one its retention was set on (`files.reviewed_hash`); for a symlink, its target is the
+    one recorded. Otherwise it is skipped ("changed since its retention was set"), its new hash is recorded, and it
+    needs a new retention.
+
+  A file that can be read but not deleted (its folder is not writable) is skipped and reported, and stays a
+  candidate. Dropped as checks: recently modified (the re-hash covers it; reading or opening a file does not change
+  its modification time, but saving does), sync and lock companion files (`.~lock.*#`, `~$*`, `.syncthing.*.tmp`,
+  `*.part`), and whether a process has the file open (platform-specific, and deleting an open file does not break the
+  app: a later save brings the file back, as a new file that needs a decision).
+- **Recording.** Each deletion is written to the register straight after the file is removed, so Ctrl-C part-way
+  leaves an accurate record. The file's row stays, marked deleted (`files.deleted_utc`), with its last path, hash,
+  size and retention: those rows are the history of what Filo deleted, so there is no separate table. Its current
+  path is closed and a `deleted` event recorded.
+- **Restored files are new rows.** Deleted rows are never relinked by a scan's pairing (unlike a missing file that
+  returns), so a file restored from a backup comes back as a new file with no retention, needing a decision; an old
+  retention can never carry over to it. A scan that finds a new file with the same content as a deleted one says so
+  ("same content as a file deleted on 2027-03-14"), as a hint only; the rows stay separate. So there is no
+  `filo restore`.
+- **Empty folders.** A folder is removed only if this run deleted its last entry: never a folder that was already
+  empty, never one Filo deleted nothing from, never a root. Before removing it, Filo lists it on disk and removes it
+  only if it has no entries at all (hidden files included), then removes it with the call that refuses a non-empty
+  folder, so anything that appeared in between keeps it. Then it works up: a parent emptied by that removal is
+  checked and removed the same way, stopping at the root. The summary says how many folders were removed.
+- **Summary and exit code.** "Deleted N files (size). Skipped M:" and one line per skipped file and why. Exit code 0
+  when everything went as decided (a changed file is an expected outcome), 1 if a file could not be read or deleted.
+- **`filo report`** adds "Deleted by filo: N files, size freed (last run DATE: n files, size)", from the deleted
+  rows.
+- **Syncthing propagates deletes**: a delete on one device removes the file on every device that syncs the folder.
+  A flag for synced roots is left for later (see Open questions). Surface `*.sync-conflict-*` files later too.
+- Scheduled runs only ever scan; Filo never schedules a deletion.
 
 ### Commands and scheduling
-- Plain names, easy to remember: `roots`, `scan`, `report`, `export`, `update`, `delete`, later `restore` and
-  `revert`. No themed subcommands. (Reshaped 2026-11-12: `review` and its subcommands `set-date`, `export` and
+- Plain names, easy to remember: `roots`, `scan`, `report`, `export`, `update`, `delete`, later `revert`. No themed
+  subcommands. (`restore` was dropped on 2026-11-12: a file restored from a backup comes back as a new file.)
+  (Reshaped 2026-11-12: `review` and its subcommands `set-date`, `export` and
   `import` were replaced by `export lifespan` and `update`; "update" says that only existing files change, which
   "import" did not.)
 - **Keep flags and options to a minimum** (2026-11-11). Prefer a safe default and clear output over a flag; prefer
@@ -295,7 +390,8 @@ lifespan CSV and `filo update` write only the register and the CSV file the user
 - `filo report [--top N]`: see section 4.
 - `filo export lifespan [DIR] -o FILE` and `filo update FILE [--dry-run]`: see Lifespan. The word after `export`
   names the CSV, so a later CSV is a new word, not a new command; `update` tells the kind from the CSV's header.
-- `filo delete`: lists the files past their keep-until date (see Disposal).
+- `filo delete`: lists the files past their keep-until date. In iteration 3, `filo delete [DIR] [-y]` deletes them
+  (see Disposal).
 - `--db PATH` is accepted before or after any command; `FILO_DB` is the fallback, then the default location. Flags may
   come before or after PATH. Built on the standard library's `flag` package (no CLI framework).
 - **A path that starts with `~` is refused** (2026-11-11): every DIR and FILE, `-o`, `--db` and `FILO_DB`.
@@ -398,11 +494,15 @@ upgrade rehashes nothing extra and records each file's ctime quietly). Version 3
 recorded `delete` becomes `keep_until` = the day it was decided, so the file is a deletion candidate; the same in
 `reviews`; `export_rows` loses `reason` and gains `keep_until`; `import` batches are renamed `update`; roots gain
 their settings (defaults for existing roots: hidden skipped, no extra ignores). Columns are dropped with `ALTER TABLE
-... DROP COLUMN`. Later iterations add holds and the retired-files history.
+... DROP COLUMN`. Iteration 3 adds the deleted marker (the deleted rows are the history of deleted files).
+
+**Planned changes**, not implemented yet: schema version 5 adds `files.file_date` and `files.retention`, and the same
+two columns on `export_rows` and `reviews` (see Lifespan CSV, second shape); iteration 3 adds `files.deleted_utc`
+and the `deleted` event kind (see Disposal).
 
 Location history gives snapshots without storing them: the tree at any scan is the set of intervals that cover it.
 A revert moves each file back to the path it had then, with a dry run that reports and skips conflicts. It reverts
-**locations only**; content recovery is the job of backups and quarantine.
+**locations only**; content recovery is the job of backups.
 
 ## 4. Scan and reconcile
 
@@ -446,10 +546,17 @@ its own identity. Reclaimable space is size × (copies − 1) per group. Paths a
    queue). Done when: on a test tree, an export, edit and update round trip records exactly the dates set, refuses
    with one clear line each a changed file, an impossible or ambiguous date, a stale export and an added row; a
    cleared date asks first; a file past its date is listed by `filo delete`, and once edited needs a new date instead
-   (`TestLifespanRoundTrip` in `internal/cli`, plus the store and lifespan package tests); on the real home directory,
-   every file gets a date or `forever`, a directory at a time (filter on `directory`, fill down), through a few
-   directory-sized exports.
-3. **Quarantine and delete** with the safety checks above, history table, holds.
+   (`TestLifespanRoundTrip` in `internal/cli`, plus the store and lifespan package tests). Still to do: the second
+   shape of the CSV (`file_date`, `retention`, display-only `keep_until`, dates from file names, past dates allowed;
+   schema version 5), designed 2026-11-12, with the round trip extended to periods, `file_date` from names and the
+   display column; then, on the real home directory, every file gets a retention or `forever`, a directory at a time
+   (filter on `directory`, fill down), through a few directory-sized exports.
+3. **Delete.** `filo delete [DIR] [-y]` deletes the candidates after the prompt, with the re-hash check, deleted rows,
+   the "freed" line in the report and empty folders removed (see Disposal). Done when: on a test tree, a confirmed
+   run deletes exactly the unchanged candidates; a file changed, unreadable, replaced or moved after its retention was
+   set is skipped with one clear line each; folders emptied by the run are removed up to the root but not an empty
+   folder that was already there or one holding a hidden file; a restored file comes back as a new row with the hint;
+   `-y` and no-terminal behave as designed.
 4. **Revert directory moves** from the path history.
 5. **UI** in place of the CSV, including viewing and editing the register in place (see Open questions).
 
@@ -459,13 +566,14 @@ register to change shape.
 
 ## 6. Open questions
 
-- Holds and asset links: modelled at project or asset level, not per file. Shape not yet decided. A hold with an end
-  date may be how hard retention ("keep for seven years, by law") is expressed, now that there is no separate floor.
+- Asset links: modelled at project or asset level, not per file. Shape not yet decided. (Holds were dropped on
+  2026-11-12: a file that must be kept gets a later retention or `forever`.)
 - Reading a keep-until date from the file itself (frontmatter, Office or PDF properties, extended attributes).
   For now it is set in the CSV; the register is the source of truth either way.
-- Whether commands that take a date (the `[k]eep until…` choice in `filo delete`, a future bulk command) accept
-  durations such as `+1y`. The CSV takes dates only.
-- How a synced-folder flag is configured (needed for disposal, iteration 3).
+- Whether commands accept a period counted from today (`+1y`). The CSV and `filo delete`'s `[r]etention…` take a
+  period counted from `file_date` instead.
+- How synced roots are marked, and what Filo does differently for them (Syncthing propagates deletes). Left until
+  the purpose is clearer; not needed for iteration 3.
 - Confirming a possible move, and undoing an update batch.
 - **A version command** (raised 2026-11-12): `filo version` showing Filo's own version (no build version is stamped
   yet) and the database in use: its path, schema version and when it was created. Today the schema version can
@@ -484,6 +592,16 @@ register to change shape.
 - UI technology.
 
 ## 7. Rejected or deferred
+
+- **Quarantine, the recycle bin, holds and `filo restore`** (rejected 2026-11-12). Deletion is permanent and backups
+  make it recoverable; the confirmed list and the re-hash check keep it safe. The bin fills up with large files and is
+  missing on network disks. A hold is a later retention or `forever`. A restored file is a new file.
+- **More checks at the moment of deleting** (rejected 2026-11-12): recently modified, lock and sync companion files,
+  open in a process. See Disposal.
+- **Relinking a restored file to its deleted record** (rejected 2026-11-12): it would carry the old, passed retention
+  onto a file the person just chose to bring back. It comes back as a new row, with a hint.
+- **Filling `retention` from a filesystem creation date** (rejected 2026-11-12): many filesystems do not record one,
+  and a copy, restore or sync resets it. `file_date` is typed, or read from the file name.
 
 - **Partial hashing of very large files** (size plus first and last megabyte, full hash on demand). Deferred
   2026-11-11: every file is hashed in full, and only rehashed when its size or mtime changes, so the cost falls on

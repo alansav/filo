@@ -15,9 +15,10 @@ delete, revert, UI) are listed in `docs/design.md`. Stay inside the current iter
 ## Hard rules
 
 - Filo must not modify, move, rename or delete any file outside its own data directory (or the `--db` path given)
-  until the iteration that calls for it. Anything destructive defaults to dry-run.
+  until the iteration that calls for it. Anything destructive shows what it will do and asks first (or needs `-y`).
 - Fail safe: a file with missing or ambiguous data is "new, needs a date", never "eligible for deletion". Reaching a
-  keep-until date makes a file a candidate that the person confirms, never a trigger. Holds veto everything.
+  keep-until date makes a file a candidate that the person confirms, never a trigger. A file is deleted only if it
+  can be read and is still exactly the content its retention was set on; one that cannot be read is never deleted.
 - Never guess. Duplicates and ambiguous moves are reported, not resolved. A directory that cannot be read must never
   cause its files to be marked missing.
 - During development, never run Filo against a real home directory or any path outside the repo or a throwaway test
@@ -25,8 +26,8 @@ delete, revert, UI) are listed in `docs/design.md`. Stay inside the current iter
 - Say clearly when code is untested. Check current library versions and docs instead of relying on memory.
 - Do not add a dependency without asking first.
 - Do not run `git commit` or `git push`, and do not set a git identity. The user commits from the host.
-- Command names stay plain and easy to remember: `roots`, `scan`, `report`, `export`, `update`, `delete`, `restore`,
-  `revert`. No themed names.
+- Command names stay plain and easy to remember: `roots`, `scan`, `report`, `export`, `update`, `delete`, `revert`.
+  No themed names.
 
 ## Commands
 
