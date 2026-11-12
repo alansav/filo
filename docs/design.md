@@ -467,6 +467,10 @@ register to change shape.
   durations such as `+1y`. The CSV takes dates only.
 - How a synced-folder flag is configured (needed for disposal, iteration 3).
 - Confirming a possible move, and undoing an update batch.
+- **A version command** (raised 2026-11-12): `filo version` showing Filo's own version (no build version is stamped
+  yet) and the database in use: its path, schema version and when it was created. Today the schema version can
+  only be read with `sqlite3 DB "SELECT key, value FROM meta"`. Showing the same in `filo report` was considered as
+  a simpler alternative.
 - **Viewing and editing the register in place** (raised 2026-11-12). Setting or clearing `keep_until` on a few files
   through a whole export, edit and update round is cumbersome. Wanted: query and view what the register holds (files,
   dates, history) and set or clear a date on a few files directly. Open: a command (for example
