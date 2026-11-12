@@ -81,15 +81,15 @@ events (moves and missing files among them). --top sets how many entries each li
   filo export lifespan [DIR] -o FILE
 
 Writes every file under DIR (inside a root), or under every root, as CSV (UTF-8) to FILE, which must not exist.
-Columns: id, export, directory, name, size, modified, keep_until. Edit keep_until in a spreadsheet, then run
-filo update FILE. On a large system, export one directory at a time.
+Columns: id, export, directory, name, size, modified, keep_until. Edit keep_until in a spreadsheet (a date, or
+forever), then run filo update FILE. On a large system, export one directory at a time.
 `,
 	"update": `Usage:
   filo update FILE [--dry-run]
 
 Reads an exported lifespan CSV and applies the keep_until dates you changed. Only id, export and keep_until are
-read; rows can be sorted, filtered or deleted, but not added. A date is YYYY-MM-DD and must be after today. A
-blank cell clears a stored date (the file then needs a date again); filo lists those files and asks first, and
+read; rows can be sorted, filtered or deleted, but not added. A date is YYYY-MM-DD and must be after today, or
+forever to keep a file indefinitely (it is then never a deletion candidate). A blank cell clears a stored date (the file then needs a date again); filo lists those files and asks first, and
 without a terminal it leaves them alone. A row is refused, with one line saying why, if the file changed since
 the export or its date was changed from a later export. The other rows are still applied.
 --dry-run checks everything and writes nothing.

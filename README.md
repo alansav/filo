@@ -114,13 +114,14 @@ filo delete                                     # list the files past their date
 
 The CSV has one row per file: `id, export, directory, name, size, modified, keep_until`. Sort and filter it however you
 like. File names often carry dates (`2023-03 invoice.pdf`), so the name has a column of its own. To date a whole
-folder at once, filter on `directory` and fill the date down. Filtering on a blank `keep_until` shows the files still
+folder at once, filter on `directory` and fill the date (or `forever`) down. Filtering on a blank `keep_until` shows the files still
 to decide.
 
 - Only `id`, `export` and `keep_until` are read back, so you can reorder columns or add your own. Rows can be sorted,
   filtered or deleted, but not added.
-- A date is `YYYY-MM-DD`, a real date (`2027-02-29` is refused), after today. Anything else is refused rather than
-  guessed. If your spreadsheet turns dates into `01/06/2027`, format the `keep_until` column as text.
+- A date is `YYYY-MM-DD`, a real date (`2027-02-29` is refused), after today. Or type `forever` to keep a file
+  indefinitely: it is never a deletion candidate, and `filo report` counts how many files are kept forever. Anything
+  else is refused rather than guessed. If your spreadsheet turns dates into `01/06/2027`, format the `keep_until` column as text.
 - A cell left as exported changes nothing. Editing the same CSV again and running `filo update` again replaces the
   dates again.
 - A blank cell where a date was set clears it, so the file needs a date again. Filo lists those files and asks first;

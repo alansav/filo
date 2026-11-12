@@ -63,10 +63,12 @@ func TestWriteTextLifespan(t *testing.T) {
 		r    Report
 		want []string
 	}{
-		{"nothing to decide", Report{Status: map[store.Status]int64{store.StatusKept: 3}}, []string{
-			"Needing a keep_until date: none",
-			"Kept until a later date: 3 files",
-		}},
+		{"nothing to decide", Report{Status: map[store.Status]int64{store.StatusKept: 3, store.StatusForever: 1}},
+			[]string{
+				"Needing a keep_until date: none",
+				"Kept until a later date: 3 files",
+				"Kept forever: 1 file",
+			}},
 		{"undecided and expired", Report{
 			Status:      map[store.Status]int64{store.StatusUndated: 1200, store.StatusChanged: 2, store.StatusExpired: 1},
 			Undecided:   1202,

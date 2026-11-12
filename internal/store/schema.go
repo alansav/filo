@@ -54,7 +54,7 @@ CREATE TABLE files (
     link_target TEXT,
     link_broken INTEGER NOT NULL DEFAULT 0,
     first_seen_scan INTEGER NOT NULL REFERENCES scans(id),
-    keep_until TEXT,
+    keep_until TEXT,                    -- YYYY-MM-DD, or 'forever'
     reviewed_utc TEXT,
     reviewed_after_scan INTEGER REFERENCES scans(id),
     reviewed_hash TEXT

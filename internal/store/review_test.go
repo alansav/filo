@@ -39,6 +39,12 @@ func TestClassify(t *testing.T) {
 			reviewedHash: hash("h")}, StatusChanged},
 		{"symlinks have no content to compare", fileRow{item: set(FileItem{Kind: "symlink", KeepUntil: "2025-01-01"})},
 			StatusExpired},
+		{"forever", fileRow{item: set(FileItem{Kind: "file", Hash: "h", KeepUntil: Forever}), reviewedHash: hash("h")},
+			StatusForever},
+		{"forever, edited since: still forever", fileRow{item: set(FileItem{Kind: "file", Hash: "h2",
+			KeepUntil: Forever}), reviewedHash: hash("h")}, StatusForever},
+		{"forever, set before it was flagged unreadable", fileRow{item: set(FileItem{Kind: "file", Hash: "h",
+			UnreadableSince: 3, KeepUntil: Forever}), reviewedAfter: 2, reviewedHash: hash("h")}, StatusUnreadable},
 		{"unreadable, never decided", fileRow{item: FileItem{Kind: "file", Hash: "h", UnreadableSince: 3}},
 			StatusUnreadable},
 		{"unreadable, date set before it was flagged", fileRow{item: set(FileItem{Kind: "file", Hash: "h",
@@ -362,6 +368,17 @@ func TestUpdateLifespan(t *testing.T) {
 	}
 	if len(res.Refusals) != 1 || !strings.Contains(res.Refusals[0].Reason, "changed after export") {
 		t.Errorf("stale update = %+v", res)
+	}
+
+	// forever: accepted, never past, never a candidate, even once edited.
+	res, err = e.s.UpdateLifespan(e.ctx, []LifespanRow{{Line: 2, ExportID: export2, FileID: id("past"),
+		KeepUntil: Forever}}, later, today, "second.csv", false, nil)
+	if err != nil || res.Set != 1 || len(res.Refusals) != 0 {
+		t.Errorf("forever = %+v, %v", res, err)
+	}
+	e.apply(Changes{Updates: []FileUpdate{{FileID: id("past"), Size: 9, MtimeNS: 9, Hash: "h10b"}}})
+	if got := e.statuses("9999-12-31")["past"]; got != StatusForever {
+		t.Errorf("forever file, edited, in 9999: %q, want forever", got)
 	}
 
 	// On its date, keep is a deletion candidate; once edited, it needs a new date instead.

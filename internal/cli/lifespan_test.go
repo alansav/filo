@@ -160,16 +160,16 @@ func TestLifespanRoundTrip(t *testing.T) {
 
 	// Set dates; an impossible date is refused with its line, and the other rows still apply.
 	editCSV(t, r1, setDates(map[string]string{"a.txt": "2027-01-01", "2023-03 invoice.pdf": "2026-11-12",
-		"c.txt": "2027-02-29"}))
+		"c.txt": "2027-02-29", "🏖️ beach.jpg": "Forever"}))
 	r := filo(ExitError, "", false, "update", r1, "--dry-run")
-	contains("dry run", r.stdout, "Dry run: nothing was written.", "Would set 2 keep_until dates")
+	contains("dry run", r.stdout, "Dry run: nothing was written.", "Would set 3 keep_until dates")
 	wantDates("after a dry run", map[string]string{"a.txt": " undated"})
 	r = filo(ExitError, "", false, "update", r1)
-	contains("update", r.stdout, "Set 2 keep_until dates, cleared 0 dates.", "1 row unchanged",
-		"1 row refused")
+	contains("update", r.stdout, "Set 3 keep_until dates, cleared 0 dates.", "1 row refused")
 	contains("update", r.stderr, `r1.csv line 4: keep_until "2027-02-29" is not a date`)
 	wantDates("after update", map[string]string{"a.txt": "2027-01-01 kept",
-		"docs/2023-03 invoice.pdf": "2026-11-12 kept", "docs/c.txt": " undated"})
+		"docs/2023-03 invoice.pdf": "2026-11-12 kept", "docs/c.txt": " undated",
+		"📷 Pictures/🏖️ beach.jpg": "forever forever"})
 
 	// The same CSV again changes nothing; editing it again replaces the dates it set.
 	contains("update again", filo(ExitError, "", false, "update", r1).stdout, "Set 0 keep_until dates")
@@ -185,7 +185,7 @@ func TestLifespanRoundTrip(t *testing.T) {
 	contains("delete", r.stdout, "Past their keep_until date: 1 file", "2026-11-12", in("docs/2023-03 invoice.pdf"),
 		"filo deletes nothing")
 	contains("report", filo(ExitOK, "", false, "report").stdout, "Past keep_until: 1 file; see filo delete",
-		"Kept until a later date: 1 file")
+		"Kept until a later date: 1 file", "Kept forever: 1 file")
 
 	// A blank cell clears a date, but only when confirmed in a terminal.
 	r2 := filepath.Join(work, "r2.csv")

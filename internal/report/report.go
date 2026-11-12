@@ -45,6 +45,8 @@ func StatusLabel(s store.Status) string {
 		return "past keep_until"
 	case store.StatusKept:
 		return "kept"
+	case store.StatusForever:
+		return "kept forever"
 	}
 	return string(s)
 }
@@ -140,6 +142,9 @@ func (r Report) WriteText(w io.Writer) error {
 	}
 	if n := r.Status[store.StatusKept]; n > 0 {
 		p.line("Kept until a later date: %s", Plural(n, "file", "files"))
+	}
+	if n := r.Status[store.StatusForever]; n > 0 {
+		p.line("Kept forever: %s", Plural(n, "file", "files"))
 	}
 	if n := r.Status[store.StatusExpired]; n > 0 {
 		p.line("Past keep_until: %s; see filo delete", Plural(n, "file", "files"))

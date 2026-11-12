@@ -8,6 +8,10 @@ import (
 	"time"
 )
 
+// Forever is the keep_until value for a file kept indefinitely. It is stored as this word, never as a far-off date,
+// and checked explicitly rather than by comparing it with dates.
+const Forever = "forever"
+
 // Status is where a present file stands in its lifespan. A file has one status: the first that applies, in the
 // order of Statuses.
 type Status string
@@ -27,10 +31,13 @@ const (
 	StatusExpired Status = "expired"
 	// StatusKept: kept until a date after today.
 	StatusKept Status = "kept"
+	// StatusForever: kept indefinitely. Never a deletion candidate, however old it is or however often it changes.
+	StatusForever Status = "forever"
 )
 
 // Statuses lists every status in priority order.
-var Statuses = []Status{StatusUnreadable, StatusPossibleMove, StatusUndated, StatusChanged, StatusExpired, StatusKept}
+var Statuses = []Status{StatusUnreadable, StatusPossibleMove, StatusUndated, StatusForever, StatusChanged,
+	StatusExpired, StatusKept}
 
 // NeedsDecision reports whether a file with this status needs a keep_until decision.
 func (s Status) NeedsDecision() bool {
@@ -46,7 +53,7 @@ type FileItem struct {
 	Size        int64
 	MtimeNS     int64
 	Hash        string // "" = none
-	KeepUntil   string // YYYY-MM-DD, "" = none
+	KeepUntil   string // YYYY-MM-DD, Forever, or "" = none
 	ReviewedUTC string // when the current keep_until was set; "" = never
 	Status      Status
 
@@ -97,6 +104,9 @@ func classify(r fileRow, today string) Status {
 	}
 	if it.KeepUntil == "" {
 		return StatusUndated
+	}
+	if it.KeepUntil == Forever {
+		return StatusForever
 	}
 	if it.KeepUntil > today {
 		return StatusKept
@@ -224,7 +234,7 @@ type LifespanRow struct {
 	Line      int // in the CSV, for messages
 	ExportID  int64
 	FileID    int64
-	KeepUntil string // YYYY-MM-DD as typed; "" = blank
+	KeepUntil string // YYYY-MM-DD or Forever, as typed; "" = blank
 }
 
 // Refusal is a row that was not applied, and why.
@@ -431,7 +441,7 @@ func checkRow(ctx context.Context, tx *sql.Tx, r LifespanRow, ex exportInfo, tod
 		c.refusal = fmt.Sprintf("changed since export %d; export again to set its date", r.ExportID)
 		return c, nil
 	}
-	if r.KeepUntil != "" && r.KeepUntil <= today {
+	if r.KeepUntil != "" && r.KeepUntil != Forever && r.KeepUntil <= today {
 		c.refusal = fmt.Sprintf("keep_until %s is not after today", r.KeepUntil)
 	}
 	return c, nil

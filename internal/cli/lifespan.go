@@ -132,7 +132,8 @@ func (e *env) export(ctx context.Context, dbBefore string, args []string) error 
 	}
 	fmt.Fprintf(e.stdout, "Exported %s%s to %s (export %d), %s without a keep_until.\n",
 		report.Plural(int64(len(items)), "file", "files"), where, path, id, report.Count(int64(undated)))
-	fmt.Fprintf(e.stdout, "Set keep_until (YYYY-MM-DD, after today) where you want it, then run:\n  filo update %s\n", path)
+	fmt.Fprintf(e.stdout, "Set keep_until (YYYY-MM-DD after today, or forever) where you want it, then run:\n"+
+		"  filo update %s\n", path)
 	return nil
 }
 

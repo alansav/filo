@@ -25,17 +25,21 @@ const dateLayout = "2006-01-02"
 // bom marks the file as UTF-8 for spreadsheets that would otherwise guess another encoding.
 const bom = "\ufeff"
 
-// ParseDate checks a typed date: "" stays "" (a blank cell), YYYY-MM-DD must be a real date (2027-02-29 is not).
-// Anything else is refused: a date like 06/07/2027 is ambiguous and is never guessed.
+// ParseDate checks a typed keep_until: "" stays "" (a blank cell), forever (in any case) is store.Forever, and
+// YYYY-MM-DD must be a real date (2027-02-29 is not). Anything else is refused: a date like 06/07/2027 is ambiguous
+// and is never guessed.
 func ParseDate(s string) (string, error) {
 	s = strings.TrimSpace(s)
 	if s == "" {
 		return "", nil
 	}
+	if strings.EqualFold(s, store.Forever) {
+		return store.Forever, nil
+	}
 	t, err := time.Parse(dateLayout, s)
 	if err != nil {
-		return "", fmt.Errorf("%q is not a date: use YYYY-MM-DD, for example 2027-06-30 (a spreadsheet may have "+
-			"rewritten it; format the column as text)", s)
+		return "", fmt.Errorf("%q is not a date: use YYYY-MM-DD, for example 2027-06-30, or forever (a spreadsheet "+
+			"may have rewritten it; format the column as text)", s)
 	}
 	return t.Format(dateLayout), nil
 }

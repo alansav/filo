@@ -22,6 +22,13 @@ func TestParseDate(t *testing.T) {
 		{"2027-06-30", "2027-06-30", false},
 		{" 2027-06-30 ", "2027-06-30", false},
 		{"2028-02-29", "2028-02-29", false}, // a leap day
+		{"forever", "forever", false},
+		{" Forever ", "forever", false},
+		{"FOREVER", "forever", false},
+		{"indefinitely", "", true}, // one word only
+		{"never", "", true},
+		{"keep", "", true},
+		{"9999-12-31", "9999-12-31", false}, // a real date, if someone types one
 		{"2027-02-29", "", true},            // not a leap year
 		{"2027-02-30", "", true},
 		{"2027-06-31", "", true},
@@ -73,6 +80,7 @@ func TestWriteThenRead(t *testing.T) {
 		{FileID: 8, RootPath: "/r", Path: "=evil", Size: 1, MtimeNS: 1, KeepUntil: "2026-01-01"},
 		{FileID: 9, RootPath: "/r", Path: "a/b/x,\"quoted\"\nname", Size: 1, MtimeNS: 1, KeepUntil: "2030-01-01"},
 		{FileID: 10, RootPath: "/r", Path: "🗂️ archive/👨‍👩‍👧 family.md", Size: 1, MtimeNS: 1},
+		{FileID: 11, RootPath: "/r", Path: "tax/2019.pdf", Size: 1, MtimeNS: 1, KeepUntil: "forever"},
 	}
 	var buf bytes.Buffer
 	if err := WriteCSV(&buf, 3, items, time.UTC); err != nil {
@@ -87,6 +95,7 @@ func TestWriteThenRead(t *testing.T) {
 		"8,3,/r,'=evil,1,", ",2026-01-01\n",
 		"9,3,/r/a/b,\"x,\"\"quoted\"\"\nname\",1,", ",2030-01-01\n",
 		"10,3,/r/🗂️ archive,👨‍👩‍👧 family.md,1,",
+		"11,3,/r/tax,2019.pdf,1,", ",forever\n",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("CSV lacks %q:\n%s", want, out)
@@ -102,6 +111,7 @@ func TestWriteThenRead(t *testing.T) {
 		{Line: 3, ExportID: 3, FileID: 8, KeepUntil: "2026-01-01"},
 		{Line: 4, ExportID: 3, FileID: 9, KeepUntil: "2030-01-01"},
 		{Line: 6, ExportID: 3, FileID: 10},
+		{Line: 7, ExportID: 3, FileID: 11, KeepUntil: "forever"},
 	}
 	if len(p.Problems) != 0 || len(p.Rows) != len(want) {
 		t.Fatalf("untouched read = %+v", p)
@@ -122,11 +132,12 @@ func TestReadCSV(t *testing.T) {
 		problems []string // substrings, one per problem, in order
 		err      error
 	}{
-		{name: "dates and blanks",
-			in: head + "1,2,/d,a,1,m,2027-01-01\n2,2,/d,b,1,m,\n",
+		{name: "dates, forever and blanks",
+			in: head + "1,2,/d,a,1,m,2027-01-01\n2,2,/d,b,1,m,\n3,2,/d,c,1,m,Forever\n",
 			want: []store.LifespanRow{
 				{Line: 2, ExportID: 2, FileID: 1, KeepUntil: "2027-01-01"},
 				{Line: 3, ExportID: 2, FileID: 2},
+				{Line: 4, ExportID: 2, FileID: 3, KeepUntil: "forever"},
 			}},
 		{name: "empty spreadsheet rows are skipped",
 			in:   head + "1,2,/d,a,1,m,2027-01-01\n,,,,,,\n\n",

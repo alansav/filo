@@ -191,6 +191,13 @@ Principles. These are not negotiable:
 Decided 2026-11-12, replacing the review queue, review dates, actions and retain-until floors of 2026-11-11. The
 lifespan CSV and `filo update` write only the register and the CSV file the user names; they never touch the files.
 
+- **Forever** (decided 2026-11-12): `keep_until` may be the word `forever` instead of a date, for files kept
+  indefinitely. It is stored as that word, never as a far-off date such as 9999-12-31 (which would look like a
+  chosen date in the CSV, sort among real dates, and need special-casing everywhere), and checked explicitly, not by
+  comparing it with dates. A `forever` file is never a deletion candidate, however old it is or however often it
+  changes; `filo report` counts them so the pile stays visible, and typing a date over it later is how it ends. One
+  word only, in any case (`Forever`): no aliases such as `indefinitely` or `never`. No schema change: the column is
+  text already.
 - **One date per file: `keep_until`.** Keep the file until then. On that date it becomes a deletion candidate, never
   deleted automatically: `filo delete` lists the candidates, and deleting each is the person's call (iteration 3). A
   recurring check on a file (an annual look at a seven-year record) is a task, a later iteration; this iteration
@@ -201,11 +208,12 @@ lifespan CSV and `filo update` write only the register and the CSV file the user
   2. *possible move*: the new side of a possible move recorded after its date was last set. The event names the old
      file; the new one is the file whose path opened at the event's path in that scan;
   3. *undated*: no `keep_until`;
-  4. *kept*: `keep_until` after today (local date);
-  5. *changed*: past its date, but a regular file whose hash is not the one the date was set on (or the date was set
+  4. *forever*: `keep_until` is `forever`;
+  5. *kept*: `keep_until` after today (local date);
+  6. *changed*: past its date, but a regular file whose hash is not the one the date was set on (or the date was set
      without a hash, or it has none now). A change before the date does not matter; at the date it needs a new one;
-  6. *expired*: past its date and unchanged: a deletion candidate.
-  The first four except *kept*, plus *changed*, need a decision; `filo report` counts them and shows the directories
+  7. *expired*: past its date and unchanged: a deletion candidate.
+  *Unreadable*, *possible move*, *undated* and *changed* need a decision; `filo report` counts them and shows the directories
   holding most of them.
 - **"Since" is measured in scans**, not clock times. Each export records the latest finished scan
   (`exports.after_scan`); a date set from it is stamped with that scan (`files.reviewed_after_scan`), the content it
@@ -227,8 +235,8 @@ lifespan CSV and `filo update` write only the register and the CSV file the user
   as they are, emoji and all; bytes that are not valid UTF-8 are shown as U+FFFD, which is harmless because the update
   never reads the name. A display cell that starts with `= + - @`, tab or CR gets a leading `'` so a spreadsheet does
   not run it as a formula. The update accepts a byte order mark, CRLF, `;` or tab separators, and empty rows.
-- **Dates**: `YYYY-MM-DD` only, and a real date (`2027-02-29` is refused). Anything else, such as `06/07/2027` or
-  `+1y`, is refused, never guessed; the message suggests formatting the column as text, since spreadsheets may
+- **Dates**: `YYYY-MM-DD` only, and a real date (`2027-02-29` is refused), or `forever`. Anything else, such as
+  `06/07/2027` or `+1y`, is refused, never guessed; the message suggests formatting the column as text, since spreadsheets may
   rewrite dates in the locale's format. A new date must be after today. Durations (`+1y`) were dropped from the CSV on
   2026-11-12: a duration is relative to the day of the update, so the same cell meant different dates on different
   days. Whether commands take durations is open.
@@ -337,7 +345,7 @@ CREATE TABLE files (
     link_target TEXT, link_broken INTEGER NOT NULL DEFAULT 0,
     first_seen_scan INTEGER NOT NULL REFERENCES scans(id),
     -- the current lifespan (version 4); the history is in reviews
-    keep_until TEXT,                    -- YYYY-MM-DD; NULL = undated, needs a decision
+    keep_until TEXT,                    -- YYYY-MM-DD or 'forever'; NULL = undated, needs a decision
     reviewed_utc TEXT,                  -- when keep_until was last set by an update; NULL = never
     reviewed_after_scan INTEGER REFERENCES scans(id), -- the latest scan that update's export had seen
     reviewed_hash TEXT);                -- the content the date was set on
@@ -439,7 +447,8 @@ its own identity. Reclaimable space is size × (copies − 1) per group. Paths a
    with one clear line each a changed file, an impossible or ambiguous date, a stale export and an added row; a
    cleared date asks first; a file past its date is listed by `filo delete`, and once edited needs a new date instead
    (`TestLifespanRoundTrip` in `internal/cli`, plus the store and lifespan package tests); on the real home directory,
-   every file gets a date through a few directory-sized exports.
+   every file gets a date or `forever`, a directory at a time (filter on `directory`, fill down), through a few
+   directory-sized exports.
 3. **Quarantine and delete** with the safety checks above, history table, holds.
 4. **Revert directory moves** from the path history.
 5. **UI** in place of the CSV, including viewing and editing the register in place (see Open questions).
