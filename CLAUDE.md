@@ -6,18 +6,18 @@ in the same commit when a design decision changes.
 
 ## Current state
 
-Iteration 2: review CSV export and import, and bulk-setting initial review dates by folder. Iteration 1 (scan,
-register, report) is done. **Still read-only on the user's files:** iteration 2 writes only the register and the CSV
-file the user names, and never overwrites an existing file. A delete action is recorded as a decision, never carried
-out. Later iterations (quarantine and delete, revert, UI) are listed in `docs/design.md`. Stay inside the current
-iteration.
+Iteration 2: lifespan. Each file gets one `keep_until` date, set through the lifespan CSV (`filo export lifespan`, then
+`filo update`); roots carry their own scan settings. Iteration 1 (scan, register, report) is done. **Still read-only on
+the user's files:** iteration 2 writes only the register and the CSV file the user names, and never overwrites an
+existing file. `filo delete` only lists the files past their date; nothing is deleted. Later iterations (quarantine and
+delete, revert, UI) are listed in `docs/design.md`. Stay inside the current iteration.
 
 ## Hard rules
 
 - Filo must not modify, move, rename or delete any file outside its own data directory (or the `--db` path given)
   until the iteration that calls for it. Anything destructive defaults to dry-run.
-- Fail safe: a file with missing or ambiguous data is "new, needs review", never "eligible for deletion". A
-  retain-until date is a floor, not a trigger. Holds veto everything.
+- Fail safe: a file with missing or ambiguous data is "new, needs a date", never "eligible for deletion". Reaching a
+  keep-until date makes a file a candidate that the person confirms, never a trigger. Holds veto everything.
 - Never guess. Duplicates and ambiguous moves are reported, not resolved. A directory that cannot be read must never
   cause its files to be marked missing.
 - During development, never run Filo against a real home directory or any path outside the repo or a throwaway test
@@ -25,7 +25,8 @@ iteration.
 - Say clearly when code is untested. Check current library versions and docs instead of relying on memory.
 - Do not add a dependency without asking first.
 - Do not run `git commit` or `git push`, and do not set a git identity. The user commits from the host.
-- Command names stay plain: `scan`, `report`, `review`, `restore`, `revert`, `roots`. No themed names.
+- Command names stay plain and easy to remember: `roots`, `scan`, `report`, `export`, `update`, `delete`, `restore`,
+  `revert`. No themed names.
 
 ## Commands
 
@@ -40,16 +41,16 @@ prefix.)
   home directory (for example `~/FiloTest`) or a temp directory. `mutate` makes a directory and a file unreadable;
   `scripts/testtree.sh unlock DIR` undoes that, and is needed before `rm -rf DIR`
 - Example dev run, always with a throwaway database and tree:
-  `bin/filo --db /tmp/f.db roots add DIR`, `bin/filo --db /tmp/f.db scan`, `bin/filo --db /tmp/f.db report`, then
-  `bin/filo --db /tmp/f.db review`, `review set-date DIR/notes +6m`, `review export -o /tmp/r.csv` and
-  `review import /tmp/r.csv` (export refuses an existing file, so remove `/tmp/r.csv` between runs)
+  `bin/filo --db /tmp/f.db roots add DIR` (adds and scans), `bin/filo --db /tmp/f.db scan`,
+  `bin/filo --db /tmp/f.db report`, then `bin/filo --db /tmp/f.db export lifespan DIR/notes -o /tmp/l.csv`, edit
+  `keep_until`, `update /tmp/l.csv` and `delete` (export refuses an existing file, so remove `/tmp/l.csv` between runs)
 
 Run `go vet` and the tests before saying a change is done.
 
 ## Layout
 
 - `cmd/filo/`: the command-line entry point, kept thin.
-- `internal/`: the logic, in small packages (walking, hashing, the store, reconcile, report, review CSV). Keep OS-specific
+- `internal/`: the logic, in small packages (walking, hashing, the store, reconcile, report, lifespan CSV). Keep OS-specific
   code (hidden files, inodes, symlinks, path separators) behind small functions.
 - `scripts/`: helper scripts (`dev.sh`, `testtree.sh`).
 - `.devcontainer/Containerfile`: the dev container. `docs/design.md`: the design.

@@ -51,13 +51,12 @@ func TestQuotedTildeRefused(t *testing.T) {
 		{"db flag", nil, []string{"--db", "~/f.db", "roots"}, "--db ~/f.db"},
 		{"db flag after command", nil, []string{"roots", "--db", "~/f.db"}, "--db ~/f.db"},
 		{"FILO_DB", map[string]string{"FILO_DB": "~/f.db"}, []string{"roots"}, "FILO_DB ~/f.db"},
-		{"roots add", nil, []string{"--db", db, "roots", "add", "~/docs"}, "PATH ~/docs"},
-		{"scan", nil, []string{"--db", db, "scan", "~/docs"}, "PATH ~/docs"},
-		{"review", nil, []string{"--db", db, "review", "~/docs"}, "PATH ~/docs"},
-		{"set-date", nil, []string{"--db", db, "review", "set-date", "~/docs", "+6m"}, "FOLDER ~/docs"},
-		{"export path", nil, []string{"--db", db, "review", "export", "~/docs"}, "PATH ~/docs"},
-		{"export -o", nil, []string{"--db", db, "review", "export", "-o", "~/r.csv"}, "-o ~/r.csv"},
-		{"import", nil, []string{"--db", db, "review", "import", "~/r.csv"}, "FILE ~/r.csv"},
+		{"roots add", nil, []string{"--db", db, "roots", "add", "~/docs"}, "DIR ~/docs"},
+		{"roots set", nil, []string{"--db", db, "roots", "set", "~/docs"}, "DIR ~/docs"},
+		{"scan", nil, []string{"--db", db, "scan", "~/docs"}, "DIR ~/docs"},
+		{"export dir", nil, []string{"--db", db, "export", "lifespan", "~/docs", "-o", "r.csv"}, "DIR ~/docs"},
+		{"export -o", nil, []string{"--db", db, "export", "lifespan", "-o", "~/r.csv"}, "-o ~/r.csv"},
+		{"update", nil, []string{"--db", db, "update", "~/r.csv"}, "FILE ~/r.csv"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

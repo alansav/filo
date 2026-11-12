@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -33,17 +34,59 @@ type Root struct {
 	Path      string // absolute, symlinks resolved
 	MountPath string // the mount point the root lives under when added; "" = the filesystem of /
 	AddedUTC  string
+	Settings
+}
+
+// Settings are a root's scan settings. Every scan of the root, whole or partial, uses them.
+type Settings struct {
+	IncludeHidden bool     // also scan hidden entries
+	Ignore        []string // entry names skipped at any depth, besides the built-in noise
+}
+
+// Equal reports whether two settings scan the same entries.
+func (a Settings) Equal(b Settings) bool {
+	if a.IncludeHidden != b.IncludeHidden || len(a.Ignore) != len(b.Ignore) {
+		return false
+	}
+	for i := range a.Ignore {
+		if a.Ignore[i] != b.Ignore[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// normal returns the settings with duplicate ignore names removed, in the order given.
+func (a Settings) normal() Settings {
+	out := Settings{IncludeHidden: a.IncludeHidden}
+	seen := map[string]bool{}
+	for _, n := range a.Ignore {
+		if !seen[n] {
+			seen[n] = true
+			out.Ignore = append(out.Ignore, n)
+		}
+	}
+	return out
+}
+
+func (a Settings) ignoresJSON() (string, error) {
+	if len(a.Ignore) == 0 {
+		return "[]", nil
+	}
+	b, err := json.Marshal(a.Ignore)
+	return string(b), err
 }
 
 // Absorbed is an existing root that a new root took in.
 type Absorbed struct {
-	Path   string // the old root, absolute
-	Prefix string // its place in the new root, '/'-separated
+	Path     string   // the old root, absolute
+	Prefix   string   // its place in the new root, '/'-separated
+	Settings Settings // its settings before; the new root's settings apply from now on
 }
 
-// AddRoot registers a directory as a root; see AddRootAbsorb.
+// AddRoot registers a directory as a root with default settings; see AddRootAbsorb.
 func (s *Store) AddRoot(ctx context.Context, path string) (Root, error) {
-	r, _, err := s.AddRootAbsorb(ctx, path)
+	r, _, err := s.AddRootAbsorb(ctx, path, Settings{})
 	return r, err
 }
 
@@ -51,8 +94,9 @@ func (s *Store) AddRoot(ctx context.Context, path string) (Root, error) {
 // existing root on the same filesystem (it is already covered). An existing root inside the new one on the same
 // filesystem is absorbed: its paths, scans and events move into the new root under its folder, in the same
 // transaction, so file identities, history and review decisions are kept. A root that cannot be checked now (not
-// reachable, or its disk not mounted) is never absorbed: the add is refused instead.
-func (s *Store) AddRootAbsorb(ctx context.Context, path string) (Root, []Absorbed, error) {
+// reachable, or its disk not mounted) is never absorbed: the add is refused instead. The new root's settings apply to
+// everything it absorbs.
+func (s *Store) AddRootAbsorb(ctx context.Context, path string, set Settings) (Root, []Absorbed, error) {
 	p, err := canonicalDir(path)
 	if err != nil {
 		return Root{}, nil, err
@@ -85,14 +129,18 @@ func (s *Store) AddRootAbsorb(ctx context.Context, path string) (Root, []Absorbe
 		}
 	}
 
-	r := Root{Path: p, MountPath: mountPath, AddedUTC: time.Now().UTC().Format(time.RFC3339)}
+	r := Root{Path: p, MountPath: mountPath, AddedUTC: time.Now().UTC().Format(time.RFC3339), Settings: set.normal()}
+	ignores, err := r.ignoresJSON()
+	if err != nil {
+		return Root{}, nil, err
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return Root{}, nil, err
 	}
 	defer tx.Rollback()
-	res, err := tx.ExecContext(ctx, `INSERT INTO roots (path, mount_path, added_utc) VALUES (?, ?, ?)`,
-		r.Path, nullString(r.MountPath), r.AddedUTC)
+	res, err := tx.ExecContext(ctx, `INSERT INTO roots (path, mount_path, added_utc, include_hidden, ignores)
+		VALUES (?, ?, ?, ?, ?)`, r.Path, nullString(r.MountPath), r.AddedUTC, r.IncludeHidden, ignores)
 	if err != nil {
 		return Root{}, nil, fmt.Errorf("add root %s: %w", p, err)
 	}
@@ -104,7 +152,7 @@ func (s *Store) AddRootAbsorb(ctx context.Context, path string) (Root, []Absorbe
 		if err := absorb(ctx, tx, t.e.ID, r.ID, t.prefix); err != nil {
 			return Root{}, nil, fmt.Errorf("absorb root %s into %s: %w", t.e.Path, p, err)
 		}
-		absorbed = append(absorbed, Absorbed{Path: t.e.Path, Prefix: t.prefix})
+		absorbed = append(absorbed, Absorbed{Path: t.e.Path, Prefix: t.prefix, Settings: t.e.Settings})
 	}
 	if err := tx.Commit(); err != nil {
 		return Root{}, nil, err
@@ -197,7 +245,8 @@ func reachableID(r Root) (fsid.ID, bool) {
 
 // Roots lists the registered roots, ordered by path.
 func (s *Store) Roots(ctx context.Context) ([]Root, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, path, coalesce(mount_path, ''), added_utc FROM roots ORDER BY path`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id, path, coalesce(mount_path, ''), added_utc, include_hidden, ignores
+		FROM roots ORDER BY path`)
 	if err != nil {
 		return nil, fmt.Errorf("list roots: %w", err)
 	}
@@ -205,12 +254,47 @@ func (s *Store) Roots(ctx context.Context) ([]Root, error) {
 	var out []Root
 	for rows.Next() {
 		var r Root
-		if err := rows.Scan(&r.ID, &r.Path, &r.MountPath, &r.AddedUTC); err != nil {
+		var ignores string
+		if err := rows.Scan(&r.ID, &r.Path, &r.MountPath, &r.AddedUTC, &r.IncludeHidden, &ignores); err != nil {
 			return nil, fmt.Errorf("list roots: %w", err)
+		}
+		if err := json.Unmarshal([]byte(ignores), &r.Ignore); err != nil {
+			return nil, fmt.Errorf("root %s: ignore names: %w", r.Path, err)
+		}
+		if len(r.Ignore) == 0 {
+			r.Ignore = nil
 		}
 		out = append(out, r)
 	}
 	return out, rows.Err()
+}
+
+// SetSettings replaces the settings of the root at path (the root itself, not a folder inside it) and returns the
+// root with its settings before the change. The next scan uses the new settings.
+func (s *Store) SetSettings(ctx context.Context, path string, set Settings) (Root, error) {
+	p, err := canonicalDir(path)
+	if err != nil {
+		return Root{}, err
+	}
+	roots, err := s.Roots(ctx)
+	if err != nil {
+		return Root{}, err
+	}
+	for _, r := range roots {
+		if r.Path != p {
+			continue
+		}
+		ignores, err := set.normal().ignoresJSON()
+		if err != nil {
+			return Root{}, err
+		}
+		if _, err := s.db.ExecContext(ctx, `UPDATE roots SET include_hidden = ?, ignores = ? WHERE id = ?`,
+			set.IncludeHidden, ignores, r.ID); err != nil {
+			return Root{}, fmt.Errorf("set settings of root %s: %w", p, err)
+		}
+		return r, nil
+	}
+	return Root{}, fmt.Errorf("%w: %s is not a root (filo roots lists them)", ErrNoRoot, p)
 }
 
 // Resolve maps a scan target to its root and a scope relative to that root ('/'-separated, "" for the whole root).

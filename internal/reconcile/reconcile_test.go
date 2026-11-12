@@ -211,7 +211,8 @@ func skipIfNoCtime(e *env) {
 
 type step struct {
 	do    func(e *env)
-	opt   Options // Target defaults to the root
+	opt   Options         // Target defaults to the root
+	set   *store.Settings // if set, the root's settings are replaced before the scan
 	want  counts
 	check func(t *testing.T, e *env, sum Summary, prev map[string]store.Known)
 }
@@ -505,10 +506,17 @@ func TestScenarios(t *testing.T) {
 					}
 				}},
 		}},
-		{"hidden files are untouched by a scan without --include-hidden", []step{
-			{do: func(e *env) { e.write(".h/x", "x"); e.write("v", "v") }, opt: Options{IncludeHidden: true}, want: counts{New: 2}},
-			{do: func(e *env) { e.rm(".h/x") }, want: counts{}},
-			{opt: Options{IncludeHidden: true}, want: counts{Missing: 1}},
+		{"hidden files are untouched by a scan of a root that skips them", []step{
+			{do: func(e *env) { e.write(".h/x", "x"); e.write("v", "v") }, set: &store.Settings{IncludeHidden: true},
+				want: counts{New: 2}},
+			{do: func(e *env) { e.rm(".h/x") }, set: &store.Settings{}, want: counts{}},
+			{set: &store.Settings{IncludeHidden: true}, want: counts{Missing: 1}},
+		}},
+		{"the root's ignore names are skipped, and untouched", []step{
+			{do: func(e *env) { e.write("venv/x", "x"); e.write("v", "v") }, set: &store.Settings{Ignore: []string{"venv"}},
+				want: counts{New: 1}},
+			{set: &store.Settings{}, want: counts{New: 1}},
+			{do: func(e *env) { e.rm("venv/x") }, set: &store.Settings{Ignore: []string{"venv"}}, want: counts{}},
 		}},
 		{"unreadable directory: its files are not missing", []step{
 			{do: func(e *env) { e.write("d/x", "x"); e.write("y", "y") }, want: counts{New: 2}},
@@ -607,6 +615,11 @@ func TestScenarios(t *testing.T) {
 				prev := e.known()
 				if st.do != nil {
 					st.do(e)
+				}
+				if st.set != nil {
+					if _, err := e.s.SetSettings(context.Background(), e.base, *st.set); err != nil {
+						t.Fatalf("step %d: SetSettings: %v", i, err)
+					}
 				}
 				opt := st.opt
 				if opt.Target == "" {

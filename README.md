@@ -1,11 +1,12 @@
 # Filo
 
-Filo keeps a register of your files: what they are, where they live, and how that changes over time. It is the first
-part of a review-and-dispose workflow meant to stop files piling up forever ("keep it in case someone asks").
+Filo keeps a register of your files: what they are, where they live, how that changes over time, and how long each one
+should be kept. It is the start of a review-and-dispose workflow meant to stop files piling up forever ("keep it in
+case someone asks").
 
-**Status: iteration 1 of 5: scan, register, report.** Filo is **read-only on your files**: it never modifies, moves,
-renames or deletes anything outside its own database. Reviewing files and disposing of them come in later iterations
-(see [Roadmap](#roadmap)).
+**Status: iteration 2 of 5: lifespan.** Filo is **read-only on your files**: it never modifies, moves, renames or
+deletes anything outside its own database. You can give every file a *keep until* date, and Filo lists the files past
+theirs; deleting them comes in a later iteration (see [Roadmap](#roadmap)).
 
 ## What it does today
 
@@ -19,8 +20,12 @@ renames or deletes anything outside its own database. Reviewing files and dispos
 
   Ambiguous cases are reported, never guessed. A file edited and moved at once shows as a **possible move**, and
   several identical copies are only paired when their names make it unambiguous.
-- **Reports** totals per root, the largest files, **duplicate groups with the space you could reclaim**, broken
-  symlinks, unreadable files, and recent changes.
+- **Reports** totals per root, the files that still need a keep-until date and where they are, the largest files,
+  **duplicate groups with the space you could reclaim**, broken symlinks, unreadable files, and recent changes
+  (including moved and missing files).
+- **Tracks how long to keep each file.** Each file has one date, `keep_until`, which you set in a spreadsheet: export
+  a CSV, fill in the dates, update the register from it. When a date passes, the file is listed as a deletion
+  candidate. Nothing is ever deleted because a date passed.
 - **Rescans quickly.** A file is only re-read when its size, modification time, change time (ctime) or inode changes.
   The change time is what catches a file whose permissions changed, or one rewritten with its old modification time
   put back. Windows has no change time, so there it isn't compared.
@@ -37,6 +42,8 @@ It is built to fail safe:
 - **Files that come back are recognised.** If they return after going missing (a disk that was briefly unreadable,
   a file moved out and back), they are relinked to their old record.
 - **Interrupting is safe.** Each scan is written in one transaction, so Ctrl-C leaves the register as it was.
+- **A changed file needs a new date.** If a file's content changed since its date was set, it isn't a deletion
+  candidate when the date comes: it needs a new decision instead.
 
 ## Install
 
@@ -54,12 +61,12 @@ Copy `bin/filo` somewhere on your `PATH`, or run it from the repository.
 ## Quick start
 
 ```sh
-filo roots add ~          # register a directory as a root
-filo scan                 # scan every root; the first scan hashes everything, so it is the slow one
-filo report               # totals, largest files, duplicates, broken symlinks, unreadable files, recent changes
+filo roots add ~          # register a directory as a root and scan it; the first scan hashes everything, so it is slow
+filo scan                 # scan every root again: only what changed is rehashed
+filo report               # totals, files needing a date, largest files, duplicates, unreadable files, recent changes
 ```
 
-After that, `filo scan` again only rehashes what changed. A scan prints a summary like this:
+A scan prints a summary like this:
 
 ```
 /home/you/FiloTest: 15 files seen in 10ms (scan 2)
@@ -96,46 +103,94 @@ Unreadable files: 1
   since scan 2  /home/you/FiloTest/docs/private.txt
 ```
 
+## Setting keep-until dates
+
+```sh
+filo export lifespan ~/Documents -o docs.csv    # every file under ~/Documents, with its keep_until
+# open docs.csv in a spreadsheet, fill in keep_until (YYYY-MM-DD), save it as CSV
+filo update docs.csv                            # apply the dates you changed
+filo delete                                     # list the files past their date (deletes nothing yet)
+```
+
+The CSV has one row per file: `id, export, directory, name, size, modified, keep_until`. Sort and filter it however you
+like. File names often carry dates (`2023-03 invoice.pdf`), so the name has a column of its own. To date a whole
+folder at once, filter on `directory` and fill the date down. Filtering on a blank `keep_until` shows the files still
+to decide.
+
+- Only `id`, `export` and `keep_until` are read back, so you can reorder columns or add your own. Rows can be sorted,
+  filtered or deleted, but not added.
+- A date is `YYYY-MM-DD`, a real date (`2027-02-29` is refused), after today. Anything else is refused rather than
+  guessed. If your spreadsheet turns dates into `01/06/2027`, format the `keep_until` column as text.
+- A cell left as exported changes nothing. Editing the same CSV again and running `filo update` again replaces the
+  dates again.
+- A blank cell where a date was set clears it, so the file needs a date again. Filo lists those files and asks first;
+  without a terminal it leaves them alone.
+- A row is refused, with one line saying why, if the file changed since the export or its date was changed from a
+  later export. The other rows are still applied. `--dry-run` checks everything and writes nothing.
+- On a large system, export one directory at a time, so the spreadsheet stays fast.
+
+Nothing is deleted because a date passed: `filo delete` lists the candidates, and in a later version will ask before
+deleting each one.
+
 ## Commands
 
 | Command | What it does |
 |---|---|
-| `filo roots` | List roots: path, mount point, file count, size, last scan. |
-| `filo roots add PATH` | Register a directory as a root. |
-| `filo scan [PATH]` | Scan `PATH` (a directory inside a root: a partial scan), or every root if omitted. |
+| `filo roots` | List roots: path, settings, mount point, file count, size, last scan. |
+| `filo roots add DIR` | Register a directory as a root, with its settings, and scan it. |
+| `filo roots set DIR` | Replace a root's settings. |
+| `filo scan [DIR]` | Scan `DIR` (a directory inside a root: a partial scan), or every root if omitted. |
 | `filo report [--top N]` | Show the overview; `--top` sets how many entries each list shows (default 10). |
+| `filo export lifespan [DIR] -o FILE` | Write every file under `DIR` (or every root) with its keep_until, as CSV. |
+| `filo update FILE [--dry-run]` | Apply the keep_until dates edited in an exported CSV. |
+| `filo delete` | List the files past their keep_until date. Deletes nothing in this version. |
 | `filo help [COMMAND]` | Show usage. `-h` works on every command. |
+
+Options for `filo roots add` and `filo roots set`, which every scan of the root then uses:
+
+| Option | Meaning |
+|---|---|
+| `--include-hidden` | Also scan hidden files and directories (skipped by default). |
+| `--skip-hidden` | Skip them again (`roots set` only). |
+| `--ignore NAME` | Skip entries with this name, at any depth. Repeatable. `roots set` replaces the whole list. |
+| `--no-scan` | Register the root without scanning it now (`roots add` only). |
 
 Options for `filo scan`:
 
 | Option | Meaning |
 |---|---|
-| `--include-hidden` | Also scan hidden files and directories (skipped by default). |
-| `--ignore NAME` | Skip entries with this name, at any depth. Repeatable. |
 | `--workers N` | Files hashed in parallel, 1–64 (default 4; use 1 on a spinning disk). |
 | `--allow-empty` | Record a scan that finds no files on a mounted disk (normally refused as "probably the wrong disk"). |
 
-Every command accepts `--db PATH`. Options can come before or after `PATH`. A progress line is shown during long
-scans when the output is a terminal.
+Every command accepts `--db PATH`. Options can come before or after `DIR`. A progress line is shown during long
+scans when the output is a terminal. The only questions Filo asks are in a terminal, and saying no (or running
+without a terminal, as a timer does) is always the safe choice.
 
-Exit codes: `0` success (files that couldn't be read are reported but don't fail the scan), `1` an error, or a root
-that failed during `filo scan` of every root, `2` a usage error.
+Exit codes: `0` success (files that couldn't be read are reported but don't fail the scan), `1` an error, a root
+that failed during `filo scan` of every root, or a CSV row that `filo update` refused, `2` a usage error.
 
 ## Roots
 
 - **Explicit roots.** Nothing becomes a root by accident: `filo scan` of a path outside every root is refused, with a
   hint to add it.
+- **A root has its own settings**: whether hidden files are scanned, and extra names to ignore. They are set when the
+  root is added and changed with `filo roots set`, so a scheduled scan and one you run by hand always cover the same
+  files.
 - **Aliases are detected.** The same directory can't be added twice, whether by another path, through a symlink, or
   through a bind mount (for example `~` also mounted at `/mnt/home`). Filo compares device and inode numbers.
 - **Nesting only across disks.** A root may sit inside another root only if it is on a different filesystem, such as
   a disk mounted at `~/mnt/disk`. A scan never crosses into another filesystem, so no file belongs to two roots.
-- **Scans map to their root.** `filo scan ~/Pictures` is a partial scan of the root that contains it.
+- **Scans map to their root.** `filo scan ~/Pictures` is a partial scan of the root that contains it, with that root's
+  settings.
+- **A parent takes in its children.** Adding `~` when `~/Documents` is already a root (on the same filesystem) merges
+  `~/Documents` into `~`, keeping its files' history and dates. The settings of `~` then apply to all of it, and
+  `roots add` says so if they differ.
 
 ## What a scan skips
 
-- Hidden entries (names starting with `.`), unless you pass `--include-hidden`.
+- Hidden entries (names starting with `.`), unless the root includes them (`--include-hidden`).
 - `node_modules`, `__pycache__`, `.filo`, and `bin`/`obj` next to a `.csproj` or `.fsproj` file.
-- Anything named with `--ignore`.
+- Anything the root ignores (`--ignore`).
 - Other filesystems mounted inside the root (each can be its own root).
 - Filo's own database files.
 - FIFOs, sockets and devices.
@@ -188,15 +243,15 @@ Enable it with `systemctl --user enable --now filo-scan.timer`.
 
 ## Roadmap
 
-1. **Scan, register, report**, read-only (this release).
-2. **Review**: export a queue of files to review as CSV, set review dates or actions, import it back.
-3. **Quarantine and delete**, with safety checks at the moment of acting, holds that veto disposal, and a history of
-   retired files.
+1. **Scan, register, report**, read-only. Done.
+2. **Lifespan**: a keep-until date for every file, set through a CSV (this release).
+3. **Quarantine and delete**: `filo delete` asks `Delete [a]ll, [s]elect or [n]one?`, with safety checks at the
+   moment of acting, holds that veto disposal, `filo restore`, and a history of retired files.
 4. **Revert directory moves** from the location history.
 5. **A UI** in place of the CSV.
 
 Principles that won't change:
-- A retain-until date is a floor, never a trigger for deletion.
+- A keep-until date is a floor, never a trigger: reaching it makes a file a candidate you confirm.
 - Holds override everything.
 - Disposal is staged and reversible.
 - Anything ambiguous is reported, never guessed.
@@ -228,14 +283,17 @@ your real home directory:
 
 ```sh
 scripts/testtree.sh init /tmp/FiloTest
-bin/filo --db /tmp/f.db roots add /tmp/FiloTest
-bin/filo --db /tmp/f.db scan
+bin/filo --db /tmp/f.db roots add /tmp/FiloTest     # adds and scans
 scripts/testtree.sh mutate /tmp/FiloTest
 bin/filo --db /tmp/f.db scan
 bin/filo --db /tmp/f.db report
 scripts/testtree.sh unlock /tmp/FiloTest
 bin/filo --db /tmp/f.db scan        # nothing new, changed or missing; the unreadable flag clears
-rm -rf /tmp/FiloTest /tmp/f.db*
+bin/filo --db /tmp/f.db export lifespan /tmp/FiloTest/notes -o /tmp/l.csv
+# edit keep_until in /tmp/l.csv
+bin/filo --db /tmp/f.db update /tmp/l.csv
+bin/filo --db /tmp/f.db delete
+rm -rf /tmp/FiloTest /tmp/f.db* /tmp/l.csv
 ```
 
 Project conventions for contributors (and for Claude Code) are in [CLAUDE.md](CLAUDE.md).

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"flag"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -22,11 +23,18 @@ type result struct {
 	stdout, stderr string
 }
 
-// run executes the CLI in-process with only the given environment.
+// run executes the CLI in-process with only the given environment, and an empty standard input that is not a
+// terminal.
 func run(t *testing.T, ctx context.Context, env map[string]string, args ...string) result {
 	t.Helper()
+	return runIn(t, ctx, env, strings.NewReader(""), args...)
+}
+
+// runIn is run with stdin as standard input.
+func runIn(t *testing.T, ctx context.Context, env map[string]string, stdin io.Reader, args ...string) result {
+	t.Helper()
 	var out, errb bytes.Buffer
-	code := Run(ctx, args, &out, &errb, func(k string) string { return env[k] })
+	code := Run(ctx, args, stdin, &out, &errb, func(k string) string { return env[k] })
 	return result{code, out.String(), errb.String()}
 }
 
@@ -120,15 +128,25 @@ func TestUsageAndHelp(t *testing.T) {
 		inStderr string
 	}{
 		{"no arguments prints usage", nil, ExitOK, "Usage:", ""},
-		{"help", []string{"help"}, ExitOK, "filo roots add PATH", ""},
+		{"help", []string{"help"}, ExitOK, "filo roots add DIR", ""},
 		{"-h", []string{"-h"}, ExitOK, "Usage:", ""},
-		{"help scan", []string{"help", "scan"}, ExitOK, "--include-hidden", ""},
+		{"help roots", []string{"help", "roots"}, ExitOK, "--include-hidden", ""},
+		{"help export", []string{"help", "export"}, ExitOK, "keep_until", ""},
+		{"scan no longer takes root settings", []string{"--db", db, "scan", "--include-hidden"}, ExitUsage, "",
+			"include-hidden"},
+		{"review is gone", []string{"--db", db, "review"}, ExitUsage, "", "export lifespan and update"},
+		{"unknown roots command", []string{"--db", db, "roots", "bogus"}, ExitUsage, "", `unknown roots command "bogus"`},
+		{"roots set without a dir", []string{"--db", db, "roots", "set"}, ExitUsage, "", "exactly one DIR"},
+		{"roots set both ways", []string{"--db", db, "roots", "set", "x", "--include-hidden", "--skip-hidden"},
+			ExitUsage, "", "not both"},
+		{"roots add with a bad ignore", []string{"--db", db, "roots", "add", "x", "--ignore", "a/b"}, ExitUsage, "",
+			"plain file or directory name"},
 		{"scan -h", []string{"scan", "-h"}, ExitOK, "--allow-empty", ""},
 		{"unknown command", []string{"bogus"}, ExitUsage, "", `unknown command "bogus"`},
 		{"unknown flag", []string{"scan", "--bogus"}, ExitUsage, "", "bogus"},
 		{"workers out of range", []string{"--db", db, "scan", "--workers", "0"}, ExitUsage, "", "--workers"},
-		{"two paths", []string{"--db", db, "scan", "a", "b"}, ExitUsage, "", "at most one PATH"},
-		{"roots add without a path", []string{"--db", db, "roots", "add"}, ExitUsage, "", "exactly one PATH"},
+		{"two dirs", []string{"--db", db, "scan", "a", "b"}, ExitUsage, "", "at most one DIR"},
+		{"roots add without a dir", []string{"--db", db, "roots", "add"}, ExitUsage, "", "exactly one DIR"},
 		{"report with an argument", []string{"--db", db, "report", "x"}, ExitUsage, "", "no arguments"},
 	}
 	for _, tc := range tests {
@@ -153,7 +171,7 @@ func TestDBSelection(t *testing.T) {
 		args []string
 		want string // the file that must exist afterwards
 	}{
-		{"FILO_DB", map[string]string{"FILO_DB": envDB}, []string{"roots", "add", root}, envDB},
+		{"FILO_DB", map[string]string{"FILO_DB": envDB}, []string{"roots", "add", root, "--no-scan"}, envDB},
 		{"--db before the command beats FILO_DB", map[string]string{"FILO_DB": envDB},
 			[]string{"--db", flagDB, "roots"}, flagDB},
 		{"--db after the command", nil, []string{"roots", "--db", flagDB + "2"}, flagDB + "2"},
@@ -200,14 +218,13 @@ func TestEndToEnd(t *testing.T) {
 	}
 
 	sh("init")
-	if out := must("roots", "add", tree); !strings.Contains(out, "Added root "+tree) {
+	// roots add scans the new root straight away.
+	if out := must("roots", "add", tree); !strings.Contains(out, "Added root "+tree+" (hidden files skipped)") ||
+		!strings.Contains(out, "15 files seen") || !strings.Contains(out, "new 15 ") {
 		t.Errorf("roots add: %s", out)
 	}
-	if out := must("roots"); !strings.Contains(out, "never scanned") {
+	if out := must("roots"); !strings.Contains(out, "last scan") || !strings.Contains(out, "settings: hidden files skipped") {
 		t.Errorf("roots: %s", out)
-	}
-	if out := must("scan", tree); !strings.Contains(out, "15 files seen") || !strings.Contains(out, "new 15 ") {
-		t.Errorf("first scan: %s", out)
 	}
 	sh("mutate")
 	t.Cleanup(func() { sh("unlock") }) // or the temp dir cannot be removed
@@ -266,7 +283,7 @@ func TestScanErrors(t *testing.T) {
 	}{
 		{"no roots yet", func(t *testing.T, env map[string]string) []string {
 			return []string{"scan"}
-		}, ExitError, "", "no roots yet; add one with: filo roots add PATH"},
+		}, ExitError, "", "no roots yet; add one with: filo roots add DIR"},
 		{"path outside every root", func(t *testing.T, env map[string]string) []string {
 			return []string{"scan", canonicalTemp(t)}
 		}, ExitError, "", "filo roots add"},
@@ -291,7 +308,7 @@ func TestScanErrors(t *testing.T) {
 			}
 			sameDevice(t, map[string]uint64{disk: 2})
 			for _, r := range []string{disk, home} {
-				if r := run(t, ctx, env, "roots", "add", r); r.code != ExitOK {
+				if r := run(t, ctx, env, "roots", "add", r, "--no-scan"); r.code != ExitOK {
 					t.Fatal(r.stderr)
 				}
 			}
@@ -323,7 +340,7 @@ func TestCancelledScanWritesNothing(t *testing.T) {
 		t.Fatal(err)
 	}
 	env := map[string]string{"FILO_DB": filepath.Join(t.TempDir(), "filo.db")}
-	if r := run(t, context.Background(), env, "roots", "add", root); r.code != ExitOK {
+	if r := run(t, context.Background(), env, "roots", "add", root, "--no-scan"); r.code != ExitOK {
 		t.Fatal(r.stderr)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -416,8 +433,8 @@ func TestBinary(t *testing.T) {
 		want string
 	}{
 		{[]string{"help"}, 0, "Usage:"},
-		{[]string{"roots", "add", root}, 0, "Added root"},
-		{[]string{"scan", root}, 0, "new 1 "},
+		{[]string{"roots", "add", root}, 0, "new 1 "},
+		{[]string{"scan", root}, 0, "new 0 "},
 		{[]string{"bogus"}, 2, "unknown command"},
 	}
 	for _, tc := range tests {
@@ -463,17 +480,20 @@ func TestRootsAddAbsorbs(t *testing.T) {
 	in := func(rel string) string { return filepath.Join(home, filepath.FromSlash(rel)) }
 
 	must("roots", "add", in("Documents"))
-	must("roots", "add", in("Pictures"))
+	must("roots", "add", in("Pictures"), "--ignore", "raw")
 	must("roots", "add", in(".config"))
-	must("scan")
 
+	// Adding home absorbs the three and scans home with its own settings: only notes.txt is new; Documents and
+	// Pictures are known; .config is skipped, not missing.
 	out := must("roots", "add", home)
 	for _, want := range []string{
-		"Added root " + home,
+		"Added root " + home + " (hidden files skipped)",
 		"It now includes the roots " + in(".config") + ", " + in("Documents") + " and " + in("Pictures") +
-			", with their history and review decisions.",
-		"Note: " + in(".config") + " is hidden or skipped by default, so a scan of " + home +
-			" covers it only with --include-hidden.",
+			", with their history and keep_until dates.",
+		"Note: " + in(".config") + " is skipped by the settings of " + home + ", so its files are no longer scanned",
+		"Note: " + in("Pictures") + " had other settings (hidden files skipped; ignoring raw); the settings of " +
+			home + " apply to it now.",
+		"new 1   changed 0   moved 0   missing 0",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("roots add lacks %q:\n%s", want, out)
@@ -489,10 +509,20 @@ func TestRootsAddAbsorbs(t *testing.T) {
 		t.Errorf("roots after absorbing = %q, want only %s", listed, home)
 	}
 
-	// The first scan of home: only notes.txt is new; Documents and Pictures are known; .config is skipped, not missing.
-	out = must("scan", home)
-	if !strings.Contains(out, "new 1   changed 0   moved 0   missing 0") {
-		t.Errorf("first scan after absorbing:\n%s", out)
+	// Including hidden files brings .config back: its file is known, not new.
+	out = must("roots", "set", home, "--include-hidden")
+	if !strings.Contains(out, "settings were hidden files skipped; now hidden files included") {
+		t.Errorf("roots set:\n%s", out)
+	}
+	if out := must("scan"); !strings.Contains(out, "new 0   changed 0   moved 0   missing 0") {
+		t.Errorf("scan after including hidden files:\n%s", out)
+	}
+	if out := must("roots", "set", home, "--include-hidden"); !strings.Contains(out, "settings unchanged") {
+		t.Errorf("roots set again:\n%s", out)
+	}
+	if r := run(t, ctx, env, "roots", "set", in("Documents")); r.code != ExitError ||
+		!strings.Contains(r.stderr, "is not a root") {
+		t.Errorf("roots set on a folder inside a root: code %d\n%s", r.code, r.stderr)
 	}
 
 	// The reverse: a folder inside a root is not a new root.

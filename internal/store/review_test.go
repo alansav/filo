@@ -16,57 +16,46 @@ import (
 func TestClassify(t *testing.T) {
 	const today = "2026-11-11"
 	hash := func(h string) sql.NullString { return sql.NullString{String: h, Valid: true} }
-	reviewed := func(it QueueItem) QueueItem { it.ReviewedUTC = "2026-11-01T00:00:00Z"; return it }
-	file := QueueItem{Kind: "file", Hash: "h"}
+	set := func(it FileItem) FileItem { it.ReviewedUTC = "2026-11-01T00:00:00Z"; return it }
 	tests := []struct {
 		name string
-		row  queueRow
-		want Reason
+		row  fileRow
+		want Status
 	}{
-		{"never reviewed, no date", queueRow{item: file}, ReasonUndated},
-		{"date in the future", queueRow{item: QueueItem{Kind: "file", Hash: "h", ReviewDate: "2026-11-12"}}, ""},
-		{"date today is due", queueRow{item: QueueItem{Kind: "file", Hash: "h", ReviewDate: today}}, ReasonDue},
-		{"date passed is due", queueRow{item: QueueItem{Kind: "file", Hash: "h", ReviewDate: "2025-01-01"}}, ReasonDue},
-		{"marked delete waits for disposal",
-			queueRow{item: reviewed(QueueItem{Kind: "file", Hash: "h", Action: ActionDelete}), reviewedHash: hash("h")}, ""},
-		{"reviewed, same content, date ahead",
-			queueRow{item: reviewed(QueueItem{Kind: "file", Hash: "h", ReviewDate: "2027-01-01"}), reviewedHash: hash("h")}, ""},
-		{"edited after a delete decision",
-			queueRow{item: reviewed(QueueItem{Kind: "file", Hash: "h2", Action: ActionDelete}), reviewedHash: hash("h")},
-			ReasonChanged},
-		{"reviewed without a hash, now read",
-			queueRow{item: reviewed(QueueItem{Kind: "file", Hash: "h", ReviewDate: "2027-01-01"})}, ReasonChanged},
-		{"reviewed, now has no hash",
-			queueRow{item: reviewed(QueueItem{Kind: "file", ReviewDate: "2027-01-01"}), reviewedHash: hash("h")},
-			ReasonChanged},
-		{"symlinks have no content to compare",
-			queueRow{item: reviewed(QueueItem{Kind: "symlink", ReviewDate: "2027-01-01"})}, ""},
-		{"unreadable, never reviewed", queueRow{item: QueueItem{Kind: "file", Hash: "h", UnreadableSince: 3}},
-			ReasonUnreadable},
-		{"unreadable, bulk-dated only",
-			queueRow{item: QueueItem{Kind: "file", Hash: "h", UnreadableSince: 3, ReviewDate: "2027-01-01"}},
-			ReasonUnreadable},
-		{"unreadable, reviewed before it was flagged",
-			queueRow{item: reviewed(QueueItem{Kind: "file", Hash: "h", UnreadableSince: 3, ReviewDate: "2027-01-01"}),
-				reviewedAfter: 2, reviewedHash: hash("h")}, ReasonUnreadable},
-		{"unreadable, reviewed since it was flagged",
-			queueRow{item: reviewed(QueueItem{Kind: "file", Hash: "h", UnreadableSince: 3, ReviewDate: "2027-01-01"}),
-				reviewedAfter: 3, reviewedHash: hash("h")}, ""},
-		{"unreadable and never read, reviewed since flagged: stale hash is not a change",
-			queueRow{item: reviewed(QueueItem{Kind: "file", UnreadableSince: 3, ReviewDate: "2027-01-01"}),
-				reviewedAfter: 4}, ""},
-		{"unreadable, reviewed since flagged, date due",
-			queueRow{item: reviewed(QueueItem{Kind: "file", Hash: "h", UnreadableSince: 3, ReviewDate: today}),
-				reviewedAfter: 3, reviewedHash: hash("h")}, ReasonDue},
-		{"possible move, never reviewed", queueRow{item: file, possibleMoveIn: 5}, ReasonPossibleMove},
-		{"possible move, bulk-dated only",
-			queueRow{item: QueueItem{Kind: "file", Hash: "h", ReviewDate: "2027-01-01"}, possibleMoveIn: 5},
-			ReasonPossibleMove},
-		{"possible move, reviewed since",
-			queueRow{item: reviewed(QueueItem{Kind: "file", Hash: "h", ReviewDate: "2027-01-01"}), reviewedAfter: 5,
-				reviewedHash: hash("h"), possibleMoveIn: 5}, ""},
+		{"no date", fileRow{item: FileItem{Kind: "file", Hash: "h"}}, StatusUndated},
+		{"date in the future", fileRow{item: set(FileItem{Kind: "file", Hash: "h", KeepUntil: "2026-11-12"}),
+			reviewedHash: hash("h")}, StatusKept},
+		{"date today, unchanged: a candidate", fileRow{item: set(FileItem{Kind: "file", Hash: "h", KeepUntil: today}),
+			reviewedHash: hash("h")}, StatusExpired},
+		{"date passed, unchanged", fileRow{item: set(FileItem{Kind: "file", Hash: "h", KeepUntil: "2025-01-01"}),
+			reviewedHash: hash("h")}, StatusExpired},
+		{"edited before its date: still kept", fileRow{item: set(FileItem{Kind: "file", Hash: "h2",
+			KeepUntil: "2027-01-01"}), reviewedHash: hash("h")}, StatusKept},
+		{"edited, date passed: needs a new date", fileRow{item: set(FileItem{Kind: "file", Hash: "h2",
+			KeepUntil: "2025-01-01"}), reviewedHash: hash("h")}, StatusChanged},
+		{"date set without a hash (migrated set-date), passed",
+			fileRow{item: FileItem{Kind: "file", Hash: "h", KeepUntil: "2025-01-01"}}, StatusChanged},
+		{"no hash now, passed", fileRow{item: set(FileItem{Kind: "file", KeepUntil: "2025-01-01"}),
+			reviewedHash: hash("h")}, StatusChanged},
+		{"symlinks have no content to compare", fileRow{item: set(FileItem{Kind: "symlink", KeepUntil: "2025-01-01"})},
+			StatusExpired},
+		{"unreadable, never decided", fileRow{item: FileItem{Kind: "file", Hash: "h", UnreadableSince: 3}},
+			StatusUnreadable},
+		{"unreadable, date set before it was flagged", fileRow{item: set(FileItem{Kind: "file", Hash: "h",
+			UnreadableSince: 3, KeepUntil: "2027-01-01"}), reviewedAfter: 2, reviewedHash: hash("h")}, StatusUnreadable},
+		{"unreadable, date set since it was flagged", fileRow{item: set(FileItem{Kind: "file", Hash: "h",
+			UnreadableSince: 3, KeepUntil: "2027-01-01"}), reviewedAfter: 3, reviewedHash: hash("h")}, StatusKept},
+		{"unreadable, date set since, passed: content cannot be checked", fileRow{item: set(FileItem{Kind: "file",
+			Hash: "h", UnreadableSince: 3, KeepUntil: today}), reviewedAfter: 3, reviewedHash: hash("h")},
+			StatusUnreadable},
+		{"possible move, never decided", fileRow{item: FileItem{Kind: "file", Hash: "h"}, possibleMoveIn: 5},
+			StatusPossibleMove},
+		{"possible move, date set before it", fileRow{item: set(FileItem{Kind: "file", Hash: "h",
+			KeepUntil: "2027-01-01"}), reviewedAfter: 4, reviewedHash: hash("h"), possibleMoveIn: 5}, StatusPossibleMove},
+		{"possible move, date set since", fileRow{item: set(FileItem{Kind: "file", Hash: "h", KeepUntil: "2027-01-01"}),
+			reviewedAfter: 5, reviewedHash: hash("h"), possibleMoveIn: 5}, StatusKept},
 		{"unreadable outranks a possible move",
-			queueRow{item: QueueItem{Kind: "file", Hash: "h", UnreadableSince: 3}, possibleMoveIn: 5}, ReasonUnreadable},
+			fileRow{item: FileItem{Kind: "file", Hash: "h", UnreadableSince: 3}, possibleMoveIn: 5}, StatusUnreadable},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -123,23 +112,23 @@ func (e *reviewEnv) known() map[string]Known {
 	return m
 }
 
-// queue returns path -> reason for the whole register.
-func (e *reviewEnv) queue(today string) map[string]Reason {
+// statuses returns path -> status for the whole register.
+func (e *reviewEnv) statuses(today string) map[string]Status {
 	e.t.Helper()
-	q, err := e.s.Queue(e.ctx, today, QueueFilter{})
+	q, err := e.s.Files(e.ctx, today, Filter{})
 	if err != nil {
 		e.t.Fatal(err)
 	}
-	m := map[string]Reason{}
+	m := map[string]Status{}
 	for _, it := range q {
-		m[it.Path] = it.Reason
+		m[it.Path] = it.Status
 	}
 	return m
 }
 
-func (e *reviewEnv) export(today string, now time.Time) (int64, []QueueItem) {
+func (e *reviewEnv) export(today string, now time.Time) (int64, []FileItem) {
 	e.t.Helper()
-	q, err := e.s.Queue(e.ctx, today, QueueFilter{})
+	q, err := e.s.Files(e.ctx, today, Filter{})
 	if err != nil {
 		e.t.Fatal(err)
 	}
@@ -154,7 +143,7 @@ func f(path, hash string) NewFile {
 	return NewFile{Path: path, Kind: "file", Size: 1, MtimeNS: 1, Hash: hash}
 }
 
-func TestQueueReasons(t *testing.T) {
+func TestFilesStatusAndScope(t *testing.T) {
 	e := newReviewEnv(t)
 	e.apply(Changes{New: []NewFile{f("docs/a", "ha"), f("docs/sub/b", "hb"), f("docsx/c", "hc"), f("old/same", "h1"),
 		f("📷 Pictures/🏖️ beach.jpg", "hp"), f("📷 Pictures🎉/party.jpg", "hq"), f("📷 Pictures-x/y.jpg", "hr")}})
@@ -168,23 +157,23 @@ func TestQueueReasons(t *testing.T) {
 			Detail: "same name, different content"}},
 	})
 
-	q, err := e.s.Queue(e.ctx, "2026-11-11", QueueFilter{})
+	q, err := e.s.Files(e.ctx, "2026-11-11", Filter{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := map[string]QueueItem{}
+	got := map[string]FileItem{}
 	for _, it := range q {
 		got[it.Path] = it
 	}
-	want := map[string]Reason{"docs/a": ReasonUnreadable, "docs/sub/b": ReasonUndated, "docsx/c": ReasonUndated,
-		"new/same": ReasonPossibleMove, "📷 Pictures/🏖️ beach.jpg": ReasonUndated, "📷 Pictures🎉/party.jpg": ReasonUndated,
-		"📷 Pictures-x/y.jpg": ReasonUndated}
+	want := map[string]Status{"docs/a": StatusUnreadable, "docs/sub/b": StatusUndated, "docsx/c": StatusUndated,
+		"new/same": StatusPossibleMove, "📷 Pictures/🏖️ beach.jpg": StatusUndated, "📷 Pictures🎉/party.jpg": StatusUndated,
+		"📷 Pictures-x/y.jpg": StatusUndated}
 	if len(got) != len(want) {
-		t.Fatalf("queue = %+v, want %v", q, want)
+		t.Fatalf("files = %+v, want %v (the missing old/same is not listed)", q, want)
 	}
-	for p, r := range want {
-		if got[p].Reason != r {
-			t.Errorf("%s: reason %q, want %q", p, got[p].Reason, r)
+	for p, st := range want {
+		if got[p].Status != st {
+			t.Errorf("%s: status %q, want %q", p, got[p].Status, st)
 		}
 	}
 	if pm := got["new/same"]; pm.MoveFrom != filepath.Join(e.root.Path, "old", "same") ||
@@ -196,7 +185,7 @@ func TestQueueReasons(t *testing.T) {
 	}
 
 	// The scope "docs" covers docs/ and below, not docsx/.
-	q, err = e.s.Queue(e.ctx, "2026-11-11", QueueFilter{RootID: e.root.ID, Scope: "docs"})
+	q, err = e.s.Files(e.ctx, "2026-11-11", Filter{RootID: e.root.ID, Scope: "docs"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -205,63 +194,71 @@ func TestQueueReasons(t *testing.T) {
 		paths = append(paths, it.Path)
 	}
 	if !slices.Equal(paths, []string{"docs/a", "docs/sub/b"}) {
-		t.Errorf("scoped queue = %v", paths)
+		t.Errorf("scoped files = %v", paths)
 	}
 
 	// An emoji folder: its siblings that share the prefix ("📷 Pictures🎉", "📷 Pictures-x") are outside it.
-	q, err = e.s.Queue(e.ctx, "2026-11-11", QueueFilter{RootID: e.root.ID, Scope: "📷 Pictures"})
+	q, err = e.s.Files(e.ctx, "2026-11-11", Filter{RootID: e.root.ID, Scope: "📷 Pictures"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(q) != 1 || q[0].Path != "📷 Pictures/🏖️ beach.jpg" || q[0].AbsPath() != filepath.Join(e.root.Path, "📷 Pictures", "🏖️ beach.jpg") {
-		t.Errorf("emoji-scoped queue = %+v", q)
+		t.Errorf("emoji-scoped files = %+v", q)
 	}
 }
 
-func TestImportDecisions(t *testing.T) {
+func TestUpdateLifespan(t *testing.T) {
 	e := newReviewEnv(t)
 	const today = "2026-11-11"
 	now := time.Date(2026, 11, 11, 12, 0, 0, 0, time.UTC)
-	e.apply(Changes{New: []NewFile{f("keep", "h1"), f("del", "h2"), f("edited", "h3"), f("flagged", "h4"),
-		f("floor", "h5"), f("again", "h6"), f("untouched", "h7"), f("old/pm", "h8"), f("retained", "h10"),
-		f("past-floor", "h11")}})
+	e.apply(Changes{New: []NewFile{f("keep", "h1"), f("edited", "h3"), f("flagged", "h4"), f("untouched", "h7"),
+		f("old/pm", "h8"), f("past", "h10"), f("gone", "h11"), f("dated", "h12")}})
 	k := e.known()
 	e.apply(Changes{
 		Close: []int64{k["old/pm"].PathID}, New: []NewFile{f("new/pm", "h9")},
 		Events: []Event{{Kind: "possible_move", FileID: k["old/pm"].FileID, Path: "new/pm", OtherPath: "old/pm"}},
 	})
 	k = e.known()
-	exportID, items := e.export(today, now)
-	if len(items) != 10 {
-		t.Fatalf("exported %d rows, want 10", len(items))
+	id := func(p string) int64 { return k[p].FileID }
+
+	// Give dated a date first, so the export carries it.
+	ex0, _ := e.export(today, now.Add(-time.Hour))
+	if res, err := e.s.UpdateLifespan(e.ctx, []LifespanRow{{Line: 2, ExportID: ex0, FileID: id("dated"),
+		KeepUntil: "2030-01-01"}}, now.Add(-time.Hour), today, "first.csv", false, nil); err != nil || res.Set != 1 {
+		t.Fatalf("first update = %+v, %v", res, err)
 	}
 
-	// After the export: edited changes, flagged becomes unreadable.
-	ed := k["edited"]
-	e.apply(Changes{Updates: []FileUpdate{{FileID: ed.FileID, Size: 2, MtimeNS: 2, Hash: "h3b"}},
-		Unreadable: []int64{k["flagged"].FileID}})
+	exportID, items := e.export(today, now)
+	if len(items) != 8 {
+		t.Fatalf("exported %d rows, want 8 (every present file)", len(items))
+	}
+	if v := rawQueryString(t, e.db, `SELECT keep_until FROM export_rows WHERE export_id = `+itoa(exportID)+
+		` AND file_id = `+itoa(id("dated"))); v != "2030-01-01" {
+		t.Errorf("export row keep_until = %q, want the date it was exported with", v)
+	}
 
-	id := func(p string) int64 { return k[p].FileID }
-	ds := []Decision{
-		{Line: 2, ExportID: exportID, FileID: id("keep"), ReviewDate: "2027-11-11"},
-		{Line: 3, ExportID: exportID, FileID: id("del"), Action: ActionDelete},
-		{Line: 4, ExportID: exportID, FileID: id("edited"), ReviewDate: "2027-11-11"},
-		{Line: 5, ExportID: exportID, FileID: id("flagged"), Action: ActionDelete},
-		{Line: 6, ExportID: exportID, FileID: id("floor"), Action: ActionDelete, RetainUntil: "2030-01-01"},
-		{Line: 7, ExportID: exportID, FileID: id("new/pm"), Action: ActionDelete},
-		{Line: 8, ExportID: exportID + 1, FileID: id("keep"), ReviewDate: "2027-11-11"},
-		{Line: 9, ExportID: exportID, FileID: 9999, ReviewDate: "2027-11-11"},
-		{Line: 10, ExportID: exportID, FileID: id("again"), ReviewDate: "2027-11-11", RetainUntil: "2033-12-31"},
-		{Line: 11, ExportID: exportID, FileID: id("retained"), RetainUntil: "2032-11-11"},
-		{Line: 12, ExportID: exportID, FileID: id("past-floor"), RetainUntil: "2026-11-11"},
-		{Line: 13, ExportID: exportID, FileID: id("untouched")}, // retain_until blank, as exported: untouched
+	// After the export: edited changes, flagged becomes unreadable, gone goes missing.
+	e.apply(Changes{Updates: []FileUpdate{{FileID: id("edited"), Size: 2, MtimeNS: 2, Hash: "h3b"}},
+		Unreadable: []int64{id("flagged")}, Close: []int64{k["gone"].PathID}})
+
+	rows := []LifespanRow{
+		{Line: 2, ExportID: exportID, FileID: id("keep"), KeepUntil: "2027-11-11"},
+		{Line: 3, ExportID: exportID, FileID: id("edited"), KeepUntil: "2027-11-11"},
+		{Line: 4, ExportID: exportID, FileID: id("flagged"), KeepUntil: "2027-11-11"}, // unreadable: a date is fine
+		{Line: 5, ExportID: exportID, FileID: id("new/pm"), KeepUntil: "2027-11-11"},
+		{Line: 6, ExportID: exportID + 1, FileID: id("keep"), KeepUntil: "2027-11-11"},
+		{Line: 7, ExportID: exportID, FileID: 9999, KeepUntil: "2027-11-11"},
+		{Line: 8, ExportID: exportID, FileID: id("past"), KeepUntil: today},
+		{Line: 9, ExportID: exportID, FileID: id("untouched")},                       // blank, as exported
+		{Line: 10, ExportID: exportID, FileID: id("gone"), KeepUntil: "2027-01-01"},  // missing since the export
+		{Line: 11, ExportID: exportID, FileID: id("dated"), KeepUntil: "2030-01-01"}, // as exported
 	}
 
 	before, err := e.s.RowCounts(e.ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	dry, err := e.s.ApplyDecisions(e.ctx, ds, now, today, "dry.csv", true)
+	dry, err := e.s.UpdateLifespan(e.ctx, rows, now, today, "dry.csv", true, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -269,23 +266,23 @@ func TestImportDecisions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if after["reviews"] != before["reviews"] || after["review_batches"] != before["review_batches"] {
-		t.Errorf("dry run wrote reviews: before %v after %v", before, after)
+	if !maps.Equal(before, after) {
+		t.Errorf("dry run wrote: before %v after %v", before, after)
 	}
 
-	res, err := e.s.ApplyDecisions(e.ctx, ds, now, today, "review.csv", false)
+	res, err := e.s.UpdateLifespan(e.ctx, rows, now, today, "lifespan.csv", false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Dates != dry.Dates || res.Deletes != dry.Deletes || len(res.Refusals) != len(dry.Refusals) {
+	if res.Set != dry.Set || len(res.Refusals) != len(dry.Refusals) {
 		t.Errorf("dry run %+v differs from the real one %+v", dry, res)
 	}
-	if res.Dates != 3 || res.Retained != 1 || res.Deletes != 1 || res.Already != 0 || res.Untouched != 1 {
-		t.Errorf("result = %+v, want 3 dates (keep, again, retained by its floor), 1 delete (del), 1 untouched", res)
+	if res.Set != 3 || res.Unchanged != 2 || res.Cleared != 0 {
+		t.Errorf("result = %+v, want 3 set (keep, flagged, new/pm), 2 unchanged", res)
 	}
 	wantRefused := map[int]string{
-		4: "changed since export", 5: "flagged unreadable", 6: "retained until 2030-01-01", 7: "possible move",
-		8: "not in this register", 9: "not in export", 12: "retain_until 2026-11-11 is not after today",
+		3: "changed since export", 6: "not in this register", 7: "not in export", 8: "is not after today",
+		10: "no longer present",
 	}
 	if len(res.Refusals) != len(wantRefused) {
 		t.Errorf("refusals = %+v", res.Refusals)
@@ -294,120 +291,96 @@ func TestImportDecisions(t *testing.T) {
 		if w, ok := wantRefused[r.Line]; !ok || !strings.Contains(r.Reason, w) {
 			t.Errorf("line %d refused with %q, want %q", r.Line, r.Reason, w)
 		}
-	}
-	for _, r := range res.Refusals {
-		if r.Line == 4 && r.Path != filepath.Join(e.root.Path, "edited") {
+		if r.Line == 3 && r.Path != filepath.Join(e.root.Path, "edited") {
 			t.Errorf("refusal path = %q", r.Path)
 		}
 	}
 
-	// The queue now: keep, again and del are decided; the rest are still queued.
-	wantQueue := map[string]Reason{"edited": ReasonUndated, "flagged": ReasonUnreadable, "floor": ReasonUndated,
-		"untouched": ReasonUndated, "new/pm": ReasonPossibleMove, "past-floor": ReasonUndated}
-	if got := e.queue(today); !maps.Equal(got, wantQueue) {
-		t.Errorf("queue after import = %v, want %v", got, wantQueue)
-	}
-	if v := rawQueryString(t, e.db, `SELECT retain_until FROM files WHERE id = `+itoa(id("again"))); v != "2033-12-31" {
-		t.Errorf("retain_until = %q", v)
-	}
-	// retain_until alone: the floor is recorded and is also the review date; the file comes back then, as due.
-	if v := rawQueryString(t, e.db, `SELECT retain_until || ' ' || review_date || ' ' || coalesce(action, '-')
-		FROM files WHERE id = `+itoa(id("retained"))); v != "2032-11-11 2032-11-11 -" {
-		t.Errorf("retained: retain_until, review_date, action = %q", v)
-	}
-	if got := e.queue("2032-11-11")["retained"]; got != ReasonDue {
-		t.Errorf("retained on its floor: %q, want due (a floor brings it back for review, never marks it delete)", got)
+	// flagged has its date, but it was flagged unreadable after the export: the date covers what the export showed,
+	// so it stays unreadable until a later export's update.
+	wantStatus := map[string]Status{"keep": StatusKept, "edited": StatusUndated, "flagged": StatusUnreadable,
+		"untouched": StatusUndated, "new/pm": StatusKept, "past": StatusUndated, "dated": StatusKept}
+	if got := e.statuses(today); !maps.Equal(got, wantStatus) {
+		t.Errorf("statuses after update = %v, want %v", got, wantStatus)
 	}
 
-	// Importing the same file again is a no-op, and changes nothing.
-	res, err = e.s.ApplyDecisions(e.ctx, ds[:3], now, today, "review.csv", false)
-	if err != nil {
-		t.Fatal(err)
+	// The same rows again: nothing to do. An edited row from the same export replaces the date.
+	res, err = e.s.UpdateLifespan(e.ctx, rows[:1], now, today, "lifespan.csv", false, nil)
+	if err != nil || res.Set != 0 || res.Unchanged != 1 {
+		t.Errorf("same rows again = %+v, %v; want 1 unchanged", res, err)
 	}
-	if res.Already != 2 || res.Dates != 0 || res.Deletes != 0 {
-		t.Errorf("re-import = %+v, want 2 already imported", res)
+	res, err = e.s.UpdateLifespan(e.ctx, []LifespanRow{{Line: 2, ExportID: exportID, FileID: id("keep"),
+		KeepUntil: "2028-11-11"}}, now.Add(time.Minute), today, "lifespan.csv", false, nil)
+	if err != nil || res.Set != 1 {
+		t.Errorf("re-edited row = %+v, %v; want it set", res, err)
 	}
 
-	// A newer export's decision wins; the older export can no longer override it.
+	// A blank cell where a date is stored is a clear: only when confirmed.
+	clear := []LifespanRow{{Line: 2, ExportID: exportID, FileID: id("dated")}}
+	var asked []Clear
+	res, err = e.s.UpdateLifespan(e.ctx, clear, now, today, "c.csv", false, func(cs []Clear) bool {
+		asked = cs
+		return false
+	})
+	if err != nil || res.ClearsSkipped != 1 || res.Cleared != 0 {
+		t.Errorf("declined clear = %+v, %v", res, err)
+	}
+	if len(asked) != 1 || asked[0].KeepUntil != "2030-01-01" || asked[0].Path != filepath.Join(e.root.Path, "dated") {
+		t.Errorf("asked about %+v", asked)
+	}
+	if res, err = e.s.UpdateLifespan(e.ctx, clear, now, today, "c.csv", false, nil); err != nil || res.ClearsSkipped != 1 {
+		t.Errorf("clear with no one to ask = %+v, %v; want it skipped", res, err)
+	}
+	if res, err = e.s.UpdateLifespan(e.ctx, clear, now, today, "c.csv", true, func([]Clear) bool {
+		t.Error("asked in a dry run")
+		return true
+	}); err != nil || res.Cleared != 1 {
+		t.Errorf("dry-run clear = %+v, %v; want 1 counted", res, err)
+	}
+	if got := e.statuses(today)["dated"]; got != StatusKept {
+		t.Errorf("dated after declined clears: %q, want kept", got)
+	}
+	res, err = e.s.UpdateLifespan(e.ctx, clear, now, today, "c.csv", false, func([]Clear) bool { return true })
+	if err != nil || res.Cleared != 1 {
+		t.Errorf("confirmed clear = %+v, %v", res, err)
+	}
+	if got := e.statuses(today)["dated"]; got != StatusUndated {
+		t.Errorf("dated after a confirmed clear: %q, want undated", got)
+	}
+
+	// A newer export's date wins; the older export can no longer override it.
 	later := now.Add(time.Hour)
 	export2, _ := e.export(today, later)
-	if _, err := e.s.ApplyDecisions(e.ctx, []Decision{{Line: 2, ExportID: export2, FileID: id("floor"),
-		ReviewDate: "2028-01-01"}}, later, today, "second.csv", false); err != nil {
+	if _, err := e.s.UpdateLifespan(e.ctx, []LifespanRow{{Line: 2, ExportID: export2, FileID: id("untouched"),
+		KeepUntil: "2028-01-01"}}, later, today, "second.csv", false, nil); err != nil {
 		t.Fatal(err)
 	}
-	res, err = e.s.ApplyDecisions(e.ctx, []Decision{{Line: 2, ExportID: exportID, FileID: id("floor"),
-		ReviewDate: "2029-01-01"}}, later.Add(time.Hour), today, "review.csv", false)
+	res, err = e.s.UpdateLifespan(e.ctx, []LifespanRow{{Line: 2, ExportID: exportID, FileID: id("untouched"),
+		KeepUntil: "2029-01-01"}}, later.Add(time.Hour), today, "lifespan.csv", false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(res.Refusals) != 1 || !strings.Contains(res.Refusals[0].Reason, "reviewed again since export") {
-		t.Errorf("stale import = %+v", res)
+	if len(res.Refusals) != 1 || !strings.Contains(res.Refusals[0].Reason, "changed after export") {
+		t.Errorf("stale update = %+v", res)
 	}
 
-	// After the review date passes, keep is due again.
-	if got := e.queue("2027-11-11")["keep"]; got != ReasonDue {
-		t.Errorf("keep on its review date: %q, want due", got)
+	// On its date, keep is a deletion candidate; once edited, it needs a new date instead.
+	if got := e.statuses("2028-11-11")["keep"]; got != StatusExpired {
+		t.Errorf("keep on its date: %q, want expired", got)
 	}
-	// Editing a file marked for deletion brings it back.
-	kd := e.known()["del"]
-	e.apply(Changes{Updates: []FileUpdate{{FileID: kd.FileID, Size: 9, MtimeNS: 9, Hash: "h2b"}}})
-	if got := e.queue(today)["del"]; got != ReasonChanged {
-		t.Errorf("del after an edit: %q, want changed", got)
+	e.apply(Changes{Updates: []FileUpdate{{FileID: id("keep"), Size: 9, MtimeNS: 9, Hash: "h1b"}}})
+	if got := e.statuses("2028-11-11")["keep"]; got != StatusChanged {
+		t.Errorf("keep edited, on its date: %q, want changed", got)
 	}
-}
-
-func TestSetReviewDate(t *testing.T) {
-	e := newReviewEnv(t)
-	const today = "2026-11-11"
-	now := time.Date(2026, 11, 11, 12, 0, 0, 0, time.UTC)
-	e.apply(Changes{New: []NewFile{f("photos/a", "h1"), f("photos/2019/b", "h2"), f("photos/c", "h3"),
-		f("photosx/d", "h4"), f("other/e", "h5")}})
-	k := e.known()
-	e.apply(Changes{Unreadable: []int64{k["photos/c"].FileID}})
-
-	// Already decided files are never overwritten.
-	exportID, _ := e.export(today, now)
-	if _, err := e.s.ApplyDecisions(e.ctx, []Decision{{Line: 2, ExportID: exportID, FileID: k["photos/a"].FileID,
-		ReviewDate: "2030-01-01"}}, now, today, "r.csv", false); err != nil {
-		t.Fatal(err)
-	}
-
-	scope := QueueFilter{RootID: e.root.ID, Scope: "photos"}
-	n, err := e.s.SetReviewDate(e.ctx, scope, "2027-06-30", now, "photos 2027-06-30", true)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if n != 2 {
-		t.Errorf("dry run counts %d, want 2 (photos/2019/b, photos/c)", n)
-	}
-	if got := e.queue(today); got["photos/2019/b"] != ReasonUndated {
-		t.Errorf("dry run changed the queue: %v", got)
-	}
-
-	if n, err = e.s.SetReviewDate(e.ctx, scope, "2027-06-30", now, "photos 2027-06-30", false); err != nil || n != 2 {
-		t.Fatalf("SetReviewDate = %d, %v; want 2", n, err)
-	}
-	want := map[string]Reason{"photos/c": ReasonUnreadable, "photosx/d": ReasonUndated, "other/e": ReasonUndated}
-	if got := e.queue(today); !maps.Equal(got, want) {
-		t.Errorf("queue = %v, want %v (an unreadable file stays queued after a bulk date)", got, want)
-	}
-	if v := rawQueryString(t, e.db, `SELECT review_date FROM files WHERE id = `+itoa(k["photos/a"].FileID)); v != "2030-01-01" {
-		t.Errorf("photos/a review_date = %s, want its reviewed date kept", v)
-	}
-	if v := rawQueryString(t, e.db, `SELECT count(*) FROM reviews r JOIN review_batches b ON b.id = r.batch_id
-		WHERE b.command = 'set-date'`); v != "2" {
-		t.Errorf("set-date history rows = %s, want 2", v)
-	}
-	// Running it again finds nothing left to date.
-	if n, err = e.s.SetReviewDate(e.ctx, scope, "2028-01-01", now, "again", false); err != nil || n != 0 {
-		t.Errorf("second SetReviewDate = %d, %v; want 0", n, err)
+	if got := e.statuses(today)["keep"]; got != StatusKept {
+		t.Errorf("keep edited, before its date: %q, want still kept", got)
 	}
 }
 
 func TestRecordExportRollsBackOnWriteError(t *testing.T) {
 	e := newReviewEnv(t)
 	e.apply(Changes{New: []NewFile{f("a", "h1")}})
-	q, err := e.s.Queue(e.ctx, "2026-11-11", QueueFilter{})
+	q, err := e.s.Files(e.ctx, "2026-11-11", Filter{})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -476,12 +476,21 @@ CREATE TABLE files (
 );
 CREATE INDEX ix_files_hash ON files(hash);`
 
+// schemaV3Roots is the roots table before schema version 4 gave roots their settings.
+const schemaV3Roots = `
+CREATE TABLE roots (
+    id INTEGER PRIMARY KEY,
+    path TEXT NOT NULL UNIQUE,
+    mount_path TEXT,
+    added_utc TEXT NOT NULL
+);`
+
 func TestMigrateFromV1ToCurrent(t *testing.T) {
 	db := tempDB(t)
 	mustClose(t, mustOpen(t, Options{DBPath: db}))
 	rawExec(t, db,
 		`DROP TABLE reviews`, `DROP TABLE review_batches`, `DROP TABLE export_rows`, `DROP TABLE exports`,
-		`DROP TABLE files`, schemaV1Files,
+		`DROP TABLE files`, schemaV1Files, `DROP TABLE roots`, schemaV3Roots,
 		`UPDATE meta SET value = '1' WHERE key = 'schema_version'`,
 		`INSERT INTO roots (id, path, added_utc) VALUES (1, '/r', '2026-01-01T00:00:00Z')`,
 		`INSERT INTO scans (id, started_utc, root_id) VALUES (1, '2026-01-01T00:00:00Z', 1)`,
@@ -502,12 +511,109 @@ func TestMigrateFromV1ToCurrent(t *testing.T) {
 	if len(ks) != 1 || ks[0] != want {
 		t.Errorf("Known = %+v, want [%+v]: the row survives with ctime 0 and no unreadable flag", ks, want)
 	}
-	// Version 3: the file has no review decision yet, so it is queued as undated.
-	q, err := s.Queue(context.Background(), "2026-11-11", QueueFilter{})
+	// The file has no keep_until yet, so it is undated.
+	q, err := s.Files(context.Background(), "2026-11-11", Filter{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(q) != 1 || q[0].Reason != ReasonUndated {
-		t.Errorf("queue after upgrade = %+v, want the one file, undated", q)
+	if len(q) != 1 || q[0].Status != StatusUndated {
+		t.Errorf("files after upgrade = %+v, want the one file, undated", q)
+	}
+}
+
+// schemaV3Files is the files table of schema version 3, with review_date, action and retain_until.
+const schemaV3Files = `
+CREATE TABLE files (
+    id INTEGER PRIMARY KEY,
+    kind TEXT NOT NULL,
+    size INTEGER NOT NULL,
+    mtime_ns INTEGER NOT NULL,
+    ctime_ns INTEGER NOT NULL DEFAULT 0,
+    hash TEXT,
+    unreadable_since_scan INTEGER REFERENCES scans(id),
+    inode INTEGER,
+    link_target TEXT,
+    link_broken INTEGER NOT NULL DEFAULT 0,
+    first_seen_scan INTEGER NOT NULL REFERENCES scans(id),
+    review_date TEXT,
+    action TEXT,
+    retain_until TEXT,
+    reviewed_utc TEXT,
+    reviewed_after_scan INTEGER REFERENCES scans(id),
+    reviewed_hash TEXT
+);
+CREATE INDEX ix_files_hash ON files(hash);`
+
+func TestMigrateFromV3(t *testing.T) {
+	db := tempDB(t)
+	mustClose(t, mustOpen(t, Options{DBPath: db}))
+	rawExec(t, db,
+		`DROP TABLE reviews`, `DROP TABLE review_batches`, `DROP TABLE export_rows`, `DROP TABLE exports`,
+		`DROP TABLE files`, schemaV3Files, `DROP TABLE roots`, schemaV3Roots, reviewSQLv3,
+		`UPDATE meta SET value = '3' WHERE key = 'schema_version'`,
+		`INSERT INTO roots (id, path, added_utc) VALUES (1, '/r', '2026-01-01T00:00:00Z')`,
+		`INSERT INTO scans (id, started_utc, finished_utc, root_id) VALUES (1, '2026-01-01T00:00:00Z', '2026-01-01T00:01:00Z', 1)`,
+		// date: a review date; floor: both, the floor later; early-floor: both, the review date later; alone: a floor
+		// alone; del: marked delete on 2026-11-05; bulk: set-date (no hash); none: undecided.
+		`INSERT INTO files (id, kind, size, mtime_ns, hash, first_seen_scan, review_date, action, retain_until,
+			reviewed_utc, reviewed_after_scan, reviewed_hash) VALUES
+			(1, 'file', 1, 1, 'h1', 1, '2027-01-01', NULL, NULL, '2026-11-05T10:00:00Z', 1, 'h1'),
+			(2, 'file', 1, 1, 'h2', 1, '2027-01-01', NULL, '2030-06-30', '2026-11-05T10:00:00Z', 1, 'h2'),
+			(3, 'file', 1, 1, 'h3', 1, '2031-01-01', NULL, '2030-06-30', '2026-11-05T10:00:00Z', 1, 'h3'),
+			(4, 'file', 1, 1, 'h4', 1, NULL, NULL, '2029-01-01', '2026-11-05T10:00:00Z', 1, 'h4'),
+			(5, 'file', 1, 1, 'h5', 1, NULL, 'delete', NULL, '2026-11-05T10:00:00Z', 1, 'h5'),
+			(6, 'file', 1, 1, 'h6', 1, '2027-06-30', NULL, NULL, NULL, NULL, NULL),
+			(7, 'file', 1, 1, 'h7', 1, NULL, NULL, NULL, NULL, NULL, NULL)`,
+		`INSERT INTO paths (file_id, root_id, path, valid_from_scan) VALUES (1, 1, 'date', 1), (2, 1, 'floor', 1),
+			(3, 1, 'early-floor', 1), (4, 1, 'alone', 1), (5, 1, 'del', 1), (6, 1, 'bulk', 1), (7, 1, 'none', 1)`,
+		`INSERT INTO exports (id, created_utc, after_scan) VALUES (1, '2026-11-05T09:00:00Z', 1)`,
+		`INSERT INTO export_rows (export_id, file_id, reason, hash) VALUES (1, 5, 'undated', 'h5')`,
+		`INSERT INTO review_batches (id, created_utc, command) VALUES (1, '2026-11-05T10:00:00Z', 'import'),
+			(2, '2026-11-05T11:00:00Z', 'set-date')`,
+		`INSERT INTO reviews (batch_id, file_id, export_id, review_date, action, retain_until, hash) VALUES
+			(1, 5, 1, NULL, 'delete', NULL, 'h5'), (1, 2, 1, '2027-01-01', NULL, '2030-06-30', 'h2'),
+			(2, 6, NULL, '2027-06-30', NULL, NULL, NULL)`,
+	)
+
+	s := mustOpen(t, Options{DBPath: db})
+	defer mustClose(t, s)
+	if v := readMeta(t, s)[metaSchemaVersion]; v != strconv.Itoa(SchemaVersion) {
+		t.Fatalf("schema_version = %s after upgrade, want %d", v, SchemaVersion)
+	}
+	q, err := s.Files(context.Background(), "2026-11-12", Filter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for _, it := range q {
+		got[it.Path] = it.KeepUntil + " " + string(it.Status)
+	}
+	want := map[string]string{
+		"date": "2027-01-01 kept", "floor": "2030-06-30 kept", "early-floor": "2031-01-01 kept",
+		"alone": "2029-01-01 kept", "del": "2026-11-05 expired", "bulk": "2027-06-30 kept", "none": " undated",
+	}
+	for p, w := range want {
+		if got[p] != w {
+			t.Errorf("%s after upgrade = %q, want %q", p, got[p], w)
+		}
+	}
+	if v := rawQueryString(t, db, `SELECT group_concat(coalesce(keep_until, '-'), ' ') FROM (SELECT keep_until FROM
+		reviews ORDER BY id)`); v != "2026-11-05 2030-06-30 2027-06-30" {
+		t.Errorf("review history keep_until = %q", v)
+	}
+	if v := rawQueryString(t, db, `SELECT group_concat(command, ' ') FROM (SELECT command FROM review_batches ORDER BY id)`); v != "update set-date" {
+		t.Errorf("batch commands = %q", v)
+	}
+	roots, err := s.Roots(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(roots) != 1 || !roots[0].Settings.Equal(Settings{}) {
+		t.Errorf("roots after upgrade = %+v, want default settings", roots)
+	}
+	for _, col := range []string{"review_date", "action", "retain_until"} {
+		if v := rawQueryString(t, db, `SELECT count(*) FROM pragma_table_info('files') WHERE name = '`+col+`'`); v != "0" {
+			t.Errorf("files.%s still there", col)
+		}
 	}
 }

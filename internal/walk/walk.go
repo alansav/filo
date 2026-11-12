@@ -90,8 +90,8 @@ func Walk(ctx context.Context, opt Options) (*Result, error) {
 	}
 	ignore := map[string]bool{}
 	for _, n := range opt.Ignore {
-		if n == "" || n == "." || n == ".." || strings.ContainsAny(n, `/\`) {
-			return nil, fmt.Errorf("ignore %q: must be a plain file or directory name", n)
+		if err := CheckIgnore(n); err != nil {
+			return nil, err
 		}
 		ignore[n] = true
 	}

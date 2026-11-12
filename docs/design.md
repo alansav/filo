@@ -2,9 +2,10 @@
 
 Status: iteration 1 (scan, register, report) is done: it passes its test-tree criterion, and on 2026-11-11 a real home
 directory (5,582 files, about 3.7 GB) scanned completely and rescanned quickly, reporting only real changes. Iteration
-2 (review) is implemented and passes its test-tree criterion; trimming the real home directory's first queue to about
-100 rows with `filo review set-date` is still to be done. A C# prototype exists as a reference spec only; its schema
-and reconcile rules were carried over. Last updated: 2026-11-11.
+2 was reshaped on 2026-11-12 from a review queue into one keep-until date per file (the lifespan CSV, `filo export
+lifespan` and `filo update`), with root settings stored on the root; it passes its test-tree criterion, and setting
+dates on the real home directory is still to be done. A C# prototype exists as a reference spec only; its schema and
+reconcile rules were carried over. Last updated: 2026-11-12.
 
 This file records settled decisions, the planned data model and the open questions. When a decision changes,
 change it here in the same commit.
@@ -17,14 +18,16 @@ who can find any old file. Filo is a register and review workflow that makes dis
 
 Principles. These are not negotiable:
 
-1. **A retain-until date is a floor, not a trigger.** Passing it makes a file eligible for review, never for deletion.
+1. **A keep-until date is a floor, not a trigger.** Reaching it makes a file a deletion candidate that the person
+   confirms, one by one; nothing is ever deleted because a date passed. (Until 2026-11-12 there were two dates, a
+   review date and a retain-until floor; since every deletion goes through a person anyway, they became one.)
 2. **Holds override everything.** Legal, tax and dispute holds veto any disposal and are checked last, at the moment
    of disposal, not when the date was set.
 3. **Disposal is staged and reversible:** review, then quarantine, then (much later) deletion.
 4. **Fail safe.** A file that loses its metadata, or whose state is ambiguous, becomes "new, needs review", never
    "eligible for deletion".
-5. **Record only what is known.** At creation that is at most a floor date and a link to an asset or project.
-   Never invent a delete date.
+5. **Record only what is known.** At creation that is at most a keep-until date and a link to an asset or project.
+   Never invent one: a file without a date needs a decision.
 6. **Nothing destructive before its iteration.** Destructive commands default to dry-run.
 7. **Never guess.** Duplicates and ambiguous moves are reported, not resolved.
 
@@ -51,7 +54,7 @@ Principles. These are not negotiable:
   never scanned. That is also why there is no device column. Revisit only if a shared register is ever wanted.
 - Driver: `modernc.org/sqlite` (pure Go, no CGO, plain `database/sql`), chosen 2026-11-11 at v1.62.0.
 - `meta.schema_version` must equal the build's version. An older database is upgraded when it is opened, one version
-  at a time, each step in its own transaction with the version bump (1 to 2, then 2 to 3); a newer version, or an older
+  at a time, each step in its own transaction with the version bump (1 to 2, 2 to 3, then 3 to 4); a newer version, or an older
   one with no migration, is refused, as is a SQLite file without Filo's `meta` keys. WAL mode is set only after those checks pass, so
   a foreign database is never modified.
 - One writer at a time: an `flock` on `<db>.lock`, taken before the database is opened. The kernel drops it if Filo
@@ -62,9 +65,19 @@ Principles. These are not negotiable:
 - The database, its WAL/SHM/journal files and the lock file are never scanned, wherever they are.
 
 ### Roots
-- Roots are registered explicitly (`filo roots add PATH`) and stored in the `roots` table as absolute paths with
-  symlinks resolved. `filo roots` lists them; `filo roots remove` (later, with a dry run) removes a root's register
-  rows, never files.
+- Roots are registered explicitly and deliberately (`filo roots add DIR`), and stored in the `roots` table as absolute
+  paths with symlinks resolved. `filo roots` lists them; `filo roots remove` (later, with a dry run) removes a root's
+  register rows, never files. Considered on 2026-11-12: letting `filo scan DIR` add DIR as a root when it is in none.
+  Rejected, because a root carries settings that every later scan relies on, so setting one up should be a
+  deliberate act; a scan of a directory under no root is refused with a hint to add it.
+- **A root owns its scan settings** (decided 2026-11-12): whether hidden entries are scanned (`include_hidden`) and the
+  extra names to ignore (`ignores`). They are given on `filo roots add DIR [--include-hidden] [--ignore NAME]...` and
+  replaced as a whole by `filo roots set DIR [--include-hidden | --skip-hidden] [--ignore NAME]...`. Every scan of
+  the root, whole or partial, uses them, so a timer's `filo scan` and a manual scan always cover the same files.
+  (Until then they were flags on each scan, and a scan without `--include-hidden` quietly left hidden files
+  unchecked.)
+- `filo roots add` scans the new root straight away; `--no-scan` only registers it (for example to run the long first
+  scan later). Ctrl-C during that scan keeps the root and writes nothing from the scan.
 - **No aliases.** A new root is refused if it is the same directory as an existing root, by path or by identity
   (device and inode). This catches symlinks and bind mounts (`~` also mounted at `/mnt/home`). It cannot catch the same
   tree mounted back over the network (NFS or SMB to localhost), which has different device and inode numbers.
@@ -75,10 +88,11 @@ Principles. These are not negotiable:
   `~/Documents` and `~/Pictures` are roots on the same filesystem merges them into `~` in the same transaction: their
   paths get the folder as a prefix (`a.txt` becomes `Documents/a.txt`), their scans become scans of `~` scoped to
   that folder, their event paths are prefixed (except a returned file's `other_path`, which is relative to the root
-  named in the event's detail), and the old root rows are deleted. Files keep their IDs, so history and review
-  decisions are kept, and the first scan of `~` finds those files unchanged. Nothing on disk changes. `roots add`
-  says which roots it absorbed, and notes any under a hidden or noise folder, which a default scan skips (their files
-  are then neither verified nor marked missing until a scan with `--include-hidden`). Refused instead: absorbing a
+  named in the event's detail), and the old root rows are deleted. Files keep their IDs, so history and keep-until
+  dates are kept, and the first scan of `~` finds those files unchanged. Nothing on disk changes. The new root's
+  settings apply to everything it absorbs. `roots add` says which roots it absorbed, notes any whose settings differed,
+  and any that the new root's settings skip (a hidden or ignored folder: their files are then neither verified nor
+  marked missing until `filo roots set` includes them). Refused instead: absorbing a
   root that cannot be checked now (not reachable or its disk not mounted), since Filo cannot tell whether it is on the
   same filesystem; and the reverse, a directory inside an existing root on the same filesystem, which is already
   covered (the message suggests `filo scan` on it). Roots inside the new one on other filesystems stay roots.
@@ -87,19 +101,19 @@ Principles. These are not negotiable:
   as **unmounted** if that directory is now on its parent's device, or the root is no longer on it. So
   `/mnt/disk/photos` is protected when `/mnt/disk` is not mounted, even if an empty `photos` folder exists underneath.
 - An existing root that cannot be reached when a new one is added (an unmounted disk) is checked by path only.
-- Paths are stored relative to their root, with `/` separators. `filo scan [PATH]` maps PATH to the deepest root that
-  contains it, by path or by identity (so `/mnt/home/docs` is a partial scan of `~` with scope `docs`). PATH must be a
-  directory on that root's filesystem. A PATH under no root is refused with a hint to add it.
+- Paths are stored relative to their root, with `/` separators. `filo scan [DIR]` maps DIR to the deepest root that
+  contains it, by path or by identity (so `/mnt/home/docs` is a partial scan of `~` with scope `docs`). DIR must be a
+  directory on that root's filesystem. A DIR under no root is refused with a hint to add it.
 - Each scan records its root, its **scope** (a path relative to the root, empty for everything) and the hidden/ignore
-  options it ran with.
+  settings it ran with (the root's at the time).
 - A file moved from one root to another shows as new plus missing; pairing across roots is a later improvement. File
   identity is not tied to a root, so that needs no schema change.
 - Location history: each file's paths are stored as intervals (`valid_from_scan`, `valid_to_scan`, NULL = current),
   so the tree can be reconstructed at any scan and directory moves can be reverted.
 
 ### Scan
-- Skips hidden entries by default (`--include-hidden` to override) plus noise: `node_modules`, `__pycache__`, `.filo`,
-  user-supplied `--ignore NAME`, and `bin`/`obj` beside a `.csproj` or `.fsproj`.
+- Skips hidden entries unless the root includes them, plus noise: `node_modules`, `__pycache__`, `.filo`, the root's
+  ignore names, and `bin`/`obj` beside a `.csproj` or `.fsproj`.
 - **One filesystem.** A walk never descends into a directory on a different device from its root; such directories are
   reported once in the summary, not as errors. A directory already visited in the same walk (same device and inode: a
   bind mount of an ancestor, or a loop) is skipped and reported.
@@ -112,8 +126,8 @@ Principles. These are not negotiable:
   another filesystem or revisited, and entries whose lstat failed are left untouched. The walker answers this from what
   it actually did: a path is covered only if every directory from the scope down to its parent was listed, or one of
   them has gone (or is no longer a directory) inside a listed parent that did not skip it.
-  This is what makes a scan of just `~/Pictures` safe after a scan of the whole home directory, and a scan without
-  `--include-hidden` safe after one with it.
+  This is what makes a scan of just `~/Pictures` safe after a scan of the whole home directory, and a scan after
+  `filo roots set` stops including hidden files safe after one that included them.
 - **Empty-walk guard, only for roots on a mounted filesystem** (`mount_path` set): if the walk finds no files but the
   register knows files this scan covers, abort and change nothing (the wrong or an empty disk is probably mounted).
   `--allow-empty` records it anyway. For other roots an empty walk is recorded: if the files are gone, they are gone.
@@ -173,76 +187,80 @@ Principles. These are not negotiable:
 - Pairing moves by inode instead of hash (to avoid hashing moved files) is a later optimisation; the inode is only
   used to decide what to rehash.
 
-### Review (iteration 2)
-Decided 2026-11-11 unless noted. Review writes only the register and the CSV file the user names; it never touches
-the files being reviewed.
+### Lifespan (iteration 2)
+Decided 2026-11-12, replacing the review queue, review dates, actions and retain-until floors of 2026-11-11. The
+lifespan CSV and `filo update` write only the register and the CSV file the user names; they never touch the files.
 
-- Export a CSV, review it in a spreadsheet, import it back. A UI replaces the CSV later.
-- **The queue** is present files (regular files and symlinks) with one reason each, the first that applies:
-  1. *unreadable*: flagged unreadable and not reviewed since the scan that flagged it;
-  2. *changed since review*: a regular file whose hash is not the one its decision was made on (or that was reviewed
-     without a hash, or has none now). While a file is flagged unreadable its hash is stale, so rule 1 governs instead;
-  3. *possible move*: the new side of a possible move recorded after its last review. The event names the old file;
-     the new one is the file whose path opened at the event's path in that scan;
-  4. a file with an action (delete) is otherwise out of the queue: it waits for disposal;
-  5. *review due*: its review date is today or earlier (local date);
-  6. *no review date*.
-  The CSV holds the queue only, not the whole register. Each row says why it is queued; an unreadable row says since
-  when (the scan that flagged it, and its time), a possible move says where it may have come from.
-- **"Reviewed since"** is measured in scans, not clock times (changed 2026-11-11 from comparing the review's time
-  with the flagging scan's finish time). Each export records the latest finished scan (`exports.after_scan`); a
-  decision imported from it is stamped with that scan (`files.reviewed_after_scan`). The decision covers what the
-  export showed, so a file flagged unreadable, or recorded as a possible move, in a scan after the export stays
-  queued after the import.
-- **Unreadable files** (decided 2026-11-11). A file flagged unreadable joins the queue even if its review date has
-  not come, because its stored hash is stale and nothing about it can be checked. Reviewing it while it is still flagged
-  takes it out of the queue until its review date; if it is read again and later becomes unreadable again, it rejoins.
-  The import accepts only a review date for a file still flagged at import time: a delete action is refused for that
-  row (one clear line naming the file; the other rows are still applied), because its content cannot be checked at
-  action time. Disposal refuses flagged files anyway (see Disposal).
-- **CSV columns**, in order: `id` (file row ID), `export` (export number), `reason`, `path` (absolute), `size` (bytes),
-  `modified` (local time), `review_date`, `action`, `retain_until`. The import finds columns by header name and reads
-  only `id`, `export`, `review_date`, `action` and `retain_until`, so a spreadsheet may reorder columns or add its own.
-  Rows are keyed on (export, id). The hash is not in the CSV: each export's rows and hashes are stored in the register
-  (`export_rows`).
+- **One date per file: `keep_until`.** Keep the file until then. On that date it becomes a deletion candidate, never
+  deleted automatically: `filo delete` lists the candidates, and deleting each is the person's call (iteration 3). A
+  recurring check on a file (an annual look at a seven-year record) is a task, a later iteration; this iteration
+  tracks lifespan only. Hard legal retention may become a hold with an end date (see Open questions).
+- **Status of a present file** (regular files and symlinks), the first that applies:
+  1. *unreadable*: flagged unreadable and its date not set since the scan that flagged it; or flagged and past its
+     date (its content cannot be checked);
+  2. *possible move*: the new side of a possible move recorded after its date was last set. The event names the old
+     file; the new one is the file whose path opened at the event's path in that scan;
+  3. *undated*: no `keep_until`;
+  4. *kept*: `keep_until` after today (local date);
+  5. *changed*: past its date, but a regular file whose hash is not the one the date was set on (or the date was set
+     without a hash, or it has none now). A change before the date does not matter; at the date it needs a new one;
+  6. *expired*: past its date and unchanged: a deletion candidate.
+  The first four except *kept*, plus *changed*, need a decision; `filo report` counts them and shows the directories
+  holding most of them.
+- **"Since" is measured in scans**, not clock times. Each export records the latest finished scan
+  (`exports.after_scan`); a date set from it is stamped with that scan (`files.reviewed_after_scan`), the content it
+  was exported with (`reviewed_hash`) and when (`reviewed_utc`). A file flagged unreadable, or recorded as a possible
+  move, in a scan after the export keeps that status after the update.
+- **The CSV has one purpose**: take the files into a spreadsheet, filter, sort, edit `keep_until`, update back. So it
+  holds **every present file** under DIR (or every root), with its current date, not a queue: dated files are
+  reviewed too, and filtering on a blank `keep_until` gives the undated ones. Missing and moved files are not in it;
+  they are in `filo report`. On a large system, export one directory at a time so a spreadsheet can open it.
+- **Columns**, in order: `id` (file row ID), `export` (export number), `directory` (absolute), `name`, `size`
+  (bytes), `modified` (local time; a cue to when the file was last worked on), `keep_until`. The name is a column of
+  its own because file names often carry dates. Left out on purpose: a reason (one purpose only), an action (a
+  delete column in a spreadsheet is unsafe: a one-column sort or a fill-down puts it on the wrong rows), and creation
+  or first-seen dates (not reliable: many filesystems do not record a birth time, and a copy, restore or sync resets
+  it). `filo update` finds columns by header name and reads only `id`, `export` and `keep_until`, so a spreadsheet may
+  reorder columns or add its own. Rows are keyed on (export, id). Each export's rows, hashes and dates are stored in
+  the register (`export_rows`).
 - **Encoding.** UTF-8 with a byte order mark (so spreadsheets detect UTF-8), standard quoting. File names are written
-  as they are, emoji and all; bytes that are not valid UTF-8 are shown as U+FFFD, which is harmless because the import
-  never reads the path. A display cell that starts with `= + - @`, tab or CR gets a leading `'` so a spreadsheet does
-  not run it as a formula. The import accepts a byte order mark, CRLF, `;` or tab separators, and empty rows.
-- **Dates**: `YYYY-MM-DD`, or `+N` followed by `d`, `w`, `m` or `y` from today (a month step that lands past a month's
-  end stops on its last day). An interval is resolved at import and stored as a date. Anything else, such as
-  `06/07/2027`, is refused, never guessed. A review date must be after today. This settles "default review intervals":
-  the intervals are what the reviewer types; nothing is filled in.
-- **Outcomes.** Each row gets either a review date or the action `delete`, not both; there is no "keep where it is"
-  without a date. A blank row is left alone. `delete` is only recorded in iteration 2. `retain_until` (a floor, see
-  principle 1) is optional with a date or delete. **On its own** (changed 2026-11-11; it was refused) it means "keep
-  it until then": the floor is recorded and is also the review date, so the file comes back as *review due* on that
-  day and is decided then. Passing the floor never marks a file delete. It must be after today. The export fills in
-  the current floor, so a row with only that unchanged value counts as blank. A blank `retain_until` keeps the
-  current floor (clearing one is not supported yet).
-- **Misplaced values** (decided 2026-11-11). The import reads only `review_date`, `action` and `retain_until`, so a
-  value typed anywhere else would otherwise pass as an untouched row. A row with none of those three filled in is
-  refused, with a line saying where to put the value, if its `reason` cell no longer reads as one Filo wrote or it has
-  a value past the last column. `size` and `modified` are not checked: spreadsheets rewrite dates and long numbers on
-  save. When no row has a decision at all, the import says which columns it reads.
-- **The import refuses a row**, with one line naming the CSV line and the file, and still applies the others, when: a
-  value is misplaced (above); the export or the file is not in the register or not in that export; the file's hash
-  differs from the export's (changed since export: it stays queued); the file was imported from a later export since;
-  a delete is asked for a file that is flagged unreadable, is a possible move (only a date is accepted, so moves are
-  never confirmed by guesswork), or has a retain-until floor after today; a value does not parse; the same (export,
-  id) appears more than once (every copy is refused). Importing the same row from the same export again does nothing.
-  The valid rows are applied in one transaction; `--dry-run` checks everything and writes nothing. The exit code is 1
-  if any row was refused.
-- **Bulk first dates by folder**: `filo review set-date FOLDER DATE` gives every present file under FOLDER with no
-  review date and no action that date. It never overwrites a decision, and it is not a review: it leaves unreadable
-  files and possible moves in the queue and sets no reviewed hash. Every change is a row in `reviews` under its own
-  batch, so a batch can be undone later (no undo command yet).
-- The hash at export is stored; it is **re-checked at action time** (iteration 3) against `files.reviewed_hash`. A
-  file edited since review goes back to the queue.
+  as they are, emoji and all; bytes that are not valid UTF-8 are shown as U+FFFD, which is harmless because the update
+  never reads the name. A display cell that starts with `= + - @`, tab or CR gets a leading `'` so a spreadsheet does
+  not run it as a formula. The update accepts a byte order mark, CRLF, `;` or tab separators, and empty rows.
+- **Dates**: `YYYY-MM-DD` only, and a real date (`2027-02-29` is refused). Anything else, such as `06/07/2027` or
+  `+1y`, is refused, never guessed; the message suggests formatting the column as text, since spreadsheets may
+  rewrite dates in the locale's format. A new date must be after today. Durations (`+1y`) were dropped from the CSV on
+  2026-11-12: a duration is relative to the day of the update, so the same cell meant different dates on different
+  days. Whether commands take durations is open.
+- **`-o FILE` is required**: the CSV is never written to the terminal. FILE is created with mode 0600 and never
+  overwritten.
+- **What the update does with each row**:
+  - the cell as exported (the date it was exported with, or blank): nothing, whatever happened since;
+  - the date already stored: nothing;
+  - a new date: replaces the stored one. Editing the same CSV again and updating again replaces the date again (the
+    old "already imported" rule, which silently ignored a re-edited row, is gone);
+  - blank where a date is stored: clears it, so the file is undated again. Before clearing, the update lists those
+    files (the first ten, then a count) and asks once, `Clear the keep_until date of N files? [y/n]`. Anything but
+    `y` or `yes`, or no terminal on standard input, leaves those rows alone, and the summary says how many and why.
+    `--dry-run` counts them without asking.
+- **The update refuses a row**, with one line naming the CSV line and the file, and still applies the others, when:
+  a value does not parse, or is typed past the last column; the export is not in the register, or the file is not in
+  that export (a row added in the spreadsheet); the file is no longer present; the file's hash differs from the
+  export's (changed since the export); its date was changed from a later export since (an old CSV never overwrites a
+  newer decision); the date is not after today; the same (export, id) appears more than once (every copy is
+  refused). A deleted row changes nothing. The applied rows go in one transaction; `--dry-run` checks everything and
+  writes nothing. The exit code is 1 if any row was refused. A CSV without a `keep_until` header is refused as a
+  whole, with a pointer to `filo export lifespan` if it is an old review CSV.
+- **Bulk dates**: set in the spreadsheet (filter on `directory`, fill down). `filo review set-date` was dropped on
+  2026-11-12, at least for now.
+- The hash at export is stored; it is **re-checked at action time** (iteration 3) against `files.reviewed_hash`.
 
 ### Disposal (iteration 3 onward)
 - Dry run first. Quarantine before deletion, for a set period.
-- Checks at the moment of acting: retain-until floor passed, no hold, not flagged unreadable, hash unchanged, file not modified in the last few
+- `filo delete` lists the candidates (expired files). In iteration 3, run in a terminal, it then asks
+  `Delete [a]ll, [s]elect or [n]one?`; *select* goes file by file (`[d]elete, [k]eep until…, [s]kip, [q]uit`). Without
+  a terminal it only lists. In iteration 2 it only lists.
+- Checks at the moment of acting: keep-until passed, no hold, not flagged unreadable, hash unchanged, file not modified in the last few
   minutes, no sync temp file present (`.syncthing.*.tmp`, `*.part`, `.~lock.*`), optionally no process holds it open.
 - A history table of retired files (path, hash, date, reason) stays after the file is gone.
 - **Syncthing propagates deletes.** Roots that are synced need a flag; quarantine for them must live outside the synced
@@ -250,23 +268,29 @@ the files being reviewed.
 - Scheduled runs only ever scan. Quarantine and deletion are always manual, after review.
 
 ### Commands and scheduling
-- Plain names: `scan`, `report`, `review`, `restore`, `revert`, `roots`. No themed subcommands.
+- Plain names, easy to remember: `roots`, `scan`, `report`, `export`, `update`, `delete`, later `restore` and
+  `revert`. No themed subcommands. (Reshaped 2026-11-12: `review` and its subcommands `set-date`, `export` and
+  `import` were replaced by `export lifespan` and `update`; "update" says that only existing files change, which
+  "import" did not.)
 - **Keep flags and options to a minimum** (2026-11-11). Prefer a safe default and clear output over a flag; prefer
-  doing the obvious thing and saying what was done over asking. Filo has no interactive prompts, so it works the
-  same from a terminal, a script or a timer.
-- `filo roots` lists roots (mount point, files, size, last scan); `filo roots add PATH` registers one (absorbing any roots inside it on the same filesystem, see Roots); later
-  `filo roots remove PATH`.
-- `filo scan [PATH] [--include-hidden] [--ignore NAME]... [--workers N] [--allow-empty]` scans PATH, which must be
-  inside a registered root (see Roots); with no PATH, every root in turn, each in its own transaction. A root that
-  fails (for example unmounted) is reported and the others are still scanned. `--workers` is 1–64, default 4.
+  doing the obvious thing and saying what was done over asking.
+- **Prompts only in a terminal** (2026-11-12, replacing "no interactive prompts"). A command asks only where a person
+  should look first: `filo update` before clearing dates, and in iteration 3 `filo delete`. Declining, or having no
+  terminal on standard input, is always the safe choice, so Filo still works the same from a script or a timer.
+- `filo roots` lists roots (settings, mount point, files, size, last scan); `filo roots add DIR [--include-hidden]
+  [--ignore NAME]... [--no-scan]` registers one and scans it (absorbing any roots inside it on the same filesystem,
+  see Roots); `filo roots set DIR [--include-hidden | --skip-hidden] [--ignore NAME]...` replaces its settings; later
+  `filo roots remove DIR`.
+- `filo scan [DIR] [--workers N] [--allow-empty]` scans DIR, which must be inside a registered root (see Roots), with
+  the root's settings; with no DIR, every root in turn, each in its own transaction. A root that fails (for example
+  unmounted) is reported and the others are still scanned. `--workers` is 1–64, default 4.
 - `filo report [--top N]`: see section 4.
-- `filo review [PATH] [--top N] [--depth N]` shows the queue by reason and the folders holding most of it;
-  `filo review set-date FOLDER DATE [--dry-run]`, `filo review export [PATH] [-o FILE]` (FILE is created with mode
-  0600 and never overwritten; without `-o` the CSV goes to standard output) and `filo review import FILE [--dry-run]`:
-  see Review. A subcommand may follow `--db`.
+- `filo export lifespan [DIR] -o FILE` and `filo update FILE [--dry-run]`: see Lifespan. The word after `export`
+  names the CSV, so a later CSV is a new word, not a new command; `update` tells the kind from the CSV's header.
+- `filo delete`: lists the files past their keep-until date (see Disposal).
 - `--db PATH` is accepted before or after any command; `FILO_DB` is the fallback, then the default location. Flags may
   come before or after PATH. Built on the standard library's `flag` package (no CLI framework).
-- **A path that starts with `~` is refused** (2026-11-11): every PATH, FOLDER and FILE, `-o`, `--db` and `FILO_DB`.
+- **A path that starts with `~` is refused** (2026-11-11): every DIR and FILE, `-o`, `--db` and `FILO_DB`.
   The shell expands `~` only when it is unquoted, so `"~/Documents"` would otherwise name a folder called `~` in the
   current directory (and `--db "~/f.db"` would create one). Filo does not expand it itself, because a name starting
   with `~` is legal. The one-line error suggests `$HOME/...` (or the full path for `~user`), and `./~...` for a name
@@ -278,7 +302,7 @@ the files being reviewed.
   so timer and cron logs stay clean. Ctrl-C or SIGTERM cancels a scan; nothing is written and the lock is released.
 - A systemd user timer running `filo scan` is enough. No daemon. (`Persistent=true`, low CPU and I/O priority.)
 
-## 3. Data model (schema version 3)
+## 3. Data model (schema version 4)
 
 Carried over from the C# prototype. Adjust freely in the Go port, but keep the interval history and the partial unique
 index.
@@ -290,13 +314,15 @@ CREATE TABLE roots (
     id INTEGER PRIMARY KEY,
     path TEXT NOT NULL UNIQUE,          -- absolute, symlinks resolved
     mount_path TEXT,                    -- the mount point the root lives under; NULL = the filesystem of /
-    added_utc TEXT NOT NULL);
+    added_utc TEXT NOT NULL,
+    include_hidden INTEGER NOT NULL DEFAULT 0,          -- version 4: the root's scan settings
+    ignores TEXT NOT NULL DEFAULT '[]');                -- JSON array of names skipped at any depth
 
 CREATE TABLE scans (
     id INTEGER PRIMARY KEY, started_utc TEXT NOT NULL, finished_utc TEXT,
     root_id INTEGER NOT NULL REFERENCES roots(id),
     scope TEXT NOT NULL DEFAULT '',     -- relative to root; '' = the whole root
-    include_hidden INTEGER NOT NULL DEFAULT 0, ignores TEXT,
+    include_hidden INTEGER NOT NULL DEFAULT 0, ignores TEXT,  -- the root's settings when it ran
     files_seen INTEGER, new_count INTEGER, changed_count INTEGER, moved_count INTEGER,
     missing_count INTEGER, error_count INTEGER, elapsed_ms INTEGER);
 
@@ -310,13 +336,11 @@ CREATE TABLE files (
     inode INTEGER,                      -- NULL for symlinks, or where the platform gives none
     link_target TEXT, link_broken INTEGER NOT NULL DEFAULT 0,
     first_seen_scan INTEGER NOT NULL REFERENCES scans(id),
-    -- the current review decision (version 3); the history is in reviews
-    review_date TEXT,                   -- YYYY-MM-DD; NULL = none
-    action TEXT,                        -- 'delete' | NULL; recorded only until disposal exists
-    retain_until TEXT,                  -- YYYY-MM-DD floor; NULL = none known
-    reviewed_utc TEXT,                  -- when the decision was imported; NULL = never reviewed (set-date is not a review)
-    reviewed_after_scan INTEGER REFERENCES scans(id), -- the latest scan the reviewed export had seen
-    reviewed_hash TEXT);                -- the content the decision was made on
+    -- the current lifespan (version 4); the history is in reviews
+    keep_until TEXT,                    -- YYYY-MM-DD; NULL = undated, needs a decision
+    reviewed_utc TEXT,                  -- when keep_until was last set by an update; NULL = never
+    reviewed_after_scan INTEGER REFERENCES scans(id), -- the latest scan that update's export had seen
+    reviewed_hash TEXT);                -- the content the date was set on
 
 CREATE TABLE paths (
     id INTEGER PRIMARY KEY, file_id INTEGER NOT NULL REFERENCES files(id),
@@ -333,24 +357,25 @@ CREATE TABLE events (
     kind TEXT NOT NULL,                 -- moved | missing | changed | possible_move | error | other_fs
     file_id INTEGER, path TEXT, other_path TEXT, detail TEXT);
 
--- version 3: review
+-- versions 3 and 4: exports and the history of keep_until dates
 CREATE TABLE exports (
     id INTEGER PRIMARY KEY, created_utc TEXT NOT NULL,
-    path TEXT,                          -- the CSV written; NULL = standard output
+    path TEXT,                          -- the CSV written (NULL only for exports to standard output before version 4)
     after_scan INTEGER REFERENCES scans(id));          -- the latest finished scan at export
 CREATE TABLE export_rows (
     export_id INTEGER NOT NULL REFERENCES exports(id), file_id INTEGER NOT NULL REFERENCES files(id),
-    reason TEXT NOT NULL,               -- unreadable | changed | possible_move | due | undated
-    hash TEXT,                          -- the content shown; the import refuses the row if it has changed
+    hash TEXT,                          -- the content shown; the update refuses the row if it has changed
+    keep_until TEXT,                    -- version 4: the date exported; a cell left as this is untouched
     PRIMARY KEY (export_id, file_id));
 CREATE TABLE review_batches (
     id INTEGER PRIMARY KEY, created_utc TEXT NOT NULL,
-    command TEXT NOT NULL,              -- 'import' | 'set-date'
-    detail TEXT);                       -- the CSV imported, or the folder and date
-CREATE TABLE reviews (                  -- append-only: every decision ever recorded
+    command TEXT NOT NULL,              -- 'update' ('set-date' in databases from before version 4)
+    detail TEXT);                       -- the CSV read
+CREATE TABLE reviews (                  -- append-only: every keep_until ever set or cleared
     id INTEGER PRIMARY KEY, batch_id INTEGER NOT NULL REFERENCES review_batches(id),
     file_id INTEGER NOT NULL REFERENCES files(id), export_id INTEGER REFERENCES exports(id),
-    review_date TEXT, action TEXT, retain_until TEXT, hash TEXT);
+    keep_until TEXT,                    -- NULL = cleared
+    hash TEXT);
 CREATE INDEX ix_reviews_file ON reviews(file_id);
 ```
 
@@ -360,8 +385,12 @@ whose scope covers its path. Disposal (iteration 3) refuses files that no recent
 unreadable, and re-checks the file itself at action time. `ctime_ns` and `unreadable_since_scan` are schema version 2,
 the first migration (two `ALTER TABLE ... ADD COLUMN`s; existing rows start with ctime 0, so the first scan after the
 upgrade rehashes nothing extra and records each file's ctime quietly). Version 3 adds the review columns on `files`
-(all NULL for existing rows, so every file starts in the queue as undated) and the four review tables. Later
-iterations add holds and the retired-files history.
+(all NULL for existing rows, so every file starts undated) and the four review tables. Version 4 (2026-11-12) merges
+`review_date` and `retain_until` into `keep_until`, taking the later of the two so nothing is kept for less time; a
+recorded `delete` becomes `keep_until` = the day it was decided, so the file is a deletion candidate; the same in
+`reviews`; `export_rows` loses `reason` and gains `keep_until`; `import` batches are renamed `update`; roots gain
+their settings (defaults for existing roots: hidden skipped, no extra ignores). Columns are dropped with `ALTER TABLE
+... DROP COLUMN`. Later iterations add holds and the retired-files history.
 
 Location history gives snapshots without storing them: the tree at any scan is the set of intervals that cover it.
 A revert moves each file back to the path it had then, with a dry run that reports and skips conflicts. It reverts
@@ -391,7 +420,9 @@ A revert moves each file back to the path it had then, with a dry run that repor
    reused by another in the same scan; then updates; then open new paths and insert new files; then events.
 9. Print a summary: counts plus samples of moved, missing, changed, possible moves and errors.
 
-`filo report` shows each root's totals (present files, size, symlinks) and last scan, the largest files, duplicate
+`filo report` shows each root's totals (present files, size, symlinks) and last scan, the files needing a keep-until
+date by status and the directories (two levels below the root) holding most of them, how many are kept and how many
+are past their date, the largest files, duplicate
 groups with reclaimable space, broken symlinks, unreadable files (path and the scan they became unreadable in) and the
 most recent events (`--top N` per list, default 10). A
 **duplicate group** is present regular files (size > 0, with a hash) sharing a hash, across all roots; each copy keeps
@@ -403,15 +434,15 @@ its own identity. Reclaimable space is size × (copies − 1) per group. Paths a
    edit, delete, duplicate, symlink, unreadable directory, unreadable file) is reported exactly on rescan
    (`scripts/testtree.sh`, checked by the walk and reconcile tests); a first scan of the real home
    directory completes and shows the size of the backlog; a second scan takes seconds to a couple of minutes.
-2. **Review CSV export and import.** Backlog handled by bulk-setting initial review dates by folder, so the first
-   queue is manageable. Done when: on the test tree, an export, edit and import round trip records exactly the
-   decisions made, and refuses with one clear line each a changed file, a delete of an unreadable file or a possible
-   move, and an ambiguous date; a file edited after review, or a dated file whose date comes, rejoins the queue
-   (`TestReviewRoundTrip` in `internal/cli`, plus the store and review package tests); on the real home directory,
-   a few `filo review set-date` runs bring the first exported queue to about 100 rows.
+2. **Lifespan: one keep-until date per file**, set through the lifespan CSV (reshaped 2026-11-12 from a review
+   queue). Done when: on a test tree, an export, edit and update round trip records exactly the dates set, refuses
+   with one clear line each a changed file, an impossible or ambiguous date, a stale export and an added row; a
+   cleared date asks first; a file past its date is listed by `filo delete`, and once edited needs a new date instead
+   (`TestLifespanRoundTrip` in `internal/cli`, plus the store and lifespan package tests); on the real home directory,
+   every file gets a date through a few directory-sized exports.
 3. **Quarantine and delete** with the safety checks above, history table, holds.
 4. **Revert directory moves** from the path history.
-5. **UI** in place of the CSV.
+5. **UI** in place of the CSV, including viewing and editing the register in place (see Open questions).
 
 Long term: other properties (type, author, sender) where they can be derived automatically, tags, projects and tasks
 linked to files, and a daily view of the files needed. All of it hangs off the stable file ID, so none of it needs the
@@ -419,19 +450,24 @@ register to change shape.
 
 ## 6. Open questions
 
-- Holds and asset links: modelled at project or asset level, not per file. Shape not yet decided.
-- Reading a retain-until floor from the file itself (frontmatter, Office or PDF properties, extended attributes).
-  For now it is entered during review; the register is the source of truth either way.
+- Holds and asset links: modelled at project or asset level, not per file. Shape not yet decided. A hold with an end
+  date may be how hard retention ("keep for seven years, by law") is expressed, now that there is no separate floor.
+- Reading a keep-until date from the file itself (frontmatter, Office or PDF properties, extended attributes).
+  For now it is set in the CSV; the register is the source of truth either way.
+- Whether commands that take a date (the `[k]eep until…` choice in `filo delete`, a future bulk command) accept
+  durations such as `+1y`. The CSV takes dates only.
 - How a synced-folder flag is configured (needed for disposal, iteration 3).
-- Confirming a possible move during review, and undoing a `set-date` batch.
-- **Folder rules for new files.** `filo review set-date` is a one-off: it dates the files under a folder that exist
-  now, and a file added later arrives undated and joins the queue. A stored rule ("new files under FOLDER get a review
+- Confirming a possible move, and undoing an update batch.
+- **Viewing and editing the register in place** (raised 2026-11-12). Setting or clearing `keep_until` on a few files
+  through a whole export, edit and update round is cumbersome. Wanted: query and view what the register holds (files,
+  dates, history) and set or clear a date on a few files directly. Open: a command (for example
+  `filo keep PATH... DATE`, which reopens whether commands take durations such as `+1y`), part of the UI (iteration
+  5), or both.
+- **Folder rules for new files.** Setting dates in the CSV is a one-off: it dates the files under a folder that exist
+  now, and a file added later arrives undated and needs a decision. A stored rule ("new files under FOLDER get a review
   date N from first seen") applied by each scan would save rerunning it, but it relaxes principle 4's default that a
   new file needs review. Open: whether to have rules at all, whether a rule-dated file still gets one look first,
   how rules on nested folders combine, and whether a rule may ever imply delete (it should not).
-- **Review commands feel cumbersome** (raised 2026-11-11, to revisit): `filo review`, `review set-date`,
-  `review export -o`, `review import [--dry-run]`. Keep flags and options to a minimum; look again at the names, the
-  number of steps in a review round, and whether some steps can be merged or made the default.
 - UI technology.
 
 ## 7. Rejected or deferred

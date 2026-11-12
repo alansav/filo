@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -26,20 +27,18 @@ const (
 	ExitUsage = 2
 )
 
-const usage = `filo keeps a register of your files and where they live.
+const usage = `filo keeps a register of your files, where they live, and how long to keep them.
 
 Usage:
-  filo roots                    list roots
-  filo roots add PATH           register a directory as a root
-  filo scan [PATH] [flags]      scan PATH (inside a root), or every root
-  filo report [--top N]         totals, review queue, largest files, duplicates, broken symlinks, recent events
-  filo review [PATH]            the review queue: why files are in it, and the folders holding most of them
-  filo review set-date FOLDER DATE [--dry-run]
-                                give every undated file under FOLDER a first review date
-  filo review export [PATH] [-o FILE]
-                                write the review queue as CSV, to FILE (never overwritten) or standard output
-  filo review import FILE [--dry-run]
-                                apply the review dates and actions filled in to an exported CSV
+  filo roots                        list roots and their settings
+  filo roots add DIR [flags]        register a directory as a root, then scan it
+  filo roots set DIR [flags]        replace a root's settings
+  filo scan [DIR]                   scan every root, or DIR inside a root
+  filo report [--top N]             totals, files needing a keep_until date, largest files, duplicates, events
+  filo export lifespan [DIR] -o FILE
+                                    write every file under DIR (or every root) with its keep_until, as CSV
+  filo update FILE [--dry-run]      apply the keep_until dates edited in an exported CSV
+  filo delete                       list the files past their keep_until date
   filo help [COMMAND]
 
 Every command accepts --db PATH (default: $FILO_DB, then the user data directory).
@@ -47,58 +46,65 @@ Every command accepts --db PATH (default: $FILO_DB, then the user data directory
 
 var commandUsage = map[string]string{
 	"roots": `Usage:
-  filo roots [--db PATH]            list roots
-  filo roots add PATH [--db PATH]   register a directory as a root
+  filo roots
+  filo roots add DIR [--include-hidden] [--ignore NAME]... [--no-scan]
+  filo roots set DIR [--include-hidden | --skip-hidden] [--ignore NAME]...
 
-A root that contains existing roots on the same filesystem takes them in, keeping their files' history and review
-decisions. A directory inside an existing root is already covered: scan it with filo scan PATH.
+A root's settings apply to every scan of it, whole or partial:
+  --include-hidden   also scan hidden files and directories (names starting with .)
+  --skip-hidden      skip them again (roots set only; the default)
+  --ignore NAME      skip entries with this name, at any depth (repeatable); node_modules, __pycache__ and .filo
+                     are always skipped
+roots add scans the new root straight away; --no-scan only registers it. roots set replaces the whole set, so
+name every --ignore you want to keep.
+
+A root that contains existing roots on the same filesystem takes them in, keeping their files' history and
+keep_until dates; its settings then apply to all of it. A directory inside an existing root is already covered:
+scan it with filo scan DIR.
 `,
 	"scan": `Usage:
-  filo scan [PATH] [flags]
+  filo scan [DIR] [--workers N] [--allow-empty]
 
-Scans PATH, which must be inside a root (a partial scan), or every root if PATH is omitted.
-Flags:
-  --include-hidden   also scan hidden files and directories
-  --ignore NAME      skip entries with this name, at any depth (repeatable)
+Scans DIR, which must be inside a root (a partial scan), or every root if DIR is omitted, with each root's
+settings (see filo help roots).
   --workers N        files hashed in parallel, 1-64 (default 4; use 1 on a spinning disk)
   --allow-empty      record an empty scan of a root on a mounted filesystem
-  --db PATH          the register to use
 `,
 	"report": `Usage:
-  filo report [--top N] [--db PATH]
+  filo report [--top N]
 
-Shows each root's totals and last scan, the size of the review queue, the largest files, duplicate groups with
-reclaimable space, broken symlinks and recent events. --top sets how many entries each list shows (default 10).
+Shows each root's totals and last scan, the files needing a keep_until date and the directories holding most of
+them, the largest files, duplicate groups with reclaimable space, broken symlinks, unreadable files and recent
+events (moves and missing files among them). --top sets how many entries each list shows (default 10).
 `,
-	"review": `Usage:
-  filo review [PATH] [--top N] [--depth N]
-  filo review set-date FOLDER DATE [--dry-run]
-  filo review export [PATH] [-o FILE]
-  filo review import FILE [--dry-run]
+	"export": `Usage:
+  filo export lifespan [DIR] -o FILE
 
-A file is queued for review when it has no review date, its review date has come, it is flagged unreadable, its
-content changed since it was reviewed, or it may be a file that moved. PATH limits a command to a folder inside a root.
+Writes every file under DIR (inside a root), or under every root, as CSV (UTF-8) to FILE, which must not exist.
+Columns: id, export, directory, name, size, modified, keep_until. Edit keep_until in a spreadsheet, then run
+filo update FILE. On a large system, export one directory at a time.
+`,
+	"update": `Usage:
+  filo update FILE [--dry-run]
 
-review       shows the queue by reason, and the folders with the most queued files (--top, default 15; --depth
-             levels below the root, default 2).
-set-date     gives every file under FOLDER that has no review date and no decision the review date DATE. It never
-             changes a decision already made, and it does not take unreadable files or possible moves out of the
-             queue.
-export       writes the queue as CSV (UTF-8) to FILE, which must not exist, or to standard output.
-import       reads an exported CSV after you fill in, per row, review_date or action (not both), optionally with
-             retain_until; or retain_until alone, which keeps the file until that date and brings it back for review
-             then. Only those three columns are read. Rows left blank are left alone. A row is refused, with one line
-             saying why, if the file changed since the export, if it asks to delete a file that is unreadable, a
-             possible move, or retained past today, or if a value was typed in another column. The other rows are
-             still applied.
+Reads an exported lifespan CSV and applies the keep_until dates you changed. Only id, export and keep_until are
+read; rows can be sorted, filtered or deleted, but not added. A date is YYYY-MM-DD and must be after today. A
+blank cell clears a stored date (the file then needs a date again); filo lists those files and asks first, and
+without a terminal it leaves them alone. A row is refused, with one line saying why, if the file changed since
+the export or its date was changed from a later export. The other rows are still applied.
+--dry-run checks everything and writes nothing.
+`,
+	"delete": `Usage:
+  filo delete
 
-Dates are YYYY-MM-DD, or +N followed by d, w, m or y (days, weeks, months, years from today). A review date must be
-after today. The only action is delete, and it is only recorded: filo deletes nothing in this version.
+Lists the files past their keep_until date whose content has not changed since the date was set. filo never
+deletes on its own: in this version the list is all it does.
 `,
 }
 
 // env is one invocation's surroundings.
 type env struct {
+	stdin          io.Reader
 	stdout, stderr io.Writer
 	getenv         func(string) string
 }
@@ -109,8 +115,8 @@ type usageError struct{ msg string }
 func (e usageError) Error() string { return e.msg }
 
 // Run executes one command line (without the program name) and returns the exit code.
-func Run(ctx context.Context, args []string, stdout, stderr io.Writer, getenv func(string) string) int {
-	e := &env{stdout: stdout, stderr: stderr, getenv: getenv}
+func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(string) string) int {
+	e := &env{stdin: stdin, stdout: stdout, stderr: stderr, getenv: getenv}
 	err := e.run(ctx, args)
 	var ue usageError
 	switch {
@@ -166,8 +172,14 @@ func (e *env) run(ctx context.Context, args []string) error {
 		return e.scan(ctx, *db, rest)
 	case "report":
 		return e.report(ctx, *db, rest)
+	case "export":
+		return e.export(ctx, *db, rest)
+	case "update":
+		return e.update(ctx, *db, rest)
+	case "delete":
+		return e.deleteList(ctx, *db, rest)
 	case "review":
-		return e.review(ctx, *db, rest)
+		return usageError{"review was replaced by export lifespan and update; see filo help"}
 	default:
 		return usageError{fmt.Sprintf("unknown command %q", cmd)}
 	}
@@ -231,79 +243,227 @@ func (e *env) open(ctx context.Context, db string) (*store.Store, error) {
 	return store.Open(ctx, store.Options{DBPath: db})
 }
 
+// rootsSub finds a roots subcommand among args, so it may follow a flag (filo roots --db X add DIR), and returns it
+// with the other arguments. Only the first positional argument can be one; "" means none.
+func rootsSub(args []string) (string, []string) {
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		if a == "--" {
+			return "", args
+		}
+		if strings.HasPrefix(a, "-") {
+			if (a == "--db" || a == "-db") && i+1 < len(args) {
+				i++ // its value
+			}
+			continue
+		}
+		return a, append(slices.Clone(args[:i]), args[i+1:]...)
+	}
+	return "", args
+}
+
 func (e *env) roots(ctx context.Context, dbBefore string, args []string) error {
+	sub, rest := rootsSub(args)
+	switch sub {
+	case "":
+		return e.rootsList(ctx, dbBefore, rest)
+	case "add":
+		return e.rootsAdd(ctx, dbBefore, rest)
+	case "set":
+		return e.rootsSet(ctx, dbBefore, rest)
+	}
+	return usageError{fmt.Sprintf("unknown roots command %q", sub)}
+}
+
+func (e *env) rootsList(ctx context.Context, dbBefore string, args []string) error {
 	fs := e.flags("roots")
 	db := dbFlag(fs, dbBefore)
 	pos, err := e.parse(fs, "roots", args)
 	if err != nil {
 		return err
 	}
-	switch {
-	case len(pos) == 0:
-		s, err := e.open(ctx, *db)
-		if err != nil {
-			return err
-		}
-		defer s.Close()
-		totals, err := s.RootTotals(ctx)
-		if err != nil {
-			return err
-		}
-		if len(totals) == 0 {
-			fmt.Fprintln(e.stdout, "No roots yet. Add one with: filo roots add PATH")
-			return nil
-		}
-		for _, t := range totals {
-			fmt.Fprintf(e.stdout, "%s\n", t.Root.Path)
-			if t.Root.MountPath != "" {
-				fmt.Fprintf(e.stdout, "  mounted filesystem: %s\n", t.Root.MountPath)
-			}
-			last := "never scanned"
-			if t.LastScan != nil {
-				last = "last scan " + report.Time(t.LastScan.FinishedUTC)
-			}
-			fmt.Fprintf(e.stdout, "  %s, %s; %s\n", report.Plural(t.Files, "file", "files"), report.Size(t.Bytes), last)
-		}
+	if len(pos) > 0 {
+		return usageError{"unknown roots command"}
+	}
+	s, err := e.open(ctx, *db)
+	if err != nil {
+		return err
+	}
+	defer s.Close()
+	totals, err := s.RootTotals(ctx)
+	if err != nil {
+		return err
+	}
+	if len(totals) == 0 {
+		fmt.Fprintln(e.stdout, "No roots yet. Add one with: filo roots add DIR")
 		return nil
-	case pos[0] == "add" && len(pos) == 2:
-		if err := checkTilde("PATH", pos[1]); err != nil {
-			return err
+	}
+	for _, t := range totals {
+		fmt.Fprintf(e.stdout, "%s\n", t.Root.Path)
+		fmt.Fprintf(e.stdout, "  settings: %s\n", settingsText(t.Root.Settings))
+		if t.Root.MountPath != "" {
+			fmt.Fprintf(e.stdout, "  mounted filesystem: %s\n", t.Root.MountPath)
 		}
-		s, err := e.open(ctx, *db)
-		if err != nil {
-			return err
+		last := "never scanned"
+		if t.LastScan != nil {
+			last = "last scan " + report.Time(t.LastScan.FinishedUTC)
 		}
-		defer s.Close()
-		r, absorbed, err := s.AddRootAbsorb(ctx, pos[1])
-		if err != nil {
-			return err
+		fmt.Fprintf(e.stdout, "  %s, %s; %s\n", report.Plural(t.Files, "file", "files"), report.Size(t.Bytes), last)
+	}
+	return nil
+}
+
+// settingsText describes a root's settings in a few words.
+func settingsText(set store.Settings) string {
+	parts := []string{"hidden files skipped"}
+	if set.IncludeHidden {
+		parts[0] = "hidden files included"
+	}
+	if len(set.Ignore) > 0 {
+		parts = append(parts, "ignoring "+strings.Join(set.Ignore, ", "))
+	}
+	return strings.Join(parts, "; ")
+}
+
+// settingsFlags adds the root settings flags to fs. skip adds --skip-hidden too (roots set).
+func settingsFlags(fs *flag.FlagSet, skip bool) (include, skipHidden *bool, ignore *stringList) {
+	include = fs.Bool("include-hidden", false, "")
+	if skip {
+		skipHidden = fs.Bool("skip-hidden", false, "")
+	}
+	ignore = &stringList{}
+	fs.Var(ignore, "ignore", "")
+	return include, skipHidden, ignore
+}
+
+func checkIgnores(names []string) error {
+	for _, n := range names {
+		if err := walk.CheckIgnore(n); err != nil {
+			return usageError{"--" + err.Error()}
 		}
-		fmt.Fprintf(e.stdout, "Added root %s\n", r.Path)
-		if len(absorbed) > 0 {
-			var paths []string
-			for _, a := range absorbed {
-				paths = append(paths, a.Path)
+	}
+	return nil
+}
+
+func (e *env) rootsAdd(ctx context.Context, dbBefore string, args []string) error {
+	fs := e.flags("roots add")
+	db := dbFlag(fs, dbBefore)
+	include, _, ignore := settingsFlags(fs, false)
+	noScan := fs.Bool("no-scan", false, "")
+	workers := fs.Int("workers", reconcile.DefaultWorkers, "")
+	pos, err := e.parse(fs, "roots", args)
+	if err != nil {
+		return err
+	}
+	if len(pos) != 1 {
+		return usageError{"roots add takes exactly one DIR"}
+	}
+	if err := checkTilde("DIR", pos[0]); err != nil {
+		return err
+	}
+	if err := checkIgnores(*ignore); err != nil {
+		return err
+	}
+	if *workers < 1 || *workers > hasher.MaxWorkers {
+		return usageError{fmt.Sprintf("--workers must be between 1 and %d", hasher.MaxWorkers)}
+	}
+	set := store.Settings{IncludeHidden: *include, Ignore: *ignore}
+	s, err := e.open(ctx, *db)
+	if err != nil {
+		return err
+	}
+	defer s.Close()
+	r, absorbed, err := s.AddRootAbsorb(ctx, pos[0], set)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(e.stdout, "Added root %s (%s)\n", r.Path, settingsText(r.Settings))
+	if len(absorbed) > 0 {
+		var paths []string
+		for _, a := range absorbed {
+			paths = append(paths, a.Path)
+		}
+		fmt.Fprintf(e.stdout, "It now includes the %s %s, with %s history and keep_until dates.\n",
+			pluralWord(len(absorbed), "root", "roots"), joinAnd(paths), pluralWord(len(absorbed), "its", "their"))
+		for _, a := range absorbed {
+			if skippedBy(a.Prefix, r.Settings) {
+				fmt.Fprintf(e.stdout, "Note: %s is skipped by the settings of %s, so its files are no longer "+
+					"scanned (neither checked nor marked missing). Change that with filo roots set %s.\n",
+					a.Path, r.Path, r.Path)
+			} else if !a.Settings.Equal(r.Settings) {
+				fmt.Fprintf(e.stdout, "Note: %s had other settings (%s); the settings of %s apply to it now.\n",
+					a.Path, settingsText(a.Settings), r.Path)
 			}
-			fmt.Fprintf(e.stdout, "It now includes the %s %s, with %s history and review decisions.\n",
-				pluralWord(len(absorbed), "root", "roots"), joinAnd(paths), pluralWord(len(absorbed), "its", "their"))
-			for _, a := range absorbed {
-				if hiddenPrefix(a.Prefix) {
-					fmt.Fprintf(e.stdout, "Note: %s is hidden or skipped by default, so a scan of %s covers it only "+
-						"with --include-hidden.\n", a.Path, r.Path)
-				}
-			}
 		}
-		if r.MountPath != "" {
-			fmt.Fprintf(e.stdout, "It is on the filesystem mounted at %s; scans are refused while that is not mounted.\n",
-				r.MountPath)
-		}
+	}
+	if r.MountPath != "" {
+		fmt.Fprintf(e.stdout, "It is on the filesystem mounted at %s; scans are refused while that is not mounted.\n",
+			r.MountPath)
+	}
+	if *noScan {
 		fmt.Fprintf(e.stdout, "Scan it with: filo scan %s\n", r.Path)
 		return nil
-	case pos[0] == "add":
-		return usageError{"roots add takes exactly one PATH"}
-	default:
-		return usageError{fmt.Sprintf("unknown roots command %q", pos[0])}
 	}
+	return e.scanTarget(ctx, s, reconcile.Options{Target: r.Path, Workers: *workers})
+}
+
+func (e *env) rootsSet(ctx context.Context, dbBefore string, args []string) error {
+	fs := e.flags("roots set")
+	db := dbFlag(fs, dbBefore)
+	include, skip, ignore := settingsFlags(fs, true)
+	pos, err := e.parse(fs, "roots", args)
+	if err != nil {
+		return err
+	}
+	if len(pos) != 1 {
+		return usageError{"roots set takes exactly one DIR"}
+	}
+	if *include && *skip {
+		return usageError{"give --include-hidden or --skip-hidden, not both"}
+	}
+	if err := checkTilde("DIR", pos[0]); err != nil {
+		return err
+	}
+	if err := checkIgnores(*ignore); err != nil {
+		return err
+	}
+	s, err := e.open(ctx, *db)
+	if err != nil {
+		return err
+	}
+	defer s.Close()
+	set := store.Settings{IncludeHidden: *include, Ignore: *ignore}
+	old, err := s.SetSettings(ctx, pos[0], set)
+	if err != nil {
+		return err
+	}
+	roots, err := s.Roots(ctx)
+	if err != nil {
+		return err
+	}
+	for _, r := range roots {
+		if r.ID != old.ID {
+			continue
+		}
+		if r.Settings.Equal(old.Settings) {
+			fmt.Fprintf(e.stdout, "%s: settings unchanged (%s)\n", r.Path, settingsText(r.Settings))
+			return nil
+		}
+		fmt.Fprintf(e.stdout, "%s: settings were %s; now %s.\n", r.Path, settingsText(old.Settings),
+			settingsText(r.Settings))
+		fmt.Fprintln(e.stdout, "The next scan uses them. Files a scan skips are neither checked nor marked missing.")
+	}
+	return nil
+}
+
+// skippedBy reports whether a scan with set skips something on this '/'-separated path inside a root.
+func skippedBy(prefix string, set store.Settings) bool {
+	for _, name := range strings.Split(prefix, "/") {
+		if walk.Skips(name, set.IncludeHidden, set.Ignore) {
+			return true
+		}
+	}
+	return false
 }
 
 // parse runs parseInterspersed and prints the command's usage for -h.
@@ -324,19 +484,16 @@ func (l *stringList) Set(v string) error { *l = append(*l, v); return nil }
 func (e *env) scan(ctx context.Context, dbBefore string, args []string) error {
 	fs := e.flags("scan")
 	db := dbFlag(fs, dbBefore)
-	includeHidden := fs.Bool("include-hidden", false, "")
 	allowEmpty := fs.Bool("allow-empty", false, "")
 	workers := fs.Int("workers", reconcile.DefaultWorkers, "")
-	var ignore stringList
-	fs.Var(&ignore, "ignore", "")
 	pos, err := e.parse(fs, "scan", args)
 	if err != nil {
 		return err
 	}
 	if len(pos) > 1 {
-		return usageError{"scan takes at most one PATH"}
+		return usageError{"scan takes at most one DIR"}
 	}
-	if err := checkTildes("PATH", pos...); err != nil {
+	if err := checkTildes("DIR", pos...); err != nil {
 		return err
 	}
 	if *workers < 1 || *workers > hasher.MaxWorkers {
@@ -349,32 +506,22 @@ func (e *env) scan(ctx context.Context, dbBefore string, args []string) error {
 	}
 	defer s.Close()
 
-	opt := reconcile.Options{IncludeHidden: *includeHidden, Ignore: ignore, Workers: *workers, AllowEmpty: *allowEmpty}
+	opt := reconcile.Options{Workers: *workers, AllowEmpty: *allowEmpty}
+	if len(pos) == 1 {
+		if opt.Target, err = filepath.Abs(pos[0]); err != nil {
+			return err
+		}
+		return e.scanTarget(ctx, s, opt)
+	}
 	stop := e.startProgress(&opt)
 	defer stop()
-
-	if len(pos) == 1 {
-		target, err := filepath.Abs(pos[0])
-		if err != nil {
-			return err
-		}
-		opt.Target = target
-		start := time.Now()
-		sum, err := reconcile.Scan(ctx, s, opt)
-		stop()
-		if err != nil {
-			return err
-		}
-		e.printSummary(sum, time.Since(start))
-		return nil
-	}
 
 	roots, err := s.Roots(ctx)
 	if err != nil {
 		return err
 	}
 	if len(roots) == 0 {
-		return errors.New("no roots yet; add one with: filo roots add PATH")
+		return errors.New("no roots yet; add one with: filo roots add DIR")
 	}
 	failed := false
 	for _, r := range roots {
@@ -396,6 +543,20 @@ func (e *env) scan(ctx context.Context, dbBefore string, args []string) error {
 	if failed {
 		return errReported
 	}
+	return nil
+}
+
+// scanTarget scans one directory with a progress line, and prints the summary.
+func (e *env) scanTarget(ctx context.Context, s *store.Store, opt reconcile.Options) error {
+	stop := e.startProgress(&opt)
+	defer stop()
+	start := time.Now()
+	sum, err := reconcile.Scan(ctx, s, opt)
+	stop()
+	if err != nil {
+		return err
+	}
+	e.printSummary(sum, time.Since(start))
 	return nil
 }
 
@@ -466,7 +627,7 @@ func (e *env) printSummary(sum reconcile.Summary, took time.Duration) {
 // terminal is implemented by writers that know whether they are a terminal (tests use it).
 type terminal interface{ IsTerminal() bool }
 
-func isTerminal(w io.Writer) bool {
+func isTerminal(w any) bool {
 	if t, ok := w.(terminal); ok {
 		return t.IsTerminal()
 	}
@@ -551,14 +712,4 @@ func joinAnd(items []string) string {
 		return strings.Join(items, "")
 	}
 	return strings.Join(items[:len(items)-1], ", ") + " and " + items[len(items)-1]
-}
-
-// hiddenPrefix reports whether a default scan skips something on this '/'-separated path.
-func hiddenPrefix(prefix string) bool {
-	for _, name := range strings.Split(prefix, "/") {
-		if walk.SkippedByDefault(name) {
-			return true
-		}
-	}
-	return false
 }

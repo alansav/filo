@@ -211,7 +211,7 @@ func TestAddRoot(t *testing.T) {
 			defer mustClose(t, s)
 			added := 0
 			for i, st := range tc.steps {
-				r, absorbed, err := s.AddRootAbsorb(context.Background(), abs(st.path))
+				r, absorbed, err := s.AddRootAbsorb(context.Background(), abs(st.path), Settings{})
 				switch {
 				case st.wantErr == nil:
 					if err != nil {
@@ -435,8 +435,8 @@ func TestAbsorbKeepsHistoryAndReviews(t *testing.T) {
 	apply(pics, "", Changes{Events: []Event{{Kind: "moved", FileID: 99, Path: "beach.jpg", OtherPath: "x/beach.jpg",
 		Detail: "returned (missing since scan 1) from root " + abs("home/Documents")}}})
 
-	// A review decision on a Documents file.
-	q, err := s.Queue(ctx, "2026-11-11", QueueFilter{})
+	// A keep_until date on a Documents file.
+	q, err := s.Files(ctx, "2026-11-11", Filter{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -445,25 +445,38 @@ func TestAbsorbKeepsHistoryAndReviews(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res, err := s.ApplyDecisions(ctx, []Decision{{Line: 2, ExportID: exportID, FileID: kd["tax/2024.pdf"].FileID,
-		RetainUntil: "2032-01-01"}}, now, "2026-11-11", "r.csv", false); err != nil || res.Dates != 1 {
-		t.Fatalf("decision: %+v, %v", res, err)
+	if res, err := s.UpdateLifespan(ctx, []LifespanRow{{Line: 2, ExportID: exportID, FileID: kd["tax/2024.pdf"].FileID,
+		KeepUntil: "2032-01-01"}}, now, "2026-11-11", "r.csv", false, nil); err != nil || res.Set != 1 {
+		t.Fatalf("update: %+v, %v", res, err)
+	}
+	if _, err := s.SetSettings(ctx, abs("home/Pictures"), Settings{Ignore: []string{"raw"}}); err != nil {
+		t.Fatal(err)
 	}
 
-	home, absorbed, err := s.AddRootAbsorb(ctx, abs("home"))
+	home, absorbed, err := s.AddRootAbsorb(ctx, abs("home"), Settings{IncludeHidden: true, Ignore: []string{"tmp", "tmp"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []Absorbed{{Path: abs("home/Documents"), Prefix: "Documents"}, {Path: abs("home/Pictures"), Prefix: "Pictures"}}
-	if !slices.Equal(absorbed, want) {
-		t.Errorf("absorbed = %+v, want %+v", absorbed, want)
+	want := []Absorbed{{Path: abs("home/Documents"), Prefix: "Documents"},
+		{Path: abs("home/Pictures"), Prefix: "Pictures", Settings: Settings{Ignore: []string{"raw"}}}}
+	if len(absorbed) != len(want) {
+		t.Fatalf("absorbed = %+v, want %+v", absorbed, want)
+	}
+	for i := range want {
+		if absorbed[i].Path != want[i].Path || absorbed[i].Prefix != want[i].Prefix ||
+			!absorbed[i].Settings.Equal(want[i].Settings) {
+			t.Errorf("absorbed[%d] = %+v, want %+v", i, absorbed[i], want[i])
+		}
+	}
+	if !home.Settings.Equal(Settings{IncludeHidden: true, Ignore: []string{"tmp"}}) {
+		t.Errorf("new root settings = %+v, want hidden included, tmp ignored once", home.Settings)
 	}
 	roots, err := s.Roots(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(roots) != 1 || roots[0].ID != home.ID {
-		t.Fatalf("roots = %+v, want only the new one", roots)
+	if len(roots) != 1 || roots[0].ID != home.ID || !roots[0].Settings.Equal(home.Settings) {
+		t.Fatalf("roots = %+v, want only the new one, with its settings", roots)
 	}
 
 	// Same files, same IDs, paths under their folders.
@@ -507,13 +520,17 @@ func TestAbsorbKeepsHistoryAndReviews(t *testing.T) {
 		t.Errorf("returned event = %q", v)
 	}
 
-	// The review decision survived: the file is not queued, and its floor is kept.
-	q, err = s.Queue(ctx, "2026-11-11", QueueFilter{RootID: home.ID, Scope: "Documents"})
+	// The keep_until date survived the absorb.
+	q, err = s.Files(ctx, "2026-11-11", Filter{RootID: home.ID, Scope: "Documents"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(q) != 1 || q[0].Path != "Documents/tax/old.txt" {
-		t.Errorf("queue under Documents = %+v, want only tax/old.txt (2024.pdf is decided)", q)
+	got2 := map[string]string{}
+	for _, it := range q {
+		got2[it.Path] = it.KeepUntil + " " + string(it.Status)
+	}
+	if len(got2) != 2 || got2["Documents/tax/2024.pdf"] != "2032-01-01 kept" || got2["Documents/tax/old.txt"] != " undated" {
+		t.Errorf("files under Documents = %v", got2)
 	}
 }
 
@@ -533,7 +550,7 @@ func TestAbsorbRefusesAnUnreachableRoot(t *testing.T) {
 	if err := os.Remove(filepath.Join(base, "home", "gone")); err != nil {
 		t.Fatal(err)
 	}
-	_, _, err := s.AddRootAbsorb(ctx, filepath.Join(base, "home"))
+	_, _, err := s.AddRootAbsorb(ctx, filepath.Join(base, "home"), Settings{})
 	if !errors.Is(err, ErrRootOverlap) || !strings.Contains(err.Error(), "cannot be checked now") {
 		t.Fatalf("err = %v, want a refusal naming the unreachable root", err)
 	}

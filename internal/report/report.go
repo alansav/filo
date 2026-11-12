@@ -5,6 +5,8 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/alansav/filo/internal/store"
@@ -20,44 +22,55 @@ type Report struct {
 	Unreadable  []store.UnreadableRow
 	UnreadTotal int64
 	Events      []store.EventRow
-	Queue       map[store.Reason]int64 // queued files by reason
-	QueueTotal  int64
+	Status      map[store.Status]int64 // present files by lifespan status
+	Undecided   int64                  // files that need a keep_until decision
+	UndecidedIn []DirGroup             // the directories holding most of them
 }
 
-// ReasonLabel names a queue reason for people.
-func ReasonLabel(r store.Reason) string {
-	switch r {
-	case store.ReasonUnreadable:
+// DirDepth is how many levels below a root the report groups files needing a decision by.
+const DirDepth = 2
+
+// StatusLabel names a lifespan status for people.
+func StatusLabel(s store.Status) string {
+	switch s {
+	case store.StatusUnreadable:
 		return "unreadable"
-	case store.ReasonChanged:
-		return "changed since review"
-	case store.ReasonPossibleMove:
+	case store.StatusPossibleMove:
 		return "possible moves"
-	case store.ReasonDue:
-		return "review due"
-	case store.ReasonUndated:
-		return "no review date"
+	case store.StatusUndated:
+		return "no keep_until"
+	case store.StatusChanged:
+		return "past keep_until, changed since it was set"
+	case store.StatusExpired:
+		return "past keep_until"
+	case store.StatusKept:
+		return "kept"
 	}
-	return string(r)
+	return string(s)
 }
 
-// Build reads the report from the register, with top entries in each list. today (YYYY-MM-DD) decides which review
-// dates are due.
+// Build reads the report from the register, with top entries in each list. today (YYYY-MM-DD) decides which
+// keep_until dates have passed.
 func Build(ctx context.Context, s *store.Store, top int, today string) (Report, error) {
 	var r Report
 	var err error
 	if r.Roots, err = s.RootTotals(ctx); err != nil {
 		return r, err
 	}
-	q, err := s.Queue(ctx, today, store.QueueFilter{})
+	files, err := s.Files(ctx, today, store.Filter{})
 	if err != nil {
 		return r, err
 	}
-	r.Queue = map[store.Reason]int64{}
-	for _, it := range q {
-		r.Queue[it.Reason]++
+	r.Status = map[store.Status]int64{}
+	var undecided []store.FileItem
+	for _, it := range files {
+		r.Status[it.Status]++
+		if it.Status.NeedsDecision() {
+			undecided = append(undecided, it)
+		}
 	}
-	r.QueueTotal = int64(len(q))
+	r.Undecided = int64(len(undecided))
+	r.UndecidedIn = DirGroups(undecided, DirDepth, top)
 	if r.Largest, err = s.Largest(ctx, top); err != nil {
 		return r, err
 	}
@@ -81,7 +94,7 @@ func (r Report) WriteText(w io.Writer) error {
 	p := &printer{w: w}
 	p.line("Roots")
 	if len(r.Roots) == 0 {
-		p.line("  none yet; add one with: filo roots add PATH")
+		p.line("  none yet; add one with: filo roots add DIR")
 	}
 	var files, bytes int64
 	for _, t := range r.Roots {
@@ -109,16 +122,27 @@ func (r Report) WriteText(w io.Writer) error {
 	}
 
 	p.blank()
-	if r.QueueTotal == 0 {
-		p.line("Review queue: empty")
+	if r.Undecided == 0 {
+		p.line("Needing a keep_until date: none")
 	} else {
 		var parts []string
-		for _, reason := range store.Reasons {
-			if n := r.Queue[reason]; n > 0 {
-				parts = append(parts, ReasonLabel(reason)+" "+Count(n))
+		for _, st := range store.Statuses {
+			if n := r.Status[st]; n > 0 && st.NeedsDecision() {
+				parts = append(parts, StatusLabel(st)+" "+Count(n))
 			}
 		}
-		p.line("Review queue: %s (%s); see filo review", Plural(r.QueueTotal, "file", "files"), strings.Join(parts, ", "))
+		p.line("Needing a keep_until date: %s (%s)", Plural(r.Undecided, "file", "files"), strings.Join(parts, ", "))
+		p.line("  directories with the most (to depth %d):", DirDepth)
+		for _, g := range r.UndecidedIn {
+			p.line("  %8s  %10s  %s", Count(g.Files), Size(g.Bytes), g.Dir)
+		}
+		p.line("  set dates with: filo export lifespan [DIR] -o FILE, then filo update FILE")
+	}
+	if n := r.Status[store.StatusKept]; n > 0 {
+		p.line("Kept until a later date: %s", Plural(n, "file", "files"))
+	}
+	if n := r.Status[store.StatusExpired]; n > 0 {
+		p.line("Past keep_until: %s; see filo delete", Plural(n, "file", "files"))
 	}
 
 	p.blank()
@@ -187,6 +211,52 @@ func (r Report) WriteText(w io.Writer) error {
 		p.line("  scan %d  %s%s", e.ScanID, EventText(e.Event), where)
 	}
 	return p.err
+}
+
+// DirGroup is a directory and the files counted in it.
+type DirGroup struct {
+	Dir          string
+	Files, Bytes int64
+}
+
+// DirGroups counts files by their directory, cut at depth levels below the root, largest count first, at most top.
+// A symlink counts as a file but adds no bytes (its size is only the length of its target).
+func DirGroups(items []store.FileItem, depth, top int) []DirGroup {
+	m := map[string]*DirGroup{}
+	for _, it := range items {
+		parts := strings.Split(it.Path, "/")
+		dirs := parts[:len(parts)-1]
+		if len(dirs) > depth {
+			dirs = dirs[:depth]
+		}
+		dir := filepath.Join(append([]string{it.RootPath}, dirs...)...)
+		g := m[dir]
+		if g == nil {
+			g = &DirGroup{Dir: dir}
+			m[dir] = g
+		}
+		g.Files++
+		if it.Kind == "file" {
+			g.Bytes += it.Size
+		}
+	}
+	out := make([]DirGroup, 0, len(m))
+	for _, g := range m {
+		out = append(out, *g)
+	}
+	slices.SortFunc(out, func(a, b DirGroup) int {
+		if a.Files != b.Files {
+			if a.Files > b.Files {
+				return -1
+			}
+			return 1
+		}
+		return strings.Compare(a.Dir, b.Dir)
+	})
+	if len(out) > top {
+		out = out[:top]
+	}
+	return out
 }
 
 // EventText renders one event on a line, without its root.

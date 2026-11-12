@@ -8,30 +8,37 @@ import (
 	"time"
 )
 
-// Reason says why a file is in the review queue. A file has one reason: the first that applies, in this order.
-type Reason string
+// Status is where a present file stands in its lifespan. A file has one status: the first that applies, in the
+// order of Statuses.
+type Status string
 
 const (
-	// ReasonUnreadable: flagged unreadable and not reviewed since the scan that flagged it.
-	ReasonUnreadable Reason = "unreadable"
-	// ReasonChanged: its content is not the content its review decision was made on.
-	ReasonChanged Reason = "changed"
-	// ReasonPossibleMove: it is the new side of a possible move recorded after its last review.
-	ReasonPossibleMove Reason = "possible_move"
-	// ReasonDue: its review date has come.
-	ReasonDue Reason = "due"
-	// ReasonUndated: it has no review date and no action.
-	ReasonUndated Reason = "undated"
+	// StatusUnreadable: flagged unreadable and not decided on since the scan that flagged it, or flagged and past its
+	// keep_until (its content cannot be checked).
+	StatusUnreadable Status = "unreadable"
+	// StatusPossibleMove: the new side of a possible move recorded after its last decision.
+	StatusPossibleMove Status = "possible_move"
+	// StatusUndated: it has no keep_until.
+	StatusUndated Status = "undated"
+	// StatusChanged: past its keep_until, but its content is not the content the date was set on (or the date was
+	// set without one), so it needs a new decision.
+	StatusChanged Status = "changed"
+	// StatusExpired: past its keep_until and unchanged: a deletion candidate. Never deleted automatically.
+	StatusExpired Status = "expired"
+	// StatusKept: kept until a date after today.
+	StatusKept Status = "kept"
 )
 
-// Reasons lists every reason in priority order.
-var Reasons = []Reason{ReasonUnreadable, ReasonChanged, ReasonPossibleMove, ReasonDue, ReasonUndated}
+// Statuses lists every status in priority order.
+var Statuses = []Status{StatusUnreadable, StatusPossibleMove, StatusUndated, StatusChanged, StatusExpired, StatusKept}
 
-// ActionDelete is the only action. In iteration 2 it is recorded, never carried out.
-const ActionDelete = "delete"
+// NeedsDecision reports whether a file with this status needs a keep_until decision.
+func (s Status) NeedsDecision() bool {
+	return s == StatusUnreadable || s == StatusPossibleMove || s == StatusUndated || s == StatusChanged
+}
 
-// QueueItem is one queued file with what the review needs to show.
-type QueueItem struct {
+// FileItem is one present file with its lifespan.
+type FileItem struct {
 	FileID      int64
 	RootPath    string // absolute
 	Path        string // relative to the root
@@ -39,11 +46,9 @@ type QueueItem struct {
 	Size        int64
 	MtimeNS     int64
 	Hash        string // "" = none
-	Reason      Reason
-	ReviewDate  string // YYYY-MM-DD, "" = none
-	Action      string
-	RetainUntil string // YYYY-MM-DD, "" = none
-	ReviewedUTC string // when the current decision was imported; "" = never reviewed
+	KeepUntil   string // YYYY-MM-DD, "" = none
+	ReviewedUTC string // when the current keep_until was set; "" = never
+	Status      Status
 
 	UnreadableSince    int64  // the scan that flagged it, 0 = not flagged
 	UnreadableSinceUTC string // when that scan finished
@@ -52,16 +57,16 @@ type QueueItem struct {
 }
 
 // AbsPath is the item's absolute path.
-func (q QueueItem) AbsPath() string { return absPath(q.RootPath, q.Path) }
+func (f FileItem) AbsPath() string { return absPath(f.RootPath, f.Path) }
 
-// QueueFilter limits the queue to one root, and optionally to a directory inside it.
-type QueueFilter struct {
+// Filter limits a listing to one root, and optionally to a directory inside it.
+type Filter struct {
 	RootID int64  // 0 = every root
 	Scope  string // relative to the root, '/' separators; "" = the whole root
 }
 
 // scopeSQL returns a condition on alias p (paths) for the filter, and its arguments.
-func (f QueueFilter) scopeSQL() (string, []any) {
+func (f Filter) scopeSQL() (string, []any) {
 	if f.RootID == 0 {
 		return "", nil
 	}
@@ -73,55 +78,47 @@ func (f QueueFilter) scopeSQL() (string, []any) {
 		[]any{f.RootID, f.Scope, f.Scope + "/", f.Scope + "0"}
 }
 
-// queueRow is a present file with everything classify needs.
-type queueRow struct {
-	item           QueueItem
+// fileRow is a present file with everything classify needs.
+type fileRow struct {
+	item           FileItem
 	reviewedAfter  int64 // reviewed_after_scan, 0 = none
 	reviewedHash   sql.NullString
 	possibleMoveIn int64 // the latest scan that recorded it as the new side of a possible move, 0 = none
 }
 
-// classify returns why the file is queued, or "" if it is not. today is YYYY-MM-DD.
-func classify(r queueRow, today string) Reason {
+// classify returns the file's status. today is YYYY-MM-DD.
+func classify(r fileRow, today string) Status {
 	it := r.item
 	if it.UnreadableSince != 0 && r.reviewedAfter < it.UnreadableSince {
-		return ReasonUnreadable
-	}
-	// A decision covers the content it was made on. A file reviewed without a hash (never read) or whose hash has
-	// changed since comes back. While it is flagged unreadable its stored hash is stale, and the rule above governs.
-	if it.ReviewedUTC != "" && it.Kind == "file" && it.UnreadableSince == 0 &&
-		(it.Hash == "" || !r.reviewedHash.Valid || r.reviewedHash.String != it.Hash) {
-		return ReasonChanged
+		return StatusUnreadable
 	}
 	if r.possibleMoveIn != 0 && r.reviewedAfter < r.possibleMoveIn {
-		return ReasonPossibleMove
+		return StatusPossibleMove
 	}
-	if it.Action != "" {
-		return "" // decided; waits for disposal (a later iteration)
+	if it.KeepUntil == "" {
+		return StatusUndated
 	}
-	if it.ReviewDate == "" {
-		return ReasonUndated
+	if it.KeepUntil > today {
+		return StatusKept
 	}
-	if it.ReviewDate <= today {
-		return ReasonDue
+	// Past its date. A file still flagged unreadable has a stale hash, so its content cannot be checked.
+	if it.UnreadableSince != 0 {
+		return StatusUnreadable
 	}
-	return ""
+	// The date covers the content it was set on. A regular file whose hash differs, or that had none, needs a new
+	// decision rather than becoming a candidate.
+	if it.Kind == "file" && (it.Hash == "" || !r.reviewedHash.Valid || r.reviewedHash.String != it.Hash) {
+		return StatusChanged
+	}
+	return StatusExpired
 }
 
-// Queue returns the files due for review under the filter, ordered by root and path. today is the local date,
-// YYYY-MM-DD.
-func (s *Store) Queue(ctx context.Context, today string, f QueueFilter) ([]QueueItem, error) {
-	return queue(ctx, s.db, today, f)
-}
-
-type querier interface {
-	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
-}
-
-func queue(ctx context.Context, db querier, today string, f QueueFilter) ([]QueueItem, error) {
+// Files returns every present file (regular files and symlinks) under the filter with its status, ordered by root
+// and path. today is the local date, YYYY-MM-DD.
+func (s *Store) Files(ctx context.Context, today string, f Filter) ([]FileItem, error) {
 	cond, args := f.scopeSQL()
 	// A possible move event names the old file; the new file is the one whose path opened at e.path in that scan.
-	rows, err := db.QueryContext(ctx, `
+	rows, err := s.db.QueryContext(ctx, `
 		WITH pm AS (
 			SELECT np.file_id AS file_id, max(e.id) AS event_id
 			FROM events e
@@ -130,9 +127,8 @@ func queue(ctx context.Context, db querier, today string, f QueueFilter) ([]Queu
 			WHERE e.kind = 'possible_move'
 			GROUP BY np.file_id)
 		SELECT f.id, r.path, p.path, f.kind, f.size, f.mtime_ns, coalesce(f.hash, ''),
-		       coalesce(f.review_date, ''), coalesce(f.action, ''), coalesce(f.retain_until, ''),
-		       coalesce(f.reviewed_utc, ''), coalesce(f.reviewed_after_scan, 0), f.reviewed_hash,
-		       coalesce(f.unreadable_since_scan, 0), coalesce(us.finished_utc, us.started_utc, ''),
+		       coalesce(f.keep_until, ''), coalesce(f.reviewed_utc, ''), coalesce(f.reviewed_after_scan, 0),
+		       f.reviewed_hash, coalesce(f.unreadable_since_scan, 0), coalesce(us.finished_utc, us.started_utc, ''),
 		       coalesce(pe.scan_id, 0), coalesce(pr.path, ''), coalesce(pe.other_path, ''), coalesce(pe.detail, '')
 		FROM paths p
 		JOIN files f ON f.id = p.file_id
@@ -145,29 +141,27 @@ func queue(ctx context.Context, db querier, today string, f QueueFilter) ([]Queu
 		WHERE p.valid_to_scan IS NULL`+cond+`
 		ORDER BY r.path, p.path`, args...)
 	if err != nil {
-		return nil, fmt.Errorf("review queue: %w", err)
+		return nil, fmt.Errorf("list files: %w", err)
 	}
 	defer rows.Close()
-	var out []QueueItem
+	var out []FileItem
 	for rows.Next() {
-		var r queueRow
+		var r fileRow
 		it := &r.item
 		var moveRoot, moveRel string
 		if err := rows.Scan(&it.FileID, &it.RootPath, &it.Path, &it.Kind, &it.Size, &it.MtimeNS, &it.Hash,
-			&it.ReviewDate, &it.Action, &it.RetainUntil, &it.ReviewedUTC, &r.reviewedAfter, &r.reviewedHash,
-			&it.UnreadableSince, &it.UnreadableSinceUTC, &r.possibleMoveIn, &moveRoot, &moveRel,
-			&it.MoveDetail); err != nil {
-			return nil, fmt.Errorf("review queue: %w", err)
+			&it.KeepUntil, &it.ReviewedUTC, &r.reviewedAfter, &r.reviewedHash, &it.UnreadableSince,
+			&it.UnreadableSinceUTC, &r.possibleMoveIn, &moveRoot, &moveRel, &it.MoveDetail); err != nil {
+			return nil, fmt.Errorf("list files: %w", err)
 		}
 		if moveRel != "" {
 			it.MoveFrom = absPath(moveRoot, moveRel)
 		}
-		if it.Reason = classify(r, today); it.Reason != "" {
-			out = append(out, *it)
-		}
+		it.Status = classify(r, today)
+		out = append(out, *it)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("review queue: %w", err)
+		return nil, fmt.Errorf("list files: %w", err)
 	}
 	return out, nil
 }
@@ -182,9 +176,10 @@ func latestScan(ctx context.Context, tx *sql.Tx) (int64, error) {
 	return id, nil
 }
 
-// RecordExport stores an export of items (made at now, written to path; "" = standard output) and calls write with
-// its ID. The export is committed only if write succeeds, so a failed write leaves no trace in the register.
-func (s *Store) RecordExport(ctx context.Context, path string, now time.Time, items []QueueItem,
+// RecordExport stores an export of items (made at now, written to path) and calls write with its ID. Each row keeps
+// the file's hash and the keep_until it was exported with. The export is committed only if write succeeds, so a
+// failed write leaves no trace in the register.
+func (s *Store) RecordExport(ctx context.Context, path string, now time.Time, items []FileItem,
 	write func(exportID int64) error) (int64, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -204,13 +199,14 @@ func (s *Store) RecordExport(ctx context.Context, path string, now time.Time, it
 	if err != nil {
 		return 0, err
 	}
-	stmt, err := tx.PrepareContext(ctx, `INSERT INTO export_rows (export_id, file_id, reason, hash) VALUES (?, ?, ?, ?)`)
+	stmt, err := tx.PrepareContext(ctx,
+		`INSERT INTO export_rows (export_id, file_id, hash, keep_until) VALUES (?, ?, ?, ?)`)
 	if err != nil {
 		return 0, fmt.Errorf("record export: %w", err)
 	}
 	defer stmt.Close()
 	for _, it := range items {
-		if _, err := stmt.ExecContext(ctx, id, it.FileID, string(it.Reason), nullString(it.Hash)); err != nil {
+		if _, err := stmt.ExecContext(ctx, id, it.FileID, nullString(it.Hash), nullString(it.KeepUntil)); err != nil {
 			return 0, fmt.Errorf("record export: %w", err)
 		}
 	}
@@ -223,17 +219,15 @@ func (s *Store) RecordExport(ctx context.Context, path string, now time.Time, it
 	return id, nil
 }
 
-// Decision is one reviewed row of an imported CSV, with its dates already resolved.
-type Decision struct {
-	Line        int // in the CSV, for messages
-	ExportID    int64
-	FileID      int64
-	ReviewDate  string // YYYY-MM-DD, "" = not given
-	Action      string // ActionDelete or ""
-	RetainUntil string // YYYY-MM-DD, "" = keep the current floor
+// LifespanRow is one row of an edited lifespan CSV.
+type LifespanRow struct {
+	Line      int // in the CSV, for messages
+	ExportID  int64
+	FileID    int64
+	KeepUntil string // YYYY-MM-DD as typed; "" = blank
 }
 
-// Refusal is a decision that was not applied, and why.
+// Refusal is a row that was not applied, and why.
 type Refusal struct {
 	Line   int
 	FileID int64
@@ -241,22 +235,29 @@ type Refusal struct {
 	Reason string
 }
 
-// ImportResult counts what an import did (or, in a dry run, would do).
-type ImportResult struct {
-	Dates     int // new review dates, including RetainOnly
-	Deletes   int // marked for deletion
-	Retained  int // of Dates: only retain_until given, so the review date is that floor
-	Already   int // already imported from the same export
-	Untouched int // only retain_until given, and it is the value already recorded
-	Refusals  []Refusal
+// Clear is a row whose blank keep_until would clear a stored date.
+type Clear struct {
+	FileID    int64
+	Path      string
+	KeepUntil string // the stored date
 }
 
-// ApplyDecisions checks each decision against the register and applies the ones that pass, in one transaction.
-// today is the local date (YYYY-MM-DD); detail names the source for the history. A dry run checks everything and
-// writes nothing.
-func (s *Store) ApplyDecisions(ctx context.Context, ds []Decision, now time.Time, today, detail string,
-	dryRun bool) (ImportResult, error) {
-	var res ImportResult
+// UpdateResult counts what an update did (or, in a dry run, would do).
+type UpdateResult struct {
+	Set           int // new keep_until dates
+	Cleared       int // dates cleared by a blank cell
+	ClearsSkipped int // blank cells that would clear a date, not confirmed
+	Unchanged     int // rows as exported, or with the date already stored
+	Refusals      []Refusal
+}
+
+// UpdateLifespan checks each row against the register and applies the ones that pass, in one transaction. A blank
+// cell where a date is stored clears it, but only if confirm (given every such row, once) returns true; confirm is
+// not called in a dry run, or when there is nothing to clear. today is the local date (YYYY-MM-DD); detail names the
+// source for the history.
+func (s *Store) UpdateLifespan(ctx context.Context, rows []LifespanRow, now time.Time, today, detail string,
+	dryRun bool, confirm func([]Clear) bool) (UpdateResult, error) {
+	var res UpdateResult
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return res, err
@@ -264,69 +265,70 @@ func (s *Store) ApplyDecisions(ctx context.Context, ds []Decision, now time.Time
 	defer tx.Rollback()
 
 	type ok struct {
-		d         Decision
+		r         LifespanRow
 		hash      sql.NullString
 		afterScan sql.NullInt64
 	}
-	var apply []ok
+	var sets, clears []ok
+	var clearList []Clear
 	exports := map[int64]exportInfo{}
-	for _, d := range ds {
-		ex, found := exports[d.ExportID]
+	for _, r := range rows {
+		ex, found := exports[r.ExportID]
 		if !found {
-			ex, err = readExport(ctx, tx, d.ExportID)
-			if err != nil {
+			if ex, err = readExport(ctx, tx, r.ExportID); err != nil {
 				return res, err
 			}
-			exports[d.ExportID] = ex
+			exports[r.ExportID] = ex
 		}
-		c, err := checkDecision(ctx, tx, d, ex, today)
+		c, err := checkRow(ctx, tx, r, ex, today)
 		if err != nil {
 			return res, err
 		}
 		switch {
 		case c.refusal != "":
-			res.Refusals = append(res.Refusals, Refusal{Line: d.Line, FileID: d.FileID, Path: c.path, Reason: c.refusal})
-		case c.already:
-			res.Already++
-		case c.untouched:
-			res.Untouched++
+			res.Refusals = append(res.Refusals, Refusal{Line: r.Line, FileID: r.FileID, Path: c.path, Reason: c.refusal})
+		case c.unchanged:
+			res.Unchanged++
+		case r.KeepUntil == "":
+			clears = append(clears, ok{r: r, hash: c.exportHash, afterScan: ex.afterScan})
+			clearList = append(clearList, Clear{FileID: r.FileID, Path: c.path, KeepUntil: c.stored})
 		default:
-			if c.reviewDate != "" {
-				d.ReviewDate = c.reviewDate
-				res.Retained++
-			}
-			apply = append(apply, ok{d: d, hash: c.exportHash, afterScan: ex.afterScan})
-			if d.Action == ActionDelete {
-				res.Deletes++
-			} else {
-				res.Dates++
-			}
+			sets = append(sets, ok{r: r, hash: c.exportHash, afterScan: ex.afterScan})
 		}
 	}
-	if dryRun || len(apply) == 0 {
+	res.Set = len(sets)
+	if dryRun {
+		res.Cleared = len(clears)
+		return res, nil
+	}
+	if len(clears) > 0 && (confirm == nil || !confirm(clearList)) {
+		res.ClearsSkipped = len(clears)
+		clears = nil
+	}
+	res.Cleared = len(clears)
+	apply := append(sets, clears...)
+	if len(apply) == 0 {
 		return res, nil
 	}
 
-	batch, err := newBatch(ctx, tx, now, "import", detail)
+	batch, err := newBatch(ctx, tx, now, "update", detail)
 	if err != nil {
 		return res, err
 	}
 	for _, a := range apply {
-		d := a.d
-		if _, err := tx.ExecContext(ctx, `INSERT INTO reviews (batch_id, file_id, export_id, review_date, action,
-			retain_until, hash) VALUES (?, ?, ?, ?, ?, ?, ?)`, batch, d.FileID, d.ExportID, nullString(d.ReviewDate),
-			nullString(d.Action), nullString(d.RetainUntil), a.hash); err != nil {
-			return res, fmt.Errorf("record review: %w", err)
+		r := a.r
+		if _, err := tx.ExecContext(ctx, `INSERT INTO reviews (batch_id, file_id, export_id, keep_until, hash)
+			VALUES (?, ?, ?, ?, ?)`, batch, r.FileID, r.ExportID, nullString(r.KeepUntil), a.hash); err != nil {
+			return res, fmt.Errorf("record keep_until: %w", err)
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE files SET review_date = ?, action = ?,
-			retain_until = coalesce(?, retain_until), reviewed_utc = ?, reviewed_after_scan = ?, reviewed_hash = ?
-			WHERE id = ?`, nullString(d.ReviewDate), nullString(d.Action), nullString(d.RetainUntil), utc(now),
-			a.afterScan, a.hash, d.FileID); err != nil {
-			return res, fmt.Errorf("record review: %w", err)
+		if _, err := tx.ExecContext(ctx, `UPDATE files SET keep_until = ?, reviewed_utc = ?, reviewed_after_scan = ?,
+			reviewed_hash = ? WHERE id = ?`, nullString(r.KeepUntil), utc(now), a.afterScan, a.hash,
+			r.FileID); err != nil {
+			return res, fmt.Errorf("record keep_until: %w", err)
 		}
 	}
 	if err := tx.Commit(); err != nil {
-		return res, fmt.Errorf("record reviews: %w", err)
+		return res, fmt.Errorf("record keep_until: %w", err)
 	}
 	return res, nil
 }
@@ -358,101 +360,79 @@ func readExport(ctx context.Context, tx *sql.Tx, id int64) (exportInfo, error) {
 type checked struct {
 	path       string
 	refusal    string // "" = passes
-	already    bool   // imported from this export before: nothing to do
-	untouched  bool   // a row with only the retain_until the export filled in
-	reviewDate string // a row with only a new retain_until: review on that floor
+	unchanged  bool   // as exported, or already the stored date: nothing to do
+	stored     string // the file's current keep_until
 	exportHash sql.NullString
 }
 
-// checkDecision applies the import's rules to one decision (design section 2, Review).
-func checkDecision(ctx context.Context, tx *sql.Tx, d Decision, ex exportInfo, today string) (checked, error) {
+// checkRow applies the update's rules to one row (design section 2, Lifespan).
+func checkRow(ctx context.Context, tx *sql.Tx, r LifespanRow, ex exportInfo, today string) (checked, error) {
 	var c checked
 	if !ex.found {
-		c.refusal = fmt.Sprintf("export %d is not in this register", d.ExportID)
+		c.refusal = fmt.Sprintf("export %d is not in this register", r.ExportID)
 		return c, nil
 	}
-	var reason string
-	err := tx.QueryRowContext(ctx, `SELECT reason, hash FROM export_rows WHERE export_id = ? AND file_id = ?`,
-		d.ExportID, d.FileID).Scan(&reason, &c.exportHash)
+	var exported sql.NullString
+	err := tx.QueryRowContext(ctx, `SELECT hash, keep_until FROM export_rows WHERE export_id = ? AND file_id = ?`,
+		r.ExportID, r.FileID).Scan(&c.exportHash, &exported)
 	if errors.Is(err, sql.ErrNoRows) {
-		c.refusal = fmt.Sprintf("file %d is not in export %d", d.FileID, d.ExportID)
+		c.refusal = fmt.Sprintf("file %d is not in export %d (rows cannot be added)", r.FileID, r.ExportID)
 		return c, nil
 	}
 	if err != nil {
-		return c, fmt.Errorf("read export %d: %w", d.ExportID, err)
+		return c, fmt.Errorf("read export %d: %w", r.ExportID, err)
+	}
+	// A cell left as exported is not a decision, whatever happened since.
+	if r.KeepUntil == exported.String {
+		c.unchanged = true
+		return c, nil
 	}
 
-	var retain string
 	var hash sql.NullString
-	var unreadable int64
-	if err := tx.QueryRowContext(ctx, `SELECT hash, coalesce(unreadable_since_scan, 0), coalesce(retain_until, '')
-		FROM files WHERE id = ?`, d.FileID).Scan(&hash, &unreadable, &retain); err != nil {
-		return c, fmt.Errorf("read file %d: %w", d.FileID, err)
+	if err := tx.QueryRowContext(ctx, `SELECT hash, coalesce(keep_until, '') FROM files WHERE id = ?`, r.FileID).
+		Scan(&hash, &c.stored); err != nil {
+		return c, fmt.Errorf("read file %d: %w", r.FileID, err)
 	}
 	var root, rel string
 	err = tx.QueryRowContext(ctx, `SELECT r.path, p.path FROM paths p JOIN roots r ON r.id = p.root_id
-		WHERE p.file_id = ? AND p.valid_to_scan IS NULL`, d.FileID).Scan(&root, &rel)
+		WHERE p.file_id = ? AND p.valid_to_scan IS NULL`, r.FileID).Scan(&root, &rel)
 	switch {
 	case err == nil:
 		c.path = absPath(root, rel)
-	case !errors.Is(err, sql.ErrNoRows):
-		return c, fmt.Errorf("read file %d: %w", d.FileID, err)
+	case errors.Is(err, sql.ErrNoRows):
+		c.refusal = "no longer present; it is not in the register's current files"
+		return c, nil
+	default:
+		return c, fmt.Errorf("read file %d: %w", r.FileID, err)
 	}
 
-	// A row with only retain_until: the export fills that column in, so an unchanged value is an untouched row. A new
-	// floor on its own means "keep it until then": the file comes back for review on that date (a floor is never a
-	// trigger for deletion).
-	if d.ReviewDate == "" && d.Action == "" {
-		switch {
-		case d.RetainUntil == retain:
-			c.untouched = true
-			return c, nil
-		case d.RetainUntil <= today:
-			c.refusal = fmt.Sprintf("retain_until %s is not after today: give a review date or delete as well",
-				d.RetainUntil)
-			return c, nil
-		}
-		c.reviewDate = d.RetainUntil
-	}
-
-	// The latest review that came from an import: an earlier import of this export, or a later review.
+	// The latest update of this file: from this export (edited again: allowed) or a later one (refused, so an old CSV
+	// never overwrites a newer decision).
 	var lastExport sql.NullInt64
 	var lastCreated string
 	err = tx.QueryRowContext(ctx, `SELECT rv.export_id, b.created_utc FROM reviews rv
 		JOIN review_batches b ON b.id = rv.batch_id
-		WHERE rv.file_id = ? AND b.command = 'import' ORDER BY rv.id DESC LIMIT 1`, d.FileID).
-		Scan(&lastExport, &lastCreated)
+		WHERE rv.file_id = ? ORDER BY rv.id DESC LIMIT 1`, r.FileID).Scan(&lastExport, &lastCreated)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return c, fmt.Errorf("read reviews of file %d: %w", d.FileID, err)
+		return c, fmt.Errorf("read history of file %d: %w", r.FileID, err)
 	}
-	if err == nil {
-		if lastExport.Valid && lastExport.Int64 == d.ExportID {
-			c.already = true
-			return c, nil
-		}
+	if err == nil && !(lastExport.Valid && lastExport.Int64 == r.ExportID) {
 		if t, perr := time.Parse(time.RFC3339Nano, lastCreated); perr == nil && t.After(ex.created) {
-			c.refusal = fmt.Sprintf("reviewed again since export %d; export the queue again", d.ExportID)
+			c.refusal = fmt.Sprintf("its keep_until was changed after export %d; export again", r.ExportID)
 			return c, nil
 		}
 	}
 
-	if hash != c.exportHash {
-		c.refusal = fmt.Sprintf("changed since export %d; it stays in the queue", d.ExportID)
+	if r.KeepUntil == c.stored {
+		c.unchanged = true
 		return c, nil
 	}
-	if d.Action == ActionDelete {
-		floor := retain
-		if d.RetainUntil != "" {
-			floor = d.RetainUntil
-		}
-		switch {
-		case unreadable != 0:
-			c.refusal = "flagged unreadable: its content cannot be checked, so only a review date is accepted"
-		case Reason(reason) == ReasonPossibleMove:
-			c.refusal = "a possible move: only a review date is accepted"
-		case floor > today:
-			c.refusal = fmt.Sprintf("retained until %s: delete is not allowed before then", floor)
-		}
+	if hash != c.exportHash {
+		c.refusal = fmt.Sprintf("changed since export %d; export again to set its date", r.ExportID)
+		return c, nil
+	}
+	if r.KeepUntil != "" && r.KeepUntil <= today {
+		c.refusal = fmt.Sprintf("keep_until %s is not after today", r.KeepUntil)
 	}
 	return c, nil
 }
@@ -461,47 +441,9 @@ func newBatch(ctx context.Context, tx *sql.Tx, now time.Time, command, detail st
 	res, err := tx.ExecContext(ctx, `INSERT INTO review_batches (created_utc, command, detail) VALUES (?, ?, ?)`,
 		utc(now), command, nullString(detail))
 	if err != nil {
-		return 0, fmt.Errorf("record review batch: %w", err)
+		return 0, fmt.Errorf("record update: %w", err)
 	}
 	return res.LastInsertId()
-}
-
-// SetReviewDate gives every present file under the filter that has no review date and no action the review date
-// date (YYYY-MM-DD), and returns how many files that is. It never overwrites a decision, and it does not count as a
-// review: an unreadable file or a possible move stays in the queue. A dry run only counts.
-func (s *Store) SetReviewDate(ctx context.Context, f QueueFilter, date string, now time.Time, detail string,
-	dryRun bool) (int64, error) {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return 0, err
-	}
-	defer tx.Rollback()
-	cond, args := f.scopeSQL()
-	sel := `SELECT f.id FROM paths p JOIN files f ON f.id = p.file_id
-		WHERE p.valid_to_scan IS NULL AND f.review_date IS NULL AND f.action IS NULL` + cond
-	var n int64
-	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM (`+sel+`)`, args...).Scan(&n); err != nil {
-		return 0, fmt.Errorf("set review dates: %w", err)
-	}
-	if dryRun || n == 0 {
-		return n, nil
-	}
-	batch, err := newBatch(ctx, tx, now, "set-date", detail)
-	if err != nil {
-		return 0, err
-	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO reviews (batch_id, file_id, review_date)
-		SELECT ?, id, ? FROM (`+sel+`)`, append([]any{batch, date}, args...)...); err != nil {
-		return 0, fmt.Errorf("set review dates: %w", err)
-	}
-	if _, err := tx.ExecContext(ctx, `UPDATE files SET review_date = ?
-		WHERE id IN (SELECT file_id FROM reviews WHERE batch_id = ?)`, date, batch); err != nil {
-		return 0, fmt.Errorf("set review dates: %w", err)
-	}
-	if err := tx.Commit(); err != nil {
-		return 0, fmt.Errorf("set review dates: %w", err)
-	}
-	return n, nil
 }
 
 func nullInt(v int64) sql.NullInt64 { return sql.NullInt64{Int64: v, Valid: v != 0} }

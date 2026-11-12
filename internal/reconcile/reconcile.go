@@ -42,12 +42,10 @@ var ErrEmptyWalk = errors.New("scan found no files")
 
 // Options control one scan.
 type Options struct {
-	Target        string // directory to scan; must be inside a root
-	IncludeHidden bool
-	Ignore        []string
-	Workers       int       // hashing workers; 0 = DefaultWorkers
-	AllowEmpty    bool      // record an empty walk on a root on a mounted filesystem anyway
-	Progress      *Progress // optional, for a progress display
+	Target     string    // directory to scan; must be inside a root, whose settings (hidden, ignore) the scan uses
+	Workers    int       // hashing workers; 0 = DefaultWorkers
+	AllowEmpty bool      // record an empty walk on a root on a mounted filesystem anyway
+	Progress   *Progress // optional, for a progress display
 }
 
 // Phases of a scan, as reported by Progress.
@@ -182,7 +180,7 @@ func Scan(ctx context.Context, s *store.Store, opt Options) (Summary, error) {
 	}
 	db := s.DBPath()
 	res, err := walk.Walk(ctx, walk.Options{
-		Root: root.Path, Scope: scope, IncludeHidden: opt.IncludeHidden, Ignore: opt.Ignore,
+		Root: root.Path, Scope: scope, IncludeHidden: root.IncludeHidden, Ignore: root.Ignore,
 		Exclude: []string{db, db + "-wal", db + "-shm", db + "-journal", db + ".lock"},
 		Seen:    walked,
 	})
@@ -506,7 +504,7 @@ func Scan(ctx context.Context, s *store.Store, opt Options) (Summary, error) {
 	}
 
 	rec := store.ScanRecord{
-		RootID: root.ID, Scope: scope, IncludeHidden: opt.IncludeHidden, Ignores: opt.Ignore, Started: started,
+		RootID: root.ID, Scope: scope, IncludeHidden: root.IncludeHidden, Ignores: root.Ignore, Started: started,
 		FilesSeen: sum.Seen, NewCount: sum.New, ChangedCount: sum.Changed, MovedCount: sum.Moved,
 		MissingCount: sum.Missing, ErrorCount: sum.Errors,
 	}
