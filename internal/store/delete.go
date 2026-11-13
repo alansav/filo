@@ -81,7 +81,7 @@ func (r *DeleteRun) root(ctx context.Context, rootID int64) (*runRoot, error) {
 	if rr, ok := r.roots[rootID]; ok {
 		return rr, nil
 	}
-	res, err := r.s.db.ExecContext(ctx, `INSERT INTO scans (started_utc, root_id, kind) VALUES (?, ?, 'delete')`,
+	res, err := r.s.exec(ctx, `INSERT INTO scans (started_utc, root_id, kind) VALUES (?, ?, 'delete')`,
 		utc(r.started), rootID)
 	if err != nil {
 		return nil, fmt.Errorf("record delete run: %w", err)
@@ -109,7 +109,7 @@ func (r *DeleteRun) record(ctx context.Context, c Candidate, fn func(tx *sql.Tx,
 	if err := fn(tx, rr.scanID); err != nil {
 		return nil, err
 	}
-	if err := tx.Commit(); err != nil {
+	if err := r.s.commit(tx); err != nil {
 		return nil, err
 	}
 	rr.checked++
@@ -189,7 +189,7 @@ func (r *DeleteRun) Unreadable(ctx context.Context, c Candidate, why string) err
 func (r *DeleteRun) Finish(ctx context.Context, finished time.Time) error {
 	var errs []error
 	for _, rr := range r.roots {
-		if _, err := r.s.db.ExecContext(ctx, `UPDATE scans SET finished_utc = ?, files_seen = ?, new_count = 0,
+		if _, err := r.s.exec(ctx, `UPDATE scans SET finished_utc = ?, files_seen = ?, new_count = 0,
 			changed_count = ?, moved_count = 0, missing_count = 0, error_count = ?, elapsed_ms = ? WHERE id = ?`,
 			utc(finished), rr.checked, rr.changed, rr.error, finished.Sub(r.started).Milliseconds(),
 			rr.scanID); err != nil {
@@ -242,7 +242,7 @@ func (s *Store) SetRetention(ctx context.Context, fileID int64, retention string
 		nullInt(after), hash, fileID); err != nil {
 		return "", fmt.Errorf("record retention: %w", err)
 	}
-	if err := tx.Commit(); err != nil {
+	if err := s.commit(tx); err != nil {
 		return "", fmt.Errorf("record retention: %w", err)
 	}
 	return keep, nil

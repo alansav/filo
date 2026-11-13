@@ -6,18 +6,24 @@ in the same commit when a design decision changes.
 
 ## Current state
 
-Iteration 3: delete. `filo delete [DIR] [-y]` lists the files past their retention, asks, and deletes the chosen
-ones, each only after it is re-read and found unchanged; it removes the folders it emptied. Iterations 1 (scan,
-register, report) and 2 (lifespan: retention through the retention CSV, `filo export retention` then `filo update`)
-are done. **`internal/dispose` is the only code allowed to delete the user's files**, and only from `filo delete`;
-everything else stays read-only on them, and nothing overwrites an existing file. Later iterations (revert, UI) are
-listed in `docs/design.md`. Stay inside the current iteration.
+Iterations 1 (scan, register, report), 2 (lifespan: retention through the retention CSV, `filo export retention`
+then `filo update`) and 3 (delete: `filo delete [DIR] [-y]` lists the files past their retention, asks, and deletes
+the chosen ones, each only after it is re-read and found unchanged) are done, as are register snapshots. The order
+of the next work is in `docs/design.md` section 5, starting with named retention policies.
+**`internal/dispose` is the only code allowed to delete the user's files**, and only from `filo delete`; everything
+else stays read-only on them, and nothing overwrites an existing file. Stay inside the current piece of work.
 
 ## Hard rules
 
-- Filo must not modify, move, rename or delete any file outside its own data directory (or the `--db` path given)
-  except through `filo delete` (iteration 3), or the later iteration that calls for it. Anything destructive shows
-  what it will do and asks first (or needs `-y`).
+- Filo must not modify, move, rename or delete any file outside its own data directory (or the `--db` path given,
+  its companion files and its `<db>.snapshots/` directory) except through `filo delete`, or the later work that
+  calls for it. Anything destructive shows what it will do and asks first (or needs `-y`).
+- Treat file names and the register as untrusted input: delete only inside a root (`internal/dispose` checks), and
+  print through the CLI's escaping writer (`safeText`), never straight to `os.Stdout`. Write each line of output with
+  one call (a newline inside a write is escaped, since only a file name puts one there); filo's own multi-line text
+  goes through `writeLines`.
+- In `internal/store`, every write goes through `s.commit(tx)` or `s.exec`, so a run that changes the register gets
+  its snapshot (`TestWritesGoThroughTheHelpers` guards it).
 - Fail safe: a file with missing or ambiguous data is "new, needs a date", never "eligible for deletion". Reaching a
   keep-until date makes a file a candidate that the person confirms, never a trigger. A file is deleted only if it
   can be read and is still exactly the content its retention was set on; one that cannot be read is never deleted.
@@ -66,5 +72,6 @@ Run `go vet` and the tests before saying a change is done.
 - Tests are table-driven and use `t.TempDir()`. No test may touch the real home directory.
 - One database per device holds all roots. It is created automatically in the user data directory
   (`~/.local/share/filo/filo.db` on Linux); `--db` and `FILO_DB` override it. Roots are added explicitly. One writer at a
-  time, and each scan is applied in a single transaction.
+  time, and each scan is applied in a single transaction. Every run that writes leaves a snapshot in
+  `<db>.snapshots/` (rotated; see `docs/design.md`, Register snapshots), so a throwaway `--db` gets one too.
 - Keep the schema changes small and versioned (`meta.schema_version`).

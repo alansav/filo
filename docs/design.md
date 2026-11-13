@@ -7,7 +7,9 @@ retention` and `filo update`), with root settings stored on the root; it passes 
 dates on the real home directory is still to be done. A C# prototype exists as a reference spec only; its schema and
 reconcile rules were carried over. The second shape of the retention CSV (`file_date`, `retention`, schema version
 5) is implemented. Iteration 3 (deletion) was designed on 2026-11-12 and implemented on 2026-11-13 (schema version
-6); it passes its test-tree criterion and has not yet been run on real files. Last updated:
+6); it passes its test-tree criterion and has not yet been run on real files. Register snapshots (rolling copies of
+the database next to it) were added on 2026-11-13. The order of the next work was agreed the same day (section 5).
+Last updated:
 2026-11-13.
 
 This file records settled decisions, the planned data model and the open questions. When a decision changes,
@@ -67,10 +69,60 @@ Principles. These are not negotiable:
   a foreign database is never modified.
 - One writer at a time: an `flock` on `<db>.lock`, taken before the database is opened. The kernel drops it if Filo
   dies, so there are no stale locks. Non-unix platforms refuse to open until locking is implemented for them. Each
-  scan is applied in a single transaction.
+  scan is applied in a single transaction. The lock file is opened with `O_NOFOLLOW`, so a symlink planted in its
+  place (with `--db` in a shared directory such as `/tmp`) is refused, not followed.
+- **The schema is not trusted** (2026-11-13): `PRAGMA trusted_schema = OFF` on every connection, so triggers and
+  views stored in an altered or swapped database cannot call functions with side effects.
 - Filo creates a new database file with mode 0600; SQLite gives the WAL and SHM files the same mode. An existing
   file's mode is never changed.
-- The database, its WAL/SHM/journal files and the lock file are never scanned, wherever they are.
+- The database, its WAL/SHM/journal files, the lock file and the snapshot directory are never scanned, wherever they
+  are.
+
+### Register snapshots
+Decided and implemented 2026-11-13. After a run of weekend dating the register holds thousands of decisions that
+exist nowhere else, and on the laptop it is outside every backup (Vorta runs on the desktop).
+
+- **What.** A consistent copy of the database, written with SQLite's `VACUUM INTO` into `<db>.snapshots/` next to
+  it (`~/.local/share/filo/filo.db.snapshots/`). `VACUUM INTO` writes one self-contained, compacted file from a read
+  transaction; copying `filo.db` instead could miss commits still in the WAL file or catch a page being written. It
+  is a copy, not a compaction of the live database.
+- **When.** At the end of every run that committed a change to the register, in `Store.Close`, while the lock is
+  held; so no list of writing commands is kept. Every write in the store goes through two helpers (`commit` and
+  `exec`) that note the change only once it is committed (a test guards that rule), plus creating or upgrading the
+  database. A run that only read takes none, and nor does one whose write was rolled back (a failed or interrupted
+  scan; `total_changes()`, used at first, also counted those). An interrupted run that committed something takes
+  one.
+- **Before a schema upgrade**, a copy of the old database is kept as `filo-vN-before-upgrade-<time>Z.db`, outside
+  the rotation, one per old version: an upgrade that keeps failing (a timer opening an old database every hour)
+  does not pile up copies. If that copy cannot be written, the upgrade is refused.
+- **Files.** `filo-YYYYMMDDTHHMMSS.mmmZ.db` (UTC); the time in the name, not the file's mtime, drives the rotation,
+  so a copy or sync cannot disturb it. The temporary file is created empty with mode 0600 before `VACUUM INTO`
+  fills it (otherwise SQLite creates it with the umask's mode and the register is readable while it is written),
+  flushed to disk (`VACUUM INTO` does not), renamed into place, never over an existing file, and the directory is
+  flushed after the rename; so a power cut cannot leave a torn newest snapshot once older ones are pruned. Leftover
+  temporary files of either kind are removed by the next snapshot. Directory 0700 (an existing one is made private),
+  files 0600: the register names every file. A snapshot directory that is a symlink, not a directory, or owned by
+  another user is refused (hardening of 2026-11-13).
+- **Rotation** (reworked 2026-11-13 from a first draft that kept only the newest three of the day, which was fragile
+  around midnight). Snapshots are a short-term safety net; long-term copies are the backups of them. Kept: every
+  snapshot from the last 24 hours (rolling, so working past midnight loses nothing); the newest three whatever their
+  age (so a write after a month away keeps the state just before it); and, up to 31 days old, the newest of each of
+  the seven most recent days with older snapshots, then the newest of each ISO week. Nothing else older than 31 days.
+  Periods count only days that have snapshots. Pruning runs only after a new snapshot was written, and removes only
+  files whose names are rotated snapshots; pre-upgrade copies and anything else in the directory are left alone. A
+  snapshot dated more than a minute in the future (the clock was ahead) is kept but takes none of the newest places,
+  and the report flags it.
+- **Failure** never undoes the run's work: one line on stderr, `filo: warning: register snapshot failed: …`.
+  `filo report` ends with a Register snapshots section (count, directory, latest), and warns when there are none
+  though the register has changed, when the latest is older than the register's latest write, or when the
+  directory cannot be read. The latest write is recorded in `meta.last_write_utc` by every run that writes, just
+  before its snapshot and with the same time, so any change counts (a root's settings too). That is how a failing
+  snapshot is noticed when scans run from a timer.
+- **Restoring** is by hand: with no filo running, move `filo.db`, `filo.db-wal` and `filo.db-shm` aside and copy a
+  snapshot to `filo.db`. A command can come later if wanted.
+- **Getting them off the machine** (to the desktop, where Vorta backs them up) is part of the synced-roots work: for
+  example a Syncthing share of the snapshot directory, laptop to desktop only. A snapshot is a finished file that
+  nothing opens for writing, so unlike the live database it is safe to sync.
 
 ### Roots
 - Roots are registered explicitly and deliberately (`filo roots add DIR`), and stored in the `roots` table as absolute
@@ -395,6 +447,14 @@ files). Replaces the earlier plan of a quarantine, holds and several checks at t
     Gone, replaced (another inode), no longer the same kind, or a symlink pointing elsewhere: nothing is recorded;
     the message says to run `filo scan`. Cannot be deleted: nothing is recorded, it stays a candidate, and exit 1.
     A last `lstat` just before the removal checks inode, size and modification time against what was read.
+  - *Only inside its root* (hardening of 2026-11-13). Before anything else, the recorded path must be a clean
+    relative path below a clean, absolute root (no `..`), and every folder from the root down must still be a real
+    folder, each checked with `lstat`: a symlink there means the tree changed since the scan (skipped, "run filo
+    scan"). Folders above the root are not checked: a symlink there (a home directory moved to another disk) moves
+    the whole root, which scans handle. The folder check is repeated at the last look before the unlink, since
+    hashing a large file leaves time for a folder to be swapped. A path outside its root can only come from an
+    altered register (`../../.ssh/id_ed25519` with that file's hash): it is refused with exit 1. The hash check alone
+    does not stop that, since whoever can edit the register can usually read the file.
   - *Removal* is `unlink` for a file or symlink (it refuses a directory) and `rmdir` for a folder (it refuses a
     non-empty folder and a file). The fallback on other platforms checks first and is untested.
   - *A file deleted by filo is never "missing"*: pairing (returned files) skips deleted rows. A new file with a
@@ -405,14 +465,25 @@ files). Replaces the earlier plan of a quarantine, holds and several checks at t
 - Scheduled runs only ever scan; Filo never schedules a deletion.
 
 ### Commands and scheduling
-- Plain names, easy to remember: `roots`, `scan`, `report`, `export`, `update`, `delete`, later `revert`. No themed
-  subcommands. (`restore` was dropped on 2026-11-12: a file restored from a backup comes back as a new file.)
+- Plain names, easy to remember: `roots`, `scan`, `report`, `export`, `update`, `delete` (a `revert` was
+  deferred). No themed subcommands. (`restore` was dropped on 2026-11-12: a file restored from a backup comes back
+  as a new file.)
   (Reshaped 2026-11-12: `review` and its subcommands `set-date`, `export` and
   `import` were replaced by `export lifespan` and `update`; "update" says that only existing files change, which
   "import" did not. `export lifespan` was renamed `export retention` the same day: the CSV's word names what is
   set in it, and the lifespan CSV became the retention CSV (package `internal/retention`).)
 - **Keep flags and options to a minimum** (2026-11-11). Prefer a safe default and clear output over a flag; prefer
   doing the obvious thing and saying what was done over asking.
+- **Output cannot act on the terminal** (2026-11-13). File names can hold any byte but `/` and NUL and come from
+  anywhere (attachments, files synced from a phone, an altered register). Everything printed goes through one
+  writer that shows control characters, escape sequences, invalid UTF-8 and Unicode bidi controls as visible
+  escapes (`\x1b`, `\u202e`), so a name cannot erase lines of the list a person confirms before a deletion, set the
+  window title, write the clipboard, or read in another order than it is. Filo writes each line with one call, so a
+  newline passes only as the last byte of a write: one inside a write can only come from a name and is shown as
+  `\n`, so a name cannot add invented lines to that list (found in the code review of 2026-11-13; the first version
+  let newlines through). Tabs are shown as `\t` and a backslash as `\\`, so an escape cannot be confused with a
+  name holding the same text. Filo's own multi-line text (help) is written a line at a time; only the progress
+  line's own control codes bypass the writer. The CSV export guards against spreadsheet formulas separately.
 - **Prompts only in a terminal** (2026-11-12, replacing "no interactive prompts"). A command asks only where a person
   should look first: `filo update` before clearing dates, and `filo delete`. Declining, or having no
   terminal on standard input, is always the safe choice, so Filo still works the same from a script or a timer.
@@ -602,23 +673,45 @@ its own identity. Reclaimable space is size × (copies − 1) per group. Paths a
    `-y` and no-terminal behave as designed. Checked by `TestDeleteRoundTrip` and `TestDeleteInterruptedAtPrompt` in
    `internal/cli` and the `internal/dispose` tests, and by hand on `scripts/testtree.sh` with a changed and an
    unreadable candidate.
-4. **Revert directory moves** from the path history.
-5. **UI** in place of the CSV, including viewing and editing the register in place (see Open questions).
+4. **Register snapshots.** Done 2026-11-13 (see Register snapshots): `TestKeep` and the snapshot tests in
+   `internal/store`, `TestSnapshots` in `internal/cli`, and by hand with a throwaway database.
 
-Long term: other properties (type, author, sender) where they can be derived automatically, tags, projects and tasks
-linked to files, and a daily view of the files needed. All of it hangs off the stable file ID, so none of it needs the
-register to change shape.
+**Next, in order** (agreed 2026-11-13; revert, the earlier iteration 4, was deferred, see section 7). Each is an open
+question below until it is designed.
+
+1. Named retention policies.
+2. Folder rules (default retention policies on directories).
+3. Progress in the report, and `export retention --needing-retention`.
+4. Duplicates: one decision for all copies, and a duplicates review CSV.
+5. `scan --verify`, with sidecar hash files.
+6. Backup awareness.
+7. Synced roots, sharing decisions between devices, and getting snapshots to the backup machine.
+8. A summary for scheduled scans.
+
+Later: the **UI** in place of the CSV, including viewing and editing the register in place, and notes, links and
+tasks (see Open questions). All of it hangs off the stable file ID, so none of it needs the register to change
+shape.
 
 ## 6. Open questions
 
-- Asset links: modelled at project or asset level, not per file. Shape not yet decided. (Holds were dropped on
-  2026-11-12: a file that must be kept gets a later retention or `forever`.)
-- Reading a keep-until date from the file itself (frontmatter, Office or PDF properties, extended attributes).
-  For now it is set in the CSV; the register is the source of truth either way.
-- Whether commands accept a period counted from today (`+1y`). The CSV and `filo delete`'s `[r]etention…` take a
-  period counted from `file_date` instead.
-- How synced roots are marked, and what Filo does differently for them (Syncthing propagates deletes). Left until
-  the purpose is clearer; not needed for iteration 3.
+- **Named retention policies** (raised 2026-11-13; next). A retention schedule written once, `bills = 7y`,
+  `payslips = forever`, and the policy name typed in the CSV (and later in folder rules) in place of a period. If the
+  law changes ("financial records: 10 years"), changing the policy changes every file using it. Proposed shape: a
+  name that is not a policy yet creates one with no period, and its files stay "needing a retention" until it has
+  one (fail safe); `filo update` lists the policies it created and asks once, so a typo (`bils`) does not quietly
+  make a new one; `forever` becomes a built-in policy; periods still count from `file_date`; fixed dates per file
+  stay possible. Changing a policy works out `keep_until` again for its files; lengthening is harmless, shortening
+  lists the files it makes past their date and asks. A command lists policies, flagging those without a period.
+  Worth having before the real home directory is dated, though setting `file_date`s does not depend on it.
+- **Notes, links and tasks** (raised 2026-11-13; merges asset links, the long-term "projects and tasks linked to
+  files", and notes on files). Notes on a file; links to an asset or project (modelled at that level, not per
+  file); tasks, some with files and some without; possibly a productivity system built on the register. That is a
+  change of scope from "Filo owns lifecycle" and needs its own discussion first. The stable file ID means nothing
+  built now blocks it. (Holds were dropped on 2026-11-12: a file that must be kept gets a later retention or
+  `forever`.)
+- How synced roots are marked, and what Filo does differently for them (Syncthing propagates deletes; surface
+  `*.sync-conflict-*` files). Belongs with sharing decisions between devices and getting snapshots to the backup
+  machine (Register snapshots).
 - **Sharing retention decisions between devices** (raised 2026-11-13). A synced folder (Syncthing) is on several
   devices, each with its own register; a retention set on one should be known on the others. Tested on 2026-11-13:
   a file dated on the laptop, then moved and renamed on the desktop, kept its retention on the laptop's next scan,
@@ -638,6 +731,31 @@ register to change shape.
   propagate. Small step worth taking early: a random device ID in `meta`, made when the database is created, and the
   device recorded with each decision, so no decision has an unknown origin later. The exchange itself can wait until
   after iteration 3.
+- **Backup awareness** (raised 2026-11-13). Principle 2 says backups make deletion recoverable; Filo cannot check
+  it. Being in a folder Vorta backs up is a weak signal (the backup may not have run, may have failed, or may predate
+  the current content). The strong one is "this content is in archive X from date Y": match Borg archive listings
+  (path, size, mtime, perhaps a content hash; Borg's listing options to be checked against its documentation)
+  against the register, giving each file a "last seen in a backup" date. It may only ever add warnings to
+  `filo delete` ("in no backup"), never make deleting easier. Open: reading Borg directly or through Vorta's
+  settings, the cost of listing a large archive, the repository passphrase, and that Borg runs on another machine.
+- **Duplicates** (raised 2026-11-13; the report finds 297 groups, 605 files on the real home directory). Retention is
+  about content, so dating one copy could offer the same retention to its undated copies (one confirmation), and
+  copies with different retentions are reported, not resolved. Also an `export duplicates` CSV for review: mark the
+  copies to delete, update, and Filo refuses a group with no copy kept or a copy that no longer exists. This brushes
+  against the rule that a delete column in a spreadsheet is unsafe (a sort or fill-down moves it), so each row
+  carries its group, path and hash, the marked copies are listed and confirmed, and each deletion goes through
+  `filo delete`'s check.
+- **Progress** (raised 2026-11-13). A report line for how far dating has got: files with a `file_date`, files with
+  a retention, and per directory what is left. And `export retention --needing-retention`, writing only the files
+  the report counts as needing a retention, so each CSV is shorter.
+- **`filo scan --verify`** (raised 2026-11-13). A scan re-hashes only files whose size, mtime, ctime or inode
+  changed, so bytes that rot in place go unnoticed until backups have pruned the good copy. `--verify` re-hashes
+  everything and reports content that changed with nothing else changing. Sidecar hash files (`file.sha256`,
+  `SHA256SUMS`) can be checked against the register's SHA-256 at no extra cost (MD5 or SHA-1 sidecars would need
+  another read); a mismatch is reported (corruption, or a sidecar left from before an edit), never resolved.
+- **A summary for scheduled scans** (raised 2026-11-13; low priority). A short line ("4 files past retention, 2 need
+  a decision") a timer can pass to a desktop notification, so candidates do not sit unnoticed. Filo still never
+  deletes on its own.
 - Confirming a possible move, and undoing an update batch.
 - **Telling a terminal from a character device** (found 2026-11-13). The prompt check treats standard input as a
   terminal if it is any character device, so `filo delete </dev/null` asks, reads end of input and deletes nothing
@@ -650,16 +768,36 @@ register to change shape.
 - **Viewing and editing the register in place** (raised 2026-11-12). Setting or clearing `keep_until` on a few files
   through a whole export, edit and update round is cumbersome. Wanted: query and view what the register holds (files,
   dates, history) and set or clear a date on a few files directly. Open: a command (for example
-  `filo keep PATH... DATE`, which reopens whether commands take durations such as `+1y`), part of the UI (iteration
-  5), or both.
-- **Folder rules for new files.** Setting dates in the CSV is a one-off: it dates the files under a folder that exist
-  now, and a file added later arrives undated and needs a decision. A stored rule ("new files under FOLDER get a review
-  date N from first seen") applied by each scan would save rerunning it, but it relaxes principle 4's default that a
-  new file needs review. Open: whether to have rules at all, whether a rule-dated file still gets one look first,
-  how rules on nested folders combine, and whether a rule may ever imply delete (it should not).
+  `filo keep PATH... RETENTION`, taking the same retentions as the CSV), part of the UI, or both. Periods always count
+  from `file_date`; a period counted from today (`+1y`) was closed on 2026-11-13.
+- **Folder rules: a default retention policy on a directory** (second in line since 2026-11-13). Setting dates in the
+  CSV is a one-off: a file added later arrives undated and needs a decision. A rule names a policy for a folder
+  ("files under `personal/home/electric` get `bills`"). Proposed: a rule proposes and the person confirms in bulk
+  (one answer per folder, not per file: "38 undated files under electric would get bills: 31 with a file_date, 7
+  without"), for files already there and for new arrivals a scan reports, which keeps principle 4 and "never a
+  trigger". About 60% of files have a `file_date` from their name; the rest need one typed before a period applies.
+  Open: how rules on nested folders combine, whether a rule overrides a retention set by hand (it should not), and
+  that a rule may never imply delete.
 - UI technology.
 
 ## 7. Rejected or deferred
+
+- **Accepted risks** (security review of 2026-11-13). Anyone who can edit the register already runs as the user and
+  could delete files directly, so an altered register matters through indirect routes (a restored snapshot, a
+  database in a synced folder, a `--db` from elsewhere). Accepted: a register whose *root* path was altered to
+  another folder is not detected (the paths below it are checked, and the confirmation list shows absolute paths);
+  `filo delete -y` deletes without a person reading the list, which is the point of `-y`; a file swapped in the
+  microseconds between the last check and the unlink is deleted (anyone able to do that can delete it directly);
+  SQLite parses a database before Filo checks it is one of its own (kept small by staying on a current driver);
+  ownership of the snapshot directory is not checked on non-Unix platforms. From the code review of the snapshots:
+  Ctrl-C cannot interrupt a snapshot being written (milliseconds for a register of a few MB), and every run that
+  writes copies the whole register, timer scans that found nothing included (fine at a few MB; skipping a snapshot
+  when a scan changed nothing is the first improvement if registers grow large). From the code review of
+  2026-11-13: a snapshot is renamed into place after a check that the name is free, and a program not taking Filo's
+  lock could create that name in between and be overwritten (the directory is private to the user; an atomic
+  no-replace rename needs `golang.org/x/sys`); and the folders on a deleted file's path are checked by name, not
+  held open, so a folder swapped in the microseconds after the last look is followed (the thorough fix, opening each
+  folder from the root and unlinking relative to it, is for later).
 
 - **Quarantine, the recycle bin, holds and `filo restore`** (rejected 2026-11-12). Deletion is permanent and backups
   make it recoverable; the confirmed list and the re-hash check keep it safe. The bin fills up with large files and is
@@ -670,6 +808,13 @@ register to change shape.
   onto a file the person just chose to bring back. It comes back as a new row, with a hint.
 - **Filling `retention` from a filesystem creation date** (rejected 2026-11-12): many filesystems do not record one,
   and a copy, restore or sync resets it. `file_date` is typed, or read from the file name.
+
+- **Revert directory moves** (the earlier iteration 4; deferred 2026-11-13). A zip of the files taken before a
+  reorganisation covers it, and a revert only works if a scan ran before the moves anyway. The path history that
+  would drive it is kept regardless.
+- **Reading a retention from the file itself** (frontmatter, Office or PDF properties, extended attributes;
+  rejected 2026-11-13). A date stored in the file can be changed under the register, which then has to decide which
+  one wins; the register stays the one source of truth.
 
 - **Partial hashing of very large files** (size plus first and last megabyte, full hash on demand). Deferred
   2026-11-11: every file is hashed in full, and only rehashed when its size or mtime changes, so the cost falls on

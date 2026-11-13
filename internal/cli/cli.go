@@ -114,7 +114,8 @@ could not be read or deleted.
 // env is one invocation's surroundings.
 type env struct {
 	stdin          io.Reader
-	stdout, stderr io.Writer
+	stdout, stderr io.Writer // through safeText: what filo prints can never act as terminal control codes
+	rawStderr      io.Writer // for the progress line's own control codes, and to ask whether it is a terminal
 	getenv         func(string) string
 }
 
@@ -125,7 +126,7 @@ func (e usageError) Error() string { return e.msg }
 
 // Run executes one command line (without the program name) and returns the exit code.
 func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(string) string) int {
-	e := &env{stdin: stdin, stdout: stdout, stderr: stderr, getenv: getenv}
+	e := &env{stdin: stdin, stdout: safeText{stdout}, stderr: safeText{stderr}, rawStderr: stderr, getenv: getenv}
 	err := e.run(ctx, args)
 	var ue usageError
 	switch {
@@ -134,13 +135,13 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	case errors.Is(err, flag.ErrHelp):
 		return ExitOK
 	case errors.As(err, &ue):
-		fmt.Fprintf(stderr, "filo: %s\n", ue.msg)
-		fmt.Fprint(stderr, "Run 'filo help' for usage.\n")
+		fmt.Fprintf(e.stderr, "filo: %s\n", ue.msg)
+		fmt.Fprint(e.stderr, "Run 'filo help' for usage.\n")
 		return ExitUsage
 	case errors.Is(err, errReported):
 		return ExitError
 	default:
-		fmt.Fprintf(stderr, "filo: %s\n", err)
+		fmt.Fprintf(e.stderr, "filo: %s\n", err)
 		return ExitError
 	}
 }
@@ -153,14 +154,14 @@ func (e *env) run(ctx context.Context, args []string) error {
 	db := global.String("db", "", "")
 	pos, err := parseLeading(global, args)
 	if errors.Is(err, flag.ErrHelp) {
-		fmt.Fprint(e.stdout, usage)
+		writeLines(e.stdout, usage)
 		return err
 	}
 	if err != nil {
 		return err
 	}
 	if len(pos) == 0 {
-		fmt.Fprint(e.stdout, usage)
+		writeLines(e.stdout, usage)
 		return nil
 	}
 	cmd, rest := pos[0], pos[1:]
@@ -168,12 +169,12 @@ func (e *env) run(ctx context.Context, args []string) error {
 	case "help", "-h", "--help":
 		if len(rest) > 0 {
 			if u, ok := commandUsage[rest[0]]; ok {
-				fmt.Fprint(e.stdout, u)
+				writeLines(e.stdout, u)
 				return nil
 			}
 			return usageError{fmt.Sprintf("no help for %q", rest[0])}
 		}
-		fmt.Fprint(e.stdout, usage)
+		writeLines(e.stdout, usage)
 		return nil
 	case "roots":
 		return e.roots(ctx, *db, rest)
@@ -252,6 +253,16 @@ func (e *env) open(ctx context.Context, db string) (*store.Store, error) {
 	return store.Open(ctx, store.Options{DBPath: db})
 }
 
+// closeStore closes the register. The run's work is already written, so a problem here (most likely a snapshot that
+// could not be written) is a warning, one line on stderr.
+func (e *env) closeStore(s *store.Store) {
+	if err := s.Close(); err != nil {
+		for _, line := range strings.Split(err.Error(), "\n") {
+			fmt.Fprintf(e.stderr, "filo: warning: %s\n", line)
+		}
+	}
+}
+
 // rootsSub finds a roots subcommand among args, so it may follow a flag (filo roots --db X add DIR), and returns it
 // with the other arguments. Only the first positional argument can be one; "" means none.
 func rootsSub(args []string) (string, []string) {
@@ -298,7 +309,7 @@ func (e *env) rootsList(ctx context.Context, dbBefore string, args []string) err
 	if err != nil {
 		return err
 	}
-	defer s.Close()
+	defer e.closeStore(s)
 	totals, err := s.RootTotals(ctx)
 	if err != nil {
 		return err
@@ -381,7 +392,7 @@ func (e *env) rootsAdd(ctx context.Context, dbBefore string, args []string) erro
 	if err != nil {
 		return err
 	}
-	defer s.Close()
+	defer e.closeStore(s)
 	r, absorbed, err := s.AddRootAbsorb(ctx, pos[0], set)
 	if err != nil {
 		return err
@@ -440,7 +451,7 @@ func (e *env) rootsSet(ctx context.Context, dbBefore string, args []string) erro
 	if err != nil {
 		return err
 	}
-	defer s.Close()
+	defer e.closeStore(s)
 	set := store.Settings{IncludeHidden: *include, Ignore: *ignore}
 	old, err := s.SetSettings(ctx, pos[0], set)
 	if err != nil {
@@ -479,7 +490,7 @@ func skippedBy(prefix string, set store.Settings) bool {
 func (e *env) parse(fs *flag.FlagSet, cmd string, args []string) ([]string, error) {
 	pos, err := parseInterspersed(fs, args)
 	if errors.Is(err, flag.ErrHelp) {
-		fmt.Fprint(e.stdout, commandUsage[cmd])
+		writeLines(e.stdout, commandUsage[cmd])
 	}
 	return pos, err
 }
@@ -513,7 +524,7 @@ func (e *env) scan(ctx context.Context, dbBefore string, args []string) error {
 	if err != nil {
 		return err
 	}
-	defer s.Close()
+	defer e.closeStore(s)
 
 	opt := reconcile.Options{Workers: *workers, AllowEmpty: *allowEmpty}
 	if len(pos) == 1 {
@@ -587,7 +598,7 @@ func (e *env) report(ctx context.Context, dbBefore string, args []string) error 
 	if err != nil {
 		return err
 	}
-	defer s.Close()
+	defer e.closeStore(s)
 	r, err := report.Build(ctx, s, *top, today())
 	if err != nil {
 		return err
@@ -655,7 +666,7 @@ var progressInterval = 500 * time.Millisecond
 // startProgress shows a progress line on stderr while a scan runs, if stderr is a terminal. The returned function
 // stops it and clears the line; it is safe to call more than once.
 func (e *env) startProgress(opt *reconcile.Options) (stop func()) {
-	if !isTerminal(e.stderr) {
+	if !isTerminal(e.rawStderr) {
 		return func() {}
 	}
 	p := &reconcile.Progress{}
@@ -672,7 +683,8 @@ func (e *env) startProgress(opt *reconcile.Options) (stop func()) {
 				return
 			case <-t.C:
 				if line := progressLine(p); line != "" {
-					fmt.Fprintf(e.stderr, "\r\x1b[K%s", line)
+					fmt.Fprint(e.rawStderr, "\r\x1b[K") // its own control codes; the line itself is escaped
+					fmt.Fprint(e.stderr, line)
 				}
 			}
 		}
@@ -689,8 +701,8 @@ func (e *env) startProgress(opt *reconcile.Options) (stop func()) {
 }
 
 func (e *env) clearProgress() {
-	if isTerminal(e.stderr) {
-		fmt.Fprint(e.stderr, "\r\x1b[K")
+	if isTerminal(e.rawStderr) {
+		fmt.Fprint(e.rawStderr, "\r\x1b[K")
 	}
 }
 

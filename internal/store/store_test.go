@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -296,6 +297,11 @@ func TestReopen(t *testing.T) {
 			s = mustOpen(t, opt)
 			defer mustClose(t, s)
 			second := readMeta(t, s)
+			// The first run wrote (it created the register), so Close recorded when; that key is meant to change.
+			if second[metaLastWrite] == "" {
+				t.Errorf("meta.%s not set after a run that wrote", metaLastWrite)
+			}
+			delete(second, metaLastWrite)
 			if len(second) != len(first) {
 				t.Errorf("meta has %d keys after reopen, want %d", len(second), len(first))
 			}
@@ -620,6 +626,19 @@ func TestMigrateFromV3(t *testing.T) {
 	if v := rawQueryString(t, db, `SELECT group_concat(coalesce(retention, '-'), ' ') FROM (SELECT retention FROM
 		reviews ORDER BY id)`); v != "2026-11-05 2030-06-30 2027-06-30" {
 		t.Errorf("review history retention = %q", v)
+	}
+	// A copy of the version 3 database was kept before the upgrade.
+	var before []string
+	for _, name := range snapshotNames(t, db) {
+		if strings.HasPrefix(name, "filo-v3-before-upgrade-") {
+			before = append(before, name)
+		}
+	}
+	if len(before) != 1 {
+		t.Errorf("before-upgrade snapshots = %v, want one of version 3", before)
+	} else if v := rawQueryString(t, filepath.Join(SnapshotDir(db), before[0]),
+		`SELECT value FROM meta WHERE key = 'schema_version'`); v != "3" {
+		t.Errorf("before-upgrade snapshot is version %s, want 3", v)
 	}
 	// Version 6: existing scans are scans, and no file is deleted.
 	if v := rawQueryString(t, db, `SELECT group_concat(kind, ' ') FROM scans`); v != "scan" {

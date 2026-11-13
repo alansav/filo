@@ -82,7 +82,7 @@ func (e *env) export(ctx context.Context, dbBefore string, args []string) error 
 	if err != nil {
 		return err
 	}
-	defer s.Close()
+	defer e.closeStore(s)
 	f, where, err := filterFor(ctx, s, pos)
 	if err != nil {
 		return err
@@ -149,8 +149,9 @@ func (e *env) export(ctx context.Context, dbBefore string, args []string) error 
 		fmt.Fprintf(e.stdout, "file_date was filled in from the name of %s; check it before counting from it.\n",
 			report.Plural(int64(suggested), "file", "files"))
 	}
-	fmt.Fprintf(e.stdout, "Set retention (a period from file_date such as 7y or 18m, forever, or a date YYYY-MM-DD) "+
-		"where you want it, then run:\n  filo update %s\n", csvPath)
+	fmt.Fprintln(e.stdout, "Set retention (a period from file_date such as 7y or 18m, forever, or a date YYYY-MM-DD) "+
+		"where you want it, then run:")
+	fmt.Fprintf(e.stdout, "  filo update %s\n", csvPath)
 	return nil
 }
 
@@ -189,7 +190,7 @@ func (e *env) update(ctx context.Context, dbBefore string, args []string) error 
 	if err != nil {
 		return err
 	}
-	defer s.Close()
+	defer e.closeStore(s)
 	asked := false
 	confirm := func(cs []store.Clear) bool {
 		if !isTerminal(e.stdin) {

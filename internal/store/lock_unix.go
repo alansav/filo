@@ -16,7 +16,9 @@ type lockFile struct {
 }
 
 func acquireLock(path string) (*lockFile, error) {
-	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o600)
+	// O_NOFOLLOW: a symlink planted at the lock's path (with --db in a shared directory such as /tmp) is refused, not
+	// followed to create or lock a file somewhere else.
+	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|syscall.O_NOFOLLOW, 0o600)
 	if err != nil {
 		return nil, fmt.Errorf("open lock file: %w", err)
 	}

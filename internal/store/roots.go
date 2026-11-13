@@ -154,7 +154,7 @@ func (s *Store) AddRootAbsorb(ctx context.Context, path string, set Settings) (R
 		}
 		absorbed = append(absorbed, Absorbed{Path: t.e.Path, Prefix: t.prefix, Settings: t.e.Settings})
 	}
-	if err := tx.Commit(); err != nil {
+	if err := s.commit(tx); err != nil {
 		return Root{}, nil, err
 	}
 	return r, absorbed, nil
@@ -288,7 +288,7 @@ func (s *Store) SetSettings(ctx context.Context, path string, set Settings) (Roo
 		if err != nil {
 			return Root{}, err
 		}
-		if _, err := s.db.ExecContext(ctx, `UPDATE roots SET include_hidden = ?, ignores = ? WHERE id = ?`,
+		if _, err := s.exec(ctx, `UPDATE roots SET include_hidden = ?, ignores = ? WHERE id = ?`,
 			set.IncludeHidden, ignores, r.ID); err != nil {
 			return Root{}, fmt.Errorf("set settings of root %s: %w", p, err)
 		}

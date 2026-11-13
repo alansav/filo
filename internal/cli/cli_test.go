@@ -390,7 +390,7 @@ func TestProgress(t *testing.T) {
 	})
 	t.Run("terminal gets a cleared line, a plain writer gets nothing", func(t *testing.T) {
 		term := &fakeTerminal{}
-		e := &env{stderr: term}
+		e := &env{stderr: term, rawStderr: term}
 		opt := reconcile.Options{}
 		stop := e.startProgress(&opt)
 		if opt.Progress == nil {
@@ -403,7 +403,7 @@ func TestProgress(t *testing.T) {
 		}
 
 		var plain bytes.Buffer
-		e = &env{stderr: &plain}
+		e = &env{stderr: &plain, rawStderr: &plain}
 		opt = reconcile.Options{}
 		e.startProgress(&opt)()
 		if opt.Progress != nil || plain.Len() != 0 {

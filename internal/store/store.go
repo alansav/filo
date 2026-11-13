@@ -40,6 +40,30 @@ type Store struct {
 	db     *sql.DB
 	lock   *lockFile
 	dbPath string
+	// changed: this run committed a change to the register, so Close takes a snapshot. Every write goes through
+	// commit or exec, which set it only once the change is committed: a rolled-back transaction changed nothing.
+	changed bool
+}
+
+// commit commits tx and notes that this run changed the register.
+func (s *Store) commit(tx *sql.Tx) error {
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	s.changed = true
+	return nil
+}
+
+// exec runs one write statement in its own transaction and notes the change if it changed a row.
+func (s *Store) exec(ctx context.Context, q string, args ...any) (sql.Result, error) {
+	res, err := s.db.ExecContext(ctx, q, args...)
+	if err != nil {
+		return res, err
+	}
+	if n, err := res.RowsAffected(); err != nil || n > 0 {
+		s.changed = true
+	}
+	return res, nil
 }
 
 // Open creates or opens the register. It takes the lock first, creates the schema in one transaction if the
@@ -51,7 +75,7 @@ func Open(ctx context.Context, opt Options) (*Store, error) {
 		return nil, err
 	}
 
-	lock, err := acquireLock(dbPath + ".lock")
+	lock, err := acquireLock(lockPath(dbPath))
 	if err != nil {
 		if errors.Is(err, ErrLocked) {
 			return nil, fmt.Errorf("%w: %s", ErrLocked, dbPath)
@@ -68,13 +92,34 @@ func Open(ctx context.Context, opt Options) (*Store, error) {
 	return s, nil
 }
 
-// Close closes the database and then releases the lock.
+// Close takes a snapshot of the register if this run wrote to it (see snapshot.go), closes the database and then
+// releases the lock. A failed snapshot is reported in the error, but the run's own writes stand.
 func (s *Store) Close() error {
-	err := s.db.Close()
-	if lerr := s.lock.release(); err == nil {
-		err = lerr
+	var errs []error
+	ctx := context.Background() // an interrupted run still gets its snapshot
+	if s.changed {
+		now := time.Now()
+		if err := s.recordWrite(ctx, now); err != nil {
+			errs = append(errs, fmt.Errorf("record the time of this change: %w", err))
+		}
+		switch err := s.Snapshot(ctx, now); {
+		case errors.Is(err, errPrune):
+			errs = append(errs, err)
+		case err != nil:
+			errs = append(errs, fmt.Errorf("register snapshot failed: %w", err))
+		}
 	}
-	return err
+	errs = append(errs, s.db.Close(), s.lock.release())
+	return errors.Join(errs...)
+}
+
+func lockPath(dbPath string) string { return dbPath + ".lock" }
+
+// OwnPaths are the paths the register keeps next to its database: the database, SQLite's companion files, the lock
+// file and the snapshot directory. A scan never records them, wherever they are.
+func (s *Store) OwnPaths() []string {
+	db := s.dbPath
+	return []string{db, db + "-wal", db + "-shm", db + "-journal", lockPath(db), SnapshotDir(db)}
 }
 
 // DBPath is the absolute path of the database file.
@@ -114,6 +159,9 @@ func dsn(path string) string {
 	q.Add("_pragma", "foreign_keys(1)")
 	q.Add("_pragma", "busy_timeout(5000)")
 	q.Add("_pragma", "synchronous(NORMAL)")
+	// Triggers and views stored in the database may not call functions with side effects: a database that was
+	// altered or swapped can carry its own SQL, which then runs whenever filo reads or writes.
+	q.Add("_pragma", "trusted_schema(0)")
 	u := url.URL{Scheme: "file", Path: filepath.ToSlash(path), RawQuery: q.Encode()}
 	return u.String()
 }
@@ -129,7 +177,8 @@ func openLocked(ctx context.Context, dbPath string) (*Store, error) {
 	// One connection: the per-connection pragmas apply to it, and Filo has one writer anyway.
 	db.SetMaxOpenConns(1)
 
-	if err := initOrCheck(ctx, db); err != nil {
+	changed, err := initOrCheck(ctx, db, dbPath)
+	if err != nil {
 		db.Close()
 		return nil, fmt.Errorf("database %s: %w", dbPath, err)
 	}
@@ -139,7 +188,7 @@ func openLocked(ctx context.Context, dbPath string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("database %s: set WAL mode: %w", dbPath, err)
 	}
-	return &Store{db: db, dbPath: dbPath}, nil
+	return &Store{db: db, dbPath: dbPath, changed: changed}, nil
 }
 
 // precreate makes a new database file with mode 0600 so the register is private to its owner (SQLite would use
@@ -159,15 +208,21 @@ func precreate(dbPath string) error {
 	return nil
 }
 
-func initOrCheck(ctx context.Context, db *sql.DB) error {
+// initOrCheck creates the register in an empty database or checks (and upgrades) an existing one. It reports
+// whether it changed the database: created it, or upgraded its schema.
+func initOrCheck(ctx context.Context, db *sql.DB, dbPath string) (bool, error) {
 	var tables int
 	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM sqlite_master WHERE type = 'table'`).Scan(&tables); err != nil {
-		return err
+		return false, err
 	}
 	if tables == 0 {
-		return create(ctx, db)
+		return true, create(ctx, db)
 	}
-	return check(ctx, db)
+	before, _ := metaValue(ctx, db, metaSchemaVersion) // check reports a missing or unreadable version
+	if err := check(ctx, db, dbPath); err != nil {
+		return false, err
+	}
+	return before != strconv.Itoa(SchemaVersion), nil
 }
 
 func create(ctx context.Context, db *sql.DB) error {
@@ -193,7 +248,7 @@ func create(ctx context.Context, db *sql.DB) error {
 	return tx.Commit()
 }
 
-func check(ctx context.Context, db *sql.DB) error {
+func check(ctx context.Context, db *sql.DB, dbPath string) error {
 	var hasMeta int
 	if err := db.QueryRowContext(ctx,
 		`SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'meta'`).Scan(&hasMeta); err != nil {
@@ -232,6 +287,12 @@ func check(ctx context.Context, db *sql.DB) error {
 	}
 	if algo != hasher.Algorithm {
 		return fmt.Errorf("%w: database hashes are %s, this filo uses %s", ErrSchemaVersion, algo, hasher.Algorithm)
+	}
+	// A copy of the database as it was, kept outside the rotation, before anything is changed. No copy, no upgrade.
+	if v < SchemaVersion {
+		if err := snapshotBeforeUpgrade(ctx, db, dbPath, v, time.Now()); err != nil {
+			return err
+		}
 	}
 	for ; v < SchemaVersion; v++ {
 		if err := migrate(ctx, db, v); err != nil {

@@ -59,5 +59,8 @@ func Time(utc string) string {
 	if err != nil {
 		return utc
 	}
-	return t.Local().Format("2006-01-02 15:04")
+	return LocalTime(t)
 }
+
+// LocalTime shows a time as local time to the minute.
+func LocalTime(t time.Time) string { return t.Local().Format("2006-01-02 15:04") }

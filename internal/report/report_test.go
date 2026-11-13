@@ -3,6 +3,7 @@ package report
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/alansav/filo/internal/store"
 )
@@ -108,5 +109,35 @@ func TestDirGroups(t *testing.T) {
 		if got[i] != want[i] {
 			t.Errorf("group %d = %+v, want %+v", i, got[i], want[i])
 		}
+	}
+}
+
+func TestWriteTextSnapshots(t *testing.T) {
+	latest := time.Date(2026, 11, 13, 10, 0, 0, 0, time.Local)
+	tests := []struct {
+		name string
+		sn   store.SnapshotInfo
+		want []string
+	}{
+		{"none yet", store.SnapshotInfo{Dir: "/d"}, []string{"Register snapshots",
+			"  none yet; one is written after each command that changes the register"}},
+		{"current", store.SnapshotInfo{Dir: "/d", Count: 2, Latest: latest, LatestWrite: latest}, []string{
+			"Register snapshots", "  2 in /d, latest 2026-11-13 10:00"}},
+		{"behind the latest write", store.SnapshotInfo{Dir: "/d", Count: 1, Latest: latest,
+			LatestWrite: latest.Add(time.Hour)}, []string{"Register snapshots", "  1 in /d, latest 2026-11-13 10:00",
+			"  warning: the register changed at 2026-11-13 11:00, after the latest snapshot; see the warning after " +
+				"each command"}},
+		{"only future-dated ones", store.SnapshotInfo{Dir: "/d", Future: 2, LatestWrite: latest}, []string{
+			"Register snapshots",
+			"  warning: none in /d, though the register has changed; see the warning after each command",
+			"  warning: 2 snapshots are dated in the future (was the clock ahead?); kept, but not counted as the latest"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := section(t, Report{Snapshots: tc.sn}, "Register snapshots")
+			if strings.Join(got, "\n") != strings.Join(tc.want, "\n") {
+				t.Errorf("got\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(tc.want, "\n"))
+			}
+		})
 	}
 }

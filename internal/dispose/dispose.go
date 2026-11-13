@@ -55,7 +55,10 @@ func (d *Disposer) Delete(ctx context.Context, c store.Candidate) (Outcome, erro
 	if err := ctx.Err(); err != nil {
 		return Outcome{}, err
 	}
-	p := c.AbsPath()
+	p, o, ok := within(c)
+	if !ok {
+		return o, nil
+	}
 	fi, err := os.Lstat(p)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
@@ -115,6 +118,10 @@ func (d *Disposer) Delete(ctx context.Context, c store.Candidate) (Outcome, erro
 	if beforeRemove != nil {
 		beforeRemove(p)
 	}
+	// The folders are checked again: hashing a large file takes long enough for one to be swapped for a symlink.
+	if why, ok := realFolders(c.RootPath, filepath.FromSlash(c.Path)); !ok || why != "" {
+		return skip("changed while it was being checked; run filo scan"), nil
+	}
 	last, err := os.Lstat(p)
 	if err != nil {
 		return skip("changed while it was being checked; run filo scan"), nil
@@ -126,7 +133,7 @@ func (d *Disposer) Delete(ctx context.Context, c store.Candidate) (Outcome, erro
 	}
 
 	if err := removeFile(p); err != nil {
-		return Outcome{Reason: "could not be deleted: " + errText(err), Failed: true}, nil
+		return Outcome{Reason: "could not be deleted: " + store.ErrDetail(err), Failed: true}, nil
 	}
 	if err := d.rec.Deleted(ctx, c, d.now()); err != nil {
 		return Outcome{Deleted: true}, fmt.Errorf("%w (%s was deleted; the next scan will report it missing)", err, p)
@@ -135,8 +142,60 @@ func (d *Disposer) Delete(ctx context.Context, c store.Candidate) (Outcome, erro
 	return Outcome{Deleted: true}, nil
 }
 
+// within returns the candidate's absolute path if it is inside its root, or else the outcome that stops its
+// deletion. The register only ever records clean paths below canonical roots, and a walk never follows a symlink, so
+// anything else means the register was altered (a path such as ../../.ssh/id_ed25519; refused, exit 1) or a folder
+// from the root down was replaced by a symlink since the scan (an ordinary change: skipped, a scan clears it up).
+// Folders above the root are not checked: the root was resolved when it was added, and a symlink above it (a home
+// directory moved to another disk) moves the whole root, which scans handle.
+func within(c store.Candidate) (string, Outcome, bool) {
+	altered := Outcome{Reason: "its recorded path is not inside its root; the register may have been altered, so " +
+		"it is not deleted", Failed: true}
+	rel := filepath.FromSlash(c.Path)
+	if c.Path == "" || !filepath.IsLocal(rel) || filepath.Clean(rel) != rel || !filepath.IsAbs(c.RootPath) ||
+		filepath.Clean(c.RootPath) != c.RootPath {
+		return "", altered, false
+	}
+	p := filepath.Join(c.RootPath, rel)
+	if !inside(p, c.RootPath) {
+		return "", altered, false
+	}
+	if why, _ := realFolders(c.RootPath, rel); why != "" {
+		return "", skip(why), false
+	}
+	return p, Outcome{}, true
+}
+
+// realFolders checks, with lstat, that the root and every folder below it down to the file at rel are real folders,
+// not symlinks. It returns why not, or ok false if a folder could not be looked at (gone or unreadable; the caller's
+// lstat of the file reports that).
+func realFolders(root, rel string) (why string, ok bool) {
+	dir := root
+	parts := strings.Split(filepath.Dir(rel), string(filepath.Separator))
+	if filepath.Dir(rel) == "." {
+		parts = nil
+	}
+	for i := -1; i < len(parts); i++ {
+		if i >= 0 {
+			dir = filepath.Join(dir, parts[i])
+		}
+		fi, err := os.Lstat(dir)
+		if err != nil {
+			return "", false
+		}
+		if fi.Mode()&fs.ModeSymlink != 0 {
+			target, _ := os.Readlink(dir)
+			return "a folder on its path is now a symlink (" + dir + " to " + target + "); run filo scan", true
+		}
+		if !fi.IsDir() {
+			return "a folder on its path is no longer a folder (" + dir + "); run filo scan", true
+		}
+	}
+	return "", true
+}
+
 func (d *Disposer) unreadable(ctx context.Context, c store.Candidate, err error) (Outcome, error) {
-	why := "cannot be read: " + errText(err)
+	why := "cannot be read: " + store.ErrDetail(err)
 	if rerr := d.rec.Unreadable(ctx, c, why); rerr != nil {
 		return Outcome{}, rerr
 	}
@@ -163,15 +222,6 @@ func ino(fi fs.FileInfo) uint64 {
 
 // sameIno compares inodes only when both are known, as a scan does.
 func sameIno(a, b uint64) bool { return a == 0 || b == 0 || a == b }
-
-// errText is an error without the path, which the caller shows already.
-func errText(err error) string {
-	var pe *fs.PathError
-	if errors.As(err, &pe) {
-		return pe.Err.Error()
-	}
-	return err.Error()
-}
 
 // PruneDirs removes the folders this run emptied: a folder a file was deleted from, if it now has no entries at all
 // (hidden ones included), then each parent that removal emptied, stopping below the root. A folder that was already
@@ -203,7 +253,7 @@ func (d *Disposer) PruneDirs() (removed []string, problems []error) {
 			if err := removeDir(dir); err != nil {
 				// Something appeared in it, or it cannot be removed: either way it stays.
 				if !errors.Is(err, fs.ErrExist) && !isNotEmpty(err) {
-					problems = append(problems, fmt.Errorf("could not remove the empty folder %s: %s", dir, errText(err)))
+					problems = append(problems, fmt.Errorf("could not remove the empty folder %s: %s", dir, store.ErrDetail(err)))
 				}
 				continue
 			}

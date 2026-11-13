@@ -224,7 +224,7 @@ func (s *Store) RecordExport(ctx context.Context, path string, now time.Time, it
 	if err := write(id); err != nil {
 		return 0, err
 	}
-	if err := tx.Commit(); err != nil {
+	if err := s.commit(tx); err != nil {
 		return 0, fmt.Errorf("record export: %w", err)
 	}
 	return id, nil
@@ -357,7 +357,7 @@ func (s *Store) UpdateRetention(ctx context.Context, rows []RetentionRow, now ti
 			return res, fmt.Errorf("record retention: %w", err)
 		}
 	}
-	if err := tx.Commit(); err != nil {
+	if err := s.commit(tx); err != nil {
 		return res, fmt.Errorf("record retention: %w", err)
 	}
 	return res, nil

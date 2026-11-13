@@ -291,7 +291,7 @@ func (s *Store) ApplyScan(ctx context.Context, rec ScanRecord, ch Changes) (int6
 		finished.Sub(rec.Started).Milliseconds(), scanID); err != nil {
 		return 0, fmt.Errorf("finish scan: %w", err)
 	}
-	if err := tx.Commit(); err != nil {
+	if err := s.commit(tx); err != nil {
 		return 0, fmt.Errorf("commit scan: %w", err)
 	}
 	return scanID, nil
