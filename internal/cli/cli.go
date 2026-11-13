@@ -154,14 +154,14 @@ func (e *env) run(ctx context.Context, args []string) error {
 	db := global.String("db", "", "")
 	pos, err := parseLeading(global, args)
 	if errors.Is(err, flag.ErrHelp) {
-		fmt.Fprint(e.stdout, usage)
+		writeLines(e.stdout, usage)
 		return err
 	}
 	if err != nil {
 		return err
 	}
 	if len(pos) == 0 {
-		fmt.Fprint(e.stdout, usage)
+		writeLines(e.stdout, usage)
 		return nil
 	}
 	cmd, rest := pos[0], pos[1:]
@@ -169,12 +169,12 @@ func (e *env) run(ctx context.Context, args []string) error {
 	case "help", "-h", "--help":
 		if len(rest) > 0 {
 			if u, ok := commandUsage[rest[0]]; ok {
-				fmt.Fprint(e.stdout, u)
+				writeLines(e.stdout, u)
 				return nil
 			}
 			return usageError{fmt.Sprintf("no help for %q", rest[0])}
 		}
-		fmt.Fprint(e.stdout, usage)
+		writeLines(e.stdout, usage)
 		return nil
 	case "roots":
 		return e.roots(ctx, *db, rest)
@@ -490,7 +490,7 @@ func skippedBy(prefix string, set store.Settings) bool {
 func (e *env) parse(fs *flag.FlagSet, cmd string, args []string) ([]string, error) {
 	pos, err := parseInterspersed(fs, args)
 	if errors.Is(err, flag.ErrHelp) {
-		fmt.Fprint(e.stdout, commandUsage[cmd])
+		writeLines(e.stdout, commandUsage[cmd])
 	}
 	return pos, err
 }

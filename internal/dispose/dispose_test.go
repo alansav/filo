@@ -350,3 +350,44 @@ func TestDeleteOnlyInsideRoot(t *testing.T) {
 		})
 	}
 }
+
+// TestDeleteSymlinkAboveRoot: a symlink above the root (a home directory moved to another disk) does not block
+// deletion; only folders from the root down are checked.
+func TestDeleteSymlinkAboveRoot(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks need privileges on windows")
+	}
+	base := canonicalTemp(t)
+	write(t, filepath.Join(base, "disk", "home", "docs", "f"), "content")
+	if err := os.Symlink(filepath.Join(base, "disk", "home"), filepath.Join(base, "home")); err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Join(base, "home", "docs") // reached through the symlink
+	o, err := New(&fakeRec{}, time.Now).Delete(context.Background(), candidate(t, root, "f"))
+	if err != nil || !o.Deleted {
+		t.Errorf("Delete = %+v, %v; want deleted", o, err)
+	}
+}
+
+// TestDeleteFolderSwappedDuringCheck: a folder replaced by a symlink while the file is being checked (hashing a
+// large file takes a while) stops the deletion at the last look.
+func TestDeleteFolderSwappedDuringCheck(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks need privileges on windows")
+	}
+	root := canonicalTemp(t)
+	write(t, filepath.Join(root, "dir", "f"), "content")
+	c := candidate(t, root, "dir/f")
+	beforeRemove = func(string) {
+		os.Rename(filepath.Join(root, "dir"), filepath.Join(root, "moved"))
+		os.Symlink(filepath.Join(root, "moved"), filepath.Join(root, "dir"))
+	}
+	t.Cleanup(func() { beforeRemove = nil })
+	o, err := New(&fakeRec{}, time.Now).Delete(context.Background(), c)
+	if err != nil || o.Deleted || !strings.Contains(o.Reason, "changed while it was being checked") {
+		t.Errorf("Delete = %+v, %v; want skipped as changed", o, err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "moved", "f")); err != nil {
+		t.Errorf("the file was deleted through the swapped folder: %v", err)
+	}
+}

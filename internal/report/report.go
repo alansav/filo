@@ -243,7 +243,6 @@ func (r Report) WriteText(w io.Writer) error {
 func (r Report) writeSnapshots(p *printer) {
 	sn := r.Snapshots
 	p.line("Register snapshots")
-	stamp := LocalTime
 	upgrades := ""
 	if sn.PreUpgrade > 0 {
 		upgrades = fmt.Sprintf(" (and %s from before an upgrade)", Plural(int64(sn.PreUpgrade), "copy", "copies"))
@@ -257,10 +256,10 @@ func (r Report) writeSnapshots(p *printer) {
 		p.line("  warning: none in %s, though the register has changed%s; see the warning after each command",
 			sn.Dir, upgrades)
 	default:
-		p.line("  %d in %s, latest %s%s", sn.Count, sn.Dir, stamp(sn.Latest), upgrades)
+		p.line("  %d in %s, latest %s%s", sn.Count, sn.Dir, LocalTime(sn.Latest), upgrades)
 		if sn.Latest.Before(sn.LatestWrite) {
 			p.line("  warning: the register changed at %s, after the latest snapshot; see the warning after each "+
-				"command", stamp(sn.LatestWrite))
+				"command", LocalTime(sn.LatestWrite))
 		}
 	}
 	if sn.Future > 0 {

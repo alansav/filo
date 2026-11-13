@@ -11,7 +11,10 @@ import (
 func TestVisible(t *testing.T) {
 	tests := []struct{ in, want string }{
 		{"plain name.pdf", "plain name.pdf"},
-		{"line\nnext\tcol", "line\nnext\tcol"},
+		{"one line\n", "one line\n"},
+		{"line\nnext\tcol", `line\nnext\tcol`},
+		{"fake\n  2020-01-01  1 KB  /home/u/harmless.txt\n", `fake\n  2020-01-01  1 KB  /home/u/harmless.txt` + "\n"},
+		{`a\x1b.txt`, `a\\x1b.txt`},
 		{"🏖️ beach é", "🏖️ beach é"},
 		{"erase\x1b[2K\x1b[1Aline", `erase\x1b[2K\x1b[1Aline`},
 		{"back\rover", `back\x0dover`},
@@ -40,14 +43,19 @@ func TestNamesCannotControlTheTerminal(t *testing.T) {
 		t.Fatal(err)
 	}
 	evil := "a\x1b[1A\x1b[2Kb\u202ec.txt"
-	if err := os.WriteFile(filepath.Join(root, evil), []byte("x"), 0o644); err != nil {
-		t.Fatal(err)
+	fake := "x.txt\n  2020-01-01  1 KB  fake.txt"
+	for _, name := range []string{evil, fake} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(name), 0o644); err != nil {
+			t.Fatal(err)
+		}
 	}
 	env := map[string]string{"FILO_DB": filepath.Join(work, "filo.db")}
 	ctx := context.Background()
 	run(t, ctx, env, "roots", "add", root)
-	if err := os.Remove(filepath.Join(root, evil)); err != nil {
-		t.Fatal(err)
+	for _, name := range []string{evil, fake} {
+		if err := os.Remove(filepath.Join(root, name)); err != nil {
+			t.Fatal(err)
+		}
 	}
 	for _, args := range [][]string{{"scan"}, {"report"}} {
 		r := run(t, ctx, env, args...)
@@ -57,6 +65,9 @@ func TestNamesCannotControlTheTerminal(t *testing.T) {
 		}
 		if strings.ContainsAny(out, "\x1b\u202e") {
 			t.Errorf("filo %v printed a raw control character", args)
+		}
+		if !strings.Contains(out, `x.txt\n  2020-01-01`) || strings.Contains(out, "\n  2020-01-01") {
+			t.Errorf("filo %v let a newline in a name start a line of its own:\n%s", args, out)
 		}
 	}
 }

@@ -154,7 +154,7 @@ func TestSnapshotOnClose(t *testing.T) {
 		}
 	}
 	s = mustOpen(t, Options{DBPath: db})
-	if _, err := s.db.ExecContext(ctx, `INSERT INTO meta (key, value) VALUES ('test', 'written')`); err != nil {
+	if _, err := s.exec(ctx, `INSERT INTO meta (key, value) VALUES ('test', 'written')`); err != nil {
 		t.Fatal(err)
 	}
 	mustClose(t, s)
@@ -197,7 +197,7 @@ func TestSnapshotFailureKeepsTheWrite(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := mustOpen(t, Options{DBPath: db})
-	if _, err := s.db.ExecContext(ctx, `INSERT INTO meta (key, value) VALUES ('test', 'written')`); err != nil {
+	if _, err := s.exec(ctx, `INSERT INTO meta (key, value) VALUES ('test', 'written')`); err != nil {
 		t.Fatal(err)
 	}
 	err := s.Close()
@@ -209,4 +209,86 @@ func TestSnapshotFailureKeepsTheWrite(t *testing.T) {
 	}
 	// The lock was released despite the failure.
 	mustClose(t, mustOpen(t, Options{DBPath: db}))
+}
+
+// TestNoSnapshotForARolledBackRun: a run whose only write was rolled back (a failed or interrupted scan) changed
+// nothing, so it takes no snapshot and records no write.
+func TestNoSnapshotForARolledBackRun(t *testing.T) {
+	ctx := context.Background()
+	db := tempDB(t)
+	mustClose(t, mustOpen(t, Options{DBPath: db}))
+	before := snapshotNames(t, db)
+	s := mustOpen(t, Options{DBPath: db})
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO meta (key, value) VALUES ('test', 'x')`); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	mustClose(t, s)
+	if after := snapshotNames(t, db); !slices.Equal(after, before) {
+		t.Errorf("snapshots %v after a rolled-back run, want %v", after, before)
+	}
+}
+
+// TestWritesGoThroughTheHelpers guards the rule that every write in this package goes through commit or exec, so a
+// run that changes the register always gets its snapshot. Creating and upgrading the database (store.go) and Close's
+// own record of the write time (snapshot.go) are the exceptions.
+func TestWritesGoThroughTheHelpers(t *testing.T) {
+	files, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range files {
+		if strings.HasSuffix(f, "_test.go") {
+			continue
+		}
+		data, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		src := string(data)
+		if f != "store.go" && strings.Contains(src, ".Commit()") {
+			t.Errorf("%s commits a transaction itself; use s.commit(tx)", f)
+		}
+		if n := strings.Count(src, "s.db.ExecContext("); n > 0 && f != "store.go" && !(f == "snapshot.go" && n == 1) {
+			t.Errorf("%s writes with s.db.ExecContext; use s.exec", f)
+		}
+	}
+}
+
+func TestSnapshotsCountsFutureApart(t *testing.T) {
+	ctx := context.Background()
+	db := tempDB(t)
+	s := mustOpen(t, Options{DBPath: db})
+	defer mustClose(t, s)
+	now := time.Date(2026, 11, 13, 12, 0, 0, 0, time.UTC)
+	if err := os.Mkdir(SnapshotDir(db), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for _, at := range []time.Time{now.Add(24 * time.Hour), now.Add(48 * time.Hour)} {
+		if err := os.WriteFile(filepath.Join(SnapshotDir(db), snapName(at)), nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	info, err := s.Snapshots(ctx, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Count != 0 || info.Future != 2 || !info.Latest.IsZero() {
+		t.Errorf("Snapshots = %+v; want none current and two in the future", info)
+	}
+}
+
+func TestPruneReportsRemovalErrors(t *testing.T) {
+	now := time.Date(2026, 11, 13, 12, 0, 0, 0, time.UTC)
+	gone := now.AddDate(0, -3, 0) // old enough to be pruned, but its file is not there
+	have := []time.Time{gone, now.Add(-3 * time.Hour), now.Add(-2 * time.Hour), now.Add(-time.Hour)}
+	if err := prune(t.TempDir(), have, now, time.UTC); err == nil {
+		t.Error("prune returned no error for a snapshot it could not remove")
+	}
 }

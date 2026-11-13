@@ -48,7 +48,7 @@ func TestSnapshotDirChecks(t *testing.T) {
 	ctx := context.Background()
 	write := func(t *testing.T, s *Store) {
 		t.Helper()
-		if _, err := s.db.ExecContext(ctx, `INSERT INTO meta (key, value) VALUES ('test', 'x')
+		if _, err := s.exec(ctx, `INSERT INTO meta (key, value) VALUES ('test', 'x')
 			ON CONFLICT (key) DO UPDATE SET value = value || 'x'`); err != nil {
 			t.Fatal(err)
 		}

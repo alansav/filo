@@ -63,10 +63,6 @@ func snapTime(name string) (time.Time, bool) {
 // it is renamed into place, and the directory after, so a power cut cannot leave a torn newest snapshot once older
 // ones are pruned. An existing file of the final name is never replaced.
 func writeSnapshot(ctx context.Context, db *sql.DB, dir, name string) error {
-	if err := snapshotDir(dir); err != nil {
-		return err
-	}
-	removeStaleTmp(dir)
 	final := filepath.Join(dir, name)
 	if _, err := os.Lstat(final); err == nil {
 		return fmt.Errorf("%s already exists", final)
@@ -119,20 +115,31 @@ func snapshotDir(dir string) error {
 	return nil
 }
 
-// removeStaleTmp removes the temporary files an interrupted snapshot left behind, rotated or taken before an
-// upgrade. The caller holds the register's lock, so no other run is writing one.
-func removeStaleTmp(dir string) {
+// openSnapshotDir makes sure the snapshot directory is fit to use (see snapshotDir) and lists it once for the
+// callers: it removes the temporary files an interrupted snapshot left behind, rotated or taken before an upgrade
+// (the caller holds the register's lock, so no other run is writing one), and returns the other entries.
+func openSnapshotDir(dir string) ([]fs.DirEntry, error) {
+	if err := snapshotDir(dir); err != nil {
+		return nil, err
+	}
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return
+		return nil, err
 	}
+	var out []fs.DirEntry
 	for _, e := range entries {
 		n := e.Name()
 		if strings.HasPrefix(n, snapPrefix) && strings.HasSuffix(n, ".db"+tmpSuffix) && e.Type().IsRegular() {
 			os.Remove(filepath.Join(dir, n))
+			continue
 		}
+		out = append(out, e)
 	}
+	return out, nil
 }
+
+// errPrune marks a failure to remove old snapshots, after the new one was written.
+var errPrune = errors.New("pruning old snapshots failed (the new snapshot was written)")
 
 func syncFile(path string) error {
 	f, err := os.OpenFile(path, os.O_RDWR, 0)
@@ -158,25 +165,30 @@ func syncDir(dir string) {
 // pruned unless the new snapshot was written.
 func (s *Store) Snapshot(ctx context.Context, now time.Time) error {
 	dir := SnapshotDir(s.dbPath)
-	if err := writeSnapshot(ctx, s.db, dir, snapName(now)); err != nil {
-		return err
-	}
-	return prune(dir, now, time.Local)
-}
-
-// prune removes the rotated snapshots the rotation no longer keeps.
-func prune(dir string, now time.Time, loc *time.Location) error {
-	entries, err := os.ReadDir(dir)
+	entries, err := openSnapshotDir(dir) // one listing serves the clean-up and the rotation
 	if err != nil {
 		return err
 	}
 	var times []time.Time
-	var errs []error
 	for _, e := range entries {
 		if t, ok := snapTime(e.Name()); ok && e.Type().IsRegular() {
 			times = append(times, t)
 		}
 	}
+	name := snapName(now)
+	if err := writeSnapshot(ctx, s.db, dir, name); err != nil {
+		return err
+	}
+	t, _ := snapTime(name)
+	if err := prune(dir, append(times, t), now, time.Local); err != nil {
+		return fmt.Errorf("%w: %w", errPrune, err)
+	}
+	return nil
+}
+
+// prune removes the rotated snapshots (at times, in dir) the rotation no longer keeps.
+func prune(dir string, times []time.Time, now time.Time, loc *time.Location) error {
+	var errs []error
 	kept := keep(times, now, loc)
 	for _, t := range times {
 		if !kept[t] {
@@ -244,7 +256,7 @@ func keep(times []time.Time, now time.Time, loc *time.Location) map[time.Time]bo
 // SnapshotInfo is what the report shows about the snapshots.
 type SnapshotInfo struct {
 	Dir         string
-	Count       int       // rotated snapshots
+	Count       int       // rotated snapshots, not counting those dated in the future
 	Latest      time.Time // the newest not dated in the future; zero if none
 	Future      int       // dated in the future: the clock was ahead when they were taken
 	PreUpgrade  int       // snapshots taken before a schema upgrade, never rotated away
@@ -264,11 +276,12 @@ func (s *Store) Snapshots(ctx context.Context, now time.Time) (SnapshotInfo, err
 			continue
 		}
 		if t, ok := snapTime(e.Name()); ok {
-			info.Count++
-			switch {
-			case t.After(now.Add(snapSkew)):
+			if t.After(now.Add(snapSkew)) {
 				info.Future++
-			case t.After(info.Latest):
+				continue
+			}
+			info.Count++
+			if t.After(info.Latest) {
 				info.Latest = t
 			}
 		} else if strings.Contains(e.Name(), "-before-upgrade-") && strings.HasSuffix(e.Name(), ".db") {
@@ -303,27 +316,19 @@ func ErrDetail(err error) string {
 	return err.Error()
 }
 
-// wrote reports whether this connection changed anything since it was opened. The store has a single connection,
-// so this covers the whole run.
-func (s *Store) wrote(ctx context.Context) (bool, error) {
-	var n int64
-	if err := s.db.QueryRowContext(ctx, `SELECT total_changes()`).Scan(&n); err != nil {
-		return false, err
-	}
-	return n > 0, nil
-}
-
 // snapshotBeforeUpgrade keeps a copy of a database about to be upgraded from version v. It is never rotated away.
 // One copy per version is enough: if an upgrade keeps failing (an hourly timer opening an old database), no further
 // copies pile up.
 func snapshotBeforeUpgrade(ctx context.Context, db *sql.DB, dbPath string, v int, now time.Time) error {
 	dir := SnapshotDir(dbPath)
 	prefix := fmt.Sprintf("filo-v%d-before-upgrade-", v)
-	if entries, err := os.ReadDir(dir); err == nil {
-		for _, e := range entries {
-			if strings.HasPrefix(e.Name(), prefix) && strings.HasSuffix(e.Name(), snapSuffix) && e.Type().IsRegular() {
-				return nil
-			}
+	entries, err := openSnapshotDir(dir)
+	if err != nil {
+		return fmt.Errorf("keep a copy before upgrading it: %w", err)
+	}
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), prefix) && strings.HasSuffix(e.Name(), snapSuffix) && e.Type().IsRegular() {
+			return nil
 		}
 	}
 	if err := writeSnapshot(ctx, db, dir, prefix+now.UTC().Format(snapLayout)+snapSuffix); err != nil {

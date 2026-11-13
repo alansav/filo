@@ -86,9 +86,12 @@ exist nowhere else, and on the laptop it is outside every backup (Vorta runs on 
   it (`~/.local/share/filo/filo.db.snapshots/`). `VACUUM INTO` writes one self-contained, compacted file from a read
   transaction; copying `filo.db` instead could miss commits still in the WAL file or catch a page being written. It
   is a copy, not a compaction of the live database.
-- **When.** At the end of every run that wrote to the register (`total_changes()` of its single connection), in
-  `Store.Close`, while the lock is held; so no list of writing commands is kept. A run that only read takes none. An
-  interrupted run that wrote still takes one.
+- **When.** At the end of every run that committed a change to the register, in `Store.Close`, while the lock is
+  held; so no list of writing commands is kept. Every write in the store goes through two helpers (`commit` and
+  `exec`) that note the change only once it is committed (a test guards that rule), plus creating or upgrading the
+  database. A run that only read takes none, and nor does one whose write was rolled back (a failed or interrupted
+  scan; `total_changes()`, used at first, also counted those). An interrupted run that committed something takes
+  one.
 - **Before a schema upgrade**, a copy of the old database is kept as `filo-vN-before-upgrade-<time>Z.db`, outside
   the rotation, one per old version: an upgrade that keeps failing (a timer opening an old database every hour)
   does not pile up copies. If that copy cannot be written, the upgrade is refused.
@@ -446,9 +449,12 @@ files). Replaces the earlier plan of a quarantine, holds and several checks at t
     A last `lstat` just before the removal checks inode, size and modification time against what was read.
   - *Only inside its root* (hardening of 2026-11-13). Before anything else, the recorded path must be a clean
     relative path below a clean, absolute root (no `..`), and every folder from the root down must still be a real
-    folder: a symlink there means the tree changed since the scan (skipped, "run filo scan"). A path outside its
-    root can only come from an altered register (`../../.ssh/id_ed25519` with that file's hash): it is refused with
-    exit 1. The hash check alone does not stop that, since whoever can edit the register can usually read the file.
+    folder, each checked with `lstat`: a symlink there means the tree changed since the scan (skipped, "run filo
+    scan"). Folders above the root are not checked: a symlink there (a home directory moved to another disk) moves
+    the whole root, which scans handle. The folder check is repeated at the last look before the unlink, since
+    hashing a large file leaves time for a folder to be swapped. A path outside its root can only come from an
+    altered register (`../../.ssh/id_ed25519` with that file's hash): it is refused with exit 1. The hash check alone
+    does not stop that, since whoever can edit the register can usually read the file.
   - *Removal* is `unlink` for a file or symlink (it refuses a directory) and `rmdir` for a folder (it refuses a
     non-empty folder and a file). The fallback on other platforms checks first and is untested.
   - *A file deleted by filo is never "missing"*: pairing (returned files) skips deleted rows. A new file with a
@@ -472,8 +478,12 @@ files). Replaces the earlier plan of a quarantine, holds and several checks at t
   anywhere (attachments, files synced from a phone, an altered register). Everything printed goes through one
   writer that shows control characters, escape sequences, invalid UTF-8 and Unicode bidi controls as visible
   escapes (`\x1b`, `\u202e`), so a name cannot erase lines of the list a person confirms before a deletion, set the
-  window title, write the clipboard, or read in another order than it is. Newlines and tabs pass; only the progress
-  line's own control codes bypass it. The CSV export guards against spreadsheet formulas separately.
+  window title, write the clipboard, or read in another order than it is. Filo writes each line with one call, so a
+  newline passes only as the last byte of a write: one inside a write can only come from a name and is shown as
+  `\n`, so a name cannot add invented lines to that list (found in the code review of 2026-11-13; the first version
+  let newlines through). Tabs are shown as `\t` and a backslash as `\\`, so an escape cannot be confused with a
+  name holding the same text. Filo's own multi-line text (help) is written a line at a time; only the progress
+  line's own control codes bypass the writer. The CSV export guards against spreadsheet formulas separately.
 - **Prompts only in a terminal** (2026-11-12, replacing "no interactive prompts"). A command asks only where a person
   should look first: `filo update` before clearing dates, and `filo delete`. Declining, or having no
   terminal on standard input, is always the safe choice, so Filo still works the same from a script or a timer.
@@ -782,7 +792,12 @@ shape.
   ownership of the snapshot directory is not checked on non-Unix platforms. From the code review of the snapshots:
   Ctrl-C cannot interrupt a snapshot being written (milliseconds for a register of a few MB), and every run that
   writes copies the whole register, timer scans that found nothing included (fine at a few MB; skipping a snapshot
-  when a scan changed nothing is the first improvement if registers grow large).
+  when a scan changed nothing is the first improvement if registers grow large). From the code review of
+  2026-11-13: a snapshot is renamed into place after a check that the name is free, and a program not taking Filo's
+  lock could create that name in between and be overwritten (the directory is private to the user; an atomic
+  no-replace rename needs `golang.org/x/sys`); and the folders on a deleted file's path are checked by name, not
+  held open, so a folder swapped in the microseconds after the last look is followed (the thorough fix, opening each
+  folder from the root and unlinking relative to it, is for later).
 
 - **Quarantine, the recycle bin, holds and `filo restore`** (rejected 2026-11-12). Deletion is permanent and backups
   make it recoverable; the confirmed list and the re-hash check keep it safe. The bin fills up with large files and is

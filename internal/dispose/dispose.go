@@ -55,9 +55,9 @@ func (d *Disposer) Delete(ctx context.Context, c store.Candidate) (Outcome, erro
 	if err := ctx.Err(); err != nil {
 		return Outcome{}, err
 	}
-	p, reason, altered := within(c)
-	if reason != "" {
-		return Outcome{Reason: reason, Failed: altered}, nil
+	p, o, ok := within(c)
+	if !ok {
+		return o, nil
 	}
 	fi, err := os.Lstat(p)
 	switch {
@@ -118,6 +118,10 @@ func (d *Disposer) Delete(ctx context.Context, c store.Candidate) (Outcome, erro
 	if beforeRemove != nil {
 		beforeRemove(p)
 	}
+	// The folders are checked again: hashing a large file takes long enough for one to be swapped for a symlink.
+	if why, ok := realFolders(c.RootPath, filepath.FromSlash(c.Path)); !ok || why != "" {
+		return skip("changed while it was being checked; run filo scan"), nil
+	}
 	last, err := os.Lstat(p)
 	if err != nil {
 		return skip("changed while it was being checked; run filo scan"), nil
@@ -138,32 +142,56 @@ func (d *Disposer) Delete(ctx context.Context, c store.Candidate) (Outcome, erro
 	return Outcome{Deleted: true}, nil
 }
 
-// within returns the candidate's absolute path if it is inside its root, or why it is not and whether that means
-// the register was altered. The register only ever
-// records clean paths below canonical roots, and a walk never follows a symlink, so anything else means the register
-// was altered (a path such as ../../.ssh/id_ed25519) or a folder on the path was replaced by a symlink since the scan.
-// Either way nothing is deleted; only the second is an ordinary change that a scan clears up.
-func within(c store.Candidate) (path, reason string, altered bool) {
-	const notInside = "its recorded path is not inside its root; the register may have been altered, so it is not deleted"
+// within returns the candidate's absolute path if it is inside its root, or else the outcome that stops its
+// deletion. The register only ever records clean paths below canonical roots, and a walk never follows a symlink, so
+// anything else means the register was altered (a path such as ../../.ssh/id_ed25519; refused, exit 1) or a folder
+// from the root down was replaced by a symlink since the scan (an ordinary change: skipped, a scan clears it up).
+// Folders above the root are not checked: the root was resolved when it was added, and a symlink above it (a home
+// directory moved to another disk) moves the whole root, which scans handle.
+func within(c store.Candidate) (string, Outcome, bool) {
+	altered := Outcome{Reason: "its recorded path is not inside its root; the register may have been altered, so " +
+		"it is not deleted", Failed: true}
 	rel := filepath.FromSlash(c.Path)
 	if c.Path == "" || !filepath.IsLocal(rel) || filepath.Clean(rel) != rel || !filepath.IsAbs(c.RootPath) ||
 		filepath.Clean(c.RootPath) != c.RootPath {
-		return "", notInside, true
+		return "", altered, false
 	}
 	p := filepath.Join(c.RootPath, rel)
 	if !inside(p, c.RootPath) {
-		return "", notInside, true
+		return "", altered, false
 	}
-	// Every folder from the root down to the file must still be a real folder, not a symlink to somewhere else.
-	dir := filepath.Dir(p)
-	real, err := filepath.EvalSymlinks(dir)
-	switch {
-	case err != nil:
-		return p, "", false // the lstat below reports it gone or unreadable
-	case real != dir:
-		return "", "a folder on its path is now a symlink (to " + real + "); run filo scan", false
+	if why, _ := realFolders(c.RootPath, rel); why != "" {
+		return "", skip(why), false
 	}
-	return p, "", false
+	return p, Outcome{}, true
+}
+
+// realFolders checks, with lstat, that the root and every folder below it down to the file at rel are real folders,
+// not symlinks. It returns why not, or ok false if a folder could not be looked at (gone or unreadable; the caller's
+// lstat of the file reports that).
+func realFolders(root, rel string) (why string, ok bool) {
+	dir := root
+	parts := strings.Split(filepath.Dir(rel), string(filepath.Separator))
+	if filepath.Dir(rel) == "." {
+		parts = nil
+	}
+	for i := -1; i < len(parts); i++ {
+		if i >= 0 {
+			dir = filepath.Join(dir, parts[i])
+		}
+		fi, err := os.Lstat(dir)
+		if err != nil {
+			return "", false
+		}
+		if fi.Mode()&fs.ModeSymlink != 0 {
+			target, _ := os.Readlink(dir)
+			return "a folder on its path is now a symlink (" + dir + " to " + target + "); run filo scan", true
+		}
+		if !fi.IsDir() {
+			return "a folder on its path is no longer a folder (" + dir + "); run filo scan", true
+		}
+	}
+	return "", true
 }
 
 func (d *Disposer) unreadable(ctx context.Context, c store.Candidate, err error) (Outcome, error) {

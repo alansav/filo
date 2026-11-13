@@ -19,7 +19,11 @@ else stays read-only on them, and nothing overwrites an existing file. Stay insi
   its companion files and its `<db>.snapshots/` directory) except through `filo delete`, or the later work that
   calls for it. Anything destructive shows what it will do and asks first (or needs `-y`).
 - Treat file names and the register as untrusted input: delete only inside a root (`internal/dispose` checks), and
-  print through the CLI's escaping writer (`safeText`), never straight to `os.Stdout`.
+  print through the CLI's escaping writer (`safeText`), never straight to `os.Stdout`. Write each line of output with
+  one call (a newline inside a write is escaped, since only a file name puts one there); filo's own multi-line text
+  goes through `writeLines`.
+- In `internal/store`, every write goes through `s.commit(tx)` or `s.exec`, so a run that changes the register gets
+  its snapshot (`TestWritesGoThroughTheHelpers` guards it).
 - Fail safe: a file with missing or ambiguous data is "new, needs a date", never "eligible for deletion". Reaching a
   keep-until date makes a file a candidate that the person confirms, never a trigger. A file is deleted only if it
   can be read and is still exactly the content its retention was set on; one that cannot be read is never deleted.

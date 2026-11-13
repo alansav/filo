@@ -40,6 +40,30 @@ type Store struct {
 	db     *sql.DB
 	lock   *lockFile
 	dbPath string
+	// changed: this run committed a change to the register, so Close takes a snapshot. Every write goes through
+	// commit or exec, which set it only once the change is committed: a rolled-back transaction changed nothing.
+	changed bool
+}
+
+// commit commits tx and notes that this run changed the register.
+func (s *Store) commit(tx *sql.Tx) error {
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	s.changed = true
+	return nil
+}
+
+// exec runs one write statement in its own transaction and notes the change if it changed a row.
+func (s *Store) exec(ctx context.Context, q string, args ...any) (sql.Result, error) {
+	res, err := s.db.ExecContext(ctx, q, args...)
+	if err != nil {
+		return res, err
+	}
+	if n, err := res.RowsAffected(); err != nil || n > 0 {
+		s.changed = true
+	}
+	return res, nil
 }
 
 // Open creates or opens the register. It takes the lock first, creates the schema in one transaction if the
@@ -73,14 +97,15 @@ func Open(ctx context.Context, opt Options) (*Store, error) {
 func (s *Store) Close() error {
 	var errs []error
 	ctx := context.Background() // an interrupted run still gets its snapshot
-	if wrote, err := s.wrote(ctx); err != nil {
-		errs = append(errs, fmt.Errorf("register snapshot failed: %w", err))
-	} else if wrote {
+	if s.changed {
 		now := time.Now()
 		if err := s.recordWrite(ctx, now); err != nil {
 			errs = append(errs, fmt.Errorf("record the time of this change: %w", err))
 		}
-		if err := s.Snapshot(ctx, now); err != nil {
+		switch err := s.Snapshot(ctx, now); {
+		case errors.Is(err, errPrune):
+			errs = append(errs, err)
+		case err != nil:
 			errs = append(errs, fmt.Errorf("register snapshot failed: %w", err))
 		}
 	}
@@ -152,7 +177,8 @@ func openLocked(ctx context.Context, dbPath string) (*Store, error) {
 	// One connection: the per-connection pragmas apply to it, and Filo has one writer anyway.
 	db.SetMaxOpenConns(1)
 
-	if err := initOrCheck(ctx, db, dbPath); err != nil {
+	changed, err := initOrCheck(ctx, db, dbPath)
+	if err != nil {
 		db.Close()
 		return nil, fmt.Errorf("database %s: %w", dbPath, err)
 	}
@@ -162,7 +188,7 @@ func openLocked(ctx context.Context, dbPath string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("database %s: set WAL mode: %w", dbPath, err)
 	}
-	return &Store{db: db, dbPath: dbPath}, nil
+	return &Store{db: db, dbPath: dbPath, changed: changed}, nil
 }
 
 // precreate makes a new database file with mode 0600 so the register is private to its owner (SQLite would use
@@ -182,15 +208,21 @@ func precreate(dbPath string) error {
 	return nil
 }
 
-func initOrCheck(ctx context.Context, db *sql.DB, dbPath string) error {
+// initOrCheck creates the register in an empty database or checks (and upgrades) an existing one. It reports
+// whether it changed the database: created it, or upgraded its schema.
+func initOrCheck(ctx context.Context, db *sql.DB, dbPath string) (bool, error) {
 	var tables int
 	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM sqlite_master WHERE type = 'table'`).Scan(&tables); err != nil {
-		return err
+		return false, err
 	}
 	if tables == 0 {
-		return create(ctx, db)
+		return true, create(ctx, db)
 	}
-	return check(ctx, db, dbPath)
+	before, _ := metaValue(ctx, db, metaSchemaVersion) // check reports a missing or unreadable version
+	if err := check(ctx, db, dbPath); err != nil {
+		return false, err
+	}
+	return before != strconv.Itoa(SchemaVersion), nil
 }
 
 func create(ctx context.Context, db *sql.DB) error {
