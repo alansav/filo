@@ -37,7 +37,7 @@ func (s *Store) RootTotals(ctx context.Context) ([]RootTotal, error) {
 		}
 		var id int64
 		err := s.db.QueryRowContext(ctx, `SELECT coalesce(max(id), 0) FROM scans
-			WHERE root_id = ? AND finished_utc IS NOT NULL`, r.ID).Scan(&id)
+			WHERE root_id = ? AND kind = 'scan' AND finished_utc IS NOT NULL`, r.ID).Scan(&id)
 		if err != nil {
 			return nil, fmt.Errorf("last scan for %s: %w", r.Path, err)
 		}
@@ -254,13 +254,14 @@ type EventRow struct {
 	FinishedUTC string
 }
 
-// RecentEvents returns the n most recent moved, missing, changed, possible_move and error events, newest first.
+// RecentEvents returns the n most recent moved, missing, changed, possible_move, error, deleted and same_as_deleted
+// events, newest first.
 func (s *Store) RecentEvents(ctx context.Context, n int) ([]EventRow, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT e.kind, coalesce(e.file_id, 0), coalesce(e.path, ''), coalesce(e.other_path, ''), coalesce(e.detail, ''),
 		       sc.id, r.path, coalesce(sc.finished_utc, '')
 		FROM events e JOIN scans sc ON sc.id = e.scan_id JOIN roots r ON r.id = sc.root_id
-		WHERE e.kind IN ('moved', 'missing', 'changed', 'possible_move', 'error')
+		WHERE e.kind IN ('moved', 'missing', 'changed', 'possible_move', 'error', 'deleted', 'same_as_deleted')
 		ORDER BY e.id DESC LIMIT ?`, n)
 	if err != nil {
 		return nil, fmt.Errorf("recent events: %w", err)

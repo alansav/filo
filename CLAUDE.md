@@ -6,17 +6,18 @@ in the same commit when a design decision changes.
 
 ## Current state
 
-Iteration 2: lifespan. Each file gets a retention (a period from its `file_date`, `forever`, or a date), set through
-the retention CSV (`filo export retention`, then `filo update`), from which Filo works out `keep_until`; roots carry
-their own scan settings. Iteration 3 (deletion) is designed in `docs/design.md` but not built. Iteration 1 (scan, register, report) is done. **Still read-only on
-the user's files:** iteration 2 writes only the register and the CSV file the user names, and never overwrites an
-existing file. `filo delete` only lists the files past their date; nothing is deleted. Later iterations (quarantine and
-delete, revert, UI) are listed in `docs/design.md`. Stay inside the current iteration.
+Iteration 3: delete. `filo delete [DIR] [-y]` lists the files past their retention, asks, and deletes the chosen
+ones, each only after it is re-read and found unchanged; it removes the folders it emptied. Iterations 1 (scan,
+register, report) and 2 (lifespan: retention through the retention CSV, `filo export retention` then `filo update`)
+are done. **`internal/dispose` is the only code allowed to delete the user's files**, and only from `filo delete`;
+everything else stays read-only on them, and nothing overwrites an existing file. Later iterations (revert, UI) are
+listed in `docs/design.md`. Stay inside the current iteration.
 
 ## Hard rules
 
 - Filo must not modify, move, rename or delete any file outside its own data directory (or the `--db` path given)
-  until the iteration that calls for it. Anything destructive shows what it will do and asks first (or needs `-y`).
+  except through `filo delete` (iteration 3), or the later iteration that calls for it. Anything destructive shows
+  what it will do and asks first (or needs `-y`).
 - Fail safe: a file with missing or ambiguous data is "new, needs a date", never "eligible for deletion". Reaching a
   keep-until date makes a file a candidate that the person confirms, never a trigger. A file is deleted only if it
   can be read and is still exactly the content its retention was set on; one that cannot be read is never deleted.
@@ -45,15 +46,16 @@ prefix.)
 - Example dev run, always with a throwaway database and tree:
   `bin/filo --db /tmp/f.db roots add DIR` (adds and scans), `bin/filo --db /tmp/f.db scan`,
   `bin/filo --db /tmp/f.db report`, then `bin/filo --db /tmp/f.db export retention DIR/notes -o /tmp/l.csv`, fill in
-  `retention`, `update /tmp/l.csv` and `delete` (export refuses an existing file, so remove `/tmp/l.csv` between runs)
+  `retention`, `update /tmp/l.csv` and `delete` (export refuses an existing file, so remove `/tmp/l.csv` between runs).
+  `delete` really deletes: run it only with a throwaway `--db` whose roots are a throwaway tree
 
 Run `go vet` and the tests before saying a change is done.
 
 ## Layout
 
 - `cmd/filo/`: the command-line entry point, kept thin.
-- `internal/`: the logic, in small packages (walking, hashing, the store, reconcile, report, retention CSV). Keep OS-specific
-  code (hidden files, inodes, symlinks, path separators) behind small functions.
+- `internal/`: the logic, in small packages (walking, hashing, the store, reconcile, report, retention CSV,
+  dispose). Keep OS-specific code (hidden files, inodes, symlinks, path separators) behind small functions.
 - `scripts/`: helper scripts (`dev.sh`, `testtree.sh`).
 - `.devcontainer/Containerfile`: the dev container. `docs/design.md`: the design.
 

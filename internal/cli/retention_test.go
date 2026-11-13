@@ -208,7 +208,7 @@ func TestRetentionRoundTrip(t *testing.T) {
 	filo(ExitOK, "", false, "update", r2)
 	r = filo(ExitOK, "", false, "delete")
 	contains("delete", r.stdout, "Past their retention: 1 file", "2026-11-10", in("docs/2023-03 invoice.pdf"),
-		"filo deletes nothing")
+		"Nothing deleted: there is no terminal to ask in")
 	contains("report", filo(ExitOK, "", false, "report").stdout, "Past their retention: 1 file; see filo delete",
 		"Kept until a later date: 2 files", "Kept forever: 1 file")
 

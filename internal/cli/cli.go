@@ -38,7 +38,7 @@ Usage:
   filo export retention [DIR] -o FILE
                                     write every file under DIR (or every root) with its retention, as CSV
   filo update FILE [--dry-run]      apply the retentions edited in an exported CSV
-  filo delete                       list the files past their retention
+  filo delete [DIR] [-y]            delete the files past their retention, after asking
   filo help [COMMAND]
 
 Every command accepts --db PATH (default: $FILO_DB, then the user data directory).
@@ -97,10 +97,17 @@ not parse, a period has no file_date, the file changed since the export, or its 
 export. The other rows are still applied. --dry-run checks everything and writes nothing.
 `,
 	"delete": `Usage:
-  filo delete
+  filo delete [DIR] [-y]
 
-Lists the files past their retention whose content has not changed since the retention was set. filo never
-deletes on its own: in this version the list is all it does.
+Lists the files past their retention under DIR (inside a root), or under every root, whose content has not changed
+since the retention was set, then asks: Delete [a]ll, [s]elect or [n]one? Select goes file by file:
+[d]elete, [r]etention (give it a new one), [s]kip or [q]uit. Without a terminal it only lists; -y deletes them all
+without asking. Deletion is permanent: there is no recycle bin, so keep backups.
+
+Just before deleting, each file is read again. It is deleted only if it is still at its path as the same file and
+its content is still the content its retention was set on; otherwise it is skipped with one line saying why. A file
+that cannot be read is never deleted. Folders the run emptied are removed, up to the root. Exit code 1 if a file
+could not be read or deleted.
 `,
 }
 
@@ -179,7 +186,7 @@ func (e *env) run(ctx context.Context, args []string) error {
 	case "update":
 		return e.update(ctx, *db, rest)
 	case "delete":
-		return e.deleteList(ctx, *db, rest)
+		return e.delete(ctx, *db, rest)
 	case "review":
 		return usageError{"review was replaced by export retention and update; see filo help"}
 	default:
@@ -608,6 +615,7 @@ func (e *env) printSummary(sum reconcile.Summary, took time.Duration) {
 		{reconcile.Changed, "changed", sum.Changed},
 		{reconcile.Missing, "missing", sum.Missing},
 		{reconcile.PossibleMove, "possible moves (not applied)", sum.PossibleMoves},
+		{reconcile.SameAsDeleted, "same content as a file filo deleted", sum.SameAsDeleted},
 		{reconcile.Error, "errors", sum.Errors},
 		{reconcile.OtherFS, "other filesystems, not scanned", len(sum.OtherFS)},
 	}

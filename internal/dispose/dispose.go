@@ -1,0 +1,224 @@
+// Package dispose deletes deletion candidates, one at a time, each only after the check at the moment of deleting
+// (docs/design.md, Disposal): the file is still at its recorded path as the same file, it can be read, and its
+// content is the content its retention was set on. It then removes the folders the run emptied. This is the only
+// package that deletes the user's files.
+package dispose
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/alansav/filo/internal/fsid"
+	"github.com/alansav/filo/internal/hasher"
+	"github.com/alansav/filo/internal/store"
+)
+
+// Recorder writes each outcome to the register as it happens (store.DeleteRun).
+type Recorder interface {
+	Deleted(ctx context.Context, c store.Candidate, now time.Time) error
+	Changed(ctx context.Context, c store.Candidate, u store.FileUpdate) error
+	Unreadable(ctx context.Context, c store.Candidate, why string) error
+}
+
+// Outcome is what happened to one candidate.
+type Outcome struct {
+	Deleted bool
+	Reason  string // why it was not deleted; "" if it was
+	Failed  bool   // it could not be read or deleted (the command then exits 1)
+}
+
+// Disposer deletes candidates and remembers the folders it took entries from.
+type Disposer struct {
+	rec  Recorder
+	now  func() time.Time
+	dirs map[string]string // folder a file was deleted from -> its root
+}
+
+// New returns a Disposer that records through rec and stamps deletions with now.
+func New(rec Recorder, now func() time.Time) *Disposer {
+	return &Disposer{rec: rec, now: now, dirs: map[string]string{}}
+}
+
+// beforeRemove, if set by a test, runs after the check and before the final lstat.
+var beforeRemove func(path string)
+
+// Delete checks c and deletes it if it passes. A file that fails the check is left alone; one whose content changed
+// has its new content recorded, and one that cannot be read is flagged unreadable. The error is for a cancelled run or
+// a register that could not be written; the run should stop.
+func (d *Disposer) Delete(ctx context.Context, c store.Candidate) (Outcome, error) {
+	if err := ctx.Err(); err != nil {
+		return Outcome{}, err
+	}
+	p := c.AbsPath()
+	fi, err := os.Lstat(p)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return skip("no longer at this path; run filo scan"), nil
+	case err != nil:
+		return d.unreadable(ctx, c, err)
+	}
+	if o, bad := sameKind(c, fi); bad {
+		return o, nil
+	}
+	if !sameIno(c.Ino, ino(fi)) {
+		return skip("replaced by another file since the last scan; run filo scan"), nil
+	}
+
+	if c.Kind == "symlink" {
+		target, err := os.Readlink(p)
+		if err != nil {
+			if errors.Is(err, fs.ErrNotExist) {
+				return skip("no longer at this path; run filo scan"), nil
+			}
+			return d.unreadable(ctx, c, err)
+		}
+		if target != c.LinkTarget {
+			return skip(fmt.Sprintf("the symlink now points to %s, not %s; run filo scan", target, c.LinkTarget)), nil
+		}
+	} else {
+		// The quick check: a different size or modification time means the content changed, without reading it.
+		if fi.Size() != c.Size || fi.ModTime().UnixNano() != c.MtimeNS {
+			return skip("changed since its retention was set; run filo scan, then give it a new retention"), nil
+		}
+		res, err := hasher.File(ctx, p)
+		switch {
+		case ctx.Err() != nil:
+			return Outcome{}, ctx.Err()
+		case errors.Is(err, fs.ErrNotExist):
+			return skip("no longer at this path; run filo scan"), nil
+		case errors.Is(err, hasher.ErrChanged), errors.Is(err, hasher.ErrNotRegular):
+			return skip("changed while it was being checked; run filo scan"), nil
+		case err != nil:
+			return d.unreadable(ctx, c, err)
+		}
+		if !sameIno(c.Ino, res.Ino) {
+			return skip("replaced by another file since the last scan; run filo scan"), nil
+		}
+		if string(res.Sum) != c.ReviewedHash {
+			if err := d.rec.Changed(ctx, c, store.FileUpdate{FileID: c.FileID, Size: res.Size, MtimeNS: res.MtimeNS,
+				CtimeNS: res.CtimeNS, Hash: string(res.Sum), Ino: res.Ino}); err != nil {
+				return Outcome{}, err
+			}
+			return skip("changed since its retention was set; it needs a new retention"), nil
+		}
+		fi = nil // compare the final lstat with what was read
+		c.Size, c.MtimeNS = res.Size, res.MtimeNS
+	}
+
+	// The last look, as close to the removal as possible: still the same file, unchanged since it was checked.
+	if beforeRemove != nil {
+		beforeRemove(p)
+	}
+	last, err := os.Lstat(p)
+	if err != nil {
+		return skip("changed while it was being checked; run filo scan"), nil
+	}
+	if _, bad := sameKind(c, last); bad || !sameIno(c.Ino, ino(last)) ||
+		(c.Kind == "file" && (last.Size() != c.Size || last.ModTime().UnixNano() != c.MtimeNS)) ||
+		(fi != nil && !last.ModTime().Equal(fi.ModTime())) {
+		return skip("changed while it was being checked; run filo scan"), nil
+	}
+
+	if err := removeFile(p); err != nil {
+		return Outcome{Reason: "could not be deleted: " + errText(err), Failed: true}, nil
+	}
+	if err := d.rec.Deleted(ctx, c, d.now()); err != nil {
+		return Outcome{Deleted: true}, fmt.Errorf("%w (%s was deleted; the next scan will report it missing)", err, p)
+	}
+	d.dirs[filepath.Dir(p)] = c.RootPath
+	return Outcome{Deleted: true}, nil
+}
+
+func (d *Disposer) unreadable(ctx context.Context, c store.Candidate, err error) (Outcome, error) {
+	why := "cannot be read: " + errText(err)
+	if rerr := d.rec.Unreadable(ctx, c, why); rerr != nil {
+		return Outcome{}, rerr
+	}
+	return Outcome{Reason: why, Failed: true}, nil
+}
+
+func skip(reason string) Outcome { return Outcome{Reason: reason} }
+
+// sameKind reports a candidate that is no longer the kind of file it was.
+func sameKind(c store.Candidate, fi fs.FileInfo) (Outcome, bool) {
+	switch {
+	case c.Kind == "symlink" && fi.Mode()&fs.ModeSymlink == 0:
+		return skip("no longer a symlink; run filo scan"), true
+	case c.Kind != "symlink" && !fi.Mode().IsRegular():
+		return skip("no longer a regular file; run filo scan"), true
+	}
+	return Outcome{}, false
+}
+
+func ino(fi fs.FileInfo) uint64 {
+	id, _ := fsid.FromFileInfo(fi)
+	return id.Ino
+}
+
+// sameIno compares inodes only when both are known, as a scan does.
+func sameIno(a, b uint64) bool { return a == 0 || b == 0 || a == b }
+
+// errText is an error without the path, which the caller shows already.
+func errText(err error) string {
+	var pe *fs.PathError
+	if errors.As(err, &pe) {
+		return pe.Err.Error()
+	}
+	return err.Error()
+}
+
+// PruneDirs removes the folders this run emptied: a folder a file was deleted from, if it now has no entries at all
+// (hidden ones included), then each parent that removal emptied, stopping below the root. A folder that was already
+// empty, or that the run deleted nothing from, is never touched. It returns the folders removed, deepest first, and
+// any folder that looked empty but could not be removed.
+func (d *Disposer) PruneDirs() (removed []string, problems []error) {
+	byDepth := map[int][]string{}
+	root := map[string]string{}
+	maxDepth := 0
+	add := func(dir, r string) {
+		if _, ok := root[dir]; ok || !inside(dir, r) {
+			return
+		}
+		root[dir] = r
+		n := depth(dir)
+		byDepth[n] = append(byDepth[n], dir)
+		maxDepth = max(maxDepth, n)
+	}
+	for dir, r := range d.dirs {
+		add(dir, r)
+	}
+	for n := maxDepth; n >= 0; n-- {
+		for i := 0; i < len(byDepth[n]); i++ {
+			dir := byDepth[n][i]
+			entries, err := os.ReadDir(dir)
+			if err != nil || len(entries) > 0 {
+				continue
+			}
+			if err := removeDir(dir); err != nil {
+				// Something appeared in it, or it cannot be removed: either way it stays.
+				if !errors.Is(err, fs.ErrExist) && !isNotEmpty(err) {
+					problems = append(problems, fmt.Errorf("could not remove the empty folder %s: %s", dir, errText(err)))
+				}
+				continue
+			}
+			removed = append(removed, dir)
+			add(filepath.Dir(dir), root[dir])
+		}
+	}
+	return removed, problems
+}
+
+// inside reports whether dir is strictly below root.
+func inside(dir, root string) bool {
+	rel, err := filepath.Rel(root, dir)
+	return err == nil && rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) &&
+		!filepath.IsAbs(rel)
+}
+
+func depth(dir string) int { return strings.Count(filepath.Clean(dir), string(filepath.Separator)) }

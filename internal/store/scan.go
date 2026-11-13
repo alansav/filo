@@ -62,7 +62,8 @@ type Gone struct {
 }
 
 // MissingByHash returns the non-empty regular files with one of the given hashes that have no current path in any
-// root, each with its most recent path.
+// root, each with its most recent path. Files filo deleted are not missing: a file restored from a backup is a new
+// file, so its old retention can never carry over to it.
 func (s *Store) MissingByHash(ctx context.Context, hashes []string) ([]Gone, error) {
 	var out []Gone
 	const batch = 500
@@ -76,7 +77,7 @@ func (s *Store) MissingByHash(ctx context.Context, hashes []string) ([]Gone, err
 			SELECT f.id, f.hash, f.size, p.path, p.root_id, p.valid_to_scan
 			FROM files f JOIN paths p ON p.file_id = f.id
 			WHERE f.hash IN (?` + strings.Repeat(",?", len(part)-1) + `)
-			  AND f.kind = 'file' AND f.size > 0
+			  AND f.kind = 'file' AND f.size > 0 AND f.deleted_utc IS NULL
 			  AND NOT EXISTS (SELECT 1 FROM paths c WHERE c.file_id = f.id AND c.valid_to_scan IS NULL)
 			  AND p.valid_to_scan = (SELECT max(valid_to_scan) FROM paths l WHERE l.file_id = f.id)`
 		rows, err := s.db.QueryContext(ctx, q, args...)

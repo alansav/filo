@@ -3,7 +3,7 @@ package store
 // SchemaVersion is the schema this build reads and writes. It is stored in meta.schema_version when a database is
 // created. An older database with a migration in migrations is upgraded when it is opened; any other version is
 // refused.
-const SchemaVersion = 5
+const SchemaVersion = 6
 
 // Meta keys.
 const (
@@ -30,6 +30,7 @@ CREATE TABLE scans (
     started_utc TEXT NOT NULL,
     finished_utc TEXT,
     root_id INTEGER NOT NULL REFERENCES roots(id),
+    kind TEXT NOT NULL DEFAULT 'scan',  -- 'scan', or 'delete' for a delete run's record of what it did in a root
     scope TEXT NOT NULL DEFAULT '',
     include_hidden INTEGER NOT NULL DEFAULT 0,
     ignores TEXT,
@@ -59,7 +60,8 @@ CREATE TABLE files (
     keep_until TEXT,                    -- worked out from the two: YYYY-MM-DD or 'forever'
     reviewed_utc TEXT,
     reviewed_after_scan INTEGER REFERENCES scans(id),
-    reviewed_hash TEXT
+    reviewed_hash TEXT,
+    deleted_utc TEXT                    -- when filo deleted it; its path is closed. NULL = not deleted by filo
 );
 
 CREATE TABLE paths (
@@ -181,6 +183,12 @@ UPDATE export_rows SET retention = keep_until WHERE keep_until IS NOT NULL;
 ALTER TABLE reviews ADD COLUMN file_date TEXT;
 ALTER TABLE reviews ADD COLUMN retention TEXT;
 UPDATE reviews SET retention = keep_until WHERE keep_until IS NOT NULL;
+`,
+	// 5 -> 6: deletion. A file filo deleted keeps its row, marked deleted; a delete run is recorded as a scan of
+	// kind 'delete' in each root it deleted from, so a deleted file's path can be closed and its event recorded.
+	5: `
+ALTER TABLE files ADD COLUMN deleted_utc TEXT;
+ALTER TABLE scans ADD COLUMN kind TEXT NOT NULL DEFAULT 'scan';
 `,
 }
 
