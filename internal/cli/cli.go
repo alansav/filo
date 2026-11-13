@@ -252,6 +252,16 @@ func (e *env) open(ctx context.Context, db string) (*store.Store, error) {
 	return store.Open(ctx, store.Options{DBPath: db})
 }
 
+// closeStore closes the register. The run's work is already written, so a problem here (most likely a snapshot that
+// could not be written) is a warning, one line on stderr.
+func (e *env) closeStore(s *store.Store) {
+	if err := s.Close(); err != nil {
+		for _, line := range strings.Split(err.Error(), "\n") {
+			fmt.Fprintf(e.stderr, "filo: warning: %s\n", line)
+		}
+	}
+}
+
 // rootsSub finds a roots subcommand among args, so it may follow a flag (filo roots --db X add DIR), and returns it
 // with the other arguments. Only the first positional argument can be one; "" means none.
 func rootsSub(args []string) (string, []string) {
@@ -298,7 +308,7 @@ func (e *env) rootsList(ctx context.Context, dbBefore string, args []string) err
 	if err != nil {
 		return err
 	}
-	defer s.Close()
+	defer e.closeStore(s)
 	totals, err := s.RootTotals(ctx)
 	if err != nil {
 		return err
@@ -381,7 +391,7 @@ func (e *env) rootsAdd(ctx context.Context, dbBefore string, args []string) erro
 	if err != nil {
 		return err
 	}
-	defer s.Close()
+	defer e.closeStore(s)
 	r, absorbed, err := s.AddRootAbsorb(ctx, pos[0], set)
 	if err != nil {
 		return err
@@ -440,7 +450,7 @@ func (e *env) rootsSet(ctx context.Context, dbBefore string, args []string) erro
 	if err != nil {
 		return err
 	}
-	defer s.Close()
+	defer e.closeStore(s)
 	set := store.Settings{IncludeHidden: *include, Ignore: *ignore}
 	old, err := s.SetSettings(ctx, pos[0], set)
 	if err != nil {
@@ -513,7 +523,7 @@ func (e *env) scan(ctx context.Context, dbBefore string, args []string) error {
 	if err != nil {
 		return err
 	}
-	defer s.Close()
+	defer e.closeStore(s)
 
 	opt := reconcile.Options{Workers: *workers, AllowEmpty: *allowEmpty}
 	if len(pos) == 1 {
@@ -587,7 +597,7 @@ func (e *env) report(ctx context.Context, dbBefore string, args []string) error 
 	if err != nil {
 		return err
 	}
-	defer s.Close()
+	defer e.closeStore(s)
 	r, err := report.Build(ctx, s, *top, today())
 	if err != nil {
 		return err

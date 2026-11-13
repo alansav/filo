@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/alansav/filo/internal/store"
 )
@@ -26,6 +27,7 @@ type Report struct {
 	Undecided   int64                  // files that need a keep_until decision
 	UndecidedIn []DirGroup             // the directories holding most of them
 	Deleted     store.DeletedTotals    // what filo has deleted
+	Snapshots   store.SnapshotInfo     // copies of the register
 }
 
 // DirDepth is how many levels below a root the report groups files needing a decision by.
@@ -90,6 +92,9 @@ func Build(ctx context.Context, s *store.Store, top int, today string) (Report, 
 		return r, err
 	}
 	if r.Deleted, err = s.Deleted(ctx); err != nil {
+		return r, err
+	}
+	if r.Snapshots, err = s.Snapshots(ctx); err != nil {
 		return r, err
 	}
 	return r, nil
@@ -227,7 +232,37 @@ func (r Report) WriteText(w io.Writer) error {
 		}
 		p.line("  scan %d  %s%s", e.ScanID, EventText(e.Event), where)
 	}
+
+	p.blank()
+	r.writeSnapshots(p)
 	return p.err
+}
+
+// writeSnapshots shows the register's copies, and warns when they are missing or behind, which is how a failing
+// snapshot gets noticed when filo runs from a timer.
+func (r Report) writeSnapshots(p *printer) {
+	sn := r.Snapshots
+	p.line("Register snapshots")
+	stamp := func(t time.Time) string { return t.Local().Format("2006-01-02 15:04") }
+	upgrades := ""
+	if sn.PreUpgrade > 0 {
+		upgrades = fmt.Sprintf(" (and %s from before an upgrade)", Plural(int64(sn.PreUpgrade), "copy", "copies"))
+	}
+	switch {
+	case sn.Problem != "":
+		p.line("  warning: cannot read %s: %s", sn.Dir, sn.Problem)
+	case sn.Count == 0 && sn.LatestWrite.IsZero():
+		p.line("  none yet; one is written after each command that changes the register%s", upgrades)
+	case sn.Count == 0:
+		p.line("  warning: none in %s, though the register has changed%s; see the warning after each command",
+			sn.Dir, upgrades)
+	default:
+		p.line("  %d in %s, latest %s%s", sn.Count, sn.Dir, stamp(sn.Latest), upgrades)
+		if sn.Latest.Before(sn.LatestWrite) {
+			p.line("  warning: the register changed at %s, after the latest snapshot; see the warning after each "+
+				"command", stamp(sn.LatestWrite))
+		}
+	}
 }
 
 // DirGroup is a directory and the files counted in it.

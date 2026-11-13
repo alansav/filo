@@ -34,7 +34,7 @@ func (e *env) delete(ctx context.Context, dbBefore string, args []string) error 
 	if err != nil {
 		return err
 	}
-	defer s.Close()
+	defer e.closeStore(s)
 	f, where, err := filterFor(ctx, s, pos)
 	if err != nil {
 		return err

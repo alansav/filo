@@ -66,5 +66,6 @@ Run `go vet` and the tests before saying a change is done.
 - Tests are table-driven and use `t.TempDir()`. No test may touch the real home directory.
 - One database per device holds all roots. It is created automatically in the user data directory
   (`~/.local/share/filo/filo.db` on Linux); `--db` and `FILO_DB` override it. Roots are added explicitly. One writer at a
-  time, and each scan is applied in a single transaction.
+  time, and each scan is applied in a single transaction. Every run that writes leaves a snapshot in
+  `<db>.snapshots/` (rotated; see `docs/design.md`, Register snapshots), so a throwaway `--db` gets one too.
 - Keep the schema changes small and versioned (`meta.schema_version`).

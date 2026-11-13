@@ -185,7 +185,7 @@ func Scan(ctx context.Context, s *store.Store, opt Options) (Summary, error) {
 	db := s.DBPath()
 	res, err := walk.Walk(ctx, walk.Options{
 		Root: root.Path, Scope: scope, IncludeHidden: root.IncludeHidden, Ignore: root.Ignore,
-		Exclude: []string{db, db + "-wal", db + "-shm", db + "-journal", db + ".lock"},
+		Exclude: []string{db, db + "-wal", db + "-shm", db + "-journal", db + ".lock", store.SnapshotDir(db)},
 		Seen:    walked,
 	})
 	if err != nil {

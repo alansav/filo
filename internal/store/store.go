@@ -68,13 +68,20 @@ func Open(ctx context.Context, opt Options) (*Store, error) {
 	return s, nil
 }
 
-// Close closes the database and then releases the lock.
+// Close takes a snapshot of the register if this run wrote to it (see snapshot.go), closes the database and then
+// releases the lock. A failed snapshot is reported in the error, but the run's own writes stand.
 func (s *Store) Close() error {
-	err := s.db.Close()
-	if lerr := s.lock.release(); err == nil {
-		err = lerr
+	var errs []error
+	ctx := context.Background() // an interrupted run still gets its snapshot
+	if wrote, err := s.wrote(ctx); err != nil {
+		errs = append(errs, fmt.Errorf("register snapshot failed: %w", err))
+	} else if wrote {
+		if err := s.Snapshot(ctx, time.Now()); err != nil {
+			errs = append(errs, fmt.Errorf("register snapshot failed: %w", err))
+		}
 	}
-	return err
+	errs = append(errs, s.db.Close(), s.lock.release())
+	return errors.Join(errs...)
 }
 
 // DBPath is the absolute path of the database file.
@@ -129,7 +136,7 @@ func openLocked(ctx context.Context, dbPath string) (*Store, error) {
 	// One connection: the per-connection pragmas apply to it, and Filo has one writer anyway.
 	db.SetMaxOpenConns(1)
 
-	if err := initOrCheck(ctx, db); err != nil {
+	if err := initOrCheck(ctx, db, dbPath); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("database %s: %w", dbPath, err)
 	}
@@ -159,7 +166,7 @@ func precreate(dbPath string) error {
 	return nil
 }
 
-func initOrCheck(ctx context.Context, db *sql.DB) error {
+func initOrCheck(ctx context.Context, db *sql.DB, dbPath string) error {
 	var tables int
 	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM sqlite_master WHERE type = 'table'`).Scan(&tables); err != nil {
 		return err
@@ -167,7 +174,7 @@ func initOrCheck(ctx context.Context, db *sql.DB) error {
 	if tables == 0 {
 		return create(ctx, db)
 	}
-	return check(ctx, db)
+	return check(ctx, db, dbPath)
 }
 
 func create(ctx context.Context, db *sql.DB) error {
@@ -193,7 +200,7 @@ func create(ctx context.Context, db *sql.DB) error {
 	return tx.Commit()
 }
 
-func check(ctx context.Context, db *sql.DB) error {
+func check(ctx context.Context, db *sql.DB, dbPath string) error {
 	var hasMeta int
 	if err := db.QueryRowContext(ctx,
 		`SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'meta'`).Scan(&hasMeta); err != nil {
@@ -232,6 +239,12 @@ func check(ctx context.Context, db *sql.DB) error {
 	}
 	if algo != hasher.Algorithm {
 		return fmt.Errorf("%w: database hashes are %s, this filo uses %s", ErrSchemaVersion, algo, hasher.Algorithm)
+	}
+	// A copy of the database as it was, kept outside the rotation, before anything is changed. No copy, no upgrade.
+	if v < SchemaVersion {
+		if err := snapshotBeforeUpgrade(ctx, db, dbPath, v, time.Now()); err != nil {
+			return err
+		}
 	}
 	for ; v < SchemaVersion; v++ {
 		if err := migrate(ctx, db, v); err != nil {
