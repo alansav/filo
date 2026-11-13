@@ -94,7 +94,7 @@ func Build(ctx context.Context, s *store.Store, top int, today string) (Report, 
 	if r.Deleted, err = s.Deleted(ctx); err != nil {
 		return r, err
 	}
-	if r.Snapshots, err = s.Snapshots(ctx); err != nil {
+	if r.Snapshots, err = s.Snapshots(ctx, time.Now()); err != nil {
 		return r, err
 	}
 	return r, nil
@@ -243,7 +243,7 @@ func (r Report) WriteText(w io.Writer) error {
 func (r Report) writeSnapshots(p *printer) {
 	sn := r.Snapshots
 	p.line("Register snapshots")
-	stamp := func(t time.Time) string { return t.Local().Format("2006-01-02 15:04") }
+	stamp := LocalTime
 	upgrades := ""
 	if sn.PreUpgrade > 0 {
 		upgrades = fmt.Sprintf(" (and %s from before an upgrade)", Plural(int64(sn.PreUpgrade), "copy", "copies"))
@@ -262,6 +262,10 @@ func (r Report) writeSnapshots(p *printer) {
 			p.line("  warning: the register changed at %s, after the latest snapshot; see the warning after each "+
 				"command", stamp(sn.LatestWrite))
 		}
+	}
+	if sn.Future > 0 {
+		p.line("  warning: %s dated in the future (was the clock ahead?); kept, but not counted as the latest",
+			Plural(int64(sn.Future), "snapshot is", "snapshots are"))
 	}
 }
 

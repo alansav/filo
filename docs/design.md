@@ -69,7 +69,10 @@ Principles. These are not negotiable:
   a foreign database is never modified.
 - One writer at a time: an `flock` on `<db>.lock`, taken before the database is opened. The kernel drops it if Filo
   dies, so there are no stale locks. Non-unix platforms refuse to open until locking is implemented for them. Each
-  scan is applied in a single transaction.
+  scan is applied in a single transaction. The lock file is opened with `O_NOFOLLOW`, so a symlink planted in its
+  place (with `--db` in a shared directory such as `/tmp`) is refused, not followed.
+- **The schema is not trusted** (2026-11-13): `PRAGMA trusted_schema = OFF` on every connection, so triggers and
+  views stored in an altered or swapped database cannot call functions with side effects.
 - Filo creates a new database file with mode 0600; SQLite gives the WAL and SHM files the same mode. An existing
   file's mode is never changed.
 - The database, its WAL/SHM/journal files, the lock file and the snapshot directory are never scanned, wherever they
@@ -87,21 +90,31 @@ exist nowhere else, and on the laptop it is outside every backup (Vorta runs on 
   `Store.Close`, while the lock is held; so no list of writing commands is kept. A run that only read takes none. An
   interrupted run that wrote still takes one.
 - **Before a schema upgrade**, a copy of the old database is kept as `filo-vN-before-upgrade-<time>Z.db`, outside
-  the rotation. If that copy cannot be written, the upgrade is refused.
+  the rotation, one per old version: an upgrade that keeps failing (a timer opening an old database every hour)
+  does not pile up copies. If that copy cannot be written, the upgrade is refused.
 - **Files.** `filo-YYYYMMDDTHHMMSS.mmmZ.db` (UTC); the time in the name, not the file's mtime, drives the rotation,
-  so a copy or sync cannot disturb it. Written as `….tmp` and renamed, never over an existing file; a leftover
-  `.tmp` is removed by the next snapshot. Directory 0700, files 0600 (the register names every file).
+  so a copy or sync cannot disturb it. The temporary file is created empty with mode 0600 before `VACUUM INTO`
+  fills it (otherwise SQLite creates it with the umask's mode and the register is readable while it is written),
+  flushed to disk (`VACUUM INTO` does not), renamed into place, never over an existing file, and the directory is
+  flushed after the rename; so a power cut cannot leave a torn newest snapshot once older ones are pruned. Leftover
+  temporary files of either kind are removed by the next snapshot. Directory 0700 (an existing one is made private),
+  files 0600: the register names every file. A snapshot directory that is a symlink, not a directory, or owned by
+  another user is refused (hardening of 2026-11-13).
 - **Rotation** (reworked 2026-11-13 from a first draft that kept only the newest three of the day, which was fragile
   around midnight). Snapshots are a short-term safety net; long-term copies are the backups of them. Kept: every
   snapshot from the last 24 hours (rolling, so working past midnight loses nothing); the newest three whatever their
   age (so a write after a month away keeps the state just before it); and, up to 31 days old, the newest of each of
   the seven most recent days with older snapshots, then the newest of each ISO week. Nothing else older than 31 days.
   Periods count only days that have snapshots. Pruning runs only after a new snapshot was written, and removes only
-  files whose names are rotated snapshots; pre-upgrade copies and anything else in the directory are left alone.
+  files whose names are rotated snapshots; pre-upgrade copies and anything else in the directory are left alone. A
+  snapshot dated more than a minute in the future (the clock was ahead) is kept but takes none of the newest places,
+  and the report flags it.
 - **Failure** never undoes the run's work: one line on stderr, `filo: warning: register snapshot failed: …`.
   `filo report` ends with a Register snapshots section (count, directory, latest), and warns when there are none
   though the register has changed, when the latest is older than the register's latest write, or when the
-  directory cannot be read. That is how a failing snapshot is noticed when scans run from a timer.
+  directory cannot be read. The latest write is recorded in `meta.last_write_utc` by every run that writes, just
+  before its snapshot and with the same time, so any change counts (a root's settings too). That is how a failing
+  snapshot is noticed when scans run from a timer.
 - **Restoring** is by hand: with no filo running, move `filo.db`, `filo.db-wal` and `filo.db-shm` aside and copy a
   snapshot to `filo.db`. A command can come later if wanted.
 - **Getting them off the machine** (to the desktop, where Vorta backs them up) is part of the synced-roots work: for
@@ -431,6 +444,11 @@ files). Replaces the earlier plan of a quarantine, holds and several checks at t
     Gone, replaced (another inode), no longer the same kind, or a symlink pointing elsewhere: nothing is recorded;
     the message says to run `filo scan`. Cannot be deleted: nothing is recorded, it stays a candidate, and exit 1.
     A last `lstat` just before the removal checks inode, size and modification time against what was read.
+  - *Only inside its root* (hardening of 2026-11-13). Before anything else, the recorded path must be a clean
+    relative path below a clean, absolute root (no `..`), and every folder from the root down must still be a real
+    folder: a symlink there means the tree changed since the scan (skipped, "run filo scan"). A path outside its
+    root can only come from an altered register (`../../.ssh/id_ed25519` with that file's hash): it is refused with
+    exit 1. The hash check alone does not stop that, since whoever can edit the register can usually read the file.
   - *Removal* is `unlink` for a file or symlink (it refuses a directory) and `rmdir` for a folder (it refuses a
     non-empty folder and a file). The fallback on other platforms checks first and is untested.
   - *A file deleted by filo is never "missing"*: pairing (returned files) skips deleted rows. A new file with a
@@ -450,6 +468,12 @@ files). Replaces the earlier plan of a quarantine, holds and several checks at t
   set in it, and the lifespan CSV became the retention CSV (package `internal/retention`).)
 - **Keep flags and options to a minimum** (2026-11-11). Prefer a safe default and clear output over a flag; prefer
   doing the obvious thing and saying what was done over asking.
+- **Output cannot act on the terminal** (2026-11-13). File names can hold any byte but `/` and NUL and come from
+  anywhere (attachments, files synced from a phone, an altered register). Everything printed goes through one
+  writer that shows control characters, escape sequences, invalid UTF-8 and Unicode bidi controls as visible
+  escapes (`\x1b`, `\u202e`), so a name cannot erase lines of the list a person confirms before a deletion, set the
+  window title, write the clipboard, or read in another order than it is. Newlines and tabs pass; only the progress
+  line's own control codes bypass it. The CSV export guards against spreadsheet formulas separately.
 - **Prompts only in a terminal** (2026-11-12, replacing "no interactive prompts"). A command asks only where a person
   should look first: `filo update` before clearing dates, and `filo delete`. Declining, or having no
   terminal on standard input, is always the safe choice, so Filo still works the same from a script or a timer.
@@ -747,6 +771,18 @@ shape.
 - UI technology.
 
 ## 7. Rejected or deferred
+
+- **Accepted risks** (security review of 2026-11-13). Anyone who can edit the register already runs as the user and
+  could delete files directly, so an altered register matters through indirect routes (a restored snapshot, a
+  database in a synced folder, a `--db` from elsewhere). Accepted: a register whose *root* path was altered to
+  another folder is not detected (the paths below it are checked, and the confirmation list shows absolute paths);
+  `filo delete -y` deletes without a person reading the list, which is the point of `-y`; a file swapped in the
+  microseconds between the last check and the unlink is deleted (anyone able to do that can delete it directly);
+  SQLite parses a database before Filo checks it is one of its own (kept small by staying on a current driver);
+  ownership of the snapshot directory is not checked on non-Unix platforms. From the code review of the snapshots:
+  Ctrl-C cannot interrupt a snapshot being written (milliseconds for a register of a few MB), and every run that
+  writes copies the whole register, timer scans that found nothing included (fine at a few MB; skipping a snapshot
+  when a scan changed nothing is the first improvement if registers grow large).
 
 - **Quarantine, the recycle bin, holds and `filo restore`** (rejected 2026-11-12). Deletion is permanent and backups
   make it recoverable; the confirmed list and the re-hash check keep it safe. The bin fills up with large files and is

@@ -301,3 +301,52 @@ func TestInside(t *testing.T) {
 		}
 	}
 }
+
+// TestDeleteOnlyInsideRoot checks that a register path pointing outside its root (an altered register) or through a
+// folder that is now a symlink is never deleted.
+func TestDeleteOnlyInsideRoot(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks need privileges on windows")
+	}
+	base := canonicalTemp(t)
+	root := filepath.Join(base, "root")
+	write(t, filepath.Join(base, "outside.txt"), "secret")
+	write(t, filepath.Join(base, "elsewhere", "f"), "content")
+	write(t, filepath.Join(root, "keep"), "x")
+	if err := os.Symlink(filepath.Join(base, "elsewhere"), filepath.Join(root, "link")); err != nil {
+		t.Fatal(err)
+	}
+	unclean := candidate(t, root, "keep")
+	unclean.RootPath = root + "/../root"
+	tests := []struct {
+		name   string
+		c      store.Candidate
+		failed bool
+		reason string
+		kept   string
+	}{
+		{"escapes the root", candidate(t, root, "../outside.txt"), true, "not inside its root",
+			filepath.Join(base, "outside.txt")},
+		{"root path not clean", unclean, true, "not inside its root", filepath.Join(root, "keep")},
+		{"through a symlinked folder", candidate(t, root, "link/f"), false, "a folder on its path is now a symlink",
+			filepath.Join(base, "elsewhere", "f")},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := &fakeRec{}
+			o, err := New(rec, time.Now).Delete(context.Background(), tc.c)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if o.Deleted || o.Failed != tc.failed || !strings.Contains(o.Reason, tc.reason) {
+				t.Errorf("outcome = %+v, want failed %v and %q", o, tc.failed, tc.reason)
+			}
+			if _, err := os.Stat(tc.kept); err != nil {
+				t.Errorf("%s is gone: %v", tc.kept, err)
+			}
+			if len(rec.deleted)+len(rec.changed)+len(rec.unreadable) > 0 {
+				t.Errorf("recorded %+v", rec)
+			}
+		})
+	}
+}

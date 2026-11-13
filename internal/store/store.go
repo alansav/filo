@@ -51,7 +51,7 @@ func Open(ctx context.Context, opt Options) (*Store, error) {
 		return nil, err
 	}
 
-	lock, err := acquireLock(dbPath + ".lock")
+	lock, err := acquireLock(lockPath(dbPath))
 	if err != nil {
 		if errors.Is(err, ErrLocked) {
 			return nil, fmt.Errorf("%w: %s", ErrLocked, dbPath)
@@ -76,12 +76,25 @@ func (s *Store) Close() error {
 	if wrote, err := s.wrote(ctx); err != nil {
 		errs = append(errs, fmt.Errorf("register snapshot failed: %w", err))
 	} else if wrote {
-		if err := s.Snapshot(ctx, time.Now()); err != nil {
+		now := time.Now()
+		if err := s.recordWrite(ctx, now); err != nil {
+			errs = append(errs, fmt.Errorf("record the time of this change: %w", err))
+		}
+		if err := s.Snapshot(ctx, now); err != nil {
 			errs = append(errs, fmt.Errorf("register snapshot failed: %w", err))
 		}
 	}
 	errs = append(errs, s.db.Close(), s.lock.release())
 	return errors.Join(errs...)
+}
+
+func lockPath(dbPath string) string { return dbPath + ".lock" }
+
+// OwnPaths are the paths the register keeps next to its database: the database, SQLite's companion files, the lock
+// file and the snapshot directory. A scan never records them, wherever they are.
+func (s *Store) OwnPaths() []string {
+	db := s.dbPath
+	return []string{db, db + "-wal", db + "-shm", db + "-journal", lockPath(db), SnapshotDir(db)}
 }
 
 // DBPath is the absolute path of the database file.
@@ -121,6 +134,9 @@ func dsn(path string) string {
 	q.Add("_pragma", "foreign_keys(1)")
 	q.Add("_pragma", "busy_timeout(5000)")
 	q.Add("_pragma", "synchronous(NORMAL)")
+	// Triggers and views stored in the database may not call functions with side effects: a database that was
+	// altered or swapped can carry its own SQL, which then runs whenever filo reads or writes.
+	q.Add("_pragma", "trusted_schema(0)")
 	u := url.URL{Scheme: "file", Path: filepath.ToSlash(path), RawQuery: q.Encode()}
 	return u.String()
 }

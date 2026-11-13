@@ -178,7 +178,7 @@ func TestSnapshotOnClose(t *testing.T) {
 	info, err := func() (SnapshotInfo, error) {
 		s := mustOpen(t, Options{DBPath: db})
 		defer mustClose(t, s)
-		return s.Snapshots(ctx)
+		return s.Snapshots(ctx, time.Now())
 	}()
 	if err != nil || info.Count != 2 || info.PreUpgrade != 1 {
 		t.Errorf("Snapshots = %+v, %v; want 2 rotated and 1 from before an upgrade", info, err)

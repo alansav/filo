@@ -297,6 +297,11 @@ func TestReopen(t *testing.T) {
 			s = mustOpen(t, opt)
 			defer mustClose(t, s)
 			second := readMeta(t, s)
+			// The first run wrote (it created the register), so Close recorded when; that key is meant to change.
+			if second[metaLastWrite] == "" {
+				t.Errorf("meta.%s not set after a run that wrote", metaLastWrite)
+			}
+			delete(second, metaLastWrite)
 			if len(second) != len(first) {
 				t.Errorf("meta has %d keys after reopen, want %d", len(second), len(first))
 			}

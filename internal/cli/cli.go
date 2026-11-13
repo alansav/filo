@@ -114,7 +114,8 @@ could not be read or deleted.
 // env is one invocation's surroundings.
 type env struct {
 	stdin          io.Reader
-	stdout, stderr io.Writer
+	stdout, stderr io.Writer // through safeText: what filo prints can never act as terminal control codes
+	rawStderr      io.Writer // for the progress line's own control codes, and to ask whether it is a terminal
 	getenv         func(string) string
 }
 
@@ -125,7 +126,7 @@ func (e usageError) Error() string { return e.msg }
 
 // Run executes one command line (without the program name) and returns the exit code.
 func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(string) string) int {
-	e := &env{stdin: stdin, stdout: stdout, stderr: stderr, getenv: getenv}
+	e := &env{stdin: stdin, stdout: safeText{stdout}, stderr: safeText{stderr}, rawStderr: stderr, getenv: getenv}
 	err := e.run(ctx, args)
 	var ue usageError
 	switch {
@@ -134,13 +135,13 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	case errors.Is(err, flag.ErrHelp):
 		return ExitOK
 	case errors.As(err, &ue):
-		fmt.Fprintf(stderr, "filo: %s\n", ue.msg)
-		fmt.Fprint(stderr, "Run 'filo help' for usage.\n")
+		fmt.Fprintf(e.stderr, "filo: %s\n", ue.msg)
+		fmt.Fprint(e.stderr, "Run 'filo help' for usage.\n")
 		return ExitUsage
 	case errors.Is(err, errReported):
 		return ExitError
 	default:
-		fmt.Fprintf(stderr, "filo: %s\n", err)
+		fmt.Fprintf(e.stderr, "filo: %s\n", err)
 		return ExitError
 	}
 }
@@ -665,7 +666,7 @@ var progressInterval = 500 * time.Millisecond
 // startProgress shows a progress line on stderr while a scan runs, if stderr is a terminal. The returned function
 // stops it and clears the line; it is safe to call more than once.
 func (e *env) startProgress(opt *reconcile.Options) (stop func()) {
-	if !isTerminal(e.stderr) {
+	if !isTerminal(e.rawStderr) {
 		return func() {}
 	}
 	p := &reconcile.Progress{}
@@ -682,7 +683,8 @@ func (e *env) startProgress(opt *reconcile.Options) (stop func()) {
 				return
 			case <-t.C:
 				if line := progressLine(p); line != "" {
-					fmt.Fprintf(e.stderr, "\r\x1b[K%s", line)
+					fmt.Fprint(e.rawStderr, "\r\x1b[K") // its own control codes; the line itself is escaped
+					fmt.Fprint(e.stderr, line)
 				}
 			}
 		}
@@ -699,8 +701,8 @@ func (e *env) startProgress(opt *reconcile.Options) (stop func()) {
 }
 
 func (e *env) clearProgress() {
-	if isTerminal(e.stderr) {
-		fmt.Fprint(e.stderr, "\r\x1b[K")
+	if isTerminal(e.rawStderr) {
+		fmt.Fprint(e.rawStderr, "\r\x1b[K")
 	}
 }
 
