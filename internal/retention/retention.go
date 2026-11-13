@@ -24,8 +24,8 @@ var Header = []string{"id", "export", "directory", "name", "size", "modified", "
 
 const dateLayout = store.DateLayout
 
-// bom marks the file as UTF-8 for spreadsheets that would otherwise guess another encoding.
-const bom = "\ufeff"
+// BOM marks the file as UTF-8 for spreadsheets that would otherwise guess another encoding.
+const BOM = "\ufeff"
 
 const formatHint = " (a spreadsheet may have rewritten it; format the column as text)"
 
@@ -175,9 +175,9 @@ func isDigit(c byte) bool { return c >= '0' && c <= '9' }
 // Today is t's date in its location, as YYYY-MM-DD.
 func Today(t time.Time) string { return t.Format(dateLayout) }
 
-// cell makes a value safe to put in a spreadsheet: valid UTF-8, and never read as a formula. Only display columns
+// Cell makes a value safe to put in a spreadsheet: valid UTF-8, and never read as a formula. Only display columns
 // pass through here; the update never reads them.
-func cell(s string) string {
+func Cell(s string) string {
 	s = strings.ToValidUTF8(s, "�")
 	if s != "" && strings.ContainsRune("=+-@\t\r", rune(s[0])) {
 		return "'" + s
@@ -188,7 +188,7 @@ func cell(s string) string {
 // WriteCSV writes items as one export: the file_date, retention and keep_until they carry (the caller fills in
 // file_date from the name first, and records the same values with the export). Times are shown in loc.
 func WriteCSV(w io.Writer, exportID int64, items []store.FileItem, loc *time.Location) error {
-	if _, err := io.WriteString(w, bom); err != nil {
+	if _, err := io.WriteString(w, BOM); err != nil {
 		return err
 	}
 	cw := csv.NewWriter(w)
@@ -203,7 +203,7 @@ func WriteCSV(w io.Writer, exportID int64, items []store.FileItem, loc *time.Loc
 			directory = it.RootPath + "/" + dir
 		}
 		rec := []string{
-			strconv.FormatInt(it.FileID, 10), ex, cell(directory), cell(name), strconv.FormatInt(it.Size, 10),
+			strconv.FormatInt(it.FileID, 10), ex, Cell(directory), Cell(name), strconv.FormatInt(it.Size, 10),
 			time.Unix(0, it.MtimeNS).In(loc).Format("2006-01-02 15:04"), it.FileDate, it.Retention, it.KeepUntil,
 		}
 		if err := cw.Write(rec); err != nil {
@@ -245,7 +245,7 @@ func ReadCSV(r io.Reader) (Parsed, error) {
 	if err != nil {
 		return p, err
 	}
-	data = bytes.TrimPrefix(data, []byte(bom))
+	data = bytes.TrimPrefix(data, []byte(BOM))
 
 	var cr *csv.Reader
 	var cols map[string]int

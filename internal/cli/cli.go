@@ -37,8 +37,11 @@ Usage:
   filo report [--top N]             totals, files needing a retention, largest files, duplicates, events
   filo export retention [DIR] -o FILE
                                     write every file under DIR (or every root) with its retention, as CSV
-  filo update FILE [--dry-run]      apply the retentions edited in an exported CSV
-  filo delete [DIR] [-y]            delete the files past their retention, after asking
+  filo export duplicates [DIR] [--separate] -o FILE
+                                    write the duplicate groups with a copy under DIR, as CSV
+  filo update FILE [--dry-run]      record the retentions or duplicate decisions edited in an exported CSV
+  filo delete [DIR] [-y]            delete the files past their retention and the duplicate copies marked
+                                    for deletion, after asking
   filo help [COMMAND]
 
 Every command accepts --db PATH (default: $FILO_DB, then the user data directory).
@@ -78,12 +81,20 @@ events (moves and missing files among them). --top sets how many entries each li
 `,
 	"export": `Usage:
   filo export retention [DIR] -o FILE
+  filo export duplicates [DIR] [--separate] -o FILE
 
 Writes every file under DIR (inside a root), or under every root, as CSV (UTF-8) to FILE, which must not exist.
 Columns: id, export, directory, name, size, modified, file_date, retention, keep_until. Fill in retention in a
 spreadsheet, then run filo update FILE. A blank file_date is filled in from the file name when the name holds one
 clear date (2023-03-14, 20230314, or 2023-03 for the month's last day); check it. On a large system, export one
 directory at a time.
+
+export duplicates writes each duplicate group (two or more copies of the same content; hard links to one file are
+one copy) with a copy under DIR, with all its copies. Columns: id, export, group, copies, directory, name, size,
+modified, file_date, retention, keep_until, delete. In each group you decide on, write Y under delete for the copies
+to delete and N for the ones to keep, then run filo update FILE; filo delete deletes them later. Two or more N mark
+the content separate: identical copies meant to exist, no longer listed as duplicates. --separate exports those
+contents with N filled in; blank a group's cells to make it a duplicate group again.
 `,
 	"update": `Usage:
   filo update FILE [--dry-run]
@@ -95,14 +106,25 @@ be sorted, filtered or deleted, but not added. A blank retention clears a stored
 asks first, and without a terminal leaves them alone. A row is refused, with one line saying why, if a value does
 not parse, a period has no file_date, the file changed since the export, or its retention was changed from a later
 export. The other rows are still applied. --dry-run checks everything and writes nothing.
+
+A duplicates CSV (from export duplicates) only records decisions; it never deletes. A group whose cells are all
+blank is left alone. A decided group needs Y or N on every copy and at least one N; a copy can be marked Y only if a
+copy marked N is kept at least as long. Otherwise the group is refused, with one line saying why. If anything is
+refused, or a content would be marked separate, filo lists it and asks once before recording anything; without a
+terminal it records nothing. Then run filo delete.
 `,
 	"delete": `Usage:
   filo delete [DIR] [-y]
 
 Lists the files past their retention under DIR (inside a root), or under every root, whose content has not changed
-since the retention was set, then asks: Delete [a]ll, [s]elect or [n]one? Select goes file by file:
-[d]elete, [r]etention (give it a new one), [s]kip or [q]uit. Without a terminal it only lists; -y deletes them all
-without asking. Deletion is permanent: there is no recycle bin, so keep backups.
+since the retention was set, and the duplicate copies marked for deletion (see filo help update) with the copies
+kept, then asks: Delete [a]ll, [s]elect or [n]one? Select goes file by file: [d]elete, [r]etention (give it a new
+one), [s]kip or [q]uit; for a duplicate copy, [u]nmark in place of [r]etention. Without a terminal it only lists;
+-y deletes them all without asking. Deletion is permanent: there is no recycle bin, so keep backups.
+
+A duplicate copy is deleted only after another copy of the same content has been read again and found unchanged
+at its path, and only if that copy is kept at least as long; otherwise its group is skipped. The last copy of a
+content is never deleted this way.
 
 Just before deleting, each file is read again. It is deleted only if it is still at its path as the same file and
 its content is still the content its retention was set on; otherwise it is skipped with one line saying why. A file

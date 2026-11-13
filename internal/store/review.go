@@ -191,6 +191,27 @@ func latestScan(ctx context.Context, tx *sql.Tx) (int64, error) {
 // failed write leaves no trace in the register.
 func (s *Store) RecordExport(ctx context.Context, path string, now time.Time, items []FileItem,
 	write func(exportID int64) error) (int64, error) {
+	return s.recordExport(ctx, path, now, ExportRetention, func(tx *sql.Tx, id int64) error {
+		stmt, err := tx.PrepareContext(ctx,
+			`INSERT INTO export_rows (export_id, file_id, hash, file_date, retention, keep_until) VALUES (?, ?, ?, ?, ?, ?)`)
+		if err != nil {
+			return err
+		}
+		defer stmt.Close()
+		for _, it := range items {
+			if _, err := stmt.ExecContext(ctx, id, it.FileID, nullString(it.Hash), nullString(it.FileDate),
+				nullString(it.Retention), nullString(it.KeepUntil)); err != nil {
+				return err
+			}
+		}
+		return nil
+	}, write)
+}
+
+// recordExport stores an export of the given kind, its rows (written by addRows), and calls write with its ID. It is
+// committed only if write succeeds.
+func (s *Store) recordExport(ctx context.Context, path string, now time.Time, kind string,
+	addRows func(tx *sql.Tx, exportID int64) error, write func(exportID int64) error) (int64, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, err
@@ -200,8 +221,8 @@ func (s *Store) RecordExport(ctx context.Context, path string, now time.Time, it
 	if err != nil {
 		return 0, err
 	}
-	res, err := tx.ExecContext(ctx, `INSERT INTO exports (created_utc, path, after_scan) VALUES (?, ?, ?)`,
-		utc(now), nullString(path), nullInt(after))
+	res, err := tx.ExecContext(ctx, `INSERT INTO exports (created_utc, path, after_scan, kind) VALUES (?, ?, ?, ?)`,
+		utc(now), nullString(path), nullInt(after), kind)
 	if err != nil {
 		return 0, fmt.Errorf("record export: %w", err)
 	}
@@ -209,17 +230,8 @@ func (s *Store) RecordExport(ctx context.Context, path string, now time.Time, it
 	if err != nil {
 		return 0, err
 	}
-	stmt, err := tx.PrepareContext(ctx,
-		`INSERT INTO export_rows (export_id, file_id, hash, file_date, retention, keep_until) VALUES (?, ?, ?, ?, ?, ?)`)
-	if err != nil {
+	if err := addRows(tx, id); err != nil {
 		return 0, fmt.Errorf("record export: %w", err)
-	}
-	defer stmt.Close()
-	for _, it := range items {
-		if _, err := stmt.ExecContext(ctx, id, it.FileID, nullString(it.Hash), nullString(it.FileDate),
-			nullString(it.Retention), nullString(it.KeepUntil)); err != nil {
-			return 0, fmt.Errorf("record export: %w", err)
-		}
 	}
 	if err := write(id); err != nil {
 		return 0, err
@@ -365,6 +377,7 @@ func (s *Store) UpdateRetention(ctx context.Context, rows []RetentionRow, now ti
 
 type exportInfo struct {
 	found     bool
+	kind      string
 	created   time.Time
 	afterScan sql.NullInt64
 }
@@ -372,8 +385,8 @@ type exportInfo struct {
 func readExport(ctx context.Context, tx *sql.Tx, id int64) (exportInfo, error) {
 	var ex exportInfo
 	var created string
-	err := tx.QueryRowContext(ctx, `SELECT created_utc, after_scan FROM exports WHERE id = ?`, id).
-		Scan(&created, &ex.afterScan)
+	err := tx.QueryRowContext(ctx, `SELECT created_utc, after_scan, kind FROM exports WHERE id = ?`, id).
+		Scan(&created, &ex.afterScan, &ex.kind)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ex, nil
 	}
@@ -403,6 +416,10 @@ func checkRow(ctx context.Context, tx *sql.Tx, r RetentionRow, ex exportInfo) (c
 	var c checked
 	if !ex.found {
 		c.refusal = fmt.Sprintf("export %d is not in this register", r.ExportID)
+		return c, nil
+	}
+	if ex.kind != ExportRetention {
+		c.refusal = fmt.Sprintf("export %d is a duplicates export, not a retention export", r.ExportID)
 		return c, nil
 	}
 	var expDate, expRetention, expKeep sql.NullString

@@ -193,6 +193,13 @@ func (r Report) WriteText(w io.Writer) error {
 			p.line("  and %s more", Plural(d.Groups-int64(len(d.Top)), "group", "groups"))
 		}
 	}
+	if d.Separate > 0 {
+		p.line("  %s marked separate (%s): identical, but not counted as duplicates",
+			Plural(d.Separate, "content", "contents"), Plural(d.SeparateFiles, "file", "files"))
+	}
+	if d.Marked > 0 {
+		p.line("  %s marked for deletion; see filo delete", Plural(d.Marked, "copy", "copies"))
+	}
 
 	p.blank()
 	if r.BrokenTotal == 0 {

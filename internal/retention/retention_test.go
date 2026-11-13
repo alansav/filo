@@ -143,8 +143,8 @@ func TestCell(t *testing.T) {
 		"🎉=party":                         "🎉=party",
 	}
 	for in, want := range tests {
-		if got := cell(in); got != want {
-			t.Errorf("cell(%q) = %q, want %q", in, got, want)
+		if got := Cell(in); got != want {
+			t.Errorf("Cell(%q) = %q, want %q", in, got, want)
 		}
 	}
 }

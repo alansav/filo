@@ -8,8 +8,10 @@ in the same commit when a design decision changes.
 
 Iterations 1 (scan, register, report), 2 (lifespan: retention through the retention CSV, `filo export retention`
 then `filo update`) and 3 (delete: `filo delete [DIR] [-y]` lists the files past their retention, asks, and deletes
-the chosen ones, each only after it is re-read and found unchanged) are done, as are register snapshots. The order
-of the next work is in `docs/design.md` section 5, starting with named retention policies.
+the chosen ones, each only after it is re-read and found unchanged) are done, as are register snapshots and the
+duplicates CSV (`filo export duplicates`, `filo update` records Y/N decisions, `filo delete` deletes marked copies
+only after a kept copy is re-read; only `filo delete` deletes). The order of the next work is in `docs/design.md`
+section 5, starting with named retention policies.
 **`internal/dispose` is the only code allowed to delete the user's files**, and only from `filo delete`; everything
 else stays read-only on them, and nothing overwrites an existing file. Stay inside the current piece of work.
 
@@ -34,6 +36,8 @@ else stays read-only on them, and nothing overwrites an existing file. Stay insi
 - Say clearly when code is untested. Check current library versions and docs instead of relying on memory.
 - Do not add a dependency without asking first.
 - Do not run `git commit` or `git push`, and do not set a git identity. The user commits from the host.
+- Before changing any file in the repo, check the branch with `git branch --show-current`. If it is `main`, stop and
+  ask the user to check out a branch; do not create or switch branches yourself.
 - Command names stay plain and easy to remember: `roots`, `scan`, `report`, `export`, `update`, `delete`, `revert`.
   No themed names.
 
