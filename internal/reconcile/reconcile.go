@@ -29,6 +29,9 @@ const (
 	PossibleMove = "possible_move"
 	Error        = "error"
 	OtherFS      = "other_fs"
+	// SameAsDeleted is a hint: a new file has the content of a file filo deleted (restored from a backup, say). It
+	// stays a new file that needs a retention; the old one's is never carried over.
+	SameAsDeleted = store.EventSameAsDeleted
 )
 
 // DefaultWorkers is the hashing parallelism when Options.Workers is 0.
@@ -105,6 +108,7 @@ type Summary struct {
 	Moved         int
 	Missing       int
 	PossibleMoves int
+	SameAsDeleted int // new files with the content of a file filo deleted
 	Errors        int
 	Samples       map[string][]store.Event // first SampleSize events of each kind
 	OtherFS       []string
@@ -480,6 +484,27 @@ func Scan(ctx context.Context, s *store.Store, opt Options) (Summary, error) {
 		leftNew = append(leftNew, side{ID: j, Name: path.Base(n.e.Path)})
 	}
 
+	// A new file with the content of a file filo deleted: a hint only.
+	var newHashes []string
+	hashSeen := map[string]bool{}
+	for _, n := range ch.New {
+		if n.Kind == string(walk.KindFile) && n.Hash != "" && n.Size > 0 && !hashSeen[n.Hash] {
+			hashSeen[n.Hash] = true
+			newHashes = append(newHashes, n.Hash)
+		}
+	}
+	deleted, err := s.DeletedByHash(ctx, newHashes)
+	if err != nil {
+		return Summary{}, err
+	}
+	for _, n := range ch.New {
+		if when, ok := deleted[n.Hash]; ok && n.Kind == string(walk.KindFile) && n.Size > 0 {
+			event(store.Event{Kind: SameAsDeleted, Path: n.Path,
+				Detail: "same content as a file filo deleted on " + localDate(when) + "; a new file, it needs a retention"})
+			sum.SameAsDeleted++
+		}
+	}
+
 	// Same name on both sides, unique on each: reported, never applied.
 	for _, p := range possibleMoves(leftOld, leftNew) {
 		g, n := leftGone[p[0]], news[p[1]]
@@ -519,6 +544,15 @@ func Scan(ctx context.Context, s *store.Store, opt Options) (Summary, error) {
 		}
 	}
 	return sum, nil
+}
+
+// localDate shows an RFC 3339 UTC time as a local date, or the text as it is if it does not parse.
+func localDate(utc string) string {
+	t, err := time.Parse(time.RFC3339Nano, utc)
+	if err != nil {
+		return utc
+	}
+	return t.Local().Format("2006-01-02")
 }
 
 // sameCtime compares change times only when both are known: a platform without them, or a row from before they were

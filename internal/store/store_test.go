@@ -490,7 +490,7 @@ func TestMigrateFromV1ToCurrent(t *testing.T) {
 	mustClose(t, mustOpen(t, Options{DBPath: db}))
 	rawExec(t, db,
 		`DROP TABLE reviews`, `DROP TABLE review_batches`, `DROP TABLE export_rows`, `DROP TABLE exports`,
-		`DROP TABLE files`, schemaV1Files, `DROP TABLE roots`, schemaV3Roots,
+		`DROP TABLE files`, schemaV1Files, `DROP TABLE roots`, schemaV3Roots, `ALTER TABLE scans DROP COLUMN kind`,
 		`UPDATE meta SET value = '1' WHERE key = 'schema_version'`,
 		`INSERT INTO roots (id, path, added_utc) VALUES (1, '/r', '2026-01-01T00:00:00Z')`,
 		`INSERT INTO scans (id, started_utc, root_id) VALUES (1, '2026-01-01T00:00:00Z', 1)`,
@@ -550,6 +550,7 @@ func TestMigrateFromV3(t *testing.T) {
 	rawExec(t, db,
 		`DROP TABLE reviews`, `DROP TABLE review_batches`, `DROP TABLE export_rows`, `DROP TABLE exports`,
 		`DROP TABLE files`, schemaV3Files, `DROP TABLE roots`, schemaV3Roots, reviewSQLv3,
+		`ALTER TABLE scans DROP COLUMN kind`,
 		`UPDATE meta SET value = '3' WHERE key = 'schema_version'`,
 		`INSERT INTO roots (id, path, added_utc) VALUES (1, '/r', '2026-01-01T00:00:00Z')`,
 		`INSERT INTO scans (id, started_utc, finished_utc, root_id) VALUES (1, '2026-01-01T00:00:00Z', '2026-01-01T00:01:00Z', 1)`,
@@ -619,6 +620,13 @@ func TestMigrateFromV3(t *testing.T) {
 	if v := rawQueryString(t, db, `SELECT group_concat(coalesce(retention, '-'), ' ') FROM (SELECT retention FROM
 		reviews ORDER BY id)`); v != "2026-11-05 2030-06-30 2027-06-30" {
 		t.Errorf("review history retention = %q", v)
+	}
+	// Version 6: existing scans are scans, and no file is deleted.
+	if v := rawQueryString(t, db, `SELECT group_concat(kind, ' ') FROM scans`); v != "scan" {
+		t.Errorf("scan kinds after upgrade = %q, want scan", v)
+	}
+	if v := rawQueryString(t, db, `SELECT count(*) FROM files WHERE deleted_utc IS NOT NULL`); v != "0" {
+		t.Errorf("%s files deleted after upgrade", v)
 	}
 	for _, col := range []string{"review_date", "action", "retain_until"} {
 		if v := rawQueryString(t, db, `SELECT count(*) FROM pragma_table_info('files') WHERE name = '`+col+`'`); v != "0" {

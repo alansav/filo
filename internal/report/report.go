@@ -25,6 +25,7 @@ type Report struct {
 	Status      map[store.Status]int64 // present files by lifespan status
 	Undecided   int64                  // files that need a keep_until decision
 	UndecidedIn []DirGroup             // the directories holding most of them
+	Deleted     store.DeletedTotals    // what filo has deleted
 }
 
 // DirDepth is how many levels below a root the report groups files needing a decision by.
@@ -88,6 +89,9 @@ func Build(ctx context.Context, s *store.Store, top int, today string) (Report, 
 	if r.Events, err = s.RecentEvents(ctx, top); err != nil {
 		return r, err
 	}
+	if r.Deleted, err = s.Deleted(ctx); err != nil {
+		return r, err
+	}
 	return r, nil
 }
 
@@ -148,6 +152,14 @@ func (r Report) WriteText(w io.Writer) error {
 	}
 	if n := r.Status[store.StatusExpired]; n > 0 {
 		p.line("Past their retention: %s; see filo delete", Plural(n, "file", "files"))
+	}
+	if d := r.Deleted; d.Files > 0 {
+		last := ""
+		if d.LastRunUTC != "" {
+			last = fmt.Sprintf(" (last run %s: %s, %s)", Time(d.LastRunUTC), Plural(d.LastFiles, "file", "files"),
+				Size(d.LastBytes))
+		}
+		p.line("Deleted by filo: %s, %s freed%s", Plural(d.Files, "file", "files"), Size(d.Bytes), last)
 	}
 
 	p.blank()
@@ -278,6 +290,10 @@ func EventText(e store.Event) string {
 		fmt.Fprintf(&b, "changed   %s", e.Path)
 	case "error":
 		fmt.Fprintf(&b, "error     %s", e.Path)
+	case store.EventDeleted:
+		fmt.Fprintf(&b, "deleted   %s", e.Path)
+	case store.EventSameAsDeleted:
+		fmt.Fprintf(&b, "new       %s", e.Path)
 	default:
 		fmt.Fprintf(&b, "%-9s %s", e.Kind, e.Path)
 	}
