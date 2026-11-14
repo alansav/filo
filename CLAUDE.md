@@ -65,7 +65,8 @@ Run `go vet` and the tests before saying a change is done.
 
 - `cmd/filo/`: the command-line entry point, kept thin.
 - `internal/`: the logic, in small packages (walking, hashing, the store, reconcile, report, retention CSV,
-  dispose). Keep OS-specific code (hidden files, inodes, symlinks, path separators) behind small functions.
+  duplicates CSV, sheet (what spreadsheets do to a CSV), dispose). Keep OS-specific code (hidden files, inodes,
+  symlinks, path separators) behind small functions.
 - `scripts/`: helper scripts (`dev.sh`, `testtree.sh`).
 - `.devcontainer/Containerfile`: the dev container. `docs/design.md`: the design.
 

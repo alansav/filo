@@ -142,7 +142,8 @@ groups:
 				continue
 			}
 			fmt.Fprintf(w, "(%d/%d) duplicate  %s  %s\n", n, total, report.Size(c.Size), c.AbsPath())
-			act, err := e.chooseDuplicate(ctx, pr, s, c)
+			act, err := e.choose(ctx, pr, "[d]elete, [u]nmark, [s]kip, [q]uit? ", choice{"u", "unmark", actUnmark,
+				func() (bool, error) { return true, s.Unmark(ctx, c.FileID, now()) }})
 			switch {
 			case err != nil || act == actQuit:
 				// Stop now: nothing more is deleted, this group's earlier choices included.
@@ -209,7 +210,8 @@ files:
 		n++
 		if selecting {
 			fmt.Fprintf(w, "(%d/%d) %s  %s  %s\n", n, total, c.KeepUntil, report.Size(c.Size), c.AbsPath())
-			act, err := e.choose(ctx, pr, s, c)
+			act, err := e.choose(ctx, pr, "[d]elete, [r]etention…, [s]kip, [q]uit? ", choice{"r", "retention",
+				actRetention, func() (bool, error) { return e.askRetention(ctx, pr, s, c) }})
 			if err != nil {
 				runErr = err
 				left += len(cands) - i
@@ -307,37 +309,18 @@ const (
 	actUnmark
 )
 
-// choose asks what to do with one candidate in select mode. A new retention is saved at once.
-func (e *env) choose(ctx context.Context, pr *prompter, s *store.Store, c store.Candidate) (action, error) {
-	for {
-		ans, ok, err := pr.ask(ctx, "[d]elete, [r]etention…, [s]kip, [q]uit? ")
-		if err != nil {
-			return actQuit, err
-		}
-		if !ok {
-			return actQuit, nil
-		}
-		switch strings.ToLower(ans) {
-		case "d", "delete":
-			return actDelete, nil
-		case "s", "skip":
-			return actSkip, nil
-		case "q", "quit":
-			return actQuit, nil
-		case "r", "retention":
-			set, err := e.askRetention(ctx, pr, s, c)
-			if err != nil || set {
-				return actRetention, err
-			}
-		}
-	}
+// choice is select mode's answer besides delete, skip and quit: a new retention for a file past its retention, or
+// unmark for a duplicate copy. do carries it out at once; false (no error) asks again.
+type choice struct {
+	key, word string
+	act       action
+	do        func() (bool, error)
 }
 
-// chooseDuplicate asks what to do with one duplicate copy marked for deletion, in select mode. Unmarking is saved
-// at once.
-func (e *env) chooseDuplicate(ctx context.Context, pr *prompter, s *store.Store, c store.Candidate) (action, error) {
+// choose asks what to do with one file in select mode, with prompt listing the answers.
+func (e *env) choose(ctx context.Context, pr *prompter, prompt string, extra choice) (action, error) {
 	for {
-		ans, ok, err := pr.ask(ctx, "[d]elete, [u]nmark, [s]kip, [q]uit? ")
+		ans, ok, err := pr.ask(ctx, prompt)
 		if err != nil {
 			return actQuit, err
 		}
@@ -351,8 +334,11 @@ func (e *env) chooseDuplicate(ctx context.Context, pr *prompter, s *store.Store,
 			return actSkip, nil
 		case "q", "quit":
 			return actQuit, nil
-		case "u", "unmark":
-			return actUnmark, s.Unmark(ctx, c.FileID, now())
+		case extra.key, extra.word:
+			done, err := extra.do()
+			if err != nil || done {
+				return extra.act, err
+			}
 		}
 	}
 }

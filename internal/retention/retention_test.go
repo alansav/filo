@@ -129,26 +129,6 @@ func TestDateFromName(t *testing.T) {
 	}
 }
 
-func TestCell(t *testing.T) {
-	tests := map[string]string{
-		"/home/a/doc.txt": "/home/a/doc.txt",
-		"=HYPERLINK(1)":   "'=HYPERLINK(1)",
-		"+1":              "'+1",
-		"-x":              "'-x",
-		"@SUM":            "'@SUM",
-		"bad\xffname":     "bad\ufffdname",
-		"":                "",
-		"/home/a/📷 Pictures/🏖️ beach.jpg": "/home/a/📷 Pictures/🏖️ beach.jpg",
-		"👨‍👩‍👧 family.md":                 "👨‍👩‍👧 family.md",
-		"🎉=party":                         "🎉=party",
-	}
-	for in, want := range tests {
-		if got := Cell(in); got != want {
-			t.Errorf("Cell(%q) = %q, want %q", in, got, want)
-		}
-	}
-}
-
 func TestWriteThenRead(t *testing.T) {
 	items := []store.FileItem{
 		{FileID: 7, RootPath: "/r", Path: "docs/2023-03 invoice.pdf", Size: 10, MtimeNS: today.UnixNano(),

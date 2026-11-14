@@ -2,7 +2,6 @@ package cli
 
 import (
 	"bytes"
-	"context"
 	"encoding/csv"
 	"os"
 	"path/filepath"
@@ -44,57 +43,10 @@ func setDelete(values map[string]string) func(map[string]string) {
 // groups, the confirmation, no terminal, a dry run), delete (the kept copy gone, select with unmark, all), and undo
 // a separate content.
 func TestDuplicatesRoundTrip(t *testing.T) {
-	skipWindows(t)
-	sameDevice(t, nil)
+	ct := newCLITest(t)
 	setNow(t, time.Date(2026, 11, 14, 12, 0, 0, 0, time.Local))
-	work := canonicalTemp(t)
-	db := filepath.Join(work, "filo.db")
-	env := map[string]string{"FILO_DB": db}
-	root := filepath.Join(work, "home")
-	in := func(rel string) string { return filepath.Join(root, filepath.FromSlash(rel)) }
-	write := func(rel, content string) {
-		t.Helper()
-		if err := os.MkdirAll(filepath.Dir(in(rel)), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(in(rel), []byte(content), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	exists := func(rel string) bool {
-		_, err := os.Lstat(in(rel))
-		return err == nil
-	}
-	ctx := context.Background()
-	filo := func(wantCode int, stdin string, terminal bool, args ...string) result {
-		t.Helper()
-		var r result
-		if terminal {
-			r = runIn(t, ctx, env, terminalInput{strings.NewReader(stdin)}, args...)
-		} else {
-			r = runIn(t, ctx, env, strings.NewReader(stdin), args...)
-		}
-		if r.code != wantCode {
-			t.Fatalf("filo %v: code %d, want %d\n%s%s", args, r.code, wantCode, r.stdout, r.stderr)
-		}
-		return r
-	}
-	contains := func(what, out string, wants ...string) {
-		t.Helper()
-		for _, w := range wants {
-			if !strings.Contains(out, w) {
-				t.Errorf("%s lacks %q:\n%s", what, w, out)
-			}
-		}
-	}
-	lacks := func(what, out string, nots ...string) {
-		t.Helper()
-		for _, n := range nots {
-			if strings.Contains(out, n) {
-				t.Errorf("%s has %q:\n%s", what, n, out)
-			}
-		}
-	}
+	work, root := ct.work, ct.root
+	in, write, exists, filo, contains, lacks := ct.in, ct.write, ct.exists, ct.filo, ct.contains, ct.lacks
 
 	for _, d := range []string{"a", "b", "c"} {
 		write(d+"/contract.pdf", "contract")
@@ -271,38 +223,15 @@ func TestDuplicatesRoundTrip(t *testing.T) {
 // TestDeleteListsMarkedCopies: a marked copy also past its retention is listed once, under retention; a symlink to a
 // marked copy is named; a mark whose copy changed since no longer counts.
 func TestDeleteListsMarkedCopies(t *testing.T) {
-	skipWindows(t)
-	sameDevice(t, nil)
+	ct := newCLITest(t)
 	setNow(t, time.Date(2026, 11, 14, 12, 0, 0, 0, time.Local))
-	work := canonicalTemp(t)
-	env := map[string]string{"FILO_DB": filepath.Join(work, "filo.db")}
-	root := filepath.Join(work, "home")
-	in := func(rel string) string { return filepath.Join(root, filepath.FromSlash(rel)) }
-	for _, f := range []struct{ rel, content string }{{"a/m", "m"}, {"b/m", "m"}, {"a/e", "e"}, {"b/e", "e"},
-		{"a/s", "s"}, {"b/s", "s"}} {
-		if err := os.MkdirAll(filepath.Dir(in(f.rel)), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(in(f.rel), []byte(f.content), 0o644); err != nil {
-			t.Fatal(err)
-		}
+	work, root := ct.work, ct.root
+	in, filo := ct.in, ct.filo
+	for _, rel := range []string{"a/m", "b/m", "a/e", "b/e", "a/s", "b/s"} {
+		ct.write(rel, rel[len(rel)-1:])
 	}
 	if err := os.Symlink("../b/m", in("a/to-m")); err != nil {
 		t.Fatal(err)
-	}
-	ctx := context.Background()
-	filo := func(wantCode int, stdin string, terminal bool, args ...string) result {
-		t.Helper()
-		var r result
-		if terminal {
-			r = runIn(t, ctx, env, terminalInput{strings.NewReader(stdin)}, args...)
-		} else {
-			r = runIn(t, ctx, env, strings.NewReader(stdin), args...)
-		}
-		if r.code != wantCode {
-			t.Fatalf("filo %v: code %d, want %d\n%s%s", args, r.code, wantCode, r.stdout, r.stderr)
-		}
-		return r
 	}
 	filo(ExitOK, "", false, "roots", "add", root)
 	dcsv := filepath.Join(work, "d.csv")
@@ -345,33 +274,13 @@ func TestDeleteListsMarkedCopies(t *testing.T) {
 // or that is on disk the same file as the copy marked for deletion (a bind mount seen by two roots), never counts as
 // kept, so one run cannot remove every copy.
 func TestDuplicatesNeverLastCopy(t *testing.T) {
-	skipWindows(t)
-	sameDevice(t, nil)
+	ct := newCLITest(t)
 	setNow(t, time.Date(2026, 11, 14, 12, 0, 0, 0, time.Local))
-	work := canonicalTemp(t)
-	env := map[string]string{"FILO_DB": filepath.Join(work, "filo.db")}
-	root := filepath.Join(work, "home")
-	in := func(rel string) string { return filepath.Join(root, filepath.FromSlash(rel)) }
-	for _, f := range []struct{ rel, content string }{{"a/k", "k"}, {"b/k", "k"}, {"a/m", "m"}, {"b/m", "m"}} {
-		if err := os.MkdirAll(filepath.Dir(in(f.rel)), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(in(f.rel), []byte(f.content), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	ctx := context.Background()
-	filo := func(wantCode int, args ...string) result {
-		t.Helper()
-		r := runIn(t, ctx, env, strings.NewReader(""), args...)
-		if r.code != wantCode {
-			t.Fatalf("filo %v: code %d, want %d\n%s%s", args, r.code, wantCode, r.stdout, r.stderr)
-		}
-		return r
-	}
-	exists := func(rel string) bool {
-		_, err := os.Lstat(in(rel))
-		return err == nil
+	work, root := ct.work, ct.root
+	in, exists := ct.in, ct.exists
+	filo := func(wantCode int, args ...string) result { t.Helper(); return ct.filo(wantCode, "", false, args...) }
+	for _, rel := range []string{"a/k", "b/k", "a/m", "b/m"} {
+		ct.write(rel, rel[len(rel)-1:])
 	}
 	filo(ExitOK, "roots", "add", root)
 	dcsv := filepath.Join(work, "d.csv")
@@ -420,33 +329,17 @@ func TestDuplicatesNeverLastCopy(t *testing.T) {
 // TestUpdateRetentionWithGroupColumn: a retention CSV with a group column of the person's own is still a retention
 // CSV (found in the code review of 2026-11-14).
 func TestUpdateRetentionWithGroupColumn(t *testing.T) {
-	skipWindows(t)
-	sameDevice(t, nil)
+	ct := newCLITest(t)
 	setNow(t, time.Date(2026, 11, 14, 12, 0, 0, 0, time.Local))
-	work := canonicalTemp(t)
-	env := map[string]string{"FILO_DB": filepath.Join(work, "filo.db")}
-	root := filepath.Join(work, "home")
-	if err := os.MkdirAll(root, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(root, "a.txt"), []byte("a"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	ctx := context.Background()
-	if r := run(t, ctx, env, "roots", "add", root); r.code != ExitOK {
-		t.Fatal(r.stderr)
-	}
-	rcsv := filepath.Join(work, "r.csv")
-	if r := run(t, ctx, env, "export", "retention", "-o", rcsv); r.code != ExitOK {
-		t.Fatal(r.stderr)
-	}
+	ct.write("a.txt", "a")
+	ct.filo(ExitOK, "", false, "roots", "add", ct.root)
+	rcsv := filepath.Join(ct.work, "r.csv")
+	ct.filo(ExitOK, "", false, "export", "retention", "-o", rcsv)
 	rows := readRows(t, rcsv)
 	data := "id,export,retention,group\n" + rows[0]["id"] + "," + rows[0]["export"] + ",forever,bills\n"
 	if err := os.WriteFile(rcsv, []byte(data), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	r := run(t, ctx, env, "update", rcsv)
-	if r.code != ExitOK || !strings.Contains(r.stdout, "Updated 1 file") {
-		t.Errorf("update of a retention CSV with a group column: code %d\n%s%s", r.code, r.stdout, r.stderr)
-	}
+	ct.contains("update of a retention CSV with a group column", ct.filo(ExitOK, "", false, "update", rcsv).stdout,
+		"Updated 1 file")
 }

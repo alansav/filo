@@ -16,27 +16,10 @@ import (
 // a new retention, skip, quit), all, and -y; with a file changed since its retention was set, folders emptied by the
 // run, a rescan afterwards, and a deleted file restored.
 func TestDeleteRoundTrip(t *testing.T) {
-	skipWindows(t)
-	sameDevice(t, nil)
+	ct := newCLITest(t)
 	setNow(t, time.Date(2026, 11, 13, 12, 0, 0, 0, time.Local))
-	work := canonicalTemp(t)
-	db := filepath.Join(work, "filo.db")
-	env := map[string]string{"FILO_DB": db}
-	root := filepath.Join(work, "home")
-	in := func(rel string) string { return filepath.Join(root, filepath.FromSlash(rel)) }
-	write := func(rel, content string) {
-		t.Helper()
-		if err := os.MkdirAll(filepath.Dir(in(rel)), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(in(rel), []byte(content), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	exists := func(rel string) bool {
-		_, err := os.Lstat(in(rel))
-		return err == nil
-	}
+	ctx, db, work, root := ct.ctx, ct.db, ct.work, ct.root
+	in, write, exists, filo, contains := ct.in, ct.write, ct.exists, ct.filo, ct.contains
 	write("old/a.txt", "a")
 	write("old/sub/b.txt", "b")
 	write("keep/c.txt", "c")
@@ -45,28 +28,6 @@ func TestDeleteRoundTrip(t *testing.T) {
 	write("x/f.txt", "f")
 	if err := os.Symlink("e.txt", in("link")); err != nil {
 		t.Fatal(err)
-	}
-	ctx := context.Background()
-	filo := func(wantCode int, stdin string, terminal bool, args ...string) result {
-		t.Helper()
-		var r result
-		if terminal {
-			r = runIn(t, ctx, env, terminalInput{strings.NewReader(stdin)}, args...)
-		} else {
-			r = runIn(t, ctx, env, strings.NewReader(stdin), args...)
-		}
-		if r.code != wantCode {
-			t.Fatalf("filo %v: code %d, want %d\n%s%s", args, r.code, wantCode, r.stdout, r.stderr)
-		}
-		return r
-	}
-	contains := func(what, out string, wants ...string) {
-		t.Helper()
-		for _, w := range wants {
-			if !strings.Contains(out, w) {
-				t.Errorf("%s lacks %q:\n%s", what, w, out)
-			}
-		}
 	}
 	gone := func(when string, want map[string]bool) {
 		t.Helper()
@@ -166,19 +127,10 @@ func (pipeTerminal) IsTerminal() bool { return true }
 // TestDeleteInterruptedAtPrompt checks that Ctrl-C (a cancelled context) ends a wait for an answer, and nothing is
 // deleted.
 func TestDeleteInterruptedAtPrompt(t *testing.T) {
-	skipWindows(t)
-	sameDevice(t, nil)
+	ct := newCLITest(t)
 	setNow(t, time.Date(2026, 11, 13, 12, 0, 0, 0, time.Local))
-	work := canonicalTemp(t)
-	env := map[string]string{"FILO_DB": filepath.Join(work, "filo.db")}
-	root := filepath.Join(work, "home")
-	if err := os.MkdirAll(root, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(root, "a.txt"), []byte("a"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	ctx := context.Background()
+	ctx, env, work, root := ct.ctx, ct.env, ct.work, ct.root
+	ct.write("a.txt", "a")
 	run(t, ctx, env, "roots", "add", root)
 	csvPath := filepath.Join(work, "r.csv")
 	run(t, ctx, env, "export", "retention", "-o", csvPath)

@@ -74,50 +74,15 @@ type terminalInput struct{ *strings.Reader }
 func (terminalInput) IsTerminal() bool { return true }
 
 func TestRetentionRoundTrip(t *testing.T) {
-	skipWindows(t)
-	sameDevice(t, nil)
+	ct := newCLITest(t)
 	day := func(d int) time.Time { return time.Date(2026, 11, d, 12, 0, 0, 0, time.Local) }
 	setNow(t, day(11))
-	work := canonicalTemp(t)
-	db := filepath.Join(work, "filo.db")
-	env := map[string]string{"FILO_DB": db}
-	root := filepath.Join(work, "home")
-	in := func(rel string) string { return filepath.Join(root, filepath.FromSlash(rel)) }
-	write := func(rel, content string) {
-		t.Helper()
-		if err := os.MkdirAll(filepath.Dir(in(rel)), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(in(rel), []byte(content), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
+	ctx, db, work, root := ct.ctx, ct.db, ct.work, ct.root
+	in, write, filo, contains := ct.in, ct.write, ct.filo, ct.contains
 	write("a.txt", "a")
 	write("docs/2023-03 invoice.pdf", "b")
 	write("docs/c.txt", "c")
 	write("📷 Pictures/🏖️ beach.jpg", "sand")
-	ctx := context.Background()
-	filo := func(wantCode int, stdin string, terminal bool, args ...string) result {
-		t.Helper()
-		var r result
-		if terminal {
-			r = runIn(t, ctx, env, terminalInput{strings.NewReader(stdin)}, args...)
-		} else {
-			r = runIn(t, ctx, env, strings.NewReader(stdin), args...)
-		}
-		if r.code != wantCode {
-			t.Fatalf("filo %v: code %d, want %d\n%s%s", args, r.code, wantCode, r.stdout, r.stderr)
-		}
-		return r
-	}
-	contains := func(what, out string, wants ...string) {
-		t.Helper()
-		for _, w := range wants {
-			if !strings.Contains(out, w) {
-				t.Errorf("%s lacks %q:\n%s", what, w, out)
-			}
-		}
-	}
 	dates := func() map[string]string {
 		t.Helper()
 		s, err := store.Open(ctx, store.Options{DBPath: db})
