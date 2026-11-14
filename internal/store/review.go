@@ -126,7 +126,21 @@ func classify(r fileRow, today string) Status {
 func (s *Store) Files(ctx context.Context, today string, f Filter) ([]FileItem, error) {
 	cond, args := f.scopeSQL()
 	// A possible move event names the old file; the new file is the one whose path opened at e.path in that scan.
-	rows, err := s.db.QueryContext(ctx, `
+	out, err := queryAll(ctx, s.db, func(rows *sql.Rows) (FileItem, error) {
+		var r fileRow
+		it := &r.item
+		var moveRoot, moveRel string
+		if err := rows.Scan(&it.FileID, &it.RootPath, &it.Path, &it.Kind, &it.Size, &it.MtimeNS, &it.Hash,
+			&it.FileDate, &it.Retention, &it.KeepUntil, &it.ReviewedUTC, &r.reviewedAfter, &r.reviewedHash, &it.UnreadableSince,
+			&it.UnreadableSinceUTC, &r.possibleMoveIn, &moveRoot, &moveRel, &it.MoveDetail); err != nil {
+			return *it, err
+		}
+		if moveRel != "" {
+			it.MoveFrom = absPath(moveRoot, moveRel)
+		}
+		it.Status = classify(r, today)
+		return *it, nil
+	}, `
 		WITH pm AS (
 			SELECT np.file_id AS file_id, max(e.id) AS event_id
 			FROM events e
@@ -150,26 +164,6 @@ func (s *Store) Files(ctx context.Context, today string, f Filter) ([]FileItem, 
 		WHERE p.valid_to_scan IS NULL`+cond+`
 		ORDER BY r.path, p.path`, args...)
 	if err != nil {
-		return nil, fmt.Errorf("list files: %w", err)
-	}
-	defer rows.Close()
-	var out []FileItem
-	for rows.Next() {
-		var r fileRow
-		it := &r.item
-		var moveRoot, moveRel string
-		if err := rows.Scan(&it.FileID, &it.RootPath, &it.Path, &it.Kind, &it.Size, &it.MtimeNS, &it.Hash,
-			&it.FileDate, &it.Retention, &it.KeepUntil, &it.ReviewedUTC, &r.reviewedAfter, &r.reviewedHash, &it.UnreadableSince,
-			&it.UnreadableSinceUTC, &r.possibleMoveIn, &moveRoot, &moveRel, &it.MoveDetail); err != nil {
-			return nil, fmt.Errorf("list files: %w", err)
-		}
-		if moveRel != "" {
-			it.MoveFrom = absPath(moveRoot, moveRel)
-		}
-		it.Status = classify(r, today)
-		out = append(out, *it)
-	}
-	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("list files: %w", err)
 	}
 	return out, nil

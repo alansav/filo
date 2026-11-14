@@ -245,28 +245,24 @@ func reachableID(r Root) (fsid.ID, bool) {
 
 // Roots lists the registered roots, ordered by path.
 func (s *Store) Roots(ctx context.Context) ([]Root, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, path, coalesce(mount_path, ''), added_utc, include_hidden, ignores
-		FROM roots ORDER BY path`)
-	if err != nil {
-		return nil, fmt.Errorf("list roots: %w", err)
-	}
-	defer rows.Close()
-	var out []Root
-	for rows.Next() {
+	out, err := queryAll(ctx, s.db, func(rows *sql.Rows) (Root, error) {
 		var r Root
 		var ignores string
 		if err := rows.Scan(&r.ID, &r.Path, &r.MountPath, &r.AddedUTC, &r.IncludeHidden, &ignores); err != nil {
-			return nil, fmt.Errorf("list roots: %w", err)
+			return r, err
 		}
 		if err := json.Unmarshal([]byte(ignores), &r.Ignore); err != nil {
-			return nil, fmt.Errorf("root %s: ignore names: %w", r.Path, err)
+			return r, fmt.Errorf("root %s: ignore names: %w", r.Path, err)
 		}
 		if len(r.Ignore) == 0 {
 			r.Ignore = nil
 		}
-		out = append(out, r)
+		return r, nil
+	}, `SELECT id, path, coalesce(mount_path, ''), added_utc, include_hidden, ignores FROM roots ORDER BY path`)
+	if err != nil {
+		return nil, fmt.Errorf("list roots: %w", err)
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 // SetSettings replaces the settings of the root at path (the root itself, not a folder inside it) and returns the

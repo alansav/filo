@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"path/filepath"
 	"slices"
@@ -64,7 +65,13 @@ type FileRow struct {
 
 // Largest returns the n largest present regular files.
 func (s *Store) Largest(ctx context.Context, n int) ([]FileRow, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	out, err := queryAll(ctx, s.db, func(rows *sql.Rows) (FileRow, error) {
+		var fr FileRow
+		var root, rel string
+		err := rows.Scan(&root, &rel, &fr.Size)
+		fr.Path = absPath(root, rel)
+		return fr, err
+	}, `
 		SELECT r.path, p.path, f.size
 		FROM paths p JOIN files f ON f.id = p.file_id JOIN roots r ON r.id = p.root_id
 		WHERE p.valid_to_scan IS NULL AND f.kind = 'file'
@@ -72,18 +79,7 @@ func (s *Store) Largest(ctx context.Context, n int) ([]FileRow, error) {
 	if err != nil {
 		return nil, fmt.Errorf("largest files: %w", err)
 	}
-	defer rows.Close()
-	var out []FileRow
-	for rows.Next() {
-		var root, rel string
-		var fr FileRow
-		if err := rows.Scan(&root, &rel, &fr.Size); err != nil {
-			return nil, fmt.Errorf("largest files: %w", err)
-		}
-		fr.Path = absPath(root, rel)
-		out = append(out, fr)
-	}
-	return out, rows.Err()
+	return out, nil
 }
 
 // DupGroup is a set of present regular files with the same content.
@@ -171,7 +167,13 @@ func (s *Store) BrokenLinks(ctx context.Context, n int) ([]LinkRow, int64, error
 		WHERE p.valid_to_scan IS NULL AND f.kind = 'symlink' AND f.link_broken`).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("broken links: %w", err)
 	}
-	rows, err := s.db.QueryContext(ctx, `
+	out, err := queryAll(ctx, s.db, func(rows *sql.Rows) (LinkRow, error) {
+		var l LinkRow
+		var root, rel string
+		err := rows.Scan(&root, &rel, &l.Target)
+		l.Path = absPath(root, rel)
+		return l, err
+	}, `
 		SELECT r.path, p.path, coalesce(f.link_target, '')
 		FROM paths p JOIN files f ON f.id = p.file_id JOIN roots r ON r.id = p.root_id
 		WHERE p.valid_to_scan IS NULL AND f.kind = 'symlink' AND f.link_broken
@@ -179,18 +181,7 @@ func (s *Store) BrokenLinks(ctx context.Context, n int) ([]LinkRow, int64, error
 	if err != nil {
 		return nil, 0, fmt.Errorf("broken links: %w", err)
 	}
-	defer rows.Close()
-	var out []LinkRow
-	for rows.Next() {
-		var root, rel string
-		var l LinkRow
-		if err := rows.Scan(&root, &rel, &l.Target); err != nil {
-			return nil, 0, fmt.Errorf("broken links: %w", err)
-		}
-		l.Path = absPath(root, rel)
-		out = append(out, l)
-	}
-	return out, total, rows.Err()
+	return out, total, nil
 }
 
 // UnreadableRow is a present file flagged unreadable.
@@ -207,7 +198,13 @@ func (s *Store) UnreadableFiles(ctx context.Context, n int) ([]UnreadableRow, in
 		WHERE p.valid_to_scan IS NULL AND f.unreadable_since_scan IS NOT NULL`).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("unreadable files: %w", err)
 	}
-	rows, err := s.db.QueryContext(ctx, `
+	out, err := queryAll(ctx, s.db, func(rows *sql.Rows) (UnreadableRow, error) {
+		var u UnreadableRow
+		var root, rel string
+		err := rows.Scan(&root, &rel, &u.Since)
+		u.Path = absPath(root, rel)
+		return u, err
+	}, `
 		SELECT r.path, p.path, f.unreadable_since_scan
 		FROM paths p JOIN files f ON f.id = p.file_id JOIN roots r ON r.id = p.root_id
 		WHERE p.valid_to_scan IS NULL AND f.unreadable_since_scan IS NOT NULL
@@ -215,18 +212,7 @@ func (s *Store) UnreadableFiles(ctx context.Context, n int) ([]UnreadableRow, in
 	if err != nil {
 		return nil, 0, fmt.Errorf("unreadable files: %w", err)
 	}
-	defer rows.Close()
-	var out []UnreadableRow
-	for rows.Next() {
-		var root, rel string
-		var u UnreadableRow
-		if err := rows.Scan(&root, &rel, &u.Since); err != nil {
-			return nil, 0, fmt.Errorf("unreadable files: %w", err)
-		}
-		u.Path = absPath(root, rel)
-		out = append(out, u)
-	}
-	return out, total, rows.Err()
+	return out, total, nil
 }
 
 // EventRow is a recorded event with its scan's root and time.
@@ -240,7 +226,11 @@ type EventRow struct {
 // RecentEvents returns the n most recent moved, missing, changed, possible_move, error, deleted and same_as_deleted
 // events, newest first.
 func (s *Store) RecentEvents(ctx context.Context, n int) ([]EventRow, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	out, err := queryAll(ctx, s.db, func(rows *sql.Rows) (EventRow, error) {
+		var e EventRow
+		err := rows.Scan(&e.Kind, &e.FileID, &e.Path, &e.OtherPath, &e.Detail, &e.ScanID, &e.RootPath, &e.FinishedUTC)
+		return e, err
+	}, `
 		SELECT e.kind, coalesce(e.file_id, 0), coalesce(e.path, ''), coalesce(e.other_path, ''), coalesce(e.detail, ''),
 		       sc.id, r.path, coalesce(sc.finished_utc, '')
 		FROM events e JOIN scans sc ON sc.id = e.scan_id JOIN roots r ON r.id = sc.root_id
@@ -249,15 +239,5 @@ func (s *Store) RecentEvents(ctx context.Context, n int) ([]EventRow, error) {
 	if err != nil {
 		return nil, fmt.Errorf("recent events: %w", err)
 	}
-	defer rows.Close()
-	var out []EventRow
-	for rows.Next() {
-		var e EventRow
-		if err := rows.Scan(&e.Kind, &e.FileID, &e.Path, &e.OtherPath, &e.Detail, &e.ScanID, &e.RootPath,
-			&e.FinishedUTC); err != nil {
-			return nil, fmt.Errorf("recent events: %w", err)
-		}
-		out = append(out, e)
-	}
-	return out, rows.Err()
+	return out, nil
 }
