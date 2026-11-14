@@ -495,7 +495,7 @@ func TestMigrateFromV1ToCurrent(t *testing.T) {
 	db := tempDB(t)
 	mustClose(t, mustOpen(t, Options{DBPath: db}))
 	rawExec(t, db,
-		`DROP TABLE reviews`, `DROP TABLE review_batches`, `DROP TABLE export_rows`, `DROP TABLE exports`,
+		dropV7, `DROP TABLE reviews`, `DROP TABLE review_batches`, `DROP TABLE export_rows`, `DROP TABLE exports`,
 		`DROP TABLE files`, schemaV1Files, `DROP TABLE roots`, schemaV3Roots, `ALTER TABLE scans DROP COLUMN kind`,
 		`UPDATE meta SET value = '1' WHERE key = 'schema_version'`,
 		`INSERT INTO roots (id, path, added_utc) VALUES (1, '/r', '2026-01-01T00:00:00Z')`,
@@ -554,7 +554,7 @@ func TestMigrateFromV3(t *testing.T) {
 	db := tempDB(t)
 	mustClose(t, mustOpen(t, Options{DBPath: db}))
 	rawExec(t, db,
-		`DROP TABLE reviews`, `DROP TABLE review_batches`, `DROP TABLE export_rows`, `DROP TABLE exports`,
+		dropV7, `DROP TABLE reviews`, `DROP TABLE review_batches`, `DROP TABLE export_rows`, `DROP TABLE exports`,
 		`DROP TABLE files`, schemaV3Files, `DROP TABLE roots`, schemaV3Roots, reviewSQLv3,
 		`ALTER TABLE scans DROP COLUMN kind`,
 		`UPDATE meta SET value = '3' WHERE key = 'schema_version'`,
@@ -651,5 +651,35 @@ func TestMigrateFromV3(t *testing.T) {
 		if v := rawQueryString(t, db, `SELECT count(*) FROM pragma_table_info('files') WHERE name = '`+col+`'`); v != "0" {
 			t.Errorf("files.%s still there", col)
 		}
+	}
+}
+
+// dropV7 removes what schema version 7 added that the older tables in these tests do not drop themselves.
+const dropV7 = `DROP TABLE duplicate_reviews; DROP TABLE separate_hashes; DROP TABLE duplicate_marks;
+DROP INDEX ix_files_inode;`
+
+func TestMigrateFromV6(t *testing.T) {
+	db := tempDB(t)
+	mustClose(t, mustOpen(t, Options{DBPath: db}))
+	rawExec(t, db, dropV7,
+		`ALTER TABLE exports DROP COLUMN kind`, `ALTER TABLE export_rows DROP COLUMN dup_group`,
+		`ALTER TABLE export_rows DROP COLUMN path_id`,
+		`UPDATE meta SET value = '6' WHERE key = 'schema_version'`,
+		`INSERT INTO exports (id, created_utc) VALUES (1, '2026-11-13T09:00:00Z')`,
+	)
+	s := mustOpen(t, Options{DBPath: db})
+	defer mustClose(t, s)
+	if v := readMeta(t, s)[metaSchemaVersion]; v != strconv.Itoa(SchemaVersion) {
+		t.Fatalf("schema_version = %s after upgrade, want %d", v, SchemaVersion)
+	}
+	var kind string
+	if err := s.db.QueryRow(`SELECT kind FROM exports WHERE id = 1`).Scan(&kind); err != nil {
+		t.Fatal(err)
+	}
+	if kind != ExportRetention {
+		t.Errorf("an existing export's kind = %q, want %q", kind, ExportRetention)
+	}
+	if _, err := s.RowCounts(context.Background()); err != nil {
+		t.Errorf("the duplicates tables after upgrade: %v", err)
 	}
 }

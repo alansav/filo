@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"slices"
+	"strings"
 )
 
 // absPath joins a root and a register path for display.
@@ -95,83 +96,65 @@ type DupGroup struct {
 
 // Duplicates is every duplicate group's total, plus the largest groups in detail.
 type Duplicates struct {
-	Groups      int64 // number of groups
-	Copies      int64 // files in all groups
-	Reclaimable int64 // across all groups
-	Top         []DupGroup
+	Groups        int64 // number of groups
+	Copies        int64 // copies in all groups (hard links to one file are one copy)
+	Reclaimable   int64 // across all groups
+	Top           []DupGroup
+	Separate      int64 // contents marked separate (identical copies that are not duplicates)
+	SeparateFiles int64 // their present files
+	Marked        int64 // copies marked for deletion, on their current content
 }
 
-// Duplicates finds present regular files (size > 0) that share a hash, across all roots, and returns the n groups
-// with the most reclaimable space.
+// Duplicates finds the duplicate groups across all roots (DuplicateGroups: two or more copies of a content, not
+// marked separate) and returns the n groups with the most reclaimable space.
 func (s *Store) Duplicates(ctx context.Context, n int) (Duplicates, error) {
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT f.hash, max(f.size), count(*)
-		FROM files f JOIN paths p ON p.file_id = f.id AND p.valid_to_scan IS NULL
-		WHERE f.kind = 'file' AND f.size > 0 AND f.hash IS NOT NULL
-		GROUP BY f.hash HAVING count(*) > 1`)
-	if err != nil {
-		return Duplicates{}, fmt.Errorf("duplicates: %w", err)
-	}
 	var d Duplicates
-	var groups []DupGroup
-	for rows.Next() {
-		var g DupGroup
-		var copies int64
-		if err := rows.Scan(&g.Hash, &g.Size, &copies); err != nil {
-			rows.Close()
-			return Duplicates{}, fmt.Errorf("duplicates: %w", err)
-		}
-		g.Reclaimable = g.Size * (copies - 1)
-		d.Groups++
-		d.Copies += copies
-		d.Reclaimable += g.Reclaimable
-		groups = append(groups, g)
-	}
-	err = rows.Err()
-	rows.Close()
+	all, err := s.DuplicateGroups(ctx, Filter{})
 	if err != nil {
-		return Duplicates{}, fmt.Errorf("duplicates: %w", err)
+		return d, err
 	}
-
-	slices.SortFunc(groups, func(a, b DupGroup) int {
-		if a.Reclaimable != b.Reclaimable {
-			if a.Reclaimable > b.Reclaimable {
+	// Sort by reclaimable space and keep the top n before building any path list.
+	type ranked struct {
+		c           DupContent
+		reclaimable int64
+	}
+	rs := make([]ranked, 0, len(all))
+	for _, c := range all {
+		r := ranked{c, c.Size * int64(len(c.Copies)-1)}
+		d.Groups++
+		d.Copies += int64(len(c.Copies))
+		d.Reclaimable += r.reclaimable
+		rs = append(rs, r)
+	}
+	slices.SortFunc(rs, func(a, b ranked) int {
+		if a.reclaimable != b.reclaimable {
+			if a.reclaimable > b.reclaimable {
 				return -1
 			}
 			return 1
 		}
-		if a.Hash < b.Hash {
-			return -1
-		}
-		return 1
+		return strings.Compare(a.c.Hash, b.c.Hash)
 	})
-	if len(groups) > n {
-		groups = groups[:n]
+	if len(rs) > n {
+		rs = rs[:n]
 	}
-	for i := range groups {
-		prow, err := s.db.QueryContext(ctx, `
-			SELECT r.path, p.path FROM files f JOIN paths p ON p.file_id = f.id AND p.valid_to_scan IS NULL
-			JOIN roots r ON r.id = p.root_id
-			WHERE f.hash = ? AND f.kind = 'file' AND f.size > 0`, groups[i].Hash)
-		if err != nil {
-			return Duplicates{}, fmt.Errorf("duplicate paths: %w", err)
+	for _, r := range rs {
+		g := DupGroup{Hash: r.c.Hash, Size: r.c.Size, Reclaimable: r.reclaimable}
+		for _, cp := range r.c.Copies {
+			g.Paths = append(g.Paths, cp.AbsPath())
+			g.Paths = append(g.Paths, cp.Links...)
 		}
-		for prow.Next() {
-			var root, rel string
-			if err := prow.Scan(&root, &rel); err != nil {
-				prow.Close()
-				return Duplicates{}, fmt.Errorf("duplicate paths: %w", err)
-			}
-			groups[i].Paths = append(groups[i].Paths, absPath(root, rel))
-		}
-		err = prow.Err()
-		prow.Close()
-		if err != nil {
-			return Duplicates{}, fmt.Errorf("duplicate paths: %w", err)
-		}
-		slices.Sort(groups[i].Paths)
+		slices.Sort(g.Paths)
+		d.Top = append(d.Top, g)
 	}
-	d.Top = groups
+	if d.Separate, d.SeparateFiles, err = s.SeparateTotals(ctx); err != nil {
+		return d, err
+	}
+	if err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM duplicate_marks m JOIN files f ON f.id = m.file_id
+		JOIN paths p ON p.file_id = f.id AND p.valid_to_scan IS NULL
+		WHERE f.hash = m.hash AND f.deleted_utc IS NULL`).Scan(&d.Marked); err != nil {
+		return d, fmt.Errorf("read marks: %w", err)
+	}
 	return d, nil
 }
 

@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alansav/filo/internal/fsid"
 	"github.com/alansav/filo/internal/hasher"
 	"github.com/alansav/filo/internal/store"
 )
@@ -389,5 +390,121 @@ func TestDeleteFolderSwappedDuringCheck(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(root, "moved", "f")); err != nil {
 		t.Errorf("the file was deleted through the swapped folder: %v", err)
+	}
+}
+
+// TestCheckKept: a copy is kept only if it is still at its path as the same file, with the same content, and
+// checking it changes nothing.
+func TestCheckKept(t *testing.T) {
+	ctx := context.Background()
+	tests := []struct {
+		name    string
+		prepare func(t *testing.T, root string, c *store.Candidate)
+		want    string // "" = kept
+	}{
+		{"unchanged", func(*testing.T, string, *store.Candidate) {}, ""},
+		{"gone", func(t *testing.T, root string, _ *store.Candidate) {
+			os.Remove(filepath.Join(root, "k"))
+		}, "no longer at this path"},
+		{"edited", func(t *testing.T, root string, _ *store.Candidate) {
+			write(t, filepath.Join(root, "k"), "something else")
+		}, "changed since the last scan"},
+		{"same size and time, other content", func(t *testing.T, root string, c *store.Candidate) {
+			c.ReviewedHash = strings.Repeat("0", 64)
+		}, "its content is no longer the same"},
+		{"replaced", func(t *testing.T, root string, c *store.Candidate) {
+			c.Ino++
+		}, "replaced by another file"},
+		{"outside its root", func(t *testing.T, root string, c *store.Candidate) {
+			c.Path = "../k"
+		}, "not inside its root"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := canonicalTemp(t)
+			write(t, filepath.Join(root, "k"), "content")
+			c := candidate(t, root, "k")
+			tt.prepare(t, root, &c)
+			kept, why, err := CheckKept(ctx, c)
+			if err != nil {
+				t.Fatal(err)
+			}
+			switch {
+			case tt.want == "" && kept == nil:
+				t.Errorf("not kept: %s", why)
+			case tt.want != "" && (kept != nil || !strings.Contains(why, tt.want)):
+				t.Errorf("CheckKept = %v, %q; want not kept, %q", kept, why, tt.want)
+			}
+		})
+	}
+}
+
+// TestDeleteDuplicate: a marked copy is deleted only while the kept copy still holds the same content, looked at
+// again right before the removal, and is never the same file as the kept copy.
+func TestDeleteDuplicate(t *testing.T) {
+	ctx := context.Background()
+	tests := []struct {
+		name string
+		// prepare runs after the kept copy is checked; it may change the marked candidate. noKept drops the kept copy.
+		prepare      func(t *testing.T, root string, c *store.Candidate)
+		beforeRemove func(t *testing.T, root string)
+		noKept       bool
+		want         string // "" = deleted, else part of the reason it was skipped
+	}{
+		{name: "deleted", want: ""},
+		{name: "kept copy removed during the check", want: "the copy kept",
+			beforeRemove: func(t *testing.T, root string) { os.Remove(filepath.Join(root, "keep")) }},
+		{name: "kept copy edited during the check", want: "the copy kept",
+			beforeRemove: func(t *testing.T, root string) { write(t, filepath.Join(root, "keep"), "other content") }},
+		{name: "other content", want: "no copy of the same content is kept",
+			prepare: func(t *testing.T, _ string, c *store.Candidate) { c.ReviewedHash = strings.Repeat("0", 64) }},
+		{name: "no kept copy", noKept: true, want: "no copy of the same content is kept"},
+		{name: "marked copy changed since it was marked", want: "changed since it was marked",
+			prepare: func(t *testing.T, root string, _ *store.Candidate) { write(t, filepath.Join(root, "dup"), "edited!") }},
+		{name: "the same file through a bind mount", want: "is the same file as the copy kept",
+			prepare: func(t *testing.T, root string, _ *store.Candidate) {
+				// Another root seeing the kept file: the register has two copies, the disk one file.
+				dup, keep := filepath.Join(root, "dup"), filepath.Join(root, "keep")
+				t.Cleanup(fsid.SetForTest(func(p string, real func(string) (fsid.ID, error)) (fsid.ID, error) {
+					if p == dup {
+						return real(keep)
+					}
+					return real(p)
+				}))
+			}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := canonicalTemp(t)
+			write(t, filepath.Join(root, "keep"), "same")
+			write(t, filepath.Join(root, "dup"), "same")
+			kept, why, err := CheckKept(ctx, candidate(t, root, "keep"))
+			if err != nil || kept == nil {
+				t.Fatalf("CheckKept: %q, %v", why, err)
+			}
+			c := candidate(t, root, "dup")
+			c.FileID = 2
+			if tt.prepare != nil {
+				tt.prepare(t, root, &c)
+			}
+			if tt.beforeRemove != nil {
+				beforeRemove = func(string) { tt.beforeRemove(t, root) }
+				t.Cleanup(func() { beforeRemove = nil })
+			}
+			if tt.noKept {
+				kept = nil
+			}
+			o, err := New(&fakeRec{}, time.Now).DeleteDuplicate(ctx, c, kept)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, dupErr := os.Lstat(filepath.Join(root, "dup"))
+			switch {
+			case tt.want == "" && (!o.Deleted || dupErr == nil):
+				t.Errorf("DeleteDuplicate = %+v; want the marked copy deleted", o)
+			case tt.want != "" && (o.Deleted || dupErr != nil || !strings.Contains(o.Reason, tt.want)):
+				t.Errorf("DeleteDuplicate = %+v (marked copy: %v); want skipped, %q", o, dupErr, tt.want)
+			}
+		})
 	}
 }

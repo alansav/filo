@@ -4,7 +4,6 @@
 package retention
 
 import (
-	"bytes"
 	"encoding/csv"
 	"errors"
 	"fmt"
@@ -14,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alansav/filo/internal/sheet"
 	"github.com/alansav/filo/internal/store"
 )
 
@@ -23,9 +23,6 @@ import (
 var Header = []string{"id", "export", "directory", "name", "size", "modified", "file_date", "retention", "keep_until"}
 
 const dateLayout = store.DateLayout
-
-// bom marks the file as UTF-8 for spreadsheets that would otherwise guess another encoding.
-const bom = "\ufeff"
 
 const formatHint = " (a spreadsheet may have rewritten it; format the column as text)"
 
@@ -175,20 +172,10 @@ func isDigit(c byte) bool { return c >= '0' && c <= '9' }
 // Today is t's date in its location, as YYYY-MM-DD.
 func Today(t time.Time) string { return t.Format(dateLayout) }
 
-// cell makes a value safe to put in a spreadsheet: valid UTF-8, and never read as a formula. Only display columns
-// pass through here; the update never reads them.
-func cell(s string) string {
-	s = strings.ToValidUTF8(s, "�")
-	if s != "" && strings.ContainsRune("=+-@\t\r", rune(s[0])) {
-		return "'" + s
-	}
-	return s
-}
-
 // WriteCSV writes items as one export: the file_date, retention and keep_until they carry (the caller fills in
 // file_date from the name first, and records the same values with the export). Times are shown in loc.
 func WriteCSV(w io.Writer, exportID int64, items []store.FileItem, loc *time.Location) error {
-	if _, err := io.WriteString(w, bom); err != nil {
+	if _, err := io.WriteString(w, sheet.BOM); err != nil {
 		return err
 	}
 	cw := csv.NewWriter(w)
@@ -203,7 +190,7 @@ func WriteCSV(w io.Writer, exportID int64, items []store.FileItem, loc *time.Loc
 			directory = it.RootPath + "/" + dir
 		}
 		rec := []string{
-			strconv.FormatInt(it.FileID, 10), ex, cell(directory), cell(name), strconv.FormatInt(it.Size, 10),
+			strconv.FormatInt(it.FileID, 10), ex, sheet.Cell(directory), sheet.Cell(name), strconv.FormatInt(it.Size, 10),
 			time.Unix(0, it.MtimeNS).In(loc).Format("2006-01-02 15:04"), it.FileDate, it.Retention, it.KeepUntil,
 		}
 		if err := cw.Write(rec); err != nil {
@@ -236,159 +223,76 @@ var (
 		"name, or export again")
 )
 
-// ReadCSV reads an edited retention CSV. It accepts what spreadsheets do to a file: a byte order mark, CRLF line ends,
-// ';' or tab as the separator, columns moved or added, and empty rows. A row listed more than once is refused every
-// time it appears, rather than guessing which one is meant.
+// ReadCSV reads an edited retention CSV, as spreadsheets save it (see package sheet). A row listed more than once
+// is refused every time it appears, rather than guessing which one is meant.
 func ReadCSV(r io.Reader) (Parsed, error) {
 	var p Parsed
 	data, err := io.ReadAll(r)
 	if err != nil {
 		return p, err
 	}
-	data = bytes.TrimPrefix(data, []byte(bom))
-
-	var cr *csv.Reader
-	var cols map[string]int
-	var width int // header fields
-	old, missing := false, false
-	for _, sep := range []rune{',', ';', '\t'} {
-		c := csv.NewReader(bytes.NewReader(data))
-		c.Comma = sep
-		c.FieldsPerRecord = -1
-		head, err := c.Read()
-		if err != nil {
-			continue
-		}
-		m := map[string]int{}
-		for i, h := range head {
-			name := strings.ToLower(strings.TrimSpace(h))
-			if _, dup := m[name]; !dup {
-				m[name] = i
+	sh, headers := sheet.Open(data, "id", "export", "retention")
+	if sh == nil {
+		for _, cols := range headers {
+			if sheet.HasAll(cols, "id", "export", "file_date") {
+				return p, ErrNoRetention // a current CSV without its retention column
 			}
 		}
-		if hasAll(m, "id", "export", "retention") {
-			cr, cols, width = c, m, len(head)
-			break
-		}
-		switch {
-		case hasAll(m, "id", "export", "file_date"):
-			missing = true // a current CSV without its retention column
-		case hasAll(m, "id", "export", "review_date") || hasAll(m, "id", "export", "keep_until"):
-			old = true
-		}
-	}
-	if cr == nil {
-		switch {
-		case missing:
-			return p, ErrNoRetention
-		case old:
-			return p, ErrOldCSV
+		for _, cols := range headers {
+			if sheet.HasAll(cols, "id", "export", "review_date") || sheet.HasAll(cols, "id", "export", "keep_until") {
+				return p, ErrOldCSV
+			}
 		}
 		return p, ErrNotRetentionCSV
 	}
 
-	seen := map[[2]int64][]int{} // (export, id) -> indexes into p.Rows
-	for {
-		rec, err := cr.Read()
-		if errors.Is(err, io.EOF) {
-			break
-		}
-		if err != nil {
-			return p, err // a broken quote: csv says where
-		}
-		line, _ := cr.FieldPos(0)
-		get := func(name string) string {
-			i, ok := cols[name]
-			if !ok || i >= len(rec) {
-				return ""
-			}
-			return strings.TrimSpace(rec[i])
-		}
-		if strings.TrimSpace(strings.Join(rec, "")) == "" {
-			continue
-		}
+	err = sh.Each(func(row sheet.Row) {
 		bad := func(format string, args ...any) {
-			p.Problems = append(p.Problems, Problem{line, fmt.Sprintf(format, args...)})
+			p.Problems = append(p.Problems, Problem{row.Line, fmt.Sprintf(format, args...)})
 		}
-
-		id, idErr := strconv.ParseInt(get("id"), 10, 64)
-		ex, exErr := strconv.ParseInt(get("export"), 10, 64)
+		id, idErr := strconv.ParseInt(row.Get("id"), 10, 64)
+		ex, exErr := strconv.ParseInt(row.Get("export"), 10, 64)
 		switch {
 		case idErr != nil || id < 1:
-			bad("id %q is not a file ID", get("id"))
-			continue
+			bad("id %q is not a file ID", row.Get("id"))
+			return
 		case exErr != nil || ex < 1:
-			bad("export %q is not an export number", get("export"))
-			continue
+			bad("export %q is not an export number", row.Get("export"))
+			return
 		}
-		// A value typed past the last column would otherwise be lost silently.
-		if v := beyond(rec, width); v != "" {
+		if v := row.Beyond(); v != "" {
 			bad("%q is outside the columns; put it under file_date or retention", v)
-			continue
+			return
 		}
-		row := store.RetentionRow{Line: line, ExportID: ex, FileID: id}
-		if row.Retention, err = ParseRetention(get("retention")); err != nil {
+		rr := store.RetentionRow{Line: row.Line, ExportID: ex, FileID: id}
+		var err error
+		if rr.Retention, err = ParseRetention(row.Get("retention")); err != nil {
 			bad("retention %v", err)
-			continue
+			return
 		}
-		if _, ok := cols["file_date"]; ok {
-			row.HasFileDate = true
-			if row.FileDate, err = ParseDate(get("file_date")); err != nil {
+		if sh.Has("file_date") {
+			rr.HasFileDate = true
+			if rr.FileDate, err = ParseDate(row.Get("file_date")); err != nil {
 				bad("file_date %v", err)
-				continue
+				return
 			}
 		}
-		if _, ok := cols["keep_until"]; ok {
-			row.HasKeepUntil = true
-			if row.KeepUntil, err = parseKeepUntil(get("keep_until")); err != nil {
+		if sh.Has("keep_until") {
+			rr.HasKeepUntil = true
+			if rr.KeepUntil, err = parseKeepUntil(row.Get("keep_until")); err != nil {
 				bad("keep_until %v", err)
-				continue
+				return
 			}
 		}
-		key := [2]int64{ex, id}
-		seen[key] = append(seen[key], len(p.Rows))
-		p.Rows = append(p.Rows, row)
+		p.Rows = append(p.Rows, rr)
+	})
+	if err != nil {
+		return p, err // a broken quote: csv says where
 	}
-
-	// Drop every copy of a row that appears more than once.
-	drop := map[int]bool{}
-	for _, idx := range seen {
-		if len(idx) > 1 {
-			for _, i := range idx {
-				drop[i] = true
-				r := p.Rows[i]
-				p.Problems = append(p.Problems, Problem{r.Line,
-					fmt.Sprintf("file %d of export %d is listed more than once", r.FileID, r.ExportID)})
-			}
-		}
-	}
-	if len(drop) > 0 {
-		kept := p.Rows[:0]
-		for i, r := range p.Rows {
-			if !drop[i] {
-				kept = append(kept, r)
-			}
-		}
-		p.Rows = kept
-	}
+	p.Rows = sheet.DropRepeated(p.Rows, func(r store.RetentionRow) [2]int64 { return [2]int64{r.ExportID, r.FileID} },
+		func(r store.RetentionRow) {
+			p.Problems = append(p.Problems, Problem{r.Line,
+				fmt.Sprintf("file %d of export %d is listed more than once", r.FileID, r.ExportID)})
+		})
 	return p, nil
-}
-
-// beyond returns the first non-empty value past the header's columns, or "".
-func beyond(rec []string, width int) string {
-	for i := width; i < len(rec); i++ {
-		if v := strings.TrimSpace(rec[i]); v != "" {
-			return v
-		}
-	}
-	return ""
-}
-
-func hasAll(m map[string]int, names ...string) bool {
-	for _, n := range names {
-		if _, ok := m[n]; !ok {
-			return false
-		}
-	}
-	return true
 }

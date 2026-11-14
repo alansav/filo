@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -14,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alansav/filo/internal/duplicates"
 	"github.com/alansav/filo/internal/report"
 	"github.com/alansav/filo/internal/retention"
 	"github.com/alansav/filo/internal/store"
@@ -25,7 +27,7 @@ var now = time.Now
 func today() string { return retention.Today(now().Local()) }
 
 // exportKinds are the CSVs filo can export. Each names what the CSV is for.
-var exportKinds = []string{"retention"}
+var exportKinds = []string{"retention", "duplicates"}
 
 // filterFor maps an optional DIR to a filter, and says where it points.
 func filterFor(ctx context.Context, s *store.Store, pos []string) (store.Filter, string, error) {
@@ -47,19 +49,24 @@ func (e *env) export(ctx context.Context, dbBefore string, args []string) error 
 	fl := e.flags("export")
 	db := dbFlag(fl, dbBefore)
 	out := fl.String("o", "", "")
+	separate := fl.Bool("separate", false, "")
 	pos, err := e.parse(fl, "export", args)
 	if err != nil {
 		return err
 	}
 	if len(pos) == 0 {
-		return usageError{"export needs what to export: filo export retention [DIR] -o FILE"}
+		return usageError{"export needs what to export: filo export retention|duplicates [DIR] -o FILE"}
 	}
-	if !slices.Contains(exportKinds, pos[0]) {
-		return usageError{fmt.Sprintf("unknown export %q; the one export is retention", pos[0])}
+	kind := pos[0]
+	if !slices.Contains(exportKinds, kind) {
+		return usageError{fmt.Sprintf("unknown export %q; the exports are retention and duplicates", kind)}
+	}
+	if *separate && kind != "duplicates" {
+		return usageError{"--separate goes with export duplicates"}
 	}
 	pos = pos[1:]
 	if len(pos) > 1 {
-		return usageError{"export retention takes at most one DIR"}
+		return usageError{"export " + kind + " takes at most one DIR"}
 	}
 	if *out == "" {
 		return usageError{"export needs -o FILE: the CSV is written to a file, never to the terminal"}
@@ -87,6 +94,9 @@ func (e *env) export(ctx context.Context, dbBefore string, args []string) error 
 	if err != nil {
 		return err
 	}
+	if kind == "duplicates" {
+		return e.exportDuplicates(ctx, s, f, where, csvPath, *separate)
+	}
 	items, err := s.Files(ctx, today(), f)
 	if err != nil {
 		return err
@@ -111,31 +121,11 @@ func (e *env) export(ctx context.Context, dbBefore string, args []string) error 
 		return nil
 	}
 
-	// O_EXCL: an existing file is never overwritten, whatever it is.
-	file, err := os.OpenFile(csvPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	if errors.Is(err, fs.ErrExist) {
-		return fmt.Errorf("%s already exists; choose another name (filo never overwrites a file)", csvPath)
-	}
+	id, err := writeExport(csvPath, func(write func(int64) error) (int64, error) {
+		return s.RecordExport(ctx, csvPath, now(), items, write)
+	}, func(w io.Writer, id int64) error { return retention.WriteCSV(w, id, items, time.Local) })
 	if err != nil {
-		return fmt.Errorf("create %s: %w", csvPath, err)
-	}
-	id, err := s.RecordExport(ctx, csvPath, now(), items, func(id int64) error {
-		bw := bufio.NewWriter(file)
-		if err := retention.WriteCSV(bw, id, items, time.Local); err != nil {
-			return err
-		}
-		if err := bw.Flush(); err != nil {
-			return err
-		}
-		if err := file.Sync(); err != nil {
-			return err
-		}
-		return file.Close()
-	})
-	if err != nil {
-		file.Close()
-		os.Remove(csvPath) // created by this command a moment ago, and incomplete
-		return fmt.Errorf("export to %s: %w", csvPath, err)
+		return err
 	}
 	undated := 0
 	for _, it := range items {
@@ -153,6 +143,40 @@ func (e *env) export(ctx context.Context, dbBefore string, args []string) error 
 		"where you want it, then run:")
 	fmt.Fprintf(e.stdout, "  filo update %s\n", csvPath)
 	return nil
+}
+
+// writeExport creates csvPath (never over an existing file) and records the export: record stores it and calls the
+// function it is given with the export's ID, which writes the CSV through writeCSV. A failed write removes the file
+// and records nothing.
+func writeExport(csvPath string, record func(write func(int64) error) (int64, error),
+	writeCSV func(w io.Writer, id int64) error) (int64, error) {
+	// O_EXCL: an existing file is never overwritten, whatever it is.
+	file, err := os.OpenFile(csvPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if errors.Is(err, fs.ErrExist) {
+		return 0, fmt.Errorf("%s already exists; choose another name (filo never overwrites a file)", csvPath)
+	}
+	if err != nil {
+		return 0, fmt.Errorf("create %s: %w", csvPath, err)
+	}
+	id, err := record(func(id int64) error {
+		bw := bufio.NewWriter(file)
+		if err := writeCSV(bw, id); err != nil {
+			return err
+		}
+		if err := bw.Flush(); err != nil {
+			return err
+		}
+		if err := file.Sync(); err != nil {
+			return err
+		}
+		return file.Close()
+	})
+	if err != nil {
+		file.Close()
+		os.Remove(csvPath) // created by this command a moment ago, and incomplete
+		return 0, fmt.Errorf("export to %s: %w", csvPath, err)
+	}
+	return id, nil
 }
 
 // clearsShown is how many files the clear prompt names before "and N more".
@@ -176,12 +200,14 @@ func (e *env) update(ctx context.Context, dbBefore string, args []string) error 
 	if err != nil {
 		return err
 	}
-	file, err := os.Open(path)
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return fmt.Errorf("open %s: %w", path, err)
 	}
-	parsed, err := retention.ReadCSV(file)
-	file.Close()
+	if duplicates.IsDuplicatesCSV(data) {
+		return e.updateDuplicates(ctx, *db, path, data, *dry)
+	}
+	parsed, err := retention.ReadCSV(bytes.NewReader(data))
 	if err != nil {
 		return fmt.Errorf("%s: %w", path, err)
 	}
@@ -204,25 +230,7 @@ func (e *env) update(ctx context.Context, dbBefore string, args []string) error 
 		return err
 	}
 
-	type line struct {
-		n   int
-		msg string
-	}
-	var bad []line
-	for _, p := range parsed.Problems {
-		bad = append(bad, line{p.Line, p.Msg})
-	}
-	for _, r := range res.Refusals {
-		where := r.Path
-		if where == "" {
-			where = fmt.Sprintf("file %d", r.FileID)
-		}
-		bad = append(bad, line{r.Line, where + ": " + r.Reason})
-	}
-	slices.SortStableFunc(bad, func(a, b line) int { return a.n - b.n })
-	for _, b := range bad {
-		fmt.Fprintf(e.stderr, "filo: %s line %d: %s\n", filepath.Base(path), b.n, b.msg)
-	}
+	bad := e.printRefusals(path, parsed.Problems, res.Refusals)
 
 	w := e.stdout
 	if *dry {
@@ -263,16 +271,55 @@ func (e *env) update(ctx context.Context, dbBefore string, args []string) error 
 	if res.Unchanged > 0 {
 		notes = append(notes, report.Plural(int64(res.Unchanged), "row", "rows")+" unchanged")
 	}
-	if len(bad) > 0 {
-		notes = append(notes, report.Plural(int64(len(bad)), "row", "rows")+" refused (listed above)")
+	if bad > 0 {
+		notes = append(notes, report.Plural(int64(bad), "row", "rows")+" refused (listed above)")
 	}
 	if len(notes) > 0 {
 		fmt.Fprintf(w, "%s.\n", strings.Join(notes, ", "))
 	}
-	if len(bad) > 0 {
+	if bad > 0 {
 		return errReported
 	}
 	return nil
+}
+
+// printRefusals prints the rows the CSV reader refused and the rows or groups the register refused, in CSV line
+// order, one line each on stderr, and returns how many.
+func (e *env) printRefusals(path string, problems []retention.Problem, refusals []store.Refusal) int {
+	type line struct {
+		n   int
+		msg string
+	}
+	var bad []line
+	for _, p := range problems {
+		bad = append(bad, line{p.Line, p.Msg})
+	}
+	for _, r := range refusals {
+		where := r.Path
+		if where == "" {
+			where = fmt.Sprintf("file %d", r.FileID)
+		}
+		bad = append(bad, line{r.Line, where + ": " + r.Reason})
+	}
+	slices.SortStableFunc(bad, func(a, b line) int { return a.n - b.n })
+	for _, b := range bad {
+		fmt.Fprintf(e.stderr, "filo: %s line %d: %s\n", filepath.Base(path), b.n, b.msg)
+	}
+	return len(bad)
+}
+
+// askYesNo prints prompt and reads one answer from standard input. Only "y" or "yes" (any case) is a yes.
+func (e *env) askYesNo(prompt string) bool {
+	fmt.Fprint(e.stdout, prompt)
+	answer, err := bufio.NewReader(e.stdin).ReadString('\n')
+	if err != nil && !errors.Is(err, io.EOF) {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(answer)) {
+	case "y", "yes":
+		return true
+	}
+	return false
 }
 
 // confirmClears lists the retentions a blank cell would clear and asks once. Only "y" or "yes" confirms.
@@ -295,14 +342,5 @@ func (e *env) confirmClears(cs []store.Clear) bool {
 		}
 		fmt.Fprintf(w, "  %s  %s\n", what, where)
 	}
-	fmt.Fprintf(w, "Clear the retention of %s? [y/n] ", report.Plural(int64(len(cs)), "file", "files"))
-	answer, err := bufio.NewReader(e.stdin).ReadString('\n')
-	if err != nil && !errors.Is(err, io.EOF) {
-		return false
-	}
-	switch strings.ToLower(strings.TrimSpace(answer)) {
-	case "y", "yes":
-		return true
-	}
-	return false
+	return e.askYesNo(fmt.Sprintf("Clear the retention of %s? [y/n] ", report.Plural(int64(len(cs)), "file", "files")))
 }

@@ -43,24 +43,40 @@ func (e *env) delete(ctx context.Context, dbBefore string, args []string) error 
 	if err != nil {
 		return err
 	}
+	groups, stale, err := markedGroups(ctx, s, f, cands)
+	if err != nil {
+		return err
+	}
 
 	w := e.stdout
 	under := ""
 	if where != "" {
 		under = " under " + where
 	}
-	if len(cands) == 0 {
+	marked := 0
+	for _, g := range groups {
+		marked += len(g.Delete)
+	}
+	if len(cands) == 0 && marked == 0 {
 		fmt.Fprintf(w, "No files%s are past their retention.\n", under)
+		if stale > 0 {
+			return e.listMarked(ctx, s, nil, stale, under)
+		}
 		return nil
 	}
-	var total int64
-	for _, c := range cands {
-		total += fileBytes(c)
+	if len(cands) > 0 {
+		var total int64
+		for _, c := range cands {
+			total += fileBytes(c)
+		}
+		fmt.Fprintf(w, "Past their retention%s: %s, %s\n", under, report.Plural(int64(len(cands)), "file", "files"),
+			report.Size(total))
+		for _, c := range cands {
+			fmt.Fprintf(w, "  %s  %10s  %s\n", c.KeepUntil, report.Size(c.Size), c.AbsPath())
+		}
 	}
-	fmt.Fprintf(w, "Past their retention%s: %s, %s\n", under, report.Plural(int64(len(cands)), "file", "files"),
-		report.Size(total))
-	for _, c := range cands {
-		fmt.Fprintf(w, "  %s  %10s  %s\n", c.KeepUntil, report.Size(c.Size), c.AbsPath())
+	if err := e.listMarked(ctx, s, groups, stale, under); err != nil {
+		return err
 	}
 
 	selecting := false
@@ -87,21 +103,115 @@ func (e *env) delete(ctx context.Context, dbBefore string, args []string) error 
 		}
 	}
 
+	expired := map[int64]bool{}
+	for _, c := range cands {
+		expired[c.FileID] = true
+	}
 	run := s.BeginDeleteRun(now())
 	d := dispose.New(run, now)
 	type skipped struct{ path, reason string }
 	var (
-		deleted, renewed, left int
-		freed                  int64
-		skips                  []skipped
-		failed                 bool
-		runErr                 error
+		deleted, renewed, unmarked, left int
+		freed                            int64
+		skips                            []skipped
+		failed                           bool
+		runErr                           error
 	)
+	total := marked + len(cands)
+	n := 0 // files gone through, for (n/total)
+	quit := false
+
+	// Duplicates first, a group at a time, each checked right before its own deletions: never the last copy.
+	// stop counts what this run leaves untouched from group gi on (from copy i of it), plus every candidate.
+	stop := func(gi, i int, err error) {
+		left += len(groups[gi].Delete) - i
+		for _, later := range groups[gi+1:] {
+			left += len(later.Delete)
+		}
+		left += len(cands)
+		runErr = err
+		quit = true
+	}
+groups:
+	for gi, g := range groups {
+		var chosen []store.Candidate
+		for i, c := range g.Delete {
+			n++
+			if !selecting {
+				chosen = append(chosen, c)
+				continue
+			}
+			fmt.Fprintf(w, "(%d/%d) duplicate  %s  %s\n", n, total, report.Size(c.Size), c.AbsPath())
+			act, err := e.choose(ctx, pr, "[d]elete, [u]nmark, [s]kip, [q]uit? ", choice{"u", "unmark", actUnmark,
+				func() (bool, error) { return true, s.Unmark(ctx, c.FileID, now()) }})
+			switch {
+			case err != nil || act == actQuit:
+				// Stop now: nothing more is deleted, this group's earlier choices included.
+				stop(gi, i, err)
+				left += len(chosen)
+				break groups
+			case act == actUnmark:
+				unmarked++
+			case act == actSkip:
+				left++
+			default:
+				chosen = append(chosen, c)
+			}
+		}
+		if len(chosen) == 0 {
+			continue
+		}
+		kept, why, err := findKept(ctx, g, chosen, expired)
+		if err != nil {
+			stop(gi, len(g.Delete), err)
+			left += len(chosen)
+			break
+		}
+		if kept != nil {
+			// The retention rule, checked again: never lose a decision.
+			for _, c := range chosen {
+				if !store.LastsAtLeast(kept.Candidate().KeepUntil, c.KeepUntil) {
+					why = fmt.Sprintf("the copy kept, %s, has a shorter retention than this one (until %s); give it "+
+						"a longer retention, or keep this copy", kept.Path(), c.KeepUntil)
+					kept = nil
+					break
+				}
+			}
+		}
+		for ci, c := range chosen {
+			if kept == nil {
+				skips = append(skips, skipped{c.AbsPath(), why})
+				continue
+			}
+			o, err := d.DeleteDuplicate(ctx, c, kept)
+			if o.Deleted {
+				deleted++
+				freed += fileBytes(c)
+			} else if err == nil {
+				skips = append(skips, skipped{c.AbsPath(), o.Reason})
+				failed = failed || o.Failed
+			}
+			if err != nil {
+				stop(gi, len(g.Delete), err)
+				left += len(chosen) - ci // this copy and the rest of the group's choices
+				if o.Deleted {
+					left--
+				}
+				break groups
+			}
+		}
+	}
+
 files:
 	for i, c := range cands {
+		if quit {
+			break
+		}
+		n++
 		if selecting {
-			fmt.Fprintf(w, "(%d/%d) %s  %s  %s\n", i+1, len(cands), c.KeepUntil, report.Size(c.Size), c.AbsPath())
-			act, err := e.choose(ctx, pr, s, c)
+			fmt.Fprintf(w, "(%d/%d) %s  %s  %s\n", n, total, c.KeepUntil, report.Size(c.Size), c.AbsPath())
+			act, err := e.choose(ctx, pr, "[d]elete, [r]etention…, [s]kip, [q]uit? ", choice{"r", "retention",
+				actRetention, func() (bool, error) { return e.askRetention(ctx, pr, s, c) }})
 			if err != nil {
 				runErr = err
 				left += len(cands) - i
@@ -129,6 +239,10 @@ files:
 		}
 		if err != nil {
 			runErr = err
+			left += len(cands) - i // this file and the rest
+			if o.Deleted {
+				left--
+			}
 			break
 		}
 	}
@@ -144,6 +258,10 @@ files:
 	}
 	if renewed > 0 {
 		fmt.Fprintf(w, "Gave %s a new retention.\n", report.Plural(int64(renewed), "file", "files"))
+	}
+	if unmarked > 0 {
+		fmt.Fprintf(w, "Unmarked %s; %s no longer marked for deletion.\n", report.Plural(int64(unmarked), "copy",
+			"copies"), pluralWord(unmarked, "it is", "they are"))
 	}
 	if left > 0 {
 		fmt.Fprintf(w, "Left %s for later.\n", report.Plural(int64(left), "file", "files"))
@@ -188,12 +306,21 @@ const (
 	actRetention
 	actSkip
 	actQuit
+	actUnmark
 )
 
-// choose asks what to do with one candidate in select mode. A new retention is saved at once.
-func (e *env) choose(ctx context.Context, pr *prompter, s *store.Store, c store.Candidate) (action, error) {
+// choice is select mode's answer besides delete, skip and quit: a new retention for a file past its retention, or
+// unmark for a duplicate copy. do carries it out at once; false (no error) asks again.
+type choice struct {
+	key, word string
+	act       action
+	do        func() (bool, error)
+}
+
+// choose asks what to do with one file in select mode, with prompt listing the answers.
+func (e *env) choose(ctx context.Context, pr *prompter, prompt string, extra choice) (action, error) {
 	for {
-		ans, ok, err := pr.ask(ctx, "[d]elete, [r]etention…, [s]kip, [q]uit? ")
+		ans, ok, err := pr.ask(ctx, prompt)
 		if err != nil {
 			return actQuit, err
 		}
@@ -207,10 +334,10 @@ func (e *env) choose(ctx context.Context, pr *prompter, s *store.Store, c store.
 			return actSkip, nil
 		case "q", "quit":
 			return actQuit, nil
-		case "r", "retention":
-			set, err := e.askRetention(ctx, pr, s, c)
-			if err != nil || set {
-				return actRetention, err
+		case extra.key, extra.word:
+			done, err := extra.do()
+			if err != nil || done {
+				return extra.act, err
 			}
 		}
 	}

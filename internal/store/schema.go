@@ -3,7 +3,7 @@ package store
 // SchemaVersion is the schema this build reads and writes. It is stored in meta.schema_version when a database is
 // created. An older database with a migration in migrations is upgraded when it is opened; any other version is
 // refused.
-const SchemaVersion = 6
+const SchemaVersion = 7
 
 // Meta keys.
 const (
@@ -85,15 +85,16 @@ CREATE TABLE events (
     other_path TEXT,
     detail TEXT
 );
-` + reviewSQL
+` + reviewSQL + duplicatesSQL
 
-// reviewSQL is the export and review tables, as of schema version 5.
+// reviewSQL is the export and review tables, as of schema version 7.
 const reviewSQL = `
 CREATE TABLE exports (
     id INTEGER PRIMARY KEY,
     created_utc TEXT NOT NULL,
     path TEXT,
-    after_scan INTEGER REFERENCES scans(id)
+    after_scan INTEGER REFERENCES scans(id),
+    kind TEXT NOT NULL DEFAULT 'retention'  -- 'retention', 'duplicates' or 'separate'
 );
 
 CREATE TABLE export_rows (
@@ -103,6 +104,8 @@ CREATE TABLE export_rows (
     keep_until TEXT,
     file_date TEXT,
     retention TEXT,
+    dup_group INTEGER,                      -- duplicates exports: the group number in the CSV
+    path_id INTEGER REFERENCES paths(id),   -- duplicates exports: the path shown
     PRIMARY KEY (export_id, file_id)
 );
 
@@ -190,7 +193,41 @@ UPDATE reviews SET retention = keep_until WHERE keep_until IS NOT NULL;
 ALTER TABLE files ADD COLUMN deleted_utc TEXT;
 ALTER TABLE scans ADD COLUMN kind TEXT NOT NULL DEFAULT 'scan';
 `,
+	// 6 -> 7: duplicates. Exports get a kind (existing ones are retention exports), duplicates exports record each
+	// row's group and path, and the decisions have tables of their own.
+	6: `
+ALTER TABLE exports ADD COLUMN kind TEXT NOT NULL DEFAULT 'retention';
+ALTER TABLE export_rows ADD COLUMN dup_group INTEGER;
+ALTER TABLE export_rows ADD COLUMN path_id INTEGER REFERENCES paths(id);
+` + duplicatesSQL,
 }
+
+// duplicatesSQL is the duplicates tables (schema version 7). A mark counts only while its hash is the file's hash.
+const duplicatesSQL = `
+CREATE TABLE duplicate_marks (
+    file_id INTEGER PRIMARY KEY REFERENCES files(id),
+    hash TEXT NOT NULL,
+    export_id INTEGER REFERENCES exports(id),
+    batch_id INTEGER NOT NULL REFERENCES review_batches(id)
+);
+
+CREATE TABLE separate_hashes (
+    hash TEXT PRIMARY KEY,
+    export_id INTEGER REFERENCES exports(id),
+    batch_id INTEGER NOT NULL REFERENCES review_batches(id)
+);
+
+CREATE TABLE duplicate_reviews (
+    id INTEGER PRIMARY KEY,
+    batch_id INTEGER NOT NULL REFERENCES review_batches(id),
+    export_id INTEGER REFERENCES exports(id),
+    file_id INTEGER REFERENCES files(id),
+    hash TEXT NOT NULL,
+    decision TEXT NOT NULL
+);
+CREATE INDEX ix_duplicate_reviews_file ON duplicate_reviews(file_id);
+CREATE INDEX ix_files_inode ON files(inode);
+`
 
 // reviewSQLv3 is the review tables as schema version 3 added them; migration 3 -> 4 reshapes them.
 const reviewSQLv3 = `
