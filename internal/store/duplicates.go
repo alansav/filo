@@ -52,12 +52,6 @@ type DupContent struct {
 	Copies   []DupCopy // ordered by absolute path
 }
 
-// querier is a *sql.DB or a *sql.Tx.
-type querier interface {
-	QueryContext(ctx context.Context, q string, args ...any) (*sql.Rows, error)
-	QueryRowContext(ctx context.Context, q string, args ...any) *sql.Row
-}
-
 // Which contents loadContents reads: their hashes are selected by one of these, which may take arguments.
 const (
 	// hashesShared: contents held by more than one present path (hard links still to be told apart).
@@ -71,7 +65,21 @@ const (
 
 // loadContents reads the present copies of the contents the hash query selects.
 func loadContents(ctx context.Context, q querier, hashes string, args ...any) ([]DupContent, error) {
-	rows, err := q.QueryContext(ctx, `
+	type row struct {
+		c        DupCopy
+		separate bool
+	}
+	rows, err := queryAll(ctx, q, func(rows *sql.Rows) (row, error) {
+		var r row
+		c := &r.c
+		var ino int64
+		err := rows.Scan(&c.FileID, &c.RootID, &c.RootPath, &c.PathID, &c.Path, &c.Size, &c.MtimeNS, &c.CtimeNS,
+			&c.Hash, &ino, &c.FileDate, &c.Retention, &c.KeepUntil, &c.ReviewedUTC, &c.ReviewedHash, &c.Unreadable,
+			&c.Marked, &r.separate)
+		c.Kind = "file"
+		c.Ino = uint64(ino)
+		return r, err
+	}, `
 		SELECT f.id, p.root_id, r.path, p.id, p.path, f.size, f.mtime_ns, f.ctime_ns, f.hash, coalesce(f.inode, 0),
 		       coalesce(f.file_date, ''), coalesce(f.retention, ''), coalesce(f.keep_until, ''),
 		       coalesce(f.reviewed_utc, ''), coalesce(f.reviewed_hash, ''), f.unreadable_since_scan IS NOT NULL,
@@ -87,26 +95,17 @@ func loadContents(ctx context.Context, q querier, hashes string, args ...any) ([
 	if err != nil {
 		return nil, fmt.Errorf("read duplicates: %w", err)
 	}
-	defer rows.Close()
+	// Rows come by content; hard links (the same inode in the same root) join their copy's first path.
 	var out []DupContent
 	type key struct {
 		root int64
 		ino  uint64
 	}
 	var byIno map[key]int // index into the current content's copies
-	for rows.Next() {
-		var c DupCopy
-		var ino int64
-		var separate bool
-		if err := rows.Scan(&c.FileID, &c.RootID, &c.RootPath, &c.PathID, &c.Path, &c.Size, &c.MtimeNS, &c.CtimeNS,
-			&c.Hash, &ino, &c.FileDate, &c.Retention, &c.KeepUntil, &c.ReviewedUTC, &c.ReviewedHash, &c.Unreadable,
-			&c.Marked, &separate); err != nil {
-			return nil, fmt.Errorf("read duplicates: %w", err)
-		}
-		c.Kind = "file"
-		c.Ino = uint64(ino)
+	for _, r := range rows {
+		c := r.c
 		if len(out) == 0 || out[len(out)-1].Hash != c.Hash {
-			out = append(out, DupContent{Hash: c.Hash, Size: c.Size, Separate: separate})
+			out = append(out, DupContent{Hash: c.Hash, Size: c.Size, Separate: r.separate})
 			byIno = map[key]int{}
 		}
 		cur := &out[len(out)-1]
@@ -119,9 +118,6 @@ func loadContents(ctx context.Context, q querier, hashes string, args ...any) ([
 			byIno[k] = len(cur.Copies)
 		}
 		cur.Copies = append(cur.Copies, c)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("read duplicates: %w", err)
 	}
 	for i := range out {
 		slices.SortFunc(out[i].Copies, func(a, b DupCopy) int { return strings.Compare(a.AbsPath(), b.AbsPath()) })
@@ -263,6 +259,7 @@ func (r DupResult) NeedsConfirm() bool {
 
 // exportRow is a duplicates export's record of one copy.
 type exportRow struct {
+	file   int64
 	hash   string
 	group  int64
 	pathID int64
@@ -336,22 +333,20 @@ func (s *Store) UpdateDuplicates(ctx context.Context, rows []DupRow, rowsRefused
 		if !info.found || info.kind == ExportRetention {
 			return ex, nil
 		}
-		rs, err := tx.QueryContext(ctx, `SELECT file_id, coalesce(hash, ''), coalesce(dup_group, 0),
-			coalesce(path_id, 0) FROM export_rows WHERE export_id = ? ORDER BY file_id`, id)
+		rows, err := queryAll(ctx, tx, func(rows *sql.Rows) (exportRow, error) {
+			var r exportRow
+			err := rows.Scan(&r.file, &r.hash, &r.group, &r.pathID)
+			return r, err
+		}, `SELECT file_id, coalesce(hash, ''), coalesce(dup_group, 0), coalesce(path_id, 0) FROM export_rows
+			WHERE export_id = ? ORDER BY file_id`, id)
 		if err != nil {
 			return nil, fmt.Errorf("read export %d: %w", id, err)
 		}
-		defer rs.Close()
-		for rs.Next() {
-			var file int64
-			var r exportRow
-			if err := rs.Scan(&file, &r.hash, &r.group, &r.pathID); err != nil {
-				return nil, fmt.Errorf("read export %d: %w", id, err)
-			}
-			ex.rows[file] = r
-			ex.groups[r.group] = append(ex.groups[r.group], file)
+		for _, r := range rows {
+			ex.rows[r.file] = r
+			ex.groups[r.group] = append(ex.groups[r.group], r.file)
 		}
-		return ex, rs.Err()
+		return ex, nil
 	}
 
 	// Each row's decision, by group; a group with a row out of place is refused whole.
@@ -817,22 +812,21 @@ func (s *Store) SymlinksTo(ctx context.Context, targets []string) (map[string][]
 	if len(want) == 0 {
 		return out, nil
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT r.path, p.path, coalesce(f.link_target, '') FROM paths p
+	links, err := queryAll(ctx, s.db, func(rows *sql.Rows) ([2]string, error) {
+		var root, rel, target string
+		err := rows.Scan(&root, &rel, &target)
+		return [2]string{absPath(root, rel), target}, err
+	}, `SELECT r.path, p.path, coalesce(f.link_target, '') FROM paths p
 		JOIN files f ON f.id = p.file_id JOIN roots r ON r.id = p.root_id
 		WHERE p.valid_to_scan IS NULL AND f.kind = 'symlink' ORDER BY r.path, p.path`)
 	if err != nil {
 		return nil, fmt.Errorf("read symlinks: %w", err)
 	}
-	defer rows.Close()
-	for rows.Next() {
-		var root, rel, target string
-		if err := rows.Scan(&root, &rel, &target); err != nil {
-			return nil, fmt.Errorf("read symlinks: %w", err)
-		}
+	for _, l := range links {
+		link, target := l[0], l[1]
 		if target == "" {
 			continue
 		}
-		link := absPath(root, rel)
 		t := filepath.FromSlash(target)
 		if !filepath.IsAbs(t) {
 			t = filepath.Join(filepath.Dir(link), t)
@@ -842,7 +836,7 @@ func (s *Store) SymlinksTo(ctx context.Context, targets []string) (map[string][]
 			out[t] = append(out[t], link)
 		}
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 // SeparateTotals counts the contents marked separate that still have a present copy, and their files.

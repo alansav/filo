@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"strings"
 	"time"
 )
 
@@ -27,7 +26,14 @@ type Known struct {
 
 // Known returns every current path of a root.
 func (s *Store) Known(ctx context.Context, rootID int64) ([]Known, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	out, err := queryAll(ctx, s.db, func(rows *sql.Rows) (Known, error) {
+		var k Known
+		var ino int64
+		err := rows.Scan(&k.PathID, &k.FileID, &k.Path, &k.Kind, &k.Size, &k.MtimeNS, &k.CtimeNS,
+			&k.Hash, &ino, &k.LinkTarget, &k.LinkBroken, &k.Unreadable)
+		k.Ino = uint64(ino)
+		return k, err
+	}, `
 		SELECT p.id, p.file_id, p.path, f.kind, f.size, f.mtime_ns, f.ctime_ns,
 		       coalesce(f.hash, ''), coalesce(f.inode, 0), coalesce(f.link_target, ''), f.link_broken,
 		       coalesce(f.unreadable_since_scan, 0)
@@ -36,19 +42,7 @@ func (s *Store) Known(ctx context.Context, rootID int64) ([]Known, error) {
 	if err != nil {
 		return nil, fmt.Errorf("load known files: %w", err)
 	}
-	defer rows.Close()
-	var out []Known
-	for rows.Next() {
-		var k Known
-		var ino int64
-		if err := rows.Scan(&k.PathID, &k.FileID, &k.Path, &k.Kind, &k.Size, &k.MtimeNS, &k.CtimeNS,
-			&k.Hash, &ino, &k.LinkTarget, &k.LinkBroken, &k.Unreadable); err != nil {
-			return nil, fmt.Errorf("load known files: %w", err)
-		}
-		k.Ino = uint64(ino)
-		out = append(out, k)
-	}
-	return out, rows.Err()
+	return out, nil
 }
 
 // Gone is a file with no current path anywhere, as of before this scan.
@@ -66,37 +60,23 @@ type Gone struct {
 // file, so its old retention can never carry over to it.
 func (s *Store) MissingByHash(ctx context.Context, hashes []string) ([]Gone, error) {
 	var out []Gone
-	const batch = 500
-	for start := 0; start < len(hashes); start += batch {
-		part := hashes[start:min(start+batch, len(hashes))]
-		args := make([]any, len(part))
-		for i, h := range part {
-			args[i] = h
-		}
-		q := `
+	err := inBatches(hashes, func(in string, args []any) error {
+		gone, err := queryAll(ctx, s.db, func(rows *sql.Rows) (Gone, error) {
+			var g Gone
+			err := rows.Scan(&g.FileID, &g.Hash, &g.Size, &g.LastPath, &g.LastRootID, &g.MissingSince)
+			return g, err
+		}, `
 			SELECT f.id, f.hash, f.size, p.path, p.root_id, p.valid_to_scan
 			FROM files f JOIN paths p ON p.file_id = f.id
-			WHERE f.hash IN (?` + strings.Repeat(",?", len(part)-1) + `)
+			WHERE f.hash IN (`+in+`)
 			  AND f.kind = 'file' AND f.size > 0 AND f.deleted_utc IS NULL
 			  AND NOT EXISTS (SELECT 1 FROM paths c WHERE c.file_id = f.id AND c.valid_to_scan IS NULL)
-			  AND p.valid_to_scan = (SELECT max(valid_to_scan) FROM paths l WHERE l.file_id = f.id)`
-		rows, err := s.db.QueryContext(ctx, q, args...)
-		if err != nil {
-			return nil, fmt.Errorf("find missing files: %w", err)
-		}
-		for rows.Next() {
-			var g Gone
-			if err := rows.Scan(&g.FileID, &g.Hash, &g.Size, &g.LastPath, &g.LastRootID, &g.MissingSince); err != nil {
-				rows.Close()
-				return nil, fmt.Errorf("find missing files: %w", err)
-			}
-			out = append(out, g)
-		}
-		err = rows.Err()
-		rows.Close()
-		if err != nil {
-			return nil, fmt.Errorf("find missing files: %w", err)
-		}
+			  AND p.valid_to_scan = (SELECT max(valid_to_scan) FROM paths l WHERE l.file_id = f.id)`, args...)
+		out = append(out, gone...)
+		return err
+	})
+	if err != nil {
+		return nil, fmt.Errorf("find missing files: %w", err)
 	}
 	return out, nil
 }

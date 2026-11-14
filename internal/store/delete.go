@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 )
 
@@ -294,32 +293,20 @@ func (s *Store) Deleted(ctx context.Context) (DeletedTotals, error) {
 // deleted (RFC 3339, UTC).
 func (s *Store) DeletedByHash(ctx context.Context, hashes []string) (map[string]string, error) {
 	out := map[string]string{}
-	const batch = 500
-	for start := 0; start < len(hashes); start += batch {
-		part := hashes[start:min(start+batch, len(hashes))]
-		args := make([]any, len(part))
-		for i, h := range part {
-			args[i] = h
+	err := inBatches(hashes, func(in string, args []any) error {
+		pairs, err := queryAll(ctx, s.db, func(rows *sql.Rows) ([2]string, error) {
+			var p [2]string
+			err := rows.Scan(&p[0], &p[1])
+			return p, err
+		}, `SELECT hash, max(deleted_utc) FROM files
+			WHERE deleted_utc IS NOT NULL AND kind = 'file' AND hash IN (`+in+`) GROUP BY hash`, args...)
+		for _, p := range pairs {
+			out[p[0]] = p[1]
 		}
-		rows, err := s.db.QueryContext(ctx, `SELECT hash, max(deleted_utc) FROM files
-			WHERE deleted_utc IS NOT NULL AND kind = 'file' AND hash IN (?`+strings.Repeat(",?", len(part)-1)+`)
-			GROUP BY hash`, args...)
-		if err != nil {
-			return nil, fmt.Errorf("find deleted files: %w", err)
-		}
-		for rows.Next() {
-			var h, when string
-			if err := rows.Scan(&h, &when); err != nil {
-				rows.Close()
-				return nil, fmt.Errorf("find deleted files: %w", err)
-			}
-			out[h] = when
-		}
-		err = rows.Err()
-		rows.Close()
-		if err != nil {
-			return nil, fmt.Errorf("find deleted files: %w", err)
-		}
+		return err
+	})
+	if err != nil {
+		return nil, fmt.Errorf("find deleted files: %w", err)
 	}
 	return out, nil
 }
