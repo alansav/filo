@@ -1062,18 +1062,18 @@ its own identity. Reclaimable space is size × (copies − 1) per group. Paths a
 **Next, in order** (agreed 2026-11-13; revert, the earlier iteration 4, was deferred, see section 7; items 1 and 2
 put first on 2026-11-15). Each is an open question below until it is designed.
 
-1. Terminal output (designed 2026-11-15, see Terminal output): `internal/view` and its components, then the
-   commands one at a time (`delete`, `update`, `report`, `scan` and `roots`, `export` and help). `internal/view` and
-   `delete` done on 2026-11-16 (component tests in `internal/view`, golden files `internal/cli/testdata/delete-*.txt`);
-   `update`, retention and duplicates CSVs both, done on 2026-11-16 (golden files `testdata/update-*.txt`; every
-   question in `delete` and `update` goes through one helper, `askChoice`). `report` done on 2026-11-16 (golden file
-   `testdata/report.txt`: every section, an empty one as one line ending in "none" (Roots and Register snapshots
-   say "none yet" with what to do; Duplicates says "no groups" when it still lists separate or marked contents);
-   recent events as a list with
-   scan and event columns). Done when each
-   command's mocked scenarios have golden tests of the plain output, and read as designed by hand in a terminal, a
-   40-column terminal, piped through `cat` and with `NO_COLOR=1`. First, since the duplicates re-plan changes what
-   `update` and `delete` print and can then use the components.
+1. Terminal output (designed 2026-11-15, see Terminal output): `internal/view` and its components, then the commands one
+   at a time (`delete`, `update`, `report`, `scan` and `roots`, `export` and help). `internal/view` and `delete` done on
+   2026-11-16 (component tests in `internal/view`, golden files `internal/cli/testdata/delete-*.txt`); `update`,
+   retention and duplicates CSVs both, done on 2026-11-16 (golden files `testdata/update-*.txt`; every question in
+   `delete` and `update` goes through one helper, `askChoice`). `report` done on 2026-11-16 (golden file
+   `testdata/report.txt`: every section, an empty one as one line ending in "none" (Roots and Register snapshots say
+   "none yet" with what to do; Duplicates says "no groups" when it still lists separate or marked contents); recent
+   events as a list with scan and event columns). Done when each command's mocked scenarios have golden tests of the
+   plain output, and read as designed by hand in a terminal, a 40-column terminal, piped through `cat` and with
+   `NO_COLOR=1`. First, since the duplicates re-plan changes what `update` and `delete` print and can then use the
+   components. Still to do: `scan` and `roots` (the scan summary uses the report's event list), `export`'s messages,
+   help and errors; then nothing prints outside the components, and the CLI's `safeText` writer can be retired.
 2. Duplicates redesign (2026-11-16, see Duplicates): `filo delete FILE.csv` carries out a duplicates CSV with no
    stored decisions to delete; the `action` column (`delete`, `keep`, `always`); records and always; `filo
    duplicates` with excluded directories; schema version 8. Done when every scenario in its table has a test, and the
