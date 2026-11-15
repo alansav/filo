@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"path/filepath"
@@ -56,7 +57,17 @@ func (c *cliTest) filo(wantCode int, stdin string, terminal bool, args ...string
 	c.t.Helper()
 	var r result
 	if terminal {
-		r = runIn(c.t, c.ctx, c.env, terminalInput{strings.NewReader(stdin)}, args...)
+		// A person at a terminal: stdin and stdout both are one (filo asks only if the question can be seen), with
+		// NO_COLOR so the output stays comparable text.
+		env := map[string]string{"NO_COLOR": "1"}
+		for k, v := range c.env {
+			env[k] = v
+		}
+		var out termOut
+		var errb bytes.Buffer
+		code := Run(c.ctx, args, terminalInput{strings.NewReader(stdin)}, &out, &errb,
+			func(k string) string { return env[k] })
+		r = result{code, out.String(), errb.String()}
 	} else {
 		r = runIn(c.t, c.ctx, c.env, strings.NewReader(stdin), args...)
 	}

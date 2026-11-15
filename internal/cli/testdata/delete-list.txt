@@ -11,4 +11,4 @@ Duplicate copies marked for deletion   1 file in 1 group . 8 B
       keep     a/contract.pdf   forever
       delete   b/contract.pdf   forever
 
-Nothing deleted: there is no terminal to ask in. Run filo delete in a terminal, or pass -y to delete them all.
+Nothing deleted: there is no terminal to ask in (filo asks only when both the question and your answer are in a terminal). Run filo delete in a terminal, or pass -y to delete them all.

@@ -67,7 +67,7 @@ func (r *Renderer) Files(l FileList) {
 	indent := 4
 	group := func(root string) {
 		if root != r.root || r.root == "" {
-			r.write(spaces(2), styled(r.Tilde(root), bold))
+			r.write(spaces(2), styledName(r.Tilde(root), bold))
 		}
 	}
 	if headed {
@@ -93,7 +93,8 @@ func (r *Renderer) Files(l FileList) {
 		if row.Note != "" {
 			tail = append(tail, spaces(3), styled(row.Note, dim))
 		}
-		if r.o.Width > 0 && width(append(line, tail...)...) > r.o.Width && len(l.Columns) > 0 {
+		// One column short of the width: some consoles wrap as soon as the last column is written.
+		if r.o.Width > 0 && width(append(line, tail...)...) >= r.o.Width && len(l.Columns) > 0 {
 			r.write(line...)
 			r.write(append([]span{spaces(indent + 2)}, tail[1:]...)...)
 			continue

@@ -45,7 +45,12 @@ func (e *env) delete(ctx context.Context, dbBefore string, args []string) error 
 	if err != nil {
 		return err
 	}
-	groups, stale, err := markedGroups(ctx, s, f, cands)
+	// The candidates past their retention: listed there, never as duplicates, and never counted as a kept copy.
+	expired := map[int64]bool{}
+	for _, c := range cands {
+		expired[c.FileID] = true
+	}
+	groups, stale, err := markedGroups(ctx, s, f, expired)
 	if err != nil {
 		return err
 	}
@@ -64,15 +69,13 @@ func (e *env) delete(ctx context.Context, dbBefore string, args []string) error 
 		noteStale(r, stale)
 		return nil
 	}
-	expired := map[int64]bool{}
-	for _, c := range cands {
-		expired[c.FileID] = true
-	}
 	list, err := buildDeleteList(ctx, s, f, cands, groups, stale, expired)
 	if err != nil {
 		return err
 	}
-	asking := !*yes && canAsk(e.stdin)
+	// Ask only if both the question can be seen (stdout) and answered (stdin): with stdout in a file, the list and the
+	// question would go there while filo waited on the keyboard.
+	asking := !*yes && canAsk(e.stdin) && r.Terminal()
 	// The full list unless a question follows: with -y, or with no terminal to ask in, the output is the record.
 	max := 0
 	if asking {
@@ -84,8 +87,8 @@ func (e *env) delete(ctx context.Context, dbBefore string, args []string) error 
 	var pr *prompter
 	if !*yes {
 		if !asking {
-			r.Next("Nothing deleted: there is no terminal to ask in. Run filo delete in a terminal, or pass -y to " +
-				"delete them all.")
+			r.Next("Nothing deleted: there is no terminal to ask in (filo asks only when both the question and your " +
+				"answer are in a terminal). Run filo delete in a terminal, or pass -y to delete them all.")
 			return nil
 		}
 		pr = newPrompter(e.stdin)
@@ -156,7 +159,10 @@ func (e *env) delete(ctx context.Context, dbBefore string, args []string) error 
 
 	run := s.BeginDeleteRun(now())
 	d := dispose.New(run, now)
-	type skipped struct{ root, rel, reason string }
+	type skipped struct {
+		root, rel, reason string
+		failed            bool // could not be read or deleted: a failure, not a skip
+	}
 	var (
 		deleted, renewed, unmarked, left int
 		freed                            int64
@@ -241,32 +247,32 @@ groups:
 			}
 		}
 		// In select mode each chosen copy gets its real result once its group is done.
-		result := func(c store.Candidate, deletedIt bool, reason string) {
-			if !selecting {
-				return
-			}
-			where := r.Path(c.RootPath, c.Path)
-			if deletedIt {
-				r.Result(view.Done, "deleted "+where)
-			} else {
-				r.Result(view.Attention, "not deleted "+where+": "+reason)
+		result := func(c store.Candidate, deletedIt, failedIt bool, reason string) {
+			switch {
+			case !selecting:
+			case deletedIt:
+				r.ResultFile(view.Done, "deleted", c.RootPath, c.Path, "")
+			case failedIt:
+				r.ResultFile(view.Refused, "not deleted", c.RootPath, c.Path, reason)
+			default:
+				r.ResultFile(view.Attention, "not deleted", c.RootPath, c.Path, reason)
 			}
 		}
 		for ci, c := range chosen {
 			if kept == nil {
-				skips = append(skips, skipped{c.RootPath, c.Path, why})
-				result(c, false, why)
+				skips = append(skips, skipped{c.RootPath, c.Path, why, false})
+				result(c, false, false, why)
 				continue
 			}
 			o, err := d.DeleteDuplicate(ctx, c, kept)
 			if o.Deleted {
 				deleted++
 				freed += fileBytes(c)
-				result(c, true, "")
+				result(c, true, false, "")
 			} else if err == nil {
-				skips = append(skips, skipped{c.RootPath, c.Path, o.Reason})
+				skips = append(skips, skipped{c.RootPath, c.Path, o.Reason, o.Failed})
 				failed = failed || o.Failed
-				result(c, false, o.Reason)
+				result(c, false, o.Failed, o.Reason)
 			}
 			if err != nil {
 				stop(gi, len(g.Delete), err)
@@ -317,14 +323,17 @@ files:
 			deleted++
 			freed += fileBytes(c)
 		} else if err == nil {
-			skips = append(skips, skipped{c.RootPath, c.Path, o.Reason})
+			skips = append(skips, skipped{c.RootPath, c.Path, o.Reason, o.Failed})
 			failed = failed || o.Failed
 		}
 		if selecting && err == nil {
-			if o.Deleted {
+			switch {
+			case o.Deleted:
 				r.Result(view.Done, "deleted")
-			} else {
+			case o.Failed:
 				r.Result(view.Refused, "not deleted: "+o.Reason)
+			default:
+				r.Result(view.Attention, "not deleted: "+o.Reason)
 			}
 		}
 		if err != nil {
@@ -350,7 +359,7 @@ files:
 	if len(skips) > 0 {
 		ps := make([]view.Problem, len(skips))
 		for i, sk := range skips {
-			ps[i] = view.Problem{Root: sk.root, Rel: sk.rel, Reason: sk.reason}
+			ps[i] = view.Problem{Root: sk.root, Rel: sk.rel, Reason: sk.reason, Failed: sk.failed}
 		}
 		r.Blank()
 		r.Problems(fmt.Sprintf("Skipped %s: nothing was changed", report.Count(int64(len(skips)))), view.Attention,
@@ -359,7 +368,7 @@ files:
 	if len(problems) > 0 {
 		ps := make([]view.Problem, len(problems))
 		for i, p := range problems {
-			ps[i] = view.Problem{Reason: p.Error()}
+			ps[i] = view.Problem{Reason: p.Error(), Failed: true}
 		}
 		r.Blank()
 		r.Problems(fmt.Sprintf("Folders not removed: %s", report.Count(int64(len(problems)))), view.Attention, ps)
@@ -496,7 +505,7 @@ func (e *env) askRetention(ctx context.Context, pr *prompter, s *store.Store, c 
 // as needed: first as an overview, again in full for l or before a cut list's a.
 type deleteList struct {
 	f       store.Filter
-	roots   []string       // each root once
+	roots   []string       // the root of each file (Heading shows each once)
 	expired []view.FileRow // past their retention
 	exBytes int64
 	dups    []view.DupGroup
@@ -511,15 +520,8 @@ type deleteList struct {
 func buildDeleteList(ctx context.Context, s *store.Store, f store.Filter, cands []store.Candidate,
 	groups []store.MarkedGroup, stale int, expired map[int64]bool) (*deleteList, error) {
 	l := &deleteList{f: f, stale: stale}
-	roots := map[string]bool{}
-	addRoot := func(root string) {
-		if !roots[root] {
-			roots[root] = true
-			l.roots = append(l.roots, root)
-		}
-	}
 	for _, c := range cands {
-		addRoot(c.RootPath)
+		l.roots = append(l.roots, c.RootPath)
 		l.exBytes += fileBytes(c)
 		l.expired = append(l.expired, view.FileRow{Root: c.RootPath, Rel: c.Path,
 			Cells: []string{c.KeepUntil, report.Size(c.Size)}})
@@ -527,7 +529,7 @@ func buildDeleteList(ctx context.Context, s *store.Store, f store.Filter, cands 
 	var targets []string
 	for _, g := range groups {
 		for _, c := range g.Delete {
-			addRoot(c.RootPath)
+			l.roots = append(l.roots, c.RootPath)
 			targets = append(targets, c.AbsPath())
 			l.dupN++
 			l.dupSize += c.Size

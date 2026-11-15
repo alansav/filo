@@ -701,7 +701,9 @@ topic at a time from mockups; the mockups below are the reference.
 
 - **Rich in a terminal, plain when piped.** Colour and symbols (`✓` done, `✗` refused, `!` needs attention, `·`
   neutral, `◆` separate; green, red, yellow, dim) only when stdout is a terminal (one whose window size can be read,
-  not just any character device) and `NO_COLOR` is unset and `TERM` is not `dumb`. Piped,
+  not just any character device) and `NO_COLOR` is unset and `TERM` is not `dumb`. Where the window size cannot be
+  read that way (Windows), a terminal stays a terminal for asking and for cutting long lists, but gets no colour, since
+  an older console shows colour codes as text. Piped,
   the words and their order are the same, with ASCII markers (`[ok]`, `[refused]`, `[!]`). ANSI codes are written
   by filo itself: no new dependency.
 - **One shape for every command**: a heading line (what, how many, where), sections, a result line, then the next
@@ -727,17 +729,20 @@ topic at a time from mockups; the mockups below are the reference.
     count and the line range (a sorted CSV can refuse every row for one reason).
   - *What a confirmation covers* (clears, contents always and sets of records, files now past their retention): the
     first 10 and "and N more", and the prompt offers `l` to list everything before answering (`[y/N/l]`).
-- **Width.** A path is never cut, not even with `…`: every path printed is about to be acted on or names something
-  to find. Short fixed columns (date, size, marker) come first and the path last; an entry whose path does not fit
-  puts it on its own indented line, and the terminal wraps it if needed. Section totals sit at the right edge.
-  Piped, there is no width: one line per entry. The width is read with the standard library's `syscall` behind a
-  small Linux-specific function; 80 columns when it cannot be read.
+- **Width.** A path is never cut, not even with `…`: every path printed is about to be acted on or names something to
+  find. Short fixed columns (date, size, marker) come first and the path last; an entry whose path does not fit puts it
+  on its own indented line, and the terminal wraps it if needed. Section totals sit at the right edge, one column short
+  of it (some consoles wrap as soon as the last column is written). Piped, there is no width: one line per entry. The
+  width is read with the standard library's `syscall` behind a small Linux-specific function; 80 columns when it cannot
+  be read.
 - **Prompts.** The question states the effect with the numbers ("Delete all 14"). The default is capitalised and
   always the safe choice (`[y/N]`, `[a/s/l/N]`); Enter takes it. A word or its first letter, any case. An
   unrecognised answer asks again with the choices (it used to mean no). End of input means the safe default; Ctrl-C
   stops as before. Select mode shows `[3/14]`, what the item is and its full path, the choices on one line, and one
-  result line after each answer; `q` goes to the summary. Without a terminal nothing is recorded or deleted, and one
-  line says so and how to go on.
+  result line after each answer; `q` goes to the summary. Filo asks only when both the question and the answer are in
+  a terminal (stdin and stdout): with stdout in a file (`filo delete > log`) the question could not be seen, so it is
+  not asked (2026-11-16, from the code review). Otherwise nothing is recorded or deleted, and one line says so and how
+  to go on.
 - **Components** (package `internal/view`). One `Renderer` holds what every component needs: the escaping writer
   (see "Output cannot act on the terminal"), whether this is a terminal, colour, the width, the home directory and
   the roots. The components: `Heading`, `Section` (title, totals at the right edge, body), `Counts` (marker lines),

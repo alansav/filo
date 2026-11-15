@@ -50,7 +50,7 @@ func TestSection(t *testing.T) {
 		want  string
 	}{
 		{"piped", 0, "Past   5 files . 820 MB\n"},
-		{"at the right edge", 30, "Past          5 files · 820 MB\n"},
+		{"one column short of the right edge", 30, "Past         5 files · 820 MB\n"},
 		{"wider than the terminal", 10, "Past   5 files · 820 MB\n"},
 	}
 	for _, tt := range tests {
@@ -418,5 +418,33 @@ func TestTildeFolder(t *testing.T) {
 	}
 	if got := r.Path("/data", "~/secret.txt"); got != "./~/secret.txt" {
 		t.Errorf("Path = %q", got)
+	}
+}
+
+// TestNamesShowTrailingSpace: every place a file or directory name is shown makes a trailing space visible.
+func TestNamesShowTrailingSpace(t *testing.T) {
+	r, b := plainView()
+	r.Heading("Ready", Where{Roots: []string{"/r "}, Under: "dir "}, "1 file")
+	r.Dup(DupGroup{Name: "m", Each: "1 B", Keep: []Copy{{Root: "/r ", Rel: "a"}},
+		Delete: []Copy{{Root: "/r ", Rel: "b", Symlinks: []string{"/r /link "}}}})
+	r.ResultFile(Done, "deleted", "/r ", "b ", "")
+	r.Files(FileList{Rows: []FileRow{{Root: "/other ", Rel: "c"}}})
+	for _, want := range []string{"Ready   1 file . /r\\x20, under dir\\x20/\n", "the symlink /r /link\\x20 points",
+		"[ok] deleted b\\x20\n", "  /other\\x20\n"} {
+		if !strings.Contains(b.String(), want) {
+			t.Errorf("lacks %q:\n%s", want, b.String())
+		}
+	}
+}
+
+// TestFailedMarker: in a list of skips, a failure keeps the refused marker.
+func TestFailedMarker(t *testing.T) {
+	r, b := plainView()
+	r.Problems("Skipped", Attention, []Problem{{Root: "/r", Rel: "a", Reason: "changed"},
+		{Root: "/r", Rel: "b", Reason: "permission denied", Failed: true}})
+	for _, want := range []string{"[!] /r/a: changed", "[refused] /r/b: permission denied"} {
+		if !strings.Contains(b.String(), want) {
+			t.Errorf("lacks %q:\n%s", want, b.String())
+		}
 	}
 }

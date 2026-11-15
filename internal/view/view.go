@@ -61,7 +61,6 @@ const (
 	Refused               // ✗ refused or failed
 	Attention             // ! needs attention
 	Neutral               // · for information
-	Kept                  // ◆ kept on purpose (always, records)
 )
 
 // marks: rich symbol, its colour, and the plain marker.
@@ -72,18 +71,16 @@ var marks = map[Mark]struct {
 	Refused:   {"✗", red, "[refused]"},
 	Attention: {"!", yellow, "[!]"},
 	Neutral:   {"·", dim, "-"},
-	Kept:      {"◆", magenta, "[kept]"},
 }
 
 // ANSI styles.
 const (
-	reset   = "\x1b[0m"
-	bold    = "\x1b[1m"
-	dim     = "\x1b[2m"
-	red     = "\x1b[31m"
-	green   = "\x1b[32m"
-	yellow  = "\x1b[33m"
-	magenta = "\x1b[35m"
+	reset  = "\x1b[0m"
+	bold   = "\x1b[1m"
+	dim    = "\x1b[2m"
+	red    = "\x1b[31m"
+	green  = "\x1b[32m"
+	yellow = "\x1b[33m"
 )
 
 // span is a piece of a line with its style ("" = plain), its text escaped once, when it is made, with the columns
@@ -101,10 +98,13 @@ func spaces(n int) span              { n = max(n, 0); return span{out: strings.R
 
 // name is a file name or path: escaped, and with a trailing space shown as \x20, so "report " and "report" never
 // read the same (a backslash in a name is shown as \\, so \x20 cannot be confused with one).
-func name(s string) span {
+func name(s string) span { return styledName(s, "") }
+
+// styledName is a name in a style.
+func styledName(s, style string) span {
 	out := Escape(s)
 	trimmed := strings.TrimRight(out, " ")
-	return escaped(trimmed+strings.Repeat(`\x20`, len(out)-len(trimmed)), "")
+	return escaped(trimmed+strings.Repeat(`\x20`, len(out)-len(trimmed)), style)
 }
 
 // relName shows a path relative to a root: one that starts with ~ (a folder named ~ inside the root) gets ./ in

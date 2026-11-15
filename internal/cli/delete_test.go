@@ -88,8 +88,8 @@ func TestDeleteRoundTrip(t *testing.T) {
 	// checked again and skipped again; keep/ still holds c, so it stays.
 	setNow(t, time.Date(2026, 11, 13, 12, 30, 0, 0, time.Local))
 	r = filo(ExitOK, "a\n", true, "delete")
-	contains("all", r.stdout, "Past their retention   4 files", "Done   deleted 3 files . freed 2 B . removed 1 empty "+
-		"folder", "Skipped 1:")
+	contains("all", r.stdout, "Past their retention ", " 4 files . 3 B", "Done   deleted 3 files . freed 2 B . removed 1 "+
+		"empty folder", "Skipped 1:")
 	gone("all", map[string]bool{"e.txt": true, "link": true, "x": true, "keep/c.txt": false, "keep/d.txt": false})
 	if !exists(".") {
 		t.Fatal("the root was removed")
@@ -150,9 +150,11 @@ func TestDeleteInterruptedAtPrompt(t *testing.T) {
 	cctx, cancel := context.WithCancel(ctx) // as Ctrl-C does
 	defer cancel()
 	time.AfterFunc(200*time.Millisecond, cancel)
-	r := runIn(t, cctx, env, pipeTerminal{pr}, "delete")
-	if r.code != ExitError || !strings.Contains(r.stderr, "interrupted") {
-		t.Errorf("code %d, stderr %q; want 1 and interrupted", r.code, r.stderr)
+	var out termOut // the question can be seen, so filo asks
+	var errb bytes.Buffer
+	code := Run(cctx, []string{"delete"}, pipeTerminal{pr}, &out, &errb, func(k string) string { return env[k] })
+	if code != ExitError || !strings.Contains(errb.String(), "interrupted") {
+		t.Errorf("code %d, stderr %q; want 1 and interrupted", code, errb.String())
 	}
 	if _, err := os.Stat(filepath.Join(root, "a.txt")); err != nil {
 		t.Errorf("a.txt is gone after an interrupted prompt: %v", err)
@@ -282,5 +284,26 @@ func TestDeleteCutList(t *testing.T) {
 	code, out = runTerm(t, ct, plain, "a\ny\n", true, "delete")
 	if code != ExitOK || !strings.Contains(out, "Done   deleted 12 files") {
 		t.Errorf("all, then yes (code %d):\n%s", code, out)
+	}
+}
+
+// TestDeleteNoQuestionWhenOutputRedirected: with stdout in a file (filo delete > log), the question could not be
+// seen, so filo does not ask even though the keyboard could answer: it lists everything and deletes nothing.
+func TestDeleteNoQuestionWhenOutputRedirected(t *testing.T) {
+	ct := newCLITest(t)
+	setNow(t, time.Date(2026, 11, 13, 12, 0, 0, 0, time.Local))
+	ct.write("a.txt", "a")
+	ct.filo(ExitOK, "", false, "roots", "add", ct.root)
+	csvPath := filepath.Join(ct.work, "r.csv")
+	ct.filo(ExitOK, "", false, "export", "retention", "-o", csvPath)
+	editCSV(t, csvPath, setRetention(map[string]string{"a.txt": "2026-11-01"}))
+	ct.filo(ExitOK, "", false, "update", csvPath)
+	r := runIn(t, ct.ctx, ct.env, terminalInput{strings.NewReader("a\n")}, "delete") // stdout is a plain buffer
+	if r.code != ExitOK || strings.Contains(r.stdout, "[a/s/l/N]") ||
+		!strings.Contains(r.stdout, "Nothing deleted: there is no terminal to ask in") {
+		t.Errorf("code %d:\n%s", r.code, r.stdout)
+	}
+	if !ct.exists("a.txt") {
+		t.Fatal("a.txt was deleted with the question out of sight")
 	}
 }

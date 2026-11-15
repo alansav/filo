@@ -8,6 +8,7 @@ type Problem struct {
 	Group     int    // the CSV group, 0 = none
 	Root, Rel string // the file, if any
 	Reason    string
+	Failed    bool // a failure (✗), not a skip: shown as Refused whatever the list's marker
 }
 
 // collapseAt is how many problems from CSV lines with one reason are listed one by one; more collapse into one line.
@@ -51,7 +52,11 @@ func (r *Renderer) Problems(title string, m Mark, ps []Problem) {
 			r.write(spaces(2), r.mark(m), plain(" "+where+"   "+p.Reason))
 			continue
 		}
-		spans := []span{spaces(2), r.mark(m), plain(" ")}
+		pm := m
+		if p.Failed {
+			pm = Refused
+		}
+		spans := []span{spaces(2), r.mark(pm), plain(" ")}
 		if hasGroup {
 			g := ""
 			if p.Group > 0 {

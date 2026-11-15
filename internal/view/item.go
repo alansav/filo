@@ -31,5 +31,15 @@ func (r *Renderer) ItemPath(word, root, rel, note string) {
 	r.write(spans...)
 }
 
+// ResultFile writes what was done with a file under an item: "        ✓ deleted b/contract.pdf", or with a reason
+// after the file. The file is shown as a name (a trailing space as \x20).
+func (r *Renderer) ResultFile(m Mark, what, root, rel, reason string) {
+	spans := []span{spaces(8), r.mark(m), plain(" " + what + " "), name(r.Path(root, rel))}
+	if reason != "" {
+		spans = append(spans, plain(": "+reason))
+	}
+	r.write(spans...)
+}
+
 // Result writes what was done with an item, under its choices: "        ✓ deleted".
 func (r *Renderer) Result(m Mark, text string) { r.write(spaces(8), r.mark(m), plain(" "+text)) }

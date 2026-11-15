@@ -42,7 +42,7 @@ func (r *Renderer) Dup(g DupGroup) {
 		}
 		r.write(spans...)
 		for _, l := range c.Symlinks {
-			r.write(spaces(15), plain(r.arrow()+" the symlink "+r.Tilde(l)+" points here and would break"))
+			r.write(spaces(15), plain(r.arrow()+" the symlink "), name(r.Tilde(l)), plain(" points here and would break"))
 		}
 	}
 	for _, c := range g.Keep {

@@ -217,15 +217,11 @@ func (e *env) printSeparate(res store.DupResult, dry bool) {
 
 // markedGroups returns the duplicate copies marked for deletion under the filter, without those that are also past
 // their retention (listed there instead), and how many marks no longer count.
-func markedGroups(ctx context.Context, s *store.Store, f store.Filter, cands []store.Candidate) ([]store.MarkedGroup,
+func markedGroups(ctx context.Context, s *store.Store, f store.Filter, expired map[int64]bool) ([]store.MarkedGroup,
 	int, error) {
 	groups, stale, err := s.MarkedGroups(ctx, f)
 	if err != nil {
 		return nil, 0, err
-	}
-	expired := map[int64]bool{}
-	for _, c := range cands {
-		expired[c.FileID] = true
 	}
 	out := groups[:0]
 	for _, g := range groups {

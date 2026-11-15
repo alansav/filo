@@ -14,26 +14,34 @@ type Where struct {
 func (r *Renderer) Heading(title string, where Where, facts ...string) {
 	r.root = ""
 	roots := uniq(where.Roots)
+	var place []span // the root and the directory under it, shown as names (a trailing space as \x20)
 	switch len(roots) {
 	case 0:
 	case 1:
 		r.root = roots[0]
-		place := r.Tilde(roots[0])
+		place = []span{name(r.Tilde(roots[0]))}
 		if where.Under != "" {
-			place += ", under " + where.Under + "/"
+			place = append(place, plain(", under "), name(where.Under), plain("/"))
 		}
-		facts = append(facts, place)
 	default:
 		facts = append(facts, Plural(int64(len(roots)), "root", "roots"))
 	}
-	r.titleLine(title, facts)
+	r.titleLine(title, facts, place...)
 }
 
-// titleLine writes a bold title and its facts: the heading's and the outcome's shape.
-func (r *Renderer) titleLine(title string, facts []string) {
+// titleLine writes a bold title and its facts, then place: the heading's and the outcome's shape.
+func (r *Renderer) titleLine(title string, facts []string, place ...span) {
 	spans := []span{styled(title, bold)}
 	if len(facts) > 0 {
 		spans = append(spans, plain("   "+strings.Join(facts, r.sep())))
+	}
+	if len(place) > 0 {
+		if len(facts) > 0 {
+			spans = append(spans, plain(r.sep()))
+		} else {
+			spans = append(spans, plain("   "))
+		}
+		spans = append(spans, place...)
 	}
 	r.write(spans...)
 }
@@ -53,7 +61,7 @@ func (r *Renderer) Section(title string, facts ...string) {
 	tail := plain(strings.Join(facts, r.sep()))
 	gap := 3
 	if r.o.Width > 0 {
-		gap = max(r.o.Width-width(head, tail), 3)
+		gap = max(r.o.Width-1-width(head, tail), 3) // one column short: some consoles wrap on the last one
 	}
 	r.write(head, spaces(gap), tail)
 }
@@ -66,9 +74,6 @@ func (r *Renderer) Note(m Mark, text string) { r.write(r.mark(m), plain(" "+text
 
 // Next writes the closing line: what happened and what to do next.
 func (r *Renderer) Next(text string) { r.write(plain(text)) }
-
-// Line writes text at an indent, for what no component covers (a list's own lines).
-func (r *Renderer) Line(indent int, text string) { r.write(spaces(indent), plain(text)) }
 
 func uniq(ss []string) []string {
 	var out []string

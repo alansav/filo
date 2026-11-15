@@ -175,13 +175,18 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 
 // newView makes the Renderer for stdout: rich and as wide as the terminal when stdout is one (colour unless NO_COLOR
 // is set or TERM is dumb), plain otherwise. A character device that is not a terminal is plain too: reading the
-// window size tells them apart.
+// window size tells them apart. Where it cannot be read (Windows), a terminal stays one, without colour.
 func newView(stdout io.Writer, getenv func(string) string) *view.Renderer {
 	o := view.Options{Out: stdout, Terminal: isTerminal(stdout), Home: getenv("HOME")}
+	color := true
 	if f, ok := stdout.(*os.File); ok && o.Terminal {
-		o.Width, o.Terminal = view.Size(f)
+		if view.CanCheck {
+			o.Width, o.Terminal = view.Size(f)
+		} else {
+			color = false // a terminal, but an older console would show colour codes as text
+		}
 	}
-	o.Color = o.Terminal && getenv("NO_COLOR") == "" && getenv("TERM") != "dumb"
+	o.Color = color && o.Terminal && getenv("NO_COLOR") == "" && getenv("TERM") != "dumb"
 	return view.New(o)
 }
 
@@ -699,13 +704,14 @@ func isTerminal(w any) bool {
 	return err == nil && fi.Mode()&os.ModeCharDevice != 0
 }
 
-// canAsk reports whether a question can be answered on in: a terminal, and for a real file one whose window size can
-// be read (a character device such as /dev/null is not).
+// canAsk reports whether a question can be answered on in: a terminal, and, where the window size can be read, one
+// whose size can (a character device such as /dev/null is not). Where it cannot be read (Windows), a terminal is
+// trusted as before.
 func canAsk(in io.Reader) bool {
 	if !isTerminal(in) {
 		return false
 	}
-	if f, ok := in.(*os.File); ok {
+	if f, ok := in.(*os.File); ok && view.CanCheck {
 		_, terminal := view.Size(f)
 		return terminal
 	}
