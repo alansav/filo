@@ -449,7 +449,7 @@ func TestAbsorbKeepsHistoryAndReviews(t *testing.T) {
 		Retention: "2032-01-01"}}, now, "2026-11-11", "r.csv", false, nil); err != nil || res.Set != 1 {
 		t.Fatalf("update: %+v, %v", res, err)
 	}
-	if _, err := s.SetSettings(ctx, abs("home/Pictures"), Settings{Ignore: []string{"raw"}}); err != nil {
+	if _, _, err := s.SetSettings(ctx, abs("home/Pictures"), Settings{Ignore: []string{"raw"}}); err != nil {
 		t.Fatal(err)
 	}
 

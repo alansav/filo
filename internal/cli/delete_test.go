@@ -98,12 +98,12 @@ func TestDeleteRoundTrip(t *testing.T) {
 
 	// A rescan finds nothing missing: the deleted files are recorded as deleted. d's edit is recorded now.
 	r = filo(ExitOK, "", false, "scan")
-	contains("rescan", r.stdout, "new 0   changed 1   moved 0   missing 0")
+	contains("rescan", r.stdout, "\n  - 1 changed\n\nEvents")
 
 	// A file restored from a backup is a new file with no retention, with a hint.
 	write("old/a.txt", "a")
 	r = filo(ExitOK, "", false, "scan")
-	contains("restored", r.stdout, "new 1", "missing 0", "same content as a file filo deleted",
+	contains("restored", r.stdout, "\n  - 1 new\n\nEvents", "same content as a file filo deleted",
 		"same content as a file filo deleted on 2026-11-13; a new file, it needs a retention")
 	s, err := store.Open(ctx, store.Options{DBPath: db})
 	if err != nil {

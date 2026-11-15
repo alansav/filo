@@ -81,7 +81,7 @@ func TestDuplicatesRoundTrip(t *testing.T) {
 	// The export: every group, hard links as one copy.
 	dcsv := filepath.Join(work, "d.csv")
 	r := filo(ExitOK, "", false, "export", "duplicates", "-o", dcsv)
-	contains("export", r.stdout, "Exported 7 duplicate groups (15 copies)", "filo update "+dcsv)
+	contains("export", r.stdout, "Duplicates export   export 2 . 7 groups . 15 copies", "Next: filo update "+dcsv+"\n")
 	rows := readRows(t, dcsv)
 	paths := map[string]map[string]string{}
 	for _, row := range rows {
@@ -147,7 +147,7 @@ func TestDuplicatesRoundTrip(t *testing.T) {
 	// The separate content is no longer exported; a row moved into another group is refused with both groups.
 	d2 := filepath.Join(work, "d2.csv")
 	contains("export again", filo(ExitOK, "", false, "export", "duplicates", "-o", d2).stdout,
-		"Exported 6 duplicate groups")
+		" . 6 groups . ")
 	if strings.Contains(string(mustRead(t, d2)), "LICENSE") {
 		t.Error("a separate content was exported again")
 	}
@@ -194,7 +194,7 @@ func TestDuplicatesRoundTrip(t *testing.T) {
 	// Undo the separate content: blank its cells.
 	scsv := filepath.Join(work, "s.csv")
 	r = filo(ExitOK, "", false, "export", "duplicates", "--separate", "-o", scsv)
-	contains("separate export", r.stdout, "Exported 1 content marked separate (2 copies)")
+	contains("separate export", r.stdout, "Separate contents export   export ", " . 1 content . 2 copies")
 	for _, row := range readRows(t, scsv) {
 		if row["delete"] != "N" || row["name"] != "LICENSE" {
 			t.Errorf("separate export row %v, want LICENSE with N", row)
@@ -331,7 +331,8 @@ func TestDuplicatesNeverLastCopy(t *testing.T) {
 
 	// The export now treats the two paths of m as one copy, so there is no group to decide.
 	d2 := filepath.Join(work, "d2.csv")
-	if out := filo(ExitOK, "export", "duplicates", "-o", d2).stdout; !strings.Contains(out, "No duplicate groups") {
+	if out := filo(ExitOK, "export", "duplicates", "-o", d2).stdout; !strings.Contains(out, "Duplicates export   no groups") ||
+		!strings.Contains(out, "\nNothing exported.\n") {
 		t.Errorf("export of one file seen twice:\n%s", out)
 	}
 }

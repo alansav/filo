@@ -54,3 +54,27 @@ func wide(r rune) bool {
 	}
 	return false
 }
+
+// Fit escapes text (see Escape) and, if it takes cols columns or more, cuts it to one column short of cols (some
+// consoles wrap as soon as the last column is written), ending in "…". Only the progress line uses it: it is
+// redrawn in place, so a line that wraps cannot be cleared, and it is never acted on. Every other path is shown
+// whole. cols 0 means no width: nothing is cut.
+func Fit(text string, cols int) string {
+	s := Escape(text)
+	switch {
+	case cols == 1:
+		return "" // no room for anything that would not wrap
+	case cols <= 0 || columns(s) < cols:
+		return s
+	}
+	limit := cols - 2 // leaves room for "…" and the last column
+	n := 0
+	for i, r := range s {
+		w := columns(string(r))
+		if n+w > limit {
+			return s[:i] + "…"
+		}
+		n += w
+	}
+	return s
+}

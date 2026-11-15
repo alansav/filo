@@ -1,0 +1,60 @@
+$ filo roots (none yet)
+Roots   none yet
+Next: filo roots add DIR
+
+$ filo roots add Documents --no-scan
+Root added   <root>/Documents
+  - hidden files skipped
+Next: filo scan <root>/Documents
+
+$ filo roots add home --ignore build
+Root added   <root>
+  - hidden files skipped . ignoring build
+
+Took in 4 roots, with their history and retentions
+  [!] .config   skipped by these settings: its files are neither checked nor marked missing
+  - Documents   had other settings (hidden files skipped): these apply now
+  - Pictures   had other settings (hidden files skipped . ignoring raw): these apply now
+  - my docs   had other settings (hidden files included): these apply now
+Next: filo roots set <root> --include-hidden --ignore build, to scan .config again
+
+Scan   scan 4 . 4 files seen . <took> . <root>
+  - 2 new
+
+Next: filo report
+
+$ filo roots add disk --no-scan
+Root added   <work>/disk
+  - hidden files skipped
+  - on the filesystem mounted at <work>/disk: scans are refused while it is not mounted
+Next: filo scan <work>/disk
+
+$ filo roots
+Roots   5 files . 17 B . 2 roots
+
+  <work>/disk   0 files . 0 B
+    hidden files skipped
+    on the filesystem mounted at <work>/disk
+    never scanned
+  <root>   5 files . 17 B
+    hidden files skipped . ignoring build
+    last scan 4, <time>, whole root: 4 seen, new 2, changed 0, moved 0, missing 0, errors 0
+
+$ filo roots set home --include-hidden --ignore build (covers more)
+Settings changed   <root>
+  - was   hidden files skipped . ignoring build
+  [ok] now   hidden files included . ignoring build
+  - the next scan also covers hidden files: any not registered yet are new files and will need a retention
+Next: filo scan <root>
+
+$ filo roots set home --include-hidden --ignore build (again)
+Settings unchanged   <root>
+  - hidden files included . ignoring build
+
+$ filo roots set home --ignore build --ignore Pictures (skips more)
+Settings changed   <root>
+  - was   hidden files included . ignoring build
+  [ok] now   hidden files skipped . ignoring build, Pictures
+  [!] 3 registered files and symlinks are now skipped: neither checked nor marked missing
+Next: filo scan <root>
+

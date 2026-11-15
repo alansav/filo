@@ -1,0 +1,11 @@
+filo report [--top N]
+
+  Shows each root's totals and last scan, and the files needing a retention with
+  the directories holding most of them.
+
+  Then the largest files, duplicate groups with reclaimable space, broken
+  symlinks, unreadable files and recent events (moves and missing files among
+  them).
+
+Flags
+  --top N                  how many entries each list shows (default 10)

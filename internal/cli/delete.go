@@ -62,8 +62,8 @@ func (e *env) delete(ctx context.Context, dbBefore string, args []string) error 
 	}
 	if len(cands) == 0 && marked == 0 {
 		under := ""
-		if where != "" {
-			under = " under " + r.Tilde(where)
+		if f.RootID != 0 { // a DIR was given
+			under = " under " + r.Tilde(filepath.Join(where.Roots[0], filepath.FromSlash(where.Under)))
 		}
 		r.Next("No files" + under + " are past their retention.")
 		noteStale(r, stale)

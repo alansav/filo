@@ -34,7 +34,7 @@ func TestSnapshots(t *testing.T) {
 
 	filo(ExitOK, "roots", "add", root)
 	r := filo(ExitOK, "scan")
-	if !strings.Contains(r.stdout, "1 file seen") || !strings.Contains(r.stdout, "new 0") {
+	if !strings.Contains(r.stdout, "1 file seen") || !strings.Contains(r.stdout, "[ok] no changes") {
 		t.Errorf("the scan saw the database or its snapshots:\n%s", r.stdout)
 	}
 	r = filo(ExitOK, "report")

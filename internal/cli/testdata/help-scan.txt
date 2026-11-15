@@ -1,0 +1,10 @@
+filo scan [DIR] [--workers N] [--allow-empty]
+
+  Scans DIR, which must be inside a root (a partial scan), or every root if DIR
+  is omitted, with each root's settings (see filo help roots).
+
+Flags
+  --workers N              files hashed in parallel, 1-64 (default 4; use 1 on a
+                           spinning disk)
+  --allow-empty            record an empty scan of a root on a mounted
+                           filesystem

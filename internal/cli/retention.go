@@ -29,20 +29,25 @@ func today() string { return retention.Today(now().Local()) }
 // exportKinds are the CSVs filo can export. Each names what the CSV is for.
 var exportKinds = []string{"retention", "duplicates"}
 
-// filterFor maps an optional DIR to a filter, and says where it points.
-func filterFor(ctx context.Context, s *store.Store, pos []string) (store.Filter, string, error) {
+// filterFor turns the DIR argument, if any, into a filter on the register and the place a heading names: the root
+// DIR is in and the folder under it, or every root when there is no DIR.
+func filterFor(ctx context.Context, s *store.Store, pos []string) (store.Filter, view.Where, error) {
 	if len(pos) == 0 {
-		return store.Filter{}, "", nil
+		roots, err := s.Roots(ctx)
+		if err != nil {
+			return store.Filter{}, view.Where{}, err
+		}
+		var w view.Where
+		for _, r := range roots {
+			w.Roots = append(w.Roots, r.Path)
+		}
+		return store.Filter{}, w, nil
 	}
 	root, scope, err := s.Resolve(ctx, pos[0])
 	if err != nil {
-		return store.Filter{}, "", err
+		return store.Filter{}, view.Where{}, err
 	}
-	where := root.Path
-	if scope != "" {
-		where = filepath.Join(root.Path, filepath.FromSlash(scope))
-	}
-	return store.Filter{RootID: root.ID, Scope: scope}, where, nil
+	return store.Filter{RootID: root.ID, Scope: scope}, view.Where{Roots: []string{root.Path}, Under: scope}, nil
 }
 
 func (e *env) export(ctx context.Context, dbBefore string, args []string) error {
@@ -113,11 +118,10 @@ func (e *env) export(ctx context.Context, dbBefore string, args []string) error 
 			}
 		}
 	}
-	if where != "" {
-		where = " under " + where
-	}
+	v := e.view
 	if len(items) == 0 {
-		fmt.Fprintf(e.stdout, "No files%s; nothing exported.\n", where)
+		v.Heading("Retention export", where, "no files")
+		v.Next("Nothing exported.")
 		return nil
 	}
 
@@ -133,15 +137,18 @@ func (e *env) export(ctx context.Context, dbBefore string, args []string) error 
 			undated++
 		}
 	}
-	fmt.Fprintf(e.stdout, "Exported %s%s to %s (export %d), %s without a retention.\n",
-		report.Plural(int64(len(items)), "file", "files"), where, csvPath, id, report.Count(int64(undated)))
+	// docs/design.md, Terminal output, Export.
+	v.Heading("Retention export", where, fmt.Sprintf("export %d", id), report.Plural(int64(len(items)), "file", "files"))
+	v.Blank()
+	v.Count(view.Neutral, report.Count(int64(undated))+" without a retention, "+
+		report.Count(int64(len(items)-undated))+" with one")
 	if suggested > 0 {
-		fmt.Fprintf(e.stdout, "file_date was filled in from the name of %s; check it before counting from it.\n",
-			report.Plural(int64(suggested), "file", "files"))
+		v.Count(view.Attention, report.Plural(int64(suggested), "file_date", "file_dates")+
+			" filled in from the file name: check "+pluralWord(suggested, "it", "them")+" before counting from "+
+			pluralWord(suggested, "it", "them"))
 	}
-	fmt.Fprintln(e.stdout, "Set retention (a period from file_date such as 7y or 18m, forever, or a date YYYY-MM-DD) "+
-		"where you want it, then run:")
-	fmt.Fprintf(e.stdout, "  filo update %s\n", csvPath)
+	v.Blank()
+	v.Next("Next: fill in retention (7y, 18m, forever or a date), then filo update " + shellQuote(csvPath))
 	return nil
 }
 

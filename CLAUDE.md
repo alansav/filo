@@ -11,8 +11,8 @@ Iterations 1 (scan, register, report), 2 (lifespan: retention through the retent
 chosen ones, each only after it is re-read and found unchanged) are done, as are register snapshots and the duplicates
 CSV (`filo export duplicates`, `filo update` records Y/N decisions, `filo delete` deletes marked copies only after a
 kept copy is re-read; only `filo delete` deletes). The order of the next work is in `docs/design.md` section 5, starting
-with the terminal output (designed 2026-11-15, see "Terminal output": `internal/view`, `delete`, `update` and `report`
-are done; then `scan` and `roots`, `export` and help, one at a time), then the duplicates redesign (2026-11-16, see
+with the terminal output (designed 2026-11-15, see "Terminal output": `internal/view`, `delete`, `update`, `report`,
+`scan`, `roots`, `export`, help and errors are done), then the duplicates redesign (2026-11-16, see
 "Duplicates": `filo delete FILE.csv` with no stored decisions to delete, the `action` column, records, always and `filo
 duplicates`).
 **`internal/dispose` is the only code allowed to delete the user's files**, and only from `filo delete`; everything
@@ -25,9 +25,10 @@ else stays read-only on them, and nothing overwrites an existing file. Stay insi
   calls for it. Anything destructive shows what it will do and asks first (or needs `-y`).
 - Treat file names and the register as untrusted input: delete only inside a root (`internal/dispose` checks), and
   print through `internal/view` (its Renderer escapes every text it is given with `view.Escape`, then adds only its
-  own colour codes) or, for output not yet moved to it, the CLI's escaping writer (`safeText`); never write text
-  straight to `os.Stdout`. Write each line of output with one call (a newline inside a write is escaped, since only a
-  file name puts one there); filo's own multi-line text goes through `writeLines`.
+  own colour codes); stderr only through the CLI's `errorLine` (each line escaped, `filo: ` before it), and the
+  progress line. Never write text straight to `os.Stdout` or `os.Stderr` (`TestOutputGoesThroughTheRenderer` guards
+  it). Write each line of output with one call (a newline inside a write is escaped, since only a file name puts one
+  there).
 - In `internal/store`, every write goes through `s.commit(tx)` or `s.exec`, so a run that changes the register gets
   its snapshot (`TestWritesGoThroughTheHelpers` guards it).
 - Fail safe: a file with missing or ambiguous data is "new, needs a date", never "eligible for deletion". Reaching a

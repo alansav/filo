@@ -8,12 +8,15 @@ import (
 	"time"
 )
 
-// Event kinds a delete run records, besides 'changed' and 'error'.
+// Event kinds shared with other packages: what a delete run records (besides 'changed' and 'error'), and the scan's
+// kinds that the report and the scan output name.
 const (
 	EventDeleted = "deleted"
 	// EventSameAsDeleted is a scan's hint that a new file has the content of a file filo deleted (restored from a
 	// backup, say). The rows stay separate: the new file needs a retention of its own.
 	EventSameAsDeleted = "same_as_deleted"
+	// EventOtherFS is a directory a scan did not enter, being on another filesystem.
+	EventOtherFS = "other_fs"
 )
 
 // Candidate is a deletion candidate (a present file whose status is expired) with what the check at the moment of

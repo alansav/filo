@@ -1,0 +1,24 @@
+filo   keeps a register of your files, where they live, and how long to keep them
+
+Commands
+  roots                    list roots and their settings
+  roots add DIR [flags]    register a directory as a root, then scan it
+  roots set DIR [flags]    replace a root's settings
+  scan [DIR]               scan every root, or DIR inside a root
+  report [--top N]         totals, files needing a retention, largest files,
+                           duplicates, events
+  export retention [DIR] -o FILE
+                           write every file under DIR (or every root) with its
+                           retention, as CSV
+  export duplicates [DIR] [--separate] -o FILE
+                           write the duplicate groups with a copy under DIR, as
+                           CSV
+  update FILE [--dry-run]  record the retentions or duplicate decisions edited
+                           in an exported CSV
+  delete [DIR] [-y]        delete the files past their retention and the
+                           duplicate copies marked for deletion, after asking
+  help [COMMAND]           this overview, or a command's flags and rules
+
+Every command accepts --db PATH (default: $FILO_DB, then the user data
+directory).
+Next: filo help COMMAND for a command's flags and rules

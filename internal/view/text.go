@@ -112,3 +112,76 @@ func uniq(ss []string) []string {
 	}
 	return out
 }
+
+// helpWidth is the width help is wrapped to where there is none (piped): a file of help reads well.
+const helpWidth = 80
+
+// wrapWidth is the width filo's own prose is wrapped to: the terminal's, one column short of it, or helpWidth.
+func (r *Renderer) wrapWidth() int {
+	if r.o.Width > 0 {
+		return r.o.Width - 1
+	}
+	return helpWidth
+}
+
+// wrap splits text into lines of at most width columns, at spaces; a word longer than width gets a line of its own.
+func wrap(text string, width int) []string {
+	var lines []string
+	line := ""
+	for _, word := range strings.Fields(text) {
+		switch {
+		case line == "":
+			line = word
+		case columns(line)+1+columns(word) <= width:
+			line += " " + word
+		default:
+			lines = append(lines, line)
+			line = word
+		}
+	}
+	if line != "" {
+		lines = append(lines, line)
+	}
+	return lines
+}
+
+// Paragraph writes filo's own prose (help), indented, wrapped at spaces to the terminal's width, or to 80 columns
+// when there is none: the text is stored unwrapped.
+func (r *Renderer) Paragraph(indent int, text string) {
+	for _, line := range wrap(text, max(r.wrapWidth()-indent, 20)) {
+		r.write(spaces(indent), plain(line))
+	}
+}
+
+// Term is one entry of a two-column list in help: a command or a flag, and what it does.
+type Term struct{ Name, Text string }
+
+// Terms writes a two-column list, names indented by indent and texts starting at column col, each text wrapped
+// under its own column. A name too long for its column puts its text on the next line. A terminal too narrow for two
+// columns (under 20 left for the text) gets each text on the lines under its name, indented a little.
+func (r *Renderer) Terms(indent, col int, terms []Term) {
+	width := r.wrapWidth() - col
+	if width < 20 {
+		col = indent + 4
+		width = max(r.wrapWidth()-col, 10)
+		for _, t := range terms {
+			r.write(spaces(indent), styled(t.Name, bold))
+			for _, l := range wrap(t.Text, width) {
+				r.write(spaces(col), plain(l))
+			}
+		}
+		return
+	}
+	for _, t := range terms {
+		lines := wrap(t.Text, width)
+		if columns(t.Name)+indent+2 > col || len(lines) == 0 {
+			r.write(spaces(indent), styled(t.Name, bold))
+		} else {
+			r.write(spaces(indent), styled(t.Name, bold), spaces(col-indent-columns(t.Name)), plain(lines[0]))
+			lines = lines[1:]
+		}
+		for _, l := range lines {
+			r.write(spaces(col), plain(l))
+		}
+	}
+}

@@ -617,7 +617,7 @@ func TestScenarios(t *testing.T) {
 					st.do(e)
 				}
 				if st.set != nil {
-					if _, err := e.s.SetSettings(context.Background(), e.base, *st.set); err != nil {
+					if _, _, err := e.s.SetSettings(context.Background(), e.base, *st.set); err != nil {
 						t.Fatalf("step %d: SetSettings: %v", i, err)
 					}
 				}
@@ -731,7 +731,9 @@ func TestEmptyGuard(t *testing.T) {
 	}
 }
 
-func TestScanAllSkipsUnmountedRoot(t *testing.T) {
+// TestScanRefusesUnmountedRoot: a root whose disk is not mounted is refused, and another root still scans (filo
+// scan of every root goes on past the refusal: TestScanGolden in internal/cli).
+func TestScanRefusesUnmountedRoot(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("not implemented on windows")
 	}
@@ -759,19 +761,11 @@ func TestScanAllSkipsUnmountedRoot(t *testing.T) {
 	}
 
 	fakeDevs(t, nil) // the disk is no longer mounted
-	results, err := ScanAll(context.Background(), s, Options{})
-	if err != nil {
-		t.Fatal(err)
+	if _, err := Scan(context.Background(), s, Options{Target: disk}); !errors.Is(err, store.ErrNotMounted) {
+		t.Errorf("disk: err = %v, want ErrNotMounted", err)
 	}
-	byRoot := map[string]RootResult{}
-	for _, r := range results {
-		byRoot[r.Root.Path] = r
-	}
-	if !errors.Is(byRoot[disk].Err, store.ErrNotMounted) {
-		t.Errorf("disk: err = %v, want ErrNotMounted", byRoot[disk].Err)
-	}
-	if r := byRoot[home]; r.Err != nil || r.Summary.New != 1 {
-		t.Errorf("home: %+v", r)
+	if sum, err := Scan(context.Background(), s, Options{Target: home}); err != nil || sum.New != 1 {
+		t.Errorf("home: %+v, %v", sum, err)
 	}
 }
 
@@ -959,9 +953,6 @@ func TestProgressCounters(t *testing.T) {
 			if p.Hash.Files.Load() != st.want.hashFiles || p.Hash.Bytes.Load() != st.want.hashBytes {
 				t.Errorf("hashed %d files, %d bytes; want %d, %d",
 					p.Hash.Files.Load(), p.Hash.Bytes.Load(), st.want.hashFiles, st.want.hashBytes)
-			}
-			if p.Root() != e.base {
-				t.Errorf("Root() = %q, want %q", p.Root(), e.base)
 			}
 			if ph := p.Phase.Load(); ph != PhaseIdle {
 				t.Errorf("phase after the scan = %d, want idle", ph)

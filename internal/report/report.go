@@ -121,24 +121,7 @@ func (r Report) Render(v *view.Renderer) {
 	} else {
 		v.Section("Roots")
 	}
-	for _, t := range r.Roots {
-		v.Entry(2, t.Root.Path, Plural(t.Files, "file", "files"), Size(t.Bytes),
-			Plural(t.Links, "symlink", "symlinks"))
-		if t.Root.MountPath != "" {
-			v.DetailPath(4, "on the filesystem mounted at ", t.Root.MountPath)
-		}
-		if ls := t.LastScan; ls != nil {
-			scope := "whole root"
-			if ls.Scope != "" {
-				scope = ls.Scope
-			}
-			v.Detail(4, fmt.Sprintf("last scan %d, %s, %s: %s seen, new %s, changed %s, moved %s, missing %s, errors %s",
-				ls.ID, Time(ls.FinishedUTC), scope, Count(ls.FilesSeen), Count(ls.New), Count(ls.Changed),
-				Count(ls.Moved), Count(ls.Missing), Count(ls.Errors)))
-		} else {
-			v.Detail(4, "never scanned")
-		}
-	}
+	RootEntries(v, r.Roots)
 
 	v.Blank()
 	r.renderRetention(v)
@@ -227,23 +210,53 @@ func (r Report) Render(v *view.Renderer) {
 		v.Section("Recent events", fmt.Sprintf("latest %s", Count(int64(len(r.Events)))))
 		rows := make([]view.FileRow, len(r.Events))
 		for i, e := range r.Events {
-			word, from := EventParts(e.Event)
-			rel := e.Path
-			if rel == "" {
-				rel = "." // an event on the root itself (an unreadable root folder)
-			}
-			fromRoot := ""
-			if _, other, ok := strings.Cut(e.Detail, store.EventFromRoot); ok && from != "" {
-				fromRoot = other // came back from another root: its earlier path is relative to that root
-			}
-			rows[i] = view.FileRow{Root: e.RootPath, Rel: rel, From: from, FromRoot: fromRoot, Note: e.Detail,
-				Cells: []string{fmt.Sprintf("scan %d", e.ScanID), word}}
+			rows[i] = EventRow(e.RootPath, e.Event, fmt.Sprintf("scan %d", e.ScanID))
 		}
 		v.Files(view.FileList{Columns: []view.Column{{Header: "scan"}, {Header: "event"}}, Rows: rows})
 	}
 
 	v.Blank()
 	r.renderSnapshots(v)
+}
+
+// RootEntries writes each root with its totals, its settings, the filesystem it is mounted on and its last scan:
+// the report's Roots section and filo roots (docs/design.md, Terminal output, Scan and roots).
+func RootEntries(v *view.Renderer, roots []store.RootTotal) {
+	for _, t := range roots {
+		facts := []string{Plural(t.Files, "file", "files"), Size(t.Bytes)}
+		if t.Links > 0 {
+			facts = append(facts, Plural(t.Links, "symlink", "symlinks"))
+		}
+		v.Entry(2, t.Root.Path, facts...)
+		v.Detail(4, v.Join(SettingsParts(t.Root.Settings)...))
+		if t.Root.MountPath != "" {
+			v.DetailPath(4, "on the filesystem mounted at ", t.Root.MountPath)
+		}
+		if ls := t.LastScan; ls != nil {
+			scope := "whole root"
+			if ls.Scope != "" {
+				scope = ls.Scope
+			}
+			v.Detail(4, fmt.Sprintf("last scan %d, %s, %s: %s seen, new %s, changed %s, moved %s, missing %s, errors %s",
+				ls.ID, Time(ls.FinishedUTC), scope, Count(ls.FilesSeen), Count(ls.New), Count(ls.Changed),
+				Count(ls.Moved), Count(ls.Missing), Count(ls.Errors)))
+		} else {
+			v.Detail(4, "never scanned")
+		}
+	}
+}
+
+// SettingsParts describes a root's settings in a few words each: whether hidden files are skipped, and the names
+// ignored. The names always skipped (node_modules and the rest) are left out: filo help roots lists them.
+func SettingsParts(set store.Settings) []string {
+	parts := []string{"hidden files skipped"}
+	if set.IncludeHidden {
+		parts[0] = "hidden files included"
+	}
+	if len(set.Ignore) > 0 {
+		parts = append(parts, "ignoring "+strings.Join(set.Ignore, ", "))
+	}
+	return parts
 }
 
 // renderRetention writes the retention section: how many files need a retention (and where most of them are), how
@@ -402,26 +415,25 @@ func EventParts(e store.Event) (word, from string) {
 		return "deleted", ""
 	case store.EventSameAsDeleted:
 		return "new", ""
+	case store.EventOtherFS:
+		return "other filesystem", ""
 	}
 	return e.Kind, ""
 }
 
-// eventWordWidth is the scan summary's column for an event's word: as wide as the longest, "possible move".
-const eventWordWidth = len("possible move")
-
-// EventText renders one event on a line, without its root (the scan summary's form, from the same words).
-func EventText(e store.Event) string {
+// EventRow is one event as a row of an event list, under root: the cells given, then the event's word, its path
+// (with the path it came from for a move) and its detail as the note. The report's recent events and a scan's
+// changes are both made of these rows, so an event reads the same in both.
+func EventRow(root string, e store.Event, cells ...string) view.FileRow {
 	word, from := EventParts(e)
-	what := e.Path
-	if from != "" {
-		what = from + " -> " + e.Path
-		if e.Kind == "possible_move" {
-			what += " ?"
-		}
+	rel := e.Path
+	if rel == "" {
+		rel = "." // an event on the root itself (an unreadable root folder)
 	}
-	text := fmt.Sprintf("%-*s %s", eventWordWidth, word, what)
-	if e.Detail != "" {
-		text += " (" + e.Detail + ")"
+	fromRoot := ""
+	if _, other, ok := strings.Cut(e.Detail, store.EventFromRoot); ok && from != "" {
+		fromRoot = other // came back from another root: its earlier path is relative to that root
 	}
-	return text
+	return view.FileRow{Root: root, Rel: rel, From: from, FromRoot: fromRoot, Note: e.Detail,
+		Cells: append(slices.Clip(cells), word)}
 }

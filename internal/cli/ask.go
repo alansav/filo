@@ -9,7 +9,7 @@ import (
 
 // canPrompt reports whether a question can be asked: both the question (stdout) and the answer (stdin) are in a
 // terminal. With stdout in a file, the question could not be seen (docs/design.md, Terminal output).
-func (e *env) canPrompt() bool { return canAsk(e.stdin) && e.view.Terminal() }
+func (e *env) canPrompt() bool { return realTerminal(e.stdin) && e.view.Terminal() }
 
 // askChoice asks question until the answer is one of choices (a key or its word, any case); an answer it does not
 // know shows the choices and asks again. Enter, or the end of input, is def: always the safe choice.

@@ -265,9 +265,8 @@ func (s *Store) Roots(ctx context.Context) ([]Root, error) {
 	return out, nil
 }
 
-// SetSettings replaces the settings of the root at path (the root itself, not a folder inside it) and returns the
-// root with its settings before the change. The next scan uses the new settings.
-func (s *Store) SetSettings(ctx context.Context, path string, set Settings) (Root, error) {
+// RootAt returns the root at path: the root itself, not a folder inside it.
+func (s *Store) RootAt(ctx context.Context, path string) (Root, error) {
 	p, err := canonicalDir(path)
 	if err != nil {
 		return Root{}, err
@@ -277,20 +276,36 @@ func (s *Store) SetSettings(ctx context.Context, path string, set Settings) (Roo
 		return Root{}, err
 	}
 	for _, r := range roots {
-		if r.Path != p {
-			continue
+		if r.Path == p {
+			return r, nil
 		}
-		ignores, err := set.normal().ignoresJSON()
-		if err != nil {
-			return Root{}, err
-		}
-		if _, err := s.exec(ctx, `UPDATE roots SET include_hidden = ?, ignores = ? WHERE id = ?`,
-			set.IncludeHidden, ignores, r.ID); err != nil {
-			return Root{}, fmt.Errorf("set settings of root %s: %w", p, err)
-		}
-		return r, nil
 	}
 	return Root{}, fmt.Errorf("%w: %s is not a root (filo roots lists them)", ErrNoRoot, p)
+}
+
+// SetSettings replaces the settings of the root at path (see RootAt) and returns the root as it was and as it is
+// now, with the settings stored. The next scan uses the new settings. Settings equal to the root's write nothing,
+// so a run that changes nothing takes no snapshot.
+func (s *Store) SetSettings(ctx context.Context, path string, set Settings) (before, after Root, err error) {
+	r, err := s.RootAt(ctx, path)
+	if err != nil {
+		return Root{}, Root{}, err
+	}
+	set = set.normal()
+	if set.Equal(r.Settings) {
+		return r, r, nil
+	}
+	ignores, err := set.ignoresJSON()
+	if err != nil {
+		return Root{}, Root{}, err
+	}
+	if _, err := s.exec(ctx, `UPDATE roots SET include_hidden = ?, ignores = ? WHERE id = ?`,
+		set.IncludeHidden, ignores, r.ID); err != nil {
+		return Root{}, Root{}, fmt.Errorf("set settings of root %s: %w", r.Path, err)
+	}
+	after = r
+	after.Settings = set
+	return r, after, nil
 }
 
 // Resolve maps a scan target to its root and a scope relative to that root ('/'-separated, "" for the whole root).
@@ -478,4 +493,29 @@ func ancestorWithID(p string, id fsid.ID, includeSelf bool) (string, bool) {
 		}
 		d = next
 	}
+}
+
+// CountPaths counts the current paths of the files and symlinks under the root with this ID (relative to it,
+// '/'-separated) for which match is true, reading them one at a time: what filo roots set uses to say how many
+// registered files a root's new settings skip.
+func (s *Store) CountPaths(ctx context.Context, rootID int64, match func(path string) bool) (int64, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT path FROM paths WHERE root_id = ? AND valid_to_scan IS NULL`, rootID)
+	if err != nil {
+		return 0, fmt.Errorf("paths of root %d: %w", rootID, err)
+	}
+	defer rows.Close()
+	var n int64
+	for rows.Next() {
+		var p string
+		if err := rows.Scan(&p); err != nil {
+			return 0, fmt.Errorf("paths of root %d: %w", rootID, err)
+		}
+		if match(p) {
+			n++
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return 0, fmt.Errorf("paths of root %d: %w", rootID, err)
+	}
+	return n, nil
 }

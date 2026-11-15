@@ -152,6 +152,10 @@ func (r *Renderer) pick(rich, plain string) string {
 // sep joins facts: " · " in colour, " . " plain.
 func (r *Renderer) sep() string { return r.pick(" · ", " . ") }
 
+// Join joins facts with the separator the headings use (" · ", or " . " plain), for a line that lists several:
+// "hidden files skipped · ignoring build".
+func (r *Renderer) Join(facts ...string) string { return strings.Join(facts, r.sep()) }
+
 // write writes one line of spans, escaping each text, with one call.
 // Trailing alignment is left out; a space that ends a file name is kept, since it is part of the name.
 func (r *Renderer) write(spans ...span) {
@@ -228,12 +232,30 @@ func join(root, rel string) string {
 }
 
 // shorten shows filo's own message text with the heading's root left out of the paths in it, as the paths in the
-// columns are: "/home/u/Documents/b/doc is kept until …" becomes "b/doc is kept until …".
+// columns are: "/home/u/Documents/b/doc is kept until …" becomes "b/doc is kept until …". The root is left out only
+// where a path starts (at the start of the text, or after a space or an opening bracket), so a longer path that holds
+// it ("/mnt/data/x.pdf" with the root /data) stays whole. It still rewrites text: a file name holding " /data/" is
+// shortened too (docs/design.md, Open questions, Paths inside notes and reasons).
 func (r *Renderer) shorten(text string) string {
 	if r.root == "" || r.root == string(filepath.Separator) {
 		return text // a root of / would strip every separator
 	}
-	return strings.ReplaceAll(text, withSep(r.root), "")
+	prefix := withSep(r.root)
+	var b strings.Builder
+	for {
+		i := strings.Index(text, prefix)
+		if i < 0 {
+			b.WriteString(text)
+			return b.String()
+		}
+		b.WriteString(text[:i])
+		if i == 0 || strings.ContainsRune(" \t([{\"'", rune(text[i-1])) {
+			text = text[i+len(prefix):] // a path starts here: leave the root out
+		} else {
+			b.WriteString(prefix) // inside a longer path: keep it whole
+			text = text[i+len(prefix):]
+		}
+	}
 }
 
 // SplitRoot splits an absolute path into the root it is in (the longest of roots that contains it) and the path

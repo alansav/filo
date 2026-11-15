@@ -1,0 +1,23 @@
+filo update FILE [--dry-run]
+
+  Reads an exported retention CSV and applies the file_date and retention you
+  changed. retention is a period counted from file_date (7y, 18m, 6w, 30d),
+  forever, or a date (YYYY-MM-DD); file_date is a date. keep_until is worked out
+  by filo: leave it alone. Dates in the past are fine: the file is then past its
+  retention (see filo delete). Rows can be sorted, filtered or deleted, but not
+  added. A blank retention clears a stored one; filo lists those files and asks
+  first, and without a terminal leaves them alone. A row is refused, with one
+  line saying why, if a value does not parse, a period has no file_date, the
+  file changed since the export, or its retention was changed from a later
+  export. The other rows are still applied.
+
+  A duplicates CSV (from export duplicates) only records decisions; it never
+  deletes. A group whose cells are all blank is left alone. A decided group
+  needs Y or N on every copy and at least one N; a copy can be marked Y only if
+  a copy marked N is kept at least as long. Otherwise the group is refused, with
+  one line saying why. If anything is refused, or a content would be marked
+  separate, filo lists it and asks once before recording anything; without a
+  terminal it records nothing. Then run filo delete.
+
+Flags
+  --dry-run                check everything and write nothing

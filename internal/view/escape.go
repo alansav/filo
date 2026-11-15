@@ -13,18 +13,9 @@ import (
 // of those as visible escapes (\x1b, \n, \u202e), invalid UTF-8 as \xNN, a tab as \t, and a backslash as \\ so an
 // escape cannot be confused with a name that holds the same text.
 // Every newline is escaped, a final one too: a name that ends in one must not end the line it is printed on.
-func Escape(s string) string { return string(visible([]byte(s), false)) }
-
-// Visible is for a writer that is given whole lines (the CLI's safeText): as Escape, except that a final newline is
-// kept, since it ends the line being written.
-func Visible(p []byte) []byte { return visible(p, true) }
-
-func visible(p []byte, keepFinal bool) []byte {
-	end := ""
-	if n := len(p); keepFinal && n > 0 && p[n-1] == '\n' {
-		p, end = p[:n-1], "\n"
-	}
-	out := make([]byte, 0, len(p)+len(end))
+func Escape(s string) string {
+	p := []byte(s)
+	out := make([]byte, 0, len(p))
 	for len(p) > 0 {
 		r, size := utf8.DecodeRune(p)
 		switch {
@@ -45,7 +36,7 @@ func visible(p []byte, keepFinal bool) []byte {
 		}
 		p = p[size:]
 	}
-	return append(out, end...)
+	return string(out)
 }
 
 // isBidi reports the Unicode bidirectional formatting characters, which reorder the text around them.

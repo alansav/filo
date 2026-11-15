@@ -577,11 +577,48 @@ func TestShortenRootSlash(t *testing.T) {
 	}
 }
 
+// TestShortenOnlyWherePathsStart: the heading's root is left out of a path that starts with it, never out of the
+// middle of a longer path that holds it.
+func TestShortenOnlyWherePathsStart(t *testing.T) {
+	tests := []struct{ reason, want string }{
+		{"/data/a.pdf changed", "a.pdf changed"},
+		{"the copy kept, /data/a.pdf, has a shorter retention", "the copy kept, a.pdf, has a shorter retention"},
+		{"the copy kept, /mnt/data/x.pdf, has a shorter retention", "the copy kept, /mnt/data/x.pdf, has a shorter retention"},
+		{"kept (/data/a.pdf) and /data/b.pdf", "kept (a.pdf) and b.pdf"},
+		{"/database/a.pdf", "/database/a.pdf"},
+	}
+	for _, tc := range tests {
+		r, b := plainView()
+		r.Heading("H", Where{Roots: []string{"/data"}})
+		b.Reset()
+		r.Problems("Skipped", Attention, []Problem{{Reason: tc.reason}})
+		if !strings.Contains(b.String(), tc.want+"\n") {
+			t.Errorf("reason %q: got %q, want it to end in %q", tc.reason, b.String(), tc.want)
+		}
+	}
+}
+
 // TestDupNameTrailingSpace: a duplicate group's name is a name: a trailing space shows.
 func TestDupNameTrailingSpace(t *testing.T) {
 	r, b := plainView()
 	r.Dup(DupGroup{Name: "report ", Each: "1 B", Copies: []Copy{{Root: "/r", Rel: "report "}}})
 	if !strings.HasPrefix(b.String(), "    report\\x20 . 1 B each\n") {
 		t.Errorf("got %q", b.String())
+	}
+}
+
+// TestTermsNarrow: a terminal too narrow for two columns gets each text under its name, within the width.
+func TestTermsNarrow(t *testing.T) {
+	var b strings.Builder
+	r := New(Options{Out: &b, Terminal: true, Width: 35})
+	r.Terms(2, 27, []Term{{Name: "--workers N", Text: "files hashed in parallel, 1-64 (default 4; use 1 on a spinning disk)"}})
+	lines := strings.Split(strings.TrimSuffix(b.String(), "\n"), "\n")
+	if lines[0] != "  --workers N" {
+		t.Errorf("first line %q, want the name alone", lines[0])
+	}
+	for _, l := range lines {
+		if len([]rune(l)) >= 35 {
+			t.Errorf("line %q is not within 35 columns", l)
+		}
 	}
 }

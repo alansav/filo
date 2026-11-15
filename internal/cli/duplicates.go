@@ -18,7 +18,7 @@ import (
 
 // exportDuplicates writes the duplicate groups with a copy under the filter (or, with separate, the contents marked
 // separate, every delete cell filled in N) to csvPath.
-func (e *env) exportDuplicates(ctx context.Context, s *store.Store, f store.Filter, where, csvPath string,
+func (e *env) exportDuplicates(ctx context.Context, s *store.Store, f store.Filter, where view.Where, csvPath string,
 	separate bool) error {
 	var groups []store.DupContent
 	var err error
@@ -35,15 +35,15 @@ func (e *env) exportDuplicates(ctx context.Context, s *store.Store, f store.Filt
 	if !separate {
 		groups = distinctOnDisk(groups)
 	}
-	if where != "" {
-		where = " under " + where
-	}
-	what := "duplicate groups"
+	// docs/design.md, Terminal output, Export. The duplicates redesign rewords it and keeps the shape.
+	v := e.view
+	title, none, one, many := "Duplicates export", "no groups", "group", "groups"
 	if separate {
-		what = "contents marked separate"
+		title, none, one, many = "Separate contents export", "no contents marked separate", "content", "contents"
 	}
 	if len(groups) == 0 {
-		fmt.Fprintf(e.stdout, "No %s%s; nothing exported.\n", what, where)
+		v.Heading(title, where, none)
+		v.Next("Nothing exported.")
 		return nil
 	}
 	id, err := writeExport(csvPath, func(write func(int64) error) (int64, error) {
@@ -56,19 +56,17 @@ func (e *env) exportDuplicates(ctx context.Context, s *store.Store, f store.Filt
 	for _, g := range groups {
 		copies += int64(len(g.Copies))
 	}
-	w := e.stdout
+	v.Heading(title, where, fmt.Sprintf("export %d", id), report.Plural(int64(len(groups)), one, many),
+		report.Plural(copies, "copy", "copies"))
+	v.Blank()
 	if separate {
-		fmt.Fprintf(w, "Exported %s marked separate%s (%s) to %s (export %d).\n",
-			report.Plural(int64(len(groups)), "content", "contents"), where, report.Plural(copies, "copy", "copies"),
-			csvPath, id)
-		fmt.Fprintln(w, "Blank the delete cells of a group to make it a duplicate group again, then run:")
+		v.Count(view.Neutral, "blank a group's delete cells to make it a duplicate group again")
 	} else {
-		fmt.Fprintf(w, "Exported %s%s (%s) to %s (export %d).\n", report.Plural(int64(len(groups)), "duplicate group",
-			"duplicate groups"), where, report.Plural(copies, "copy", "copies"), csvPath, id)
-		fmt.Fprintln(w, "In each group you decide on, write Y under delete for the copies to delete and N for the "+
-			"ones to keep (two or more N: the copies are meant to exist, and are no longer duplicates). Then run:")
+		v.Count(view.Neutral, "in each group you decide on: Y under delete for the copies to delete, N for those to keep")
+		v.Count(view.Neutral, "two or more N: identical copies meant to exist, no longer listed as duplicates")
 	}
-	fmt.Fprintf(w, "  filo update %s\n", csvPath)
+	v.Blank()
+	v.Next("Next: filo update " + shellQuote(csvPath))
 	return nil
 }
 

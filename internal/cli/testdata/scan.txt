@@ -1,0 +1,50 @@
+$ filo scan
+Scan   scan 2 . 4 files seen . <took> . <root>
+
+  - 2 new
+  - 1 changed
+  - 1 moved
+  - 13 missing
+  [!] 1 possible move, not applied
+
+Events   up to 10 of each kind
+    event
+    changed         notes/todo.md   content
+    moved           docs/contract.txt -> notes/contract-final.txt
+    missing         docs/report.txt
+    missing         old/f01.txt
+    missing         old/f02.txt
+    missing         old/f03.txt
+    missing         old/f04.txt
+    missing         old/f05.txt
+    missing         old/f06.txt
+    missing         old/f07.txt
+    missing         old/f08.txt
+    missing         old/f09.txt
+    possible move   docs/report.txt -> archive/report.txt   same name, different content
+    ... 3 more missing
+
+Next: filo report
+
+$ filo scan docs
+Scan   scan 3 . 0 files seen . <took> . <root>, under docs/
+  [ok] no changes
+
+$ filo scan (a disk mounted inside the root)
+Scan   scan 4 . 4 files seen . <took> . <root>
+
+  - 1 directory on another filesystem, not scanned
+
+Events   up to 10 of each kind
+    event
+    other filesystem   mnt   on another filesystem; not scanned
+
+$ filo scan (one root unmounted)
+Scan   <work>/disk
+  [refused] not scanned: the root looks unmounted (<work>/disk is not mounted)
+
+Scan   scan 5 . 4 files seen . <took> . <root>
+  [ok] no changes
+
+Done   2 roots . 1 scanned . 1 failed
+Next: filo report

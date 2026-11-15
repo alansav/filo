@@ -70,26 +70,38 @@ filo scan                 # scan every root again: only what changed is rehashed
 filo report               # totals, files needing a retention, largest files, duplicates, unreadable files, events
 ```
 
-A scan prints a summary like this:
+A scan prints a summary like this (paths are relative to the root named at the top; in a terminal the markers are
+symbols and colours):
 
 ```
-/home/you/FiloTest: 15 files seen in 10ms (scan 2)
-  new 3   changed 2   moved 2   missing 2   possible moves 1   errors 2
-  moved:
-    moved         docs/contract.txt -> notes/contract-final.txt
-    moved         photos/img2.bin -> photos/img2-renamed.bin
-  changed:
-    changed       link-to-report (symlink: docs/report-2024.txt -> docs/report-2024.txt (broken))
-    changed       notes/todo.md (content)
-  missing:
-    missing       docs/receipt-tyre.txt
-    missing       docs/report-2024.txt
-  possible moves (not applied):
-    possible move docs/report-2024.txt -> archive/report-2024.txt ? (same name, different content)
-  errors:
-    error         docs/private.txt (hash: open /home/you/FiloTest/docs/private.txt: permission denied)
-    error         locked (open /home/you/FiloTest/locked: permission denied)
+Scan   scan 2 . 15 files seen . 0.4 s . ~/FiloTest
+
+  - 3 new
+  - 2 changed
+  - 2 moved
+  - 2 missing
+  [!] 1 possible move, not applied
+  [refused] 2 could not be read: none marked missing
+
+Events   up to 10 of each kind
+    event
+    changed         link-to-report   symlink: docs/report-2024.txt (now broken)
+    changed         notes/todo.md   content
+    moved           docs/contract.txt -> notes/contract-final.txt
+    moved           photos/img2.bin -> photos/img2-renamed.bin
+    missing         docs/receipt-tyre.txt
+    missing         docs/report-2024.txt
+    possible move   docs/report-2024.txt -> archive/report-2024.txt   same name, different content
+    error           docs/private.txt   hash: open /home/you/FiloTest/docs/private.txt: permission denied
+    error           locked   open /home/you/FiloTest/locked: permission denied
+
+Next: filo report
 ```
+
+A scan with nothing to report is two lines (`Scan …` and `[ok] no changes`); a directory on another filesystem
+is listed but is not a change. `filo scan` with no directory scans
+every root, one block each; a root that cannot be scanned (an unmounted disk) is reported in its place and the
+others are still scanned.
 
 The two errors are a file and a directory made unreadable. The files inside `locked` aren't reported missing,
 because Filo couldn't look.

@@ -119,8 +119,9 @@ func TestRetentionRoundTrip(t *testing.T) {
 	filo(ExitUsage, "", false, "export", "retention")
 	filo(ExitUsage, "", false, "export", "-o", r1)
 	contains("export", filo(ExitOK, "", false, "export", "retention", "-o", r1).stdout,
-		"Exported 4 files to "+r1+" (export 1), 4 without a retention.",
-		"file_date was filled in from the name of 1 file", "filo update "+r1)
+		"Retention export   export 1 . 4 files", "  - 4 without a retention, 0 with one\n",
+		"  [!] 1 file_date filled in from the file name: check it before counting from it\n",
+		"Next: fill in retention (7y, 18m, forever or a date), then filo update "+r1+"\n")
 	contains("export again", filo(ExitError, "", false, "export", "retention", "-o", r1).stderr, "already exists")
 	contains("CSV", string(mustRead(t, r1)), "id,export,directory,name,size,modified,file_date,retention,keep_until\n",
 		","+root+"/docs,2023-03 invoice.pdf,1,", ",2023-03-31,,\n", // file_date read from the name
