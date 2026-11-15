@@ -11,7 +11,9 @@ then `filo update`) and 3 (delete: `filo delete [DIR] [-y]` lists the files past
 the chosen ones, each only after it is re-read and found unchanged) are done, as are register snapshots and the
 duplicates CSV (`filo export duplicates`, `filo update` records Y/N decisions, `filo delete` deletes marked copies
 only after a kept copy is re-read; only `filo delete` deletes). The order of the next work is in `docs/design.md`
-section 5, starting with named retention policies.
+section 5, starting with the terminal output (designed 2026-11-15, see "Terminal output": the `internal/view`
+components, then the commands one at a time), then re-planning how a second duplicates export shows the decisions
+recorded (a fix was abandoned; see the open question "Duplicates: showing the decisions recorded").
 **`internal/dispose` is the only code allowed to delete the user's files**, and only from `filo delete`; everything
 else stays read-only on them, and nothing overwrites an existing file. Stay inside the current piece of work.
 
@@ -65,8 +67,8 @@ Run `go vet` and the tests before saying a change is done.
 
 - `cmd/filo/`: the command-line entry point, kept thin.
 - `internal/`: the logic, in small packages (walking, hashing, the store, reconcile, report, retention CSV,
-  duplicates CSV, sheet (what spreadsheets do to a CSV), dispose). Keep OS-specific code (hidden files, inodes,
-  symlinks, path separators) behind small functions.
+  duplicates CSV, sheet (what spreadsheets do to a CSV), dispose; view, the terminal output components, once
+  built). Keep OS-specific code (hidden files, inodes, symlinks, path separators) behind small functions.
 - `scripts/`: helper scripts (`dev.sh`, `testtree.sh`).
 - `.devcontainer/Containerfile`: the dev container. `docs/design.md`: the design.
 

@@ -9,8 +9,10 @@ reconcile rules were carried over. The second shape of the retention CSV (`file_
 5) is implemented. Iteration 3 (deletion) was designed on 2026-11-12 and implemented on 2026-11-13 (schema version
 6); it passes its test-tree criterion and has not yet been run on real files. Register snapshots (rolling copies of
 the database next to it) were added on 2026-11-13. The order of the next work was agreed the same day (section 5).
-The duplicates CSV was designed on 2026-11-13/14 and taken ahead of that order (schema version 7). Last updated:
-2026-11-14.
+The duplicates CSV was designed on 2026-11-13/14 and taken ahead of that order (schema version 7); a gap found on
+2026-11-14 (a second export shows decided groups blank) is to be re-planned (section 6). The terminal output was
+designed on 2026-11-15 and comes first (Terminal output). Last updated:
+2026-11-15.
 
 This file records settled decisions, the planned data model and the open questions. When a decision changes,
 change it here in the same commit.
@@ -547,6 +549,9 @@ it on the wrong rows), hence the group rules, the confirmation and the check at 
   `separate_hashes`, and `duplicate_reviews` (append-only history of every decision, in a `review_batches` batch with
   command `update`), and an index on `files(inode)` for finding hard links.
 - Later: "one decision for all copies" (offering a retention set on one copy to its undated copies).
+- **Known gap** (raised 2026-11-14): a second export shows decided groups with blank `delete` cells, so they look
+  undecided. A fix was attempted and abandoned on 2026-11-15; see Open questions, "Duplicates: showing the decisions
+  recorded".
 
 ### Commands and scheduling
 - Plain names, easy to remember: `roots`, `scan`, `report`, `export`, `update`, `delete` (a `revert` was
@@ -591,12 +596,173 @@ it on the wrong rows), hence the group rules, the confirmation and the check at 
   current directory (and `--db "~/f.db"` would create one). Filo does not expand it itself, because a name starting
   with `~` is legal. The one-line error suggests `$HOME/...` (or the full path for `~user`), and `./~...` for a name
   that really starts with `~`. Checked before the database is opened, so nothing is created.
-- Output is plain text. Errors are one line, `filo: <message>`. Exit codes: 0 success (files that could not be read
-  inside a completed scan are reported but do not fail it); 1 an error, or any root that failed in a scan of every
-  root; 2 a usage error.
+- Output: see Terminal output (designed 2026-11-15; until it is built, output is plain text). Errors are one line,
+  `filo: <message>`. Exit codes: 0 success (files that could not be read inside a completed scan are reported but do
+  not fail it); 1 an error, or any root that failed in a scan of every root; 2 a usage error.
 - A progress line (walking, hashing with files and bytes, writing) is drawn on stderr only when stderr is a terminal,
   so timer and cron logs stay clean. Ctrl-C or SIGTERM cancels a scan; nothing is written and the lock is released.
 - A systemd user timer running `filo scan` is enough. No daemon. (`Persistent=true`, low CPU and I/O priority.)
+
+### Terminal output (designed 2026-11-15)
+The output worked but read badly, `filo update` and `filo delete` most: an absolute path on every line, refusals as
+dense one-line messages on stderr (`filo: d.csv line 7: /long/path: group 3 of export 4: reason`), summaries in
+whatever order the code reached them, no visual weight and no consistent next step. The terminal is treated as a UI:
+output is built from components, so files, groups, problems and prompts look the same in every command. Designed one
+topic at a time from mockups; the mockups below are the reference.
+
+- **Rich in a terminal, plain when piped.** Colour and symbols (`✓` done, `✗` refused, `!` needs attention, `·`
+  neutral, `◆` separate; green, red, yellow, dim) only when stdout is a terminal and `NO_COLOR` is unset. Piped,
+  the words and their order are the same, with ASCII markers (`[ok]`, `[refused]`, `[!]`). ANSI codes are written
+  by filo itself: no new dependency.
+- **One shape for every command**: a heading line (what, how many, where), sections, a result line, then the next
+  step ("Nothing has been deleted. Next: filo delete").
+- **Paths.** With one root, the root is shown once in the heading and paths are relative to it. A DIR filter is named
+  after it (`~/Documents, under video/`), but paths stay relative to the root, so a file reads the same in every
+  listing. With several roots, a sub-heading per root. A duplicate group whose copies span roots shows full paths on
+  its lines. The home directory shows as `~`. The last confirmation before a deletion (an item in select mode) shows
+  the full path.
+- **Streams and exit codes.** Refusals and skips are part of the report: stdout, in their section, so a log holds the
+  whole story in order. stderr carries only errors that stop the command, one line `filo: <message>`. Exit codes are
+  unchanged: 0 nothing went wrong (rows unchanged, groups left alone and declining a prompt included), 1 something
+  refused, skipped or failed, 2 a usage error. A finer split waits for scheduled scans.
+- **Long lists**, three kinds:
+  - *About to be deleted* (the `filo delete` overview): in a terminal 10 per section, then `… N more`, and the
+    question gains `l` to list everything and ask again (`[a/s/l/N]`). Piped or with `-y`: always the full list,
+    since the output is then the record of what was deleted.
+  - *Needs fixing* (refusals, skips): every item; more than 10 with the same reason collapse into one line with the
+    count and the line range (a sorted CSV can refuse every row for one reason).
+  - *What a confirmation covers* (clears, contents marked separate, files now past their retention): the first 10
+    and "and N more", and the prompt offers `l` to list everything before answering (`[y/N/l]`).
+- **Width.** A path is never cut, not even with `…`: every path printed is about to be acted on or names something
+  to find. Short fixed columns (date, size, marker) come first and the path last; an entry whose path does not fit
+  puts it on its own indented line, and the terminal wraps it if needed. Section totals sit at the right edge.
+  Piped, there is no width: one line per entry. The width is read with the standard library's `syscall` behind a
+  small Linux-specific function; 80 columns when it cannot be read.
+- **Prompts.** The question states the effect with the numbers ("Delete all 14"). The default is capitalised and
+  always the safe choice (`[y/N]`, `[a/s/l/N]`); Enter takes it. A word or its first letter, any case. An
+  unrecognised answer asks again with the choices (it used to mean no). End of input means the safe default; Ctrl-C
+  stops as before. Select mode shows `[3/14]`, what the item is and its full path, the choices on one line, and one
+  result line after each answer; `q` goes to the summary. Without a terminal nothing is recorded or deleted, and one
+  line says so and how to go on.
+- **Components** (package `internal/view`). One `Renderer` holds what every component needs: the escaping writer
+  (see "Output cannot act on the terminal"), whether this is a terminal, colour, the width, the home directory and
+  the roots. The components: `Heading`, `Section` (title, totals at the right edge, body), `Counts` (marker lines),
+  `FileList` (rows of date or retention, size, path and note; grouped by root; wrapping; `… N more`), `DupGroup`
+  (`contract.pdf · 8 MB each` with its keep and delete lines and symlink notes), `Problems` (line, file, reason and
+  what to do; repeats collapsed), `Prompt`, `Item` (a select-mode item and its result) and `Next`. Commands build the
+  data and hand it to components; they never format output themselves or decide plain or rich, relative or full
+  paths. Each component writes whole lines, one write per line. Not called `ui`: the "UI in place of the CSV" is a
+  different, later thing.
+- **Scope: every command** (roots, scan, report, export, update, delete, help and errors), in this order: `delete`,
+  `update`, `report`, `scan` and `roots`, then `export` and help.
+
+The reference mockups (rich form; colour not shown):
+
+```
+$ filo update retention-notes.csv
+
+Retention update   export 12 · 48 rows · ~/Documents
+
+  ✓ 41 files given a retention
+  · 5 rows unchanged
+  ✗ 2 rows refused
+
+Refused: fix these rows in the CSV and run filo update again
+  line  7  invoices/2019-03.pdf       retention 7y needs a file_date
+  line 31  notes/old draft.txt        changed since the export: export again
+
+! 3 files are now past their retention. Check for a typo, such as 7d for 7y:
+       retention   until
+       7d          2023-01-08   receipts/2023-01-01 coffee.pdf
+       2y          2021-06-30   tax/2019-06-30 statement.pdf
+       2015-01-01  2015-01-01   old/letter.doc
+
+Nothing has been deleted. Next: filo delete
+```
+
+```
+$ filo update dupes.csv
+
+Duplicates update   export 7 · 12 groups · ~/Documents
+
+Will record
+  ✓ 9 copies to delete in 6 groups                     1.2 GB once deleted
+  ◆ 1 content marked separate (identical copies meant to exist)
+      LICENSE      a/LICENSE · b/LICENSE
+  · 3 groups left alone (no Y or N)
+
+Refused: nothing in these groups is recorded
+  group 3  line 12  IMG_2041.jpg   every copy is Y; this would leave none
+  group 5  line 19  contract.pdf   b/contract.pdf is kept forever, longer than every copy marked N
+  group 8  line 27  q              a/q has a hard link, so deleting it frees nothing: mark it N
+
+Record these decisions? Refused groups stay as they are. [y/N/l] y
+
+✓ Recorded. Nothing has been deleted. Next: filo delete (9 copies to review)
+```
+
+```
+$ filo delete
+
+Ready to delete   14 files · 2.3 GB · ~/Documents
+
+Past their retention                                     5 files · 820 MB
+    until        size
+    2024-12-31   12 MB   tax/2017 return.pdf
+    2025-06-30    3 KB   notes/meeting.txt
+    2025-09-01  640 MB
+      video/2015/summer holiday in the south of France with the whole family, day 3.mp4
+    2025-11-01  160 MB   backups/old-phone.zip
+    2025-11-14    8 KB   receipts/2018-11-14 taxi.pdf
+
+Duplicate copies marked for deletion                     9 files in 6 groups · 1.5 GB
+    contract.pdf · 8 MB each
+      keep     a/contract.pdf          forever
+      delete   b/contract.pdf
+      delete   c/contract.pdf
+               ↳ the symlink ~/Desktop/contract points here and would break
+    IMG_2041.jpg · 4 MB each
+      keep     photos/2019/IMG_2041.jpg
+      delete   phone-import/IMG_2041.jpg
+    … 4 more groups
+
+! 1 mark no longer counts: its copy changed since it was marked (export duplicates again).
+
+Delete all 14, select one by one, list them all, or none? [a/s/l/N]
+```
+
+```
+[3/14]  duplicate · contract.pdf · 8 MB
+          keep     ~/Documents/a/contract.pdf          forever
+          delete   ~/Documents/c/contract.pdf
+        d delete · u unmark · s skip · q quit  › d
+        ✓ deleted
+
+[4/14]  past its retention · until 2024-12-31 · 12 MB
+          ~/Documents/tax/2017 return.pdf
+        d delete · r new retention · s skip · q quit  › r
+        retention (7y, forever or a date)  › 10y
+        ✓ kept until 2027-12-31
+```
+
+```
+Done   deleted 12 files · freed 2.1 GB · removed 1 empty folder
+
+Skipped 2: nothing was changed
+  tax/2017 return.pdf    changed since its retention was set: give it a new retention
+  b/contract.pdf         the kept copy a/contract.pdf moved: run filo scan, then filo delete
+
+  · 1 file given a new retention
+  · 0 left for later
+```
+
+Piped or with `NO_COLOR`, the same text with ASCII markers:
+
+```
+Duplicates update   export 7 . 12 groups . ~/Documents
+  [ok] 9 copies to delete in 6 groups
+  [refused] 3 groups (listed below)
+```
 
 ## 3. Data model (schema version 7)
 
@@ -787,17 +953,24 @@ its own identity. Reclaimable space is size × (copies − 1) per group. Paths a
    skips a group whose kept copy was deleted or changed after the update (`TestDuplicatesRoundTrip` in
    `internal/cli`, plus the store tests).
 
-**Next, in order** (agreed 2026-11-13; revert, the earlier iteration 4, was deferred, see section 7). Each is an open
-question below until it is designed.
+**Next, in order** (agreed 2026-11-13; revert, the earlier iteration 4, was deferred, see section 7; items 1 and 2
+put first on 2026-11-15). Each is an open question below until it is designed.
 
-1. Named retention policies.
-2. Folder rules (default retention policies on directories).
-3. Progress in the report, and `export retention --needing-retention`.
-4. Duplicates: one decision for all copies (the duplicates review CSV was done first, see iteration 5).
-5. `scan --verify`, with sidecar hash files.
-6. Backup awareness.
-7. Synced roots, sharing decisions between devices, and getting snapshots to the backup machine.
-8. A summary for scheduled scans.
+1. Terminal output (designed 2026-11-15, see Terminal output): `internal/view` and its components, then the
+   commands one at a time (`delete`, `update`, `report`, `scan` and `roots`, `export` and help). Done when each
+   command's mocked scenarios have golden tests of the plain output, and read as designed by hand in a terminal, a
+   40-column terminal, piped through `cat` and with `NO_COLOR=1`. First, since the duplicates re-plan changes what
+   `update` and `delete` print and can then use the components.
+2. Duplicates: showing the decisions recorded in a second export (re-plan the strategy first; a fix was abandoned).
+   The strategy can be designed alongside item 1.
+3. Named retention policies.
+4. Folder rules (default retention policies on directories).
+5. Progress in the report, and `export retention --needing-retention`.
+6. Duplicates: one decision for all copies (the duplicates review CSV was done first, see iteration 5).
+7. `scan --verify`, with sidecar hash files.
+8. Backup awareness.
+9. Synced roots, sharing decisions between devices, and getting snapshots to the backup machine.
+10. A summary for scheduled scans.
 
 Later: the **UI** in place of the CSV, including viewing and editing the register in place, and notes, links and
 tasks (see Open questions). All of it hangs off the stable file ID, so none of it needs the register to change
@@ -805,7 +978,7 @@ shape.
 
 ## 6. Open questions
 
-- **Named retention policies** (raised 2026-11-13; next). A retention schedule written once, `bills = 7y`,
+- **Named retention policies** (raised 2026-11-13; next after the terminal output and the duplicates re-plan). A retention schedule written once, `bills = 7y`,
   `payslips = forever`, and the policy name typed in the CSV (and later in folder rules) in place of a period. If the
   law changes ("financial records: 10 years"), changing the policy changes every file using it. Proposed shape: a
   name that is not a policy yet creates one with no period, and its files stay "needing a retention" until it has
@@ -852,6 +1025,54 @@ shape.
 - **Duplicates: one decision for all copies** (raised 2026-11-13). Retention is about content, so dating one copy
   could offer the same retention to its undated copies (one confirmation), and copies with different retentions are
   reported, not resolved. The duplicates CSV itself is designed and built (see Duplicates).
+- **Duplicates: showing the decisions recorded** (raised 2026-11-14; a fix was abandoned 2026-11-15, to be re-planned
+  with a clear strategy before any code). Export duplicates, decide some groups, `filo update`, then export again: the
+  decided groups come back with every `delete` cell blank, so they look undecided, though the marks are in the
+  register. The retention CSV fills in each row's stored `retention`, so the expectation is that the duplicates CSV
+  fills in `Y`/`N` too, and that a blank means "undecided" (blanking a decided group takes the decision back,
+  confirmed first).
+
+  *What was tried* (branch `fix-duplicates-includes-copy-decision`, kept for reference at a4ffe5f): fill each cell in from the
+  register (Y if marked on the current content; N if the copy's latest decision on it is keep, read from
+  `duplicate_reviews`; blank otherwise), then decide what an update means by comparing the CSV with a baseline. The
+  first baseline was the register as it is now. It let an old CSV undo later decisions, so a schema version 8 stored
+  the cell each export showed (`export_rows.delete_shown`) and the last decision before it
+  (`exports.dup_reviews_upto`), and the baseline became "what this export's own updates last recorded, else what it
+  showed", rebuilt from the history. Six code review rounds each found new cases; most came from that rebuilding (the
+  history does not always say what a CSV last meant: `filo delete` writes nothing to it, an undo touches only some
+  rows) and from the separate-contents export.
+
+  *What a design has to get right* (each found on that branch):
+  1. An old CSV, untouched, records nothing, whatever was decided since, and is never refused or asked about again.
+  2. The same CSV can be worked through over several updates, including taking a decision back.
+  3. A group decided again since the export (another export's update, an unmark in `filo delete`, the content made
+     separate or undone) is refused if changed in the CSV, so an old CSV never undoes a later decision.
+  4. A filtered or trimmed CSV changes nothing by itself (a missing row is no decision).
+  5. Copies deleted by `filo delete` since the export (their rows are still in the old CSV), and copies missing from
+     a scan that may come back (they must not keep a mark the person took back).
+  6. Separate contents: the `--separate` export; a separate content with a copy marked Y (two N and a Y); an undo
+     applied, then run again, partly blanked, or after the content was made separate again; a new Y there.
+  7. Clearing a whole column must not silently undo hundreds of decisions: made undecided and no longer separate are
+     listed and confirmed, like marking separate.
+  8. The same content in two groups of one CSV (rows pasted from two exports) must not give contradictory plans.
+  9. Summary and prompt text that says exactly what happens ("unchanged" is not "still in force"; name a group by
+     its first path).
+  10. Upgrading: released version 7 exports showed blank cells (N in a separate export); a development build
+      (00246ae) filled in Y/N, but no register that matters has its exports.
+  11. Smaller points: decisions matched by hash only (a file restored to the content it was decided on gets that
+      decision back); a decision recorded on another hard link of a copy is not shown; `created_utc` strings
+      (RFC3339Nano drops trailing zeros) do not sort as times, so order by ids or compare with `julianday`; an index
+      on `duplicate_reviews(export_id)` and `(hash, id)` if exports' own decisions are read.
+
+  *Ideas for the re-plan* (not decided):
+  - Store, per export row, the cell the last update of its group recorded (`delete_recorded`, starting as the cell
+    exported), and compare the CSV with that instead of rebuilding it from the history: "unchanged" is then exact.
+  - Ignore, when updating, a row whose copy `filo delete` has deleted, as if it were removed from the CSV.
+  - Make the separate-contents export undo-only (any blank undoes the content; a re-run is a no-op; it never shows Y),
+    or fold separate contents into the duplicates export.
+  - The simplest strategy may be one live export: an update of an export older than the latest decision on any of its
+    groups is refused for those groups ("export again"), which removes most of cases 1 to 3.
+  - Agree the strategy and its test cases (the list above) in this document first, then write the code.
 - **Progress** (raised 2026-11-13). A report line for how far dating has got: files with a `file_date`, files with
   a retention, and per directory what is left. And `export retention --needing-retention`, writing only the files
   the report counts as needing a retention, so each CSV is shorter.
