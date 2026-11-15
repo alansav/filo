@@ -1,16 +1,17 @@
-// Package report builds the `filo report` overview from the register and formats it as text.
+// Package report builds the `filo report` overview from the register and renders it with the terminal output
+// components.
 package report
 
 import (
 	"context"
 	"fmt"
-	"io"
 	"path/filepath"
 	"slices"
 	"strings"
 	"time"
 
 	"github.com/alansav/filo/internal/store"
+	"github.com/alansav/filo/internal/view"
 )
 
 // Report is everything `filo report` shows.
@@ -100,41 +101,165 @@ func Build(ctx context.Context, s *store.Store, top int, today string) (Report, 
 	return r, nil
 }
 
-// WriteText prints the report.
-func (r Report) WriteText(w io.Writer) error {
-	p := &printer{w: w}
-	p.line("Roots")
-	if len(r.Roots) == 0 {
-		p.line("  none yet; add one with: filo roots add DIR")
-	}
+// Render writes the report through the terminal output components (docs/design.md, Terminal output). Every section
+// is shown, so it is seen to have been checked: an empty one is one line ending in "none", except Roots and Register
+// snapshots, which say "none yet" with what to do, and Duplicates, which says "no groups" when it still lists contents
+// marked separate or copies marked for deletion.
+func (r Report) Render(v *view.Renderer) {
+	var roots []string
 	var files, bytes int64
 	for _, t := range r.Roots {
+		roots = append(roots, t.Root.Path)
 		files += t.Files
 		bytes += t.Bytes
-		p.line("  %s: %s, %s, %s", t.Root.Path, Plural(t.Files, "file", "files"), Size(t.Bytes),
+	}
+	v.Heading("Register", view.Where{Roots: roots}, Plural(files, "file", "files"), Size(bytes))
+
+	v.Blank()
+	if len(r.Roots) == 0 {
+		v.Section("Roots", "none yet: add one with filo roots add DIR")
+	} else {
+		v.Section("Roots")
+	}
+	for _, t := range r.Roots {
+		v.Entry(2, t.Root.Path, Plural(t.Files, "file", "files"), Size(t.Bytes),
 			Plural(t.Links, "symlink", "symlinks"))
 		if t.Root.MountPath != "" {
-			p.line("    on the filesystem mounted at %s", t.Root.MountPath)
+			v.DetailPath(4, "on the filesystem mounted at ", t.Root.MountPath)
 		}
 		if ls := t.LastScan; ls != nil {
 			scope := "whole root"
 			if ls.Scope != "" {
 				scope = ls.Scope
 			}
-			p.line("    last scan %d at %s (%s): %s seen; new %s, changed %s, moved %s, missing %s, errors %s",
-				ls.ID, Time(ls.FinishedUTC), scope, Count(ls.FilesSeen), Count(ls.New), Count(ls.Changed), Count(ls.Moved),
-				Count(ls.Missing), Count(ls.Errors))
+			v.Detail(4, fmt.Sprintf("last scan %d, %s, %s: %s seen, new %s, changed %s, moved %s, missing %s, errors %s",
+				ls.ID, Time(ls.FinishedUTC), scope, Count(ls.FilesSeen), Count(ls.New), Count(ls.Changed),
+				Count(ls.Moved), Count(ls.Missing), Count(ls.Errors)))
 		} else {
-			p.line("    never scanned")
+			v.Detail(4, "never scanned")
 		}
 	}
-	if len(r.Roots) > 1 {
-		p.line("  total: %s, %s", Plural(files, "file", "files"), Size(bytes))
+
+	v.Blank()
+	r.renderRetention(v)
+
+	v.Blank()
+	if len(r.Largest) == 0 {
+		v.Section("Largest files", "none")
+	} else {
+		v.Section("Largest files", "top "+Count(int64(len(r.Largest))))
+		rows := make([]view.FileRow, len(r.Largest))
+		for i, f := range r.Largest {
+			rows[i] = view.FileRow{Root: f.Root, Rel: f.Rel, Cells: []string{Size(f.Size)}}
+			if f.Links > 0 {
+				rows[i].Note = "and " + Plural(int64(f.Links), "hard link", "hard links") + ", the same file"
+			}
+		}
+		v.Files(view.FileList{Columns: []view.Column{{Header: "size", Right: true}}, Rows: rows})
 	}
 
-	p.blank()
+	v.Blank()
+	d := r.Duplicates
+	switch {
+	case d.Groups == 0 && d.Separate == 0 && d.Marked == 0:
+		v.Section("Duplicates", "none")
+	case d.Groups == 0:
+		v.Section("Duplicates", "no groups")
+	default:
+		v.Section("Duplicates", Plural(d.Groups, "group", "groups"), Plural(d.Copies, "copy", "copies"),
+			Size(d.Reclaimable)+" reclaimable")
+		groups := make([]view.DupGroup, len(d.Top))
+		for i, g := range d.Top {
+			dg := view.DupGroup{Name: filepath.Base(g.Copies[0].Rel), Each: Size(g.Size),
+				Facts: []string{Plural(int64(len(g.Copies)), "copy", "copies"), Size(g.Reclaimable) + " reclaimable"}}
+			for _, c := range g.Copies {
+				dg.Copies = append(dg.Copies, view.Copy{Root: c.Root, Rel: c.Rel, Links: c.Links})
+			}
+			groups[i] = dg
+		}
+		v.Dups(groups, 0)
+		if more := d.Groups - int64(len(d.Top)); more > 0 {
+			v.More(int(more), "group", "groups")
+		}
+	}
+	if d.Separate > 0 {
+		v.Count(view.Kept, Plural(d.Separate, "content", "contents")+" marked separate ("+
+			Plural(d.SeparateFiles, "file", "files")+"): identical, but not counted as duplicates")
+	}
+	if d.Marked > 0 {
+		v.Count(view.Attention, Plural(d.Marked, "copy", "copies")+" marked for deletion: see filo delete")
+	}
+
+	v.Blank()
+	if r.BrokenTotal == 0 {
+		v.Section("Broken symlinks", "none")
+	} else {
+		v.Section("Broken symlinks", Count(r.BrokenTotal))
+		rows := make([]view.FileRow, len(r.Broken))
+		for i, l := range r.Broken {
+			rows[i] = view.FileRow{Root: l.Root, Rel: l.Rel, Note: "-> " + l.Target}
+		}
+		v.Files(view.FileList{Rows: rows, ByRoot: true})
+		if more := r.BrokenTotal - int64(len(r.Broken)); more > 0 {
+			v.More(int(more), "symlink", "symlinks")
+		}
+	}
+
+	v.Blank()
+	if r.UnreadTotal == 0 {
+		v.Section("Unreadable files", "none")
+	} else {
+		v.Section("Unreadable files", Count(r.UnreadTotal))
+		rows := make([]view.FileRow, len(r.Unreadable))
+		for i, u := range r.Unreadable {
+			rows[i] = view.FileRow{Root: u.Root, Rel: u.Rel, Cells: []string{fmt.Sprintf("scan %d", u.Since)}}
+		}
+		v.Files(view.FileList{Columns: []view.Column{{Header: "since"}}, Rows: rows})
+		if more := r.UnreadTotal - int64(len(r.Unreadable)); more > 0 {
+			v.More(int(more), "file", "files")
+		}
+	}
+
+	v.Blank()
+	if len(r.Events) == 0 {
+		v.Section("Recent events", "none")
+	} else {
+		v.Section("Recent events", fmt.Sprintf("latest %s", Count(int64(len(r.Events)))))
+		rows := make([]view.FileRow, len(r.Events))
+		for i, e := range r.Events {
+			word, from := EventParts(e.Event)
+			rel := e.Path
+			if rel == "" {
+				rel = "." // an event on the root itself (an unreadable root folder)
+			}
+			fromRoot := ""
+			if _, other, ok := strings.Cut(e.Detail, store.EventFromRoot); ok && from != "" {
+				fromRoot = other // came back from another root: its earlier path is relative to that root
+			}
+			rows[i] = view.FileRow{Root: e.RootPath, Rel: rel, From: from, FromRoot: fromRoot, Note: e.Detail,
+				Cells: []string{fmt.Sprintf("scan %d", e.ScanID), word}}
+		}
+		v.Files(view.FileList{Columns: []view.Column{{Header: "scan"}, {Header: "event"}}, Rows: rows})
+	}
+
+	v.Blank()
+	r.renderSnapshots(v)
+}
+
+// renderRetention writes the retention section: how many files need a retention (and where most of them are), how
+// many are kept, past their retention, or deleted by filo.
+func (r Report) renderRetention(v *view.Renderer) {
+	var total int64
+	for _, n := range r.Status {
+		total += n
+	}
+	if total == 0 {
+		v.Section("Retention", "none")
+		return
+	}
+	v.Section("Retention", Plural(total, "file or symlink", "files and symlinks"))
 	if r.Undecided == 0 {
-		p.line("Needing a retention: none")
+		v.Count(view.Done, "no file needs a retention")
 	} else {
 		var parts []string
 		for _, st := range store.Statuses {
@@ -142,21 +267,28 @@ func (r Report) WriteText(w io.Writer) error {
 				parts = append(parts, StatusLabel(st)+" "+Count(n))
 			}
 		}
-		p.line("Needing a retention: %s (%s)", Plural(r.Undecided, "file", "files"), strings.Join(parts, ", "))
-		p.line("  directories with the most (to depth %d):", DirDepth)
-		for _, g := range r.UndecidedIn {
-			p.line("  %8s  %10s  %s", Count(g.Files), Size(g.Bytes), g.Dir)
-		}
-		p.line("  set retentions with: filo export retention [DIR] -o FILE, then filo update FILE")
+		v.Count(view.Attention, Plural(r.Undecided, "needs", "need")+" a retention ("+
+			strings.Join(parts, ", ")+")")
 	}
+	if r.Undecided > 0 { // right under the line it explains
+		v.Detail(4, fmt.Sprintf("Where most need one (to depth %d)", DirDepth))
+		rows := make([]view.FileRow, len(r.UndecidedIn))
+		for i, g := range r.UndecidedIn {
+			rows[i] = view.FileRow{Root: g.Root, Rel: g.Rel, Cells: []string{Count(g.Files), Size(g.Bytes)}}
+		}
+		v.Files(view.FileList{Columns: []view.Column{{Header: "files", Right: true}, {Header: "size", Right: true}},
+			Rows: rows})
+		v.Detail(4, "Next: filo export retention [DIR] -o FILE, then filo update FILE")
+	}
+
 	if n := r.Status[store.StatusKept]; n > 0 {
-		p.line("Kept until a later date: %s", Plural(n, "file", "files"))
+		v.Count(view.Neutral, Count(n)+" kept until a later date")
 	}
 	if n := r.Status[store.StatusForever]; n > 0 {
-		p.line("Kept forever: %s", Plural(n, "file", "files"))
+		v.Count(view.Neutral, Count(n)+" kept forever")
 	}
 	if n := r.Status[store.StatusExpired]; n > 0 {
-		p.line("Past their retention: %s; see filo delete", Plural(n, "file", "files"))
+		v.Count(view.Attention, Plural(n, "past its", "past their")+" retention: see filo delete")
 	}
 	if d := r.Deleted; d.Files > 0 {
 		last := ""
@@ -164,122 +296,52 @@ func (r Report) WriteText(w io.Writer) error {
 			last = fmt.Sprintf(" (last run %s: %s, %s)", Time(d.LastRunUTC), Plural(d.LastFiles, "file", "files"),
 				Size(d.LastBytes))
 		}
-		p.line("Deleted by filo: %s, %s freed%s", Plural(d.Files, "file", "files"), Size(d.Bytes), last)
+		v.Count(view.Neutral, fmt.Sprintf("deleted by filo: %s, %s freed%s", Plural(d.Files, "file", "files"),
+			Size(d.Bytes), last))
 	}
-
-	p.blank()
-	p.line("Largest files")
-	if len(r.Largest) == 0 {
-		p.line("  none")
-	}
-	for _, f := range r.Largest {
-		p.line("  %10s  %s", Size(f.Size), f.Path)
-	}
-
-	p.blank()
-	d := r.Duplicates
-	if d.Groups == 0 {
-		p.line("Duplicates: none")
-	} else {
-		p.line("Duplicates: %s, %s, %s reclaimable", Plural(d.Groups, "group", "groups"), Plural(d.Copies, "file", "files"),
-			Size(d.Reclaimable))
-		for _, g := range d.Top {
-			p.line("  %d copies of %s, %s reclaimable", len(g.Paths), Size(g.Size), Size(g.Reclaimable))
-			for _, path := range g.Paths {
-				p.line("    %s", path)
-			}
-		}
-		if int64(len(d.Top)) < d.Groups {
-			p.line("  and %s more", Plural(d.Groups-int64(len(d.Top)), "group", "groups"))
-		}
-	}
-	if d.Separate > 0 {
-		p.line("  %s marked separate (%s): identical, but not counted as duplicates",
-			Plural(d.Separate, "content", "contents"), Plural(d.SeparateFiles, "file", "files"))
-	}
-	if d.Marked > 0 {
-		p.line("  %s marked for deletion; see filo delete", Plural(d.Marked, "copy", "copies"))
-	}
-
-	p.blank()
-	if r.BrokenTotal == 0 {
-		p.line("Broken symlinks: none")
-	} else {
-		p.line("Broken symlinks: %s", Count(r.BrokenTotal))
-		for _, l := range r.Broken {
-			p.line("  %s -> %s", l.Path, l.Target)
-		}
-		if int64(len(r.Broken)) < r.BrokenTotal {
-			p.line("  and %s more", Count(r.BrokenTotal-int64(len(r.Broken))))
-		}
-	}
-
-	p.blank()
-	if r.UnreadTotal == 0 {
-		p.line("Unreadable files: none")
-	} else {
-		p.line("Unreadable files: %s", Count(r.UnreadTotal))
-		for _, u := range r.Unreadable {
-			p.line("  since scan %d  %s", u.Since, u.Path)
-		}
-		if int64(len(r.Unreadable)) < r.UnreadTotal {
-			p.line("  and %s more", Count(r.UnreadTotal-int64(len(r.Unreadable))))
-		}
-	}
-
-	p.blank()
-	p.line("Recent events")
-	if len(r.Events) == 0 {
-		p.line("  none")
-	}
-	for _, e := range r.Events {
-		where := ""
-		if len(r.Roots) > 1 {
-			where = "  in " + e.RootPath
-		}
-		p.line("  scan %d  %s%s", e.ScanID, EventText(e.Event), where)
-	}
-
-	p.blank()
-	r.writeSnapshots(p)
-	return p.err
 }
 
-// writeSnapshots shows the register's copies, and warns when they are missing or behind, which is how a failing
+// renderSnapshots shows the register's copies, and warns when they are missing or behind, which is how a failing
 // snapshot gets noticed when filo runs from a timer.
-func (r Report) writeSnapshots(p *printer) {
+func (r Report) renderSnapshots(v *view.Renderer) {
 	sn := r.Snapshots
-	p.line("Register snapshots")
 	upgrades := ""
 	if sn.PreUpgrade > 0 {
 		upgrades = fmt.Sprintf(" (and %s from before an upgrade)", Plural(int64(sn.PreUpgrade), "copy", "copies"))
 	}
 	switch {
 	case sn.Problem != "":
-		p.line("  warning: cannot read %s: %s", sn.Dir, sn.Problem)
+		v.Section("Register snapshots")
+		v.CountName(view.Attention, "cannot read ", sn.Dir, ": "+sn.Problem)
 	case sn.Count == 0 && sn.LatestWrite.IsZero():
-		p.line("  none yet; one is written after each command that changes the register%s", upgrades)
+		v.Section("Register snapshots", "none yet")
+		v.Detail(4, "one is written after each command that changes the register"+upgrades)
 	case sn.Count == 0:
-		p.line("  warning: none in %s, though the register has changed%s; see the warning after each command",
-			sn.Dir, upgrades)
+		v.Section("Register snapshots", "none")
+		v.CountName(view.Attention, "none in ", sn.Dir, ", though the register has changed"+upgrades+
+			"; see the warning after each command")
 	default:
-		p.line("  %d in %s, latest %s%s", sn.Count, sn.Dir, LocalTime(sn.Latest), upgrades)
+		v.Section("Register snapshots", fmt.Sprintf("%d, latest %s%s", sn.Count, LocalTime(sn.Latest), upgrades))
+		v.DetailPath(4, "", sn.Dir)
 		if sn.Latest.Before(sn.LatestWrite) {
-			p.line("  warning: the register changed at %s, after the latest snapshot; see the warning after each "+
-				"command", LocalTime(sn.LatestWrite))
+			v.Count(view.Attention, "the register changed at "+LocalTime(sn.LatestWrite)+", after the latest "+
+				"snapshot; see the warning after each command")
 		}
 	}
 	if sn.Future > 0 {
-		p.line("  warning: %s dated in the future (was the clock ahead?); kept, but not counted as the latest",
-			Plural(int64(sn.Future), "snapshot is", "snapshots are"))
+		v.Count(view.Attention, Plural(int64(sn.Future), "snapshot is", "snapshots are")+" dated in the future (was the "+
+			"clock ahead?); kept, but not counted as the latest")
 	}
 }
 
 // DirGroup is a directory and the files counted in it.
 type DirGroup struct {
-	Dir          string
+	Root, Rel    string // the root (absolute) and the directory relative to it ("." for the root itself)
 	Files, Bytes int64
 }
+
+// AbsDir is the directory's absolute path.
+func (g DirGroup) AbsDir() string { return filepath.Join(g.Root, filepath.FromSlash(g.Rel)) }
 
 // DirGroups counts files by their directory, cut at depth levels below the root, largest count first, at most top.
 // A symlink counts as a file but adds no bytes (its size is only the length of its target).
@@ -294,7 +356,11 @@ func DirGroups(items []store.FileItem, depth, top int) []DirGroup {
 		dir := filepath.Join(append([]string{it.RootPath}, dirs...)...)
 		g := m[dir]
 		if g == nil {
-			g = &DirGroup{Dir: dir}
+			rel := strings.Join(dirs, "/")
+			if rel == "" {
+				rel = "."
+			}
+			g = &DirGroup{Root: it.RootPath, Rel: rel}
 			m[dir] = g
 		}
 		g.Files++
@@ -313,7 +379,10 @@ func DirGroups(items []store.FileItem, depth, top int) []DirGroup {
 			}
 			return 1
 		}
-		return strings.Compare(a.Dir, b.Dir)
+		if a.Root != b.Root {
+			return strings.Compare(a.Root, b.Root)
+		}
+		return strings.Compare(a.Rel, b.Rel)
 	})
 	if len(out) > top {
 		out = out[:top]
@@ -321,42 +390,38 @@ func DirGroups(items []store.FileItem, depth, top int) []DirGroup {
 	return out
 }
 
-// EventText renders one event on a line, without its root.
-func EventText(e store.Event) string {
-	var b strings.Builder
+// EventParts splits an event into its kind as a word ("moved", "missing", …) and, for a move, the path it came
+// from ("" otherwise); its path and detail are the event's own.
+func EventParts(e store.Event) (word, from string) {
 	switch e.Kind {
 	case "moved":
-		fmt.Fprintf(&b, "moved     %s -> %s", e.OtherPath, e.Path)
+		return "moved", e.OtherPath
 	case "possible_move":
-		fmt.Fprintf(&b, "possible  %s -> %s ?", e.OtherPath, e.Path)
-	case "missing":
-		fmt.Fprintf(&b, "missing   %s", e.Path)
-	case "changed":
-		fmt.Fprintf(&b, "changed   %s", e.Path)
-	case "error":
-		fmt.Fprintf(&b, "error     %s", e.Path)
+		return "possible move", e.OtherPath
 	case store.EventDeleted:
-		fmt.Fprintf(&b, "deleted   %s", e.Path)
+		return "deleted", ""
 	case store.EventSameAsDeleted:
-		fmt.Fprintf(&b, "new       %s", e.Path)
-	default:
-		fmt.Fprintf(&b, "%-9s %s", e.Kind, e.Path)
+		return "new", ""
 	}
+	return e.Kind, ""
+}
+
+// eventWordWidth is the scan summary's column for an event's word: as wide as the longest, "possible move".
+const eventWordWidth = len("possible move")
+
+// EventText renders one event on a line, without its root (the scan summary's form, from the same words).
+func EventText(e store.Event) string {
+	word, from := EventParts(e)
+	what := e.Path
+	if from != "" {
+		what = from + " -> " + e.Path
+		if e.Kind == "possible_move" {
+			what += " ?"
+		}
+	}
+	text := fmt.Sprintf("%-*s %s", eventWordWidth, word, what)
 	if e.Detail != "" {
-		fmt.Fprintf(&b, " (%s)", e.Detail)
+		text += " (" + e.Detail + ")"
 	}
-	return b.String()
+	return text
 }
-
-type printer struct {
-	w   io.Writer
-	err error
-}
-
-func (p *printer) line(format string, args ...any) {
-	if p.err == nil {
-		_, p.err = fmt.Fprintf(p.w, format+"\n", args...)
-	}
-}
-
-func (p *printer) blank() { p.line("") }

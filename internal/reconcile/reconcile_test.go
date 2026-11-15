@@ -549,7 +549,7 @@ func TestScenarios(t *testing.T) {
 							now, sum.ScanID)
 					}
 					rows, total, err := e.s.UnreadableFiles(context.Background(), 10)
-					if err != nil || total != 1 || len(rows) != 1 || rows[0].Path != e.abs("f") || rows[0].Since != sum.ScanID {
+					if err != nil || total != 1 || len(rows) != 1 || rows[0].AbsPath() != e.abs("f") || rows[0].Since != sum.ScanID {
 						t.Errorf("UnreadableFiles = %+v, %d, %v", rows, total, err)
 					}
 				}},

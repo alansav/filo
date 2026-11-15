@@ -6,15 +6,14 @@ import (
 	"time"
 
 	"github.com/alansav/filo/internal/store"
+	"github.com/alansav/filo/internal/view"
 )
 
-// section returns the lines of the report from the one starting with heading up to the next blank line.
+// section returns the lines of the plain report from the one starting with heading up to the next blank line.
 func section(t *testing.T, r Report, heading string) []string {
 	t.Helper()
 	var b strings.Builder
-	if err := r.WriteText(&b); err != nil {
-		t.Fatal(err)
-	}
+	r.Render(view.New(view.Options{Out: &b}))
 	lines := strings.Split(b.String(), "\n")
 	for i, l := range lines {
 		if strings.HasPrefix(l, heading) {
@@ -29,23 +28,26 @@ func section(t *testing.T, r Report, heading string) []string {
 	return nil
 }
 
-func TestWriteTextUnreadable(t *testing.T) {
+func TestRenderUnreadable(t *testing.T) {
 	tests := []struct {
 		name  string
 		rows  []store.UnreadableRow
 		total int64
 		want  []string
 	}{
-		{"none", nil, 0, []string{"Unreadable files: none"}},
-		{"all shown", []store.UnreadableRow{{Path: "/r/a", Since: 2}, {Path: "/r/b", Since: 5}}, 2, []string{
-			"Unreadable files: 2",
-			"  since scan 2  /r/a",
-			"  since scan 5  /r/b",
+		{"none", nil, 0, []string{"Unreadable files   none"}},
+		{"all shown", []store.UnreadableRow{{Root: "/r", Rel: "a", Since: 2},
+			{Root: "/r", Rel: "b", Since: 5}}, 2, []string{
+			"Unreadable files   2",
+			"    since",
+			"    scan 2   /r/a",
+			"    scan 5   /r/b",
 		}},
-		{"more than the top", []store.UnreadableRow{{Path: "/r/a", Since: 2}}, 1235, []string{
-			"Unreadable files: 1,235",
-			"  since scan 2  /r/a",
-			"  and 1,234 more",
+		{"more than the top", []store.UnreadableRow{{Root: "/r", Rel: "a", Since: 2}}, 1235, []string{
+			"Unreadable files   1,235",
+			"    since",
+			"    scan 2   /r/a",
+			"    ... 1,234 more files",
 		}},
 	}
 	for _, tc := range tests {
@@ -58,7 +60,7 @@ func TestWriteTextUnreadable(t *testing.T) {
 	}
 }
 
-func TestWriteTextLifespan(t *testing.T) {
+func TestRenderRetention(t *testing.T) {
 	tests := []struct {
 		name string
 		r    Report
@@ -66,25 +68,30 @@ func TestWriteTextLifespan(t *testing.T) {
 	}{
 		{"nothing to decide", Report{Status: map[store.Status]int64{store.StatusKept: 3, store.StatusForever: 1}},
 			[]string{
-				"Needing a retention: none",
-				"Kept until a later date: 3 files",
-				"Kept forever: 1 file",
+				"Retention   4 files and symlinks",
+				"  [ok] no file needs a retention",
+				"  - 3 kept until a later date",
+				"  - 1 kept forever",
 			}},
 		{"undecided and expired", Report{
-			Status:      map[store.Status]int64{store.StatusUndated: 1200, store.StatusChanged: 2, store.StatusExpired: 1},
+			Roots: []store.RootTotal{{Root: store.Root{Path: "/r"}}},
+			Status: map[store.Status]int64{store.StatusUndated: 1200, store.StatusChanged: 2,
+				store.StatusExpired: 1},
 			Undecided:   1202,
-			UndecidedIn: []DirGroup{{Dir: "/r/docs", Files: 1202, Bytes: 2048}},
+			UndecidedIn: []DirGroup{{Root: "/r", Rel: "docs", Files: 1202, Bytes: 2048}},
 		}, []string{
-			"Needing a retention: 1,202 files (no retention 1,200, past retention, changed since it was set 2)",
-			"  directories with the most (to depth 2):",
-			"     1,202     2.0 KiB  /r/docs",
-			"  set retentions with: filo export retention [DIR] -o FILE, then filo update FILE",
-			"Past their retention: 1 file; see filo delete",
+			"Retention   1,203 files and symlinks",
+			"  [!] 1,202 need a retention (no retention 1,200, past retention, changed since it was set 2)",
+			"    Where most need one (to depth 2)",
+			"    files      size",
+			"    1,202   2.0 KiB   docs",
+			"    Next: filo export retention [DIR] -o FILE, then filo update FILE",
+			"  [!] 1 past its retention: see filo delete",
 		}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := section(t, tc.r, "Needing a retention")
+			got := section(t, tc.r, "Retention")
 			if strings.Join(got, "\n") != strings.Join(tc.want, "\n") {
 				t.Errorf("got:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(tc.want, "\n"))
 			}
@@ -101,7 +108,8 @@ func TestDirGroups(t *testing.T) {
 		{RootPath: "/s", Path: "b", Kind: "file", Size: 5},
 	}
 	got := DirGroups(items, 2, 2)
-	want := []DirGroup{{Dir: "/r/docs/x", Files: 3, Bytes: 20}, {Dir: "/r", Files: 1, Bytes: 1}}
+	want := []DirGroup{{Root: "/r", Rel: "docs/x", Files: 3, Bytes: 20},
+		{Root: "/r", Rel: ".", Files: 1, Bytes: 1}}
 	if len(got) != len(want) {
 		t.Fatalf("got %+v, want %+v", got, want)
 	}
@@ -112,25 +120,25 @@ func TestDirGroups(t *testing.T) {
 	}
 }
 
-func TestWriteTextSnapshots(t *testing.T) {
+func TestRenderSnapshots(t *testing.T) {
 	latest := time.Date(2026, 11, 13, 10, 0, 0, 0, time.Local)
 	tests := []struct {
 		name string
 		sn   store.SnapshotInfo
 		want []string
 	}{
-		{"none yet", store.SnapshotInfo{Dir: "/d"}, []string{"Register snapshots",
-			"  none yet; one is written after each command that changes the register"}},
+		{"none yet", store.SnapshotInfo{Dir: "/d"}, []string{"Register snapshots   none yet",
+			"    one is written after each command that changes the register"}},
 		{"current", store.SnapshotInfo{Dir: "/d", Count: 2, Latest: latest, LatestWrite: latest}, []string{
-			"Register snapshots", "  2 in /d, latest 2026-11-13 10:00"}},
+			"Register snapshots   2, latest 2026-11-13 10:00", "    /d"}},
 		{"behind the latest write", store.SnapshotInfo{Dir: "/d", Count: 1, Latest: latest,
-			LatestWrite: latest.Add(time.Hour)}, []string{"Register snapshots", "  1 in /d, latest 2026-11-13 10:00",
-			"  warning: the register changed at 2026-11-13 11:00, after the latest snapshot; see the warning after " +
-				"each command"}},
+			LatestWrite: latest.Add(time.Hour)}, []string{"Register snapshots   1, latest 2026-11-13 10:00", "    /d",
+			"  [!] the register changed at 2026-11-13 11:00, after the latest snapshot; see the warning after each " +
+				"command"}},
 		{"only future-dated ones", store.SnapshotInfo{Dir: "/d", Future: 2, LatestWrite: latest}, []string{
-			"Register snapshots",
-			"  warning: none in /d, though the register has changed; see the warning after each command",
-			"  warning: 2 snapshots are dated in the future (was the clock ahead?); kept, but not counted as the latest"}},
+			"Register snapshots   none",
+			"  [!] none in /d, though the register has changed; see the warning after each command",
+			"  [!] 2 snapshots are dated in the future (was the clock ahead?); kept, but not counted as the latest"}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -139,5 +147,25 @@ func TestWriteTextSnapshots(t *testing.T) {
 				t.Errorf("got\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(tc.want, "\n"))
 			}
 		})
+	}
+}
+
+func TestRenderDuplicatesAndEvents(t *testing.T) {
+	var b strings.Builder
+	Report{Roots: []store.RootTotal{{Root: store.Root{Path: "/r"}}},
+		Duplicates: store.Duplicates{Separate: 2, SeparateFiles: 4},
+		Events:     []store.EventRow{{Event: store.Event{Kind: "error", Detail: "permission denied"}, ScanID: 4, RootPath: "/r"}},
+	}.Render(view.New(view.Options{Out: &b}))
+	for _, want := range []string{"Duplicates   no groups\n", "  [kept] 2 contents marked separate (4 files)",
+		"    scan 4   error   .   permission denied\n"} {
+		if !strings.Contains(b.String(), want) {
+			t.Errorf("lacks %q:\n%s", want, b.String())
+		}
+	}
+}
+
+func TestRenderEmptyRetention(t *testing.T) {
+	if got := section(t, Report{}, "Retention"); strings.Join(got, "\n") != "Retention   none" {
+		t.Errorf("got %q, want one line", got)
 	}
 }

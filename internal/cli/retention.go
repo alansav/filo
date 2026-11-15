@@ -232,7 +232,7 @@ func (e *env) update(ctx context.Context, dbBefore string, args []string) error 
 	var pr *prompter
 	if asking {
 		pr = newPrompter(e.stdin)
-		pr.end = r.Blank
+		pr.end, pr.check = r.Blank, e.outputErr
 		defer pr.close()
 	}
 	asked := false
@@ -288,7 +288,7 @@ func (e *env) update(ctx context.Context, dbBefore string, args []string) error 
 	if n := len(res.NowPast); n > 0 {
 		rows := make([]view.FileRow, n)
 		for i, p := range res.NowPast {
-			root, rel := splitRoot(roots, p.Path)
+			root, rel := view.SplitRoot(roots, p.Path)
 			rows[i] = view.FileRow{Root: root, Rel: rel, Cells: []string{p.Retention, p.KeepUntil}}
 		}
 		r.Blank()
@@ -355,7 +355,7 @@ func refusalProblems(roots []string, problems []retention.Problem, refusals []st
 		if rf.Path == "" {
 			p.Reason = fmt.Sprintf("file %d: %s", rf.FileID, rf.Reason)
 		} else {
-			p.Root, p.Rel = splitRoot(roots, rf.Path)
+			p.Root, p.Rel = view.SplitRoot(roots, rf.Path)
 		}
 		out = append(out, p)
 	}
@@ -371,9 +371,9 @@ func (e *env) confirmClears(ctx context.Context, pr *prompter, roots []string, c
 	for i, c := range cs {
 		row := view.FileRow{Cells: []string{c.Retention, c.KeepUntil}}
 		if c.Path == "" {
-			row.Rel = fmt.Sprintf("file %d", c.FileID)
+			row.Label = fmt.Sprintf("file %d, no current path", c.FileID)
 		} else {
-			row.Root, row.Rel = splitRoot(roots, c.Path)
+			row.Root, row.Rel = view.SplitRoot(roots, c.Path)
 		}
 		rows[i] = row
 	}

@@ -112,7 +112,7 @@ func TestRetentionRoundTrip(t *testing.T) {
 
 	filo(ExitOK, "", false, "roots", "add", root)
 	contains("report", filo(ExitOK, "", false, "report").stdout,
-		"Needing a retention: 4 files (no retention 4)", root+"/docs", "filo export retention")
+		"[!] 4 need a retention (no retention 4)", "   docs\n", "filo export retention")
 
 	// Export: -o is required, and an existing file is never overwritten.
 	r1 := filepath.Join(work, "r1.csv")
@@ -180,8 +180,8 @@ func TestRetentionRoundTrip(t *testing.T) {
 	r = filo(ExitOK, "", false, "delete")
 	contains("delete", r.stdout, "Past their retention   1 file", "2026-11-10", "   docs/2023-03 invoice.pdf",
 		"Nothing deleted: there is no terminal to ask in")
-	contains("report", filo(ExitOK, "", false, "report").stdout, "Past their retention: 1 file; see filo delete",
-		"Kept until a later date: 2 files", "Kept forever: 1 file")
+	contains("report", filo(ExitOK, "", false, "report").stdout, "[!] 1 past its retention: see filo delete",
+		"- 2 kept until a later date", "- 1 kept forever")
 
 	// An older export cannot overwrite a retention changed from a later one.
 	editCSV(t, r1, setRetention(map[string]string{"a.txt": "2029-01-01"}))

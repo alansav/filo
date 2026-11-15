@@ -141,8 +141,8 @@ func TestDuplicatesRoundTrip(t *testing.T) {
 		}
 	}
 	contains("report", filo(ExitOK, "", false, "report").stdout,
-		"1 content marked separate (2 files): identical, but not counted as duplicates",
-		"2 copies marked for deletion; see filo delete")
+		"[kept] 1 content marked separate (2 files): identical, but not counted as duplicates",
+		"[!] 2 copies marked for deletion: see filo delete")
 
 	// The separate content is no longer exported; a row moved into another group is refused with both groups.
 	d2 := filepath.Join(work, "d2.csv")

@@ -138,6 +138,7 @@ could not be read or deleted.
 
 // env is one invocation's surroundings.
 type env struct {
+	out            *firstError // stdout, keeping its first write error
 	stdin          io.Reader
 	view           *view.Renderer // the terminal output components (docs/design.md, Terminal output)
 	stdout, stderr io.Writer      // through safeText: what filo prints can never act as terminal control codes
@@ -152,9 +153,15 @@ func (e usageError) Error() string { return e.msg }
 
 // Run executes one command line (without the program name) and returns the exit code.
 func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(string) string) int {
-	e := &env{stdin: stdin, view: newView(stdout, getenv), stdout: safeText{stdout}, stderr: safeText{stderr},
-		rawStderr: stderr, getenv: getenv}
+	// Every command's output goes through out, which keeps the first write error, whether it is written by the
+	// components or by safeText: output that did not get through (a full disk, a closed pipe) is not success.
+	out := &firstError{w: stdout}
+	e := &env{out: out, stdin: stdin, view: newView(stdout, out, getenv), stdout: safeText{out},
+		stderr: safeText{stderr}, rawStderr: stderr, getenv: getenv}
 	err := e.run(ctx, args)
+	if err == nil && out.err != nil {
+		err = fmt.Errorf("write output: %w", out.err)
+	}
 	var ue usageError
 	switch {
 	case err == nil:
@@ -173,11 +180,11 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	}
 }
 
-// newView makes the Renderer for stdout: rich and as wide as the terminal when stdout is one (colour unless NO_COLOR
+// newView makes the Renderer, writing to out (stdout through firstError), and judging from stdout itself: rich and as wide as the terminal when stdout is one (colour unless NO_COLOR
 // is set or TERM is dumb), plain otherwise. A character device that is not a terminal is plain too: reading the
 // window size tells them apart. Where it cannot be read (Windows), a terminal stays one, without colour.
-func newView(stdout io.Writer, getenv func(string) string) *view.Renderer {
-	o := view.Options{Out: stdout, Terminal: isTerminal(stdout), Home: getenv("HOME")}
+func newView(stdout, out io.Writer, getenv func(string) string) *view.Renderer {
+	o := view.Options{Out: out, Terminal: isTerminal(stdout), Home: getenv("HOME")}
 	color := true
 	if f, ok := stdout.(*os.File); ok && o.Terminal {
 		if view.CanCheck {
@@ -188,6 +195,32 @@ func newView(stdout io.Writer, getenv func(string) string) *view.Renderer {
 	}
 	o.Color = color && o.Terminal && getenv("NO_COLOR") == "" && getenv("TERM") != "dumb"
 	return view.New(o)
+}
+
+// outputErr is stdout's first write error, whether the components or safeText met it: a command checks it before
+// acting on what it showed (a question, a deletion).
+func (e *env) outputErr() error {
+	if e.out.err != nil {
+		return fmt.Errorf("write output: %w", e.out.err)
+	}
+	return e.view.Err()
+}
+
+// firstError passes writes to w until one fails, keeps that error, and writes nothing after it.
+type firstError struct {
+	w   io.Writer
+	err error
+}
+
+func (f *firstError) Write(p []byte) (int, error) {
+	if f.err != nil {
+		return 0, f.err
+	}
+	n, err := f.w.Write(p)
+	if err != nil {
+		f.err = err
+	}
+	return n, err
 }
 
 // errReported means the details were already printed.
@@ -647,7 +680,8 @@ func (e *env) report(ctx context.Context, dbBefore string, args []string) error 
 	if err != nil {
 		return err
 	}
-	return r.WriteText(e.stdout)
+	r.Render(e.view)
+	return nil
 }
 
 // printSummary prints a scan's counts and samples (design section 4, step 9).

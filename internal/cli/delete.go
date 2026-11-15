@@ -92,7 +92,7 @@ func (e *env) delete(ctx context.Context, dbBefore string, args []string) error 
 			return nil
 		}
 		pr = newPrompter(e.stdin)
-		pr.end = r.Blank
+		pr.end, pr.check = r.Blank, e.outputErr
 		defer pr.close()
 		total := len(cands) + marked
 		choices := []view.Choice{{Key: "a", Word: "all"}, {Key: "s", Word: "select"}, {Key: "l", Word: "list"},
@@ -244,7 +244,12 @@ groups:
 				result(c, false, false, why)
 				continue
 			}
-			o, err := d.DeleteDuplicate(ctx, c, kept)
+			// Never delete once output has failed: what is deleted must have been shown.
+			var o dispose.Outcome
+			err := e.outputErr()
+			if err == nil {
+				o, err = d.DeleteDuplicate(ctx, c, kept)
+			}
 			if o.Deleted {
 				deleted++
 				freed += fileBytes(c)
@@ -298,7 +303,11 @@ files:
 				break files
 			}
 		}
-		o, err := d.Delete(ctx, c)
+		var o dispose.Outcome
+		err := e.outputErr() // never delete once output has failed: what is deleted must have been shown
+		if err == nil {
+			o, err = d.Delete(ctx, c)
+		}
 		if o.Deleted {
 			deleted++
 			freed += fileBytes(c)
@@ -551,7 +560,7 @@ func (l *deleteList) draw(r *view.Renderer, max int) (cut bool) {
 		r.Blank()
 		r.Section("Past their retention", report.Plural(int64(len(l.expired)), "file", "files"), report.Size(l.exBytes))
 		r.Files(view.FileList{Columns: []view.Column{{Header: "until"}, {Header: "size", Right: true}},
-			Rows: l.expired, Max: max, More: "files", MoreOne: "file"})
+			Rows: l.expired, ByRoot: true, Max: max, More: "files", MoreOne: "file"})
 	}
 	if len(l.dups) > 0 {
 		r.Blank()
@@ -578,9 +587,10 @@ func noteStale(r *view.Renderer, stale int) {
 // prompter asks questions on standard input. Each read runs in a goroutine, so Ctrl-C (a cancelled context) ends a
 // wait for an answer.
 type prompter struct {
-	req chan struct{}
-	res chan answer
-	end func() // ends the question's line when no answer will be written after it
+	req   chan struct{}
+	res   chan answer
+	end   func()       // ends the question's line when no answer will be written after it
+	check func() error // the output's first write error: a question that could not be shown is not asked
 }
 
 type answer struct {
@@ -607,9 +617,16 @@ func newPrompter(in io.Reader) *prompter {
 // close stops the reader once its current read, if any, returns.
 func (p *prompter) close() { close(p.req) }
 
-// ask shows the question (with show) and returns the answer, trimmed. ok is false at end of input.
+// ask shows the question (with show) and returns the answer, trimmed. ok is false at end of input. If the question
+// could not be written (check reports an output error), it is not asked: the error is returned, so nothing is done
+// on an answer to a question nobody saw.
 func (p *prompter) ask(ctx context.Context, show func()) (string, bool, error) {
 	show()
+	if p.check != nil {
+		if err := p.check(); err != nil {
+			return "", false, err
+		}
+	}
 	select {
 	case p.req <- struct{}{}:
 	case <-ctx.Done():

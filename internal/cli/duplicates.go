@@ -133,7 +133,7 @@ func (e *env) updateDuplicates(ctx context.Context, db, path string, data []byte
 	var pr *prompter
 	if asking {
 		pr = newPrompter(e.stdin)
-		pr.end = r.Blank
+		pr.end, pr.check = r.Blank, e.outputErr
 		defer pr.close()
 	}
 	// show lists what needs a look before anything is recorded: the refusals, and the contents to be marked separate
@@ -145,7 +145,7 @@ func (e *env) updateDuplicates(ctx context.Context, db, path string, data []byte
 	separate := func(res store.DupResult, max int) {
 		rows := make([]view.FileRow, len(res.Separate))
 		for i, p := range res.Separate {
-			rows[i].Root, rows[i].Rel = splitRoot(roots, p)
+			rows[i].Root, rows[i].Rel = view.SplitRoot(roots, p)
 		}
 		r.Files(view.FileList{Rows: rows, Max: max, More: "contents", MoreOne: "content"})
 	}

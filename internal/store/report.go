@@ -59,36 +59,80 @@ func (s *Store) RootTotals(ctx context.Context) ([]RootTotal, error) {
 
 // FileRow is one present file for display.
 type FileRow struct {
-	Path string // absolute
-	Size int64
+	Root  string // the root it is in, absolute
+	Rel   string // the path relative to the root, '/' separators
+	Size  int64
+	Links int // other paths of the same file (hard links in the same root), not listed as files of their own
 }
 
-// Largest returns the n largest present regular files.
+// AbsPath is the file's absolute path.
+func (f FileRow) AbsPath() string { return absPath(f.Root, f.Rel) }
+
+// Largest returns the n largest present regular files. Hard links (the same inode in the same root) are one file,
+// listed by its first path with the number of other links, as the duplicates count them. The query takes the largest
+// paths in order (cheap with LIMIT); links are merged here, fetching more rows if merging left fewer than n.
 func (s *Store) Largest(ctx context.Context, n int) ([]FileRow, error) {
-	out, err := queryAll(ctx, s.db, func(rows *sql.Rows) (FileRow, error) {
-		var fr FileRow
-		var root, rel string
-		err := rows.Scan(&root, &rel, &fr.Size)
-		fr.Path = absPath(root, rel)
-		return fr, err
-	}, `
-		SELECT r.path, p.path, f.size
-		FROM paths p JOIN files f ON f.id = p.file_id JOIN roots r ON r.id = p.root_id
-		WHERE p.valid_to_scan IS NULL AND f.kind = 'file'
-		ORDER BY f.size DESC, r.path, p.path LIMIT ?`, n)
-	if err != nil {
-		return nil, fmt.Errorf("largest files: %w", err)
+	type row struct {
+		root, rel string
+		rootID    int64
+		size      int64
+		ino       int64 // 0 = not known: never merged
 	}
-	return out, nil
+	type key struct{ root, ino int64 }
+	for limit := n * 2; ; limit *= 2 {
+		rows, err := queryAll(ctx, s.db, func(rs *sql.Rows) (row, error) {
+			var r row
+			return r, rs.Scan(&r.root, &r.rel, &r.rootID, &r.size, &r.ino)
+		}, `
+			SELECT r.path, p.path, p.root_id, f.size, coalesce(f.inode, 0)
+			FROM paths p JOIN files f ON f.id = p.file_id JOIN roots r ON r.id = p.root_id
+			WHERE p.valid_to_scan IS NULL AND f.kind = 'file'
+			ORDER BY f.size DESC, r.path, p.path LIMIT ?`, limit)
+		if err != nil {
+			return nil, fmt.Errorf("largest files: %w", err)
+		}
+		var out []FileRow
+		first := map[key]int{} // the row a file's links join
+		for _, r := range rows {
+			if r.ino != 0 {
+				k := key{r.rootID, r.ino}
+				if i, ok := first[k]; ok {
+					out[i].Links++
+					continue
+				}
+				first[k] = len(out)
+			}
+			out = append(out, FileRow{Root: r.root, Rel: r.rel, Size: r.size})
+		}
+		if len(out) >= n || len(rows) < limit {
+			// Links of the last files shown may lie beyond this batch; counting them exactly would need the whole
+			// register, so a link count is a lower bound only at the very edge of a large batch.
+			if len(out) > n {
+				out = out[:n]
+			}
+			return out, nil
+		}
+	}
 }
 
 // DupGroup is a set of present regular files with the same content.
 type DupGroup struct {
 	Hash        string
-	Size        int64    // of each copy
-	Paths       []string // absolute, sorted
-	Reclaimable int64    // Size × (copies − 1)
+	Size        int64       // of each copy
+	Copies      []GroupCopy // ordered by absolute path
+	Reclaimable int64       // Size × (copies − 1)
 }
+
+// GroupCopy is one copy in a report's duplicate group: its root (absolute), its path relative to it ('/'
+// separators), and the other paths of the same file (hard links: one copy, freeing nothing if deleted), relative to
+// the same root.
+type GroupCopy struct {
+	Root, Rel string
+	Links     []string
+}
+
+// AbsPath is the copy's absolute path.
+func (c GroupCopy) AbsPath() string { return absPath(c.Root, c.Rel) }
 
 // Duplicates is every duplicate group's total, plus the largest groups in detail.
 type Duplicates struct {
@@ -136,11 +180,9 @@ func (s *Store) Duplicates(ctx context.Context, n int) (Duplicates, error) {
 	}
 	for _, r := range rs {
 		g := DupGroup{Hash: r.c.Hash, Size: r.c.Size, Reclaimable: r.reclaimable}
-		for _, cp := range r.c.Copies {
-			g.Paths = append(g.Paths, cp.AbsPath())
-			g.Paths = append(g.Paths, cp.Links...)
+		for _, cp := range r.c.Copies { // already ordered by absolute path
+			g.Copies = append(g.Copies, GroupCopy{Root: cp.RootPath, Rel: cp.Path, Links: cp.LinkRels()})
 		}
-		slices.Sort(g.Paths)
 		d.Top = append(d.Top, g)
 	}
 	if d.Separate, d.SeparateFiles, err = s.SeparateTotals(ctx); err != nil {
@@ -156,9 +198,13 @@ func (s *Store) Duplicates(ctx context.Context, n int) (Duplicates, error) {
 
 // LinkRow is one present symlink.
 type LinkRow struct {
-	Path   string // absolute
+	Root   string // the root it is in
+	Rel    string // relative to the root
 	Target string
 }
+
+// AbsPath is the symlink's absolute path.
+func (l LinkRow) AbsPath() string { return absPath(l.Root, l.Rel) }
 
 // BrokenLinks returns up to n present broken symlinks and how many there are in total.
 func (s *Store) BrokenLinks(ctx context.Context, n int) ([]LinkRow, int64, error) {
@@ -169,10 +215,7 @@ func (s *Store) BrokenLinks(ctx context.Context, n int) ([]LinkRow, int64, error
 	}
 	out, err := queryAll(ctx, s.db, func(rows *sql.Rows) (LinkRow, error) {
 		var l LinkRow
-		var root, rel string
-		err := rows.Scan(&root, &rel, &l.Target)
-		l.Path = absPath(root, rel)
-		return l, err
+		return l, rows.Scan(&l.Root, &l.Rel, &l.Target)
 	}, `
 		SELECT r.path, p.path, coalesce(f.link_target, '')
 		FROM paths p JOIN files f ON f.id = p.file_id JOIN roots r ON r.id = p.root_id
@@ -186,9 +229,13 @@ func (s *Store) BrokenLinks(ctx context.Context, n int) ([]LinkRow, int64, error
 
 // UnreadableRow is a present file flagged unreadable.
 type UnreadableRow struct {
-	Path  string // absolute
+	Root  string // the root it is in
+	Rel   string // relative to the root
 	Since int64  // the first scan in a row that could not read it
 }
+
+// AbsPath is the file's absolute path.
+func (u UnreadableRow) AbsPath() string { return absPath(u.Root, u.Rel) }
 
 // UnreadableFiles returns up to n present files flagged unreadable, longest-flagged first, and how many there are in
 // total.
@@ -200,10 +247,7 @@ func (s *Store) UnreadableFiles(ctx context.Context, n int) ([]UnreadableRow, in
 	}
 	out, err := queryAll(ctx, s.db, func(rows *sql.Rows) (UnreadableRow, error) {
 		var u UnreadableRow
-		var root, rel string
-		err := rows.Scan(&root, &rel, &u.Since)
-		u.Path = absPath(root, rel)
-		return u, err
+		return u, rows.Scan(&u.Root, &u.Rel, &u.Since)
 	}, `
 		SELECT r.path, p.path, f.unreadable_since_scan
 		FROM paths p JOIN files f ON f.id = p.file_id JOIN roots r ON r.id = p.root_id

@@ -2,6 +2,7 @@ package view
 
 import (
 	"bytes"
+	"errors"
 	"regexp"
 	"strings"
 	"testing"
@@ -118,7 +119,7 @@ func TestFiles(t *testing.T) {
 				"    until          size\n" +
 				"    2025-06-30     3 KB   x\n" +
 				"    2025-06-30   640 MB   video/2015/summer holiday, day 3.mp4\n"},
-		{"several roots", 0, FileList{Columns: []Column{{}}, Rows: []FileRow{
+		{"several roots", 0, FileList{Columns: []Column{{}}, ByRoot: true, Rows: []FileRow{
 			{Root: "/home/u/Documents", Rel: "a", Cells: []string{"1"}},
 			{Root: "/media/archive", Rel: "b", Cells: []string{"2"}}}},
 			[]string{"/home/u/Documents", "/media/archive"}, "" +
@@ -428,7 +429,7 @@ func TestNamesShowTrailingSpace(t *testing.T) {
 	r.Dup(DupGroup{Name: "m", Each: "1 B", Keep: []Copy{{Root: "/r ", Rel: "a"}},
 		Delete: []Copy{{Root: "/r ", Rel: "b", Symlinks: []string{"/r /link "}}}})
 	r.ResultFile(Done, "deleted", "/r ", "b ", "")
-	r.Files(FileList{Rows: []FileRow{{Root: "/other ", Rel: "c"}}})
+	r.Files(FileList{Rows: []FileRow{{Root: "/other ", Rel: "c"}}, ByRoot: true})
 	for _, want := range []string{"Ready   1 file . /r\\x20, under dir\\x20/\n", "the symlink /r /link\\x20 points",
 		"[ok] deleted b\\x20\n", "  /other\\x20\n"} {
 		if !strings.Contains(b.String(), want) {
@@ -446,5 +447,141 @@ func TestFailedMarker(t *testing.T) {
 		if !strings.Contains(b.String(), want) {
 			t.Errorf("lacks %q:\n%s", want, b.String())
 		}
+	}
+}
+
+// failWriter fails every write after the first n.
+type failWriter struct{ n int }
+
+func (w *failWriter) Write(p []byte) (int, error) {
+	if w.n <= 0 {
+		return 0, errors.New("no space left on device")
+	}
+	w.n--
+	return len(p), nil
+}
+
+// TestWriteErrorKept: the first write error is kept, nothing more is written, and Err reports it.
+func TestWriteErrorKept(t *testing.T) {
+	w := &failWriter{n: 1}
+	r := New(Options{Out: w})
+	r.Next("one")
+	if r.Err() != nil {
+		t.Fatalf("error after a good write: %v", r.Err())
+	}
+	r.Next("two")
+	r.Next("three")
+	if r.Err() == nil || !strings.Contains(r.Err().Error(), "no space left on device") {
+		t.Errorf("Err = %v, want the write error", r.Err())
+	}
+}
+
+func TestFileRows(t *testing.T) {
+	tests := []struct {
+		name   string
+		roots  []string // the heading's
+		byRoot bool
+		rows   []FileRow
+		want   string
+	}{
+		{"a move: both paths are names", []string{"/r"}, false, []FileRow{{Root: "/r", From: "report ", Rel: "~/x"}},
+			"    report\\x20 -> ./~/x\n"},
+		{"a row with no path", []string{"/r"}, false, []FileRow{{Label: "file 12, no current path"}},
+			"    (file 12, no current path)\n"},
+		{"ordered by root: sub-headings", []string{"/a", "/b"}, true, []FileRow{{Root: "/a", Rel: "1"}, {Root: "/a", Rel: "2"},
+			{Root: "/b", Rel: "3"}}, "  /a\n    1\n    2\n  /b\n    3\n"},
+		{"not ordered by root: full paths", []string{"/a", "/b"}, false, []FileRow{{Root: "/a", Rel: "1"},
+			{Root: "/b", Rel: "2"}, {Root: "/a", Rel: "3"}}, "    /a/1\n    /b/2\n    /a/3\n"},
+		{"the heading's root, not ordered by root: relative, others full", []string{"/a"}, false, []FileRow{{Root: "/a", Rel: "1"},
+			{Root: "/b", Rel: "2"}, {Root: "/a", Rel: "3"}}, "    1\n    /b/2\n    3\n"},
+		{"the heading's root after another, ordered by root: both get a sub-heading", []string{"/a"}, true, []FileRow{{Root: "/b", Rel: "x"},
+			{Root: "/b", Rel: "y"}, {Root: "/a", Rel: "z"}}, "  /b\n    x\n    y\n  /a\n    z\n"},
+		{"a root of /", []string{"/"}, false, []FileRow{{Root: "/", Rel: "etc/x"}}, "    etc/x\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r, b := plainView()
+			r.Heading("H", Where{Roots: tt.roots})
+			b.Reset()
+			r.Files(FileList{Rows: tt.rows, ByRoot: tt.byRoot})
+			if b.String() != tt.want {
+				t.Errorf("got\n%q\nwant\n%q", b.String(), tt.want)
+			}
+		})
+	}
+}
+
+// TestEntryAndDetailNames: a root entry and a detail path are names: a trailing space shows.
+func TestEntryAndDetailNames(t *testing.T) {
+	r, b := plainView()
+	r.Entry(2, "/media/disk ", "1 file")
+	r.DetailPath(4, "on the filesystem mounted at ", "/media ")
+	want := "  /media/disk\\x20   1 file\n    on the filesystem mounted at /media\\x20\n"
+	if b.String() != want {
+		t.Errorf("got %q, want %q", b.String(), want)
+	}
+}
+
+// TestHardLinksUnderTheirCopy: a hard link is shown under its copy, as the same file, not as another copy.
+func TestHardLinksUnderTheirCopy(t *testing.T) {
+	r, b := plainView()
+	r.Heading("H", Where{Roots: []string{"/r"}})
+	b.Reset()
+	r.Dup(DupGroup{Name: "a", Each: "1 B", Copies: []Copy{{Root: "/r", Rel: "a", Links: []string{"a2"}},
+		{Root: "/r", Rel: "b"}}})
+	want := "    a . 1 B each\n      a\n        hard link, the same file: a2\n      b\n"
+	if b.String() != want {
+		t.Errorf("got %q, want %q", b.String(), want)
+	}
+}
+
+func TestSplitRootSlash(t *testing.T) {
+	if root, rel := SplitRoot([]string{"/"}, "/etc/x"); root != "/" || rel != "etc/x" {
+		t.Errorf("SplitRoot(/, /etc/x) = %q, %q", root, rel)
+	}
+}
+
+// TestNotOrderedByRootNeverGroups: a list sorted by size whose roots happen to sit together still gets no
+// sub-headings: one ranking, not one per root.
+func TestNotOrderedByRootNeverGroups(t *testing.T) {
+	r, b := plainView()
+	r.Heading("H", Where{Roots: []string{"/a", "/b"}})
+	b.Reset()
+	r.Files(FileList{Rows: []FileRow{{Root: "/a", Rel: "1"}, {Root: "/a", Rel: "2"}, {Root: "/b", Rel: "3"}}})
+	if want := "    /a/1\n    /a/2\n    /b/3\n"; b.String() != want {
+		t.Errorf("got %q, want %q", b.String(), want)
+	}
+}
+
+// TestCrossRootMove: a file back from another root shows its earlier path in full, under that root, never under the
+// root it is in now.
+func TestCrossRootMove(t *testing.T) {
+	r, b := plainView()
+	r.Heading("H", Where{Roots: []string{"/a", "/b"}})
+	b.Reset()
+	r.Files(FileList{Rows: []FileRow{{Root: "/b", Rel: "y.txt", From: "x.txt", FromRoot: "/a"}}})
+	if want := "    /a/x.txt -> /b/y.txt\n"; b.String() != want {
+		t.Errorf("got %q, want %q", b.String(), want)
+	}
+}
+
+// TestShortenRootSlash: with a root of /, filo's message text keeps its paths whole.
+func TestShortenRootSlash(t *testing.T) {
+	r, b := plainView()
+	r.Heading("H", Where{Roots: []string{"/"}})
+	b.Reset()
+	r.Problems("Skipped", Attention, []Problem{{Root: "/", Rel: "data/b.pdf", Reason: "the copy kept, /data/a.pdf, " +
+		"has a shorter retention"}})
+	if !strings.Contains(b.String(), "the copy kept, /data/a.pdf, has a shorter retention") {
+		t.Errorf("got %q", b.String())
+	}
+}
+
+// TestDupNameTrailingSpace: a duplicate group's name is a name: a trailing space shows.
+func TestDupNameTrailingSpace(t *testing.T) {
+	r, b := plainView()
+	r.Dup(DupGroup{Name: "report ", Each: "1 B", Copies: []Copy{{Root: "/r", Rel: "report "}}})
+	if !strings.HasPrefix(b.String(), "    report\\x20 . 1 B each\n") {
+		t.Errorf("got %q", b.String())
 	}
 }

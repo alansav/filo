@@ -142,13 +142,24 @@ func (d DupContent) touches(f Filter) bool {
 		if f.contains(c.RootID, c.Path) {
 			return true
 		}
-		for _, l := range c.Links {
-			if rel, err := filepath.Rel(c.RootPath, l); err == nil && f.contains(c.RootID, filepath.ToSlash(rel)) {
+		for _, rel := range c.LinkRels() {
+			if f.contains(c.RootID, rel) {
 				return true
 			}
 		}
 	}
 	return false
+}
+
+// LinkRels returns the copy's other paths (hard links, in the same root) relative to the root, '/' separators.
+func (c DupCopy) LinkRels() []string {
+	var out []string
+	for _, l := range c.Links {
+		if rel, err := filepath.Rel(c.RootPath, l); err == nil {
+			out = append(out, filepath.ToSlash(rel))
+		}
+	}
+	return out
 }
 
 // DuplicateGroups returns the duplicate groups with a copy under the filter: contents held by two or more copies,

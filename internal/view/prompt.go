@@ -1,9 +1,6 @@
 package view
 
-import (
-	"io"
-	"strings"
-)
+import "strings"
 
 // Choice is one answer to a question: its key (a letter), the word that also selects it, and what it does, for the
 // line that lists the choices.
@@ -41,7 +38,7 @@ func (r *Renderer) AskText(question string) {
 }
 
 // prompt writes spans with no newline, in one call.
-func (r *Renderer) prompt(spans ...span) { io.WriteString(r.o.Out, r.render(spans)) }
+func (r *Renderer) prompt(spans ...span) { r.out(r.render(spans)) }
 
 // Again says which answers a question takes, after one it did not understand: "  answer a (all), s (select), l
 // (list) or n (none)".

@@ -2,8 +2,6 @@ package cli
 
 import (
 	"context"
-	"path/filepath"
-	"strings"
 
 	"github.com/alansav/filo/internal/store"
 	"github.com/alansav/filo/internal/view"
@@ -46,21 +44,4 @@ func registeredRoots(ctx context.Context, s *store.Store) ([]string, error) {
 		out[i] = r.Path
 	}
 	return out, nil
-}
-
-// splitRoot splits an absolute path into the root it is in (the longest that contains it) and the path relative to
-// it ('/' separators). A path in no root comes back whole, with no root.
-func splitRoot(roots []string, abs string) (root, rel string) {
-	for _, r := range roots {
-		if len(r) <= len(root) {
-			continue
-		}
-		if rest, ok := strings.CutPrefix(abs, r+string(filepath.Separator)); ok {
-			root, rel = r, filepath.ToSlash(rest)
-		}
-	}
-	if root == "" {
-		return "", abs
-	}
-	return root, rel
 }

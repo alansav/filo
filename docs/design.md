@@ -712,12 +712,21 @@ topic at a time from mockups; the mockups below are the reference.
   after it (`~/Documents, under video/`), but paths stay relative to the root, so a file reads the same in every
   listing. With several roots, a sub-heading per root. A duplicate group whose copies span roots shows full paths on
   its lines. The home directory shows as `~`. The last confirmation before a deletion (an item in select mode) shows
-  the full path.
+  the full path. A list gets a sub-heading per root only when its command says it is ordered by root (the delete
+  list, broken symlinks), every row has a root, and some row is outside the heading's root; then every root gets one,
+  the heading's too, so no row reads as part of the root above it. The component never guesses the order from the
+  rows (it did, and a size-sorted list whose roots happened to sit together read as one ranking per root). Any other
+  list (largest files, events) shows a row in the heading's root relative and any other in full. A file with hard
+  links is listed once, with its links noted. A row with no path (a file with no current path)
+  shows a label in brackets, never something that could read as a file name. A move shows both its paths, each as a
+  name. In a duplicate group, a hard link is shown under its copy as the same file, never as another copy.
 - **Streams and exit codes.** Refusals and skips are part of the report: stdout, in their section, so a log holds the
   whole story in order. stderr carries only errors that stop the command, one line `filo: <message>`. Exit codes are
   unchanged: 0 nothing went wrong (rows unchanged, groups left alone, declining a prompt, and a file `filo delete`
   skipped because it changed, all included), 1 an error, a CSV row or group refused, or a file `filo delete` could
-  not read, delete, or tidy up after, 2 a usage error. A finer split waits for scheduled scans.
+  not read, delete, or tidy up after, 2 a usage error. Output that could not be written (a full disk, a closed pipe)
+  makes a command exit 1 with the reason, so a scheduled `filo report > log` that fails is not taken for success. A
+  finer split waits for scheduled scans.
 - **Long lists**, three kinds:
   - *About to be deleted* (the `filo delete` overview): in a terminal 10 per section, then `… N more`, and the
     question gains `l` to list everything and ask again (`[a/s/l/N]`). If the list was cut, `a` first shows every
@@ -1057,7 +1066,11 @@ put first on 2026-11-15). Each is an open question below until it is designed.
    commands one at a time (`delete`, `update`, `report`, `scan` and `roots`, `export` and help). `internal/view` and
    `delete` done on 2026-11-16 (component tests in `internal/view`, golden files `internal/cli/testdata/delete-*.txt`);
    `update`, retention and duplicates CSVs both, done on 2026-11-16 (golden files `testdata/update-*.txt`; every
-   question in `delete` and `update` goes through one helper, `askChoice`). Done when each
+   question in `delete` and `update` goes through one helper, `askChoice`). `report` done on 2026-11-16 (golden file
+   `testdata/report.txt`: every section, an empty one as one line ending in "none" (Roots and Register snapshots
+   say "none yet" with what to do; Duplicates says "no groups" when it still lists separate or marked contents);
+   recent events as a list with
+   scan and event columns). Done when each
    command's mocked scenarios have golden tests of the plain output, and read as designed by hand in a terminal, a
    40-column terminal, piped through `cat` and with `NO_COLOR=1`. First, since the duplicates re-plan changes what
    `update` and `delete` print and can then use the components.

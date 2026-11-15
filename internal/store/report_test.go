@@ -60,7 +60,15 @@ func TestReportQueries(t *testing.T) {
 	}
 	wantPaths := []string{filepath.Join(rootA, "dup"), filepath.Join(rootA, "sub", "dup"), filepath.Join(rootB, "dup-in-b")}
 	slices.Sort(wantPaths)
-	if got := d.Top[0].Paths; !slices.Equal(got, wantPaths) {
+	var got []string
+	for _, c := range d.Top[0].Copies {
+		got = append(got, c.AbsPath())
+		for _, l := range c.Links {
+			got = append(got, filepath.Join(c.Root, l))
+		}
+	}
+	slices.Sort(got)
+	if !slices.Equal(got, wantPaths) {
 		t.Errorf("duplicate paths = %v, want %v", got, wantPaths)
 	}
 
@@ -76,7 +84,7 @@ func TestReportQueries(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if total != 1 || len(broken) != 1 || broken[0].Path != filepath.Join(rootA, "dead") || broken[0].Target != "nowhere" {
+	if total != 1 || len(broken) != 1 || broken[0].Root != rootA || broken[0].Rel != "dead" || broken[0].Target != "nowhere" {
 		t.Errorf("broken = %+v (total %d)", broken, total)
 	}
 
@@ -188,9 +196,9 @@ func TestUnreadableFiles(t *testing.T) {
 		Updates: []FileUpdate{{FileID: r.FileID, Size: r.Size, MtimeNS: r.MtimeNS, Hash: r.Hash}}})
 
 	want := []UnreadableRow{
-		{Path: filepath.Join(rootA, "new-unreadable"), Since: 1},
-		{Path: filepath.Join(rootB, "z"), Since: 2},
-		{Path: filepath.Join(rootA, "later"), Since: 3},
+		{Root: rootA, Rel: "new-unreadable", Since: 1},
+		{Root: rootB, Rel: "z", Since: 2},
+		{Root: rootA, Rel: "later", Since: 3},
 	}
 	got, total, err := s.UnreadableFiles(ctx, 10)
 	if err != nil {

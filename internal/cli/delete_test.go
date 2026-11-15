@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -121,7 +122,7 @@ func TestDeleteRoundTrip(t *testing.T) {
 
 	// The report counts what filo deleted; the last scan shown is a real scan.
 	r = filo(ExitOK, "", false, "report")
-	contains("report", r.stdout, "Deleted by filo: 5 files, 4 B freed (last run 2026-11-13 12:30: 3 files, 2 B)",
+	contains("report", r.stdout, "deleted by filo: 5 files, 4 B freed (last run 2026-11-13 12:30: 3 files, 2 B)",
 		"new 1, changed 0, moved 0, missing 0", "deleted   e.txt", "new       old/a.txt")
 
 	filo(ExitUsage, "", false, "delete", in("old"), in("keep"))
@@ -305,5 +306,54 @@ func TestDeleteNoQuestionWhenOutputRedirected(t *testing.T) {
 	}
 	if !ct.exists("a.txt") {
 		t.Fatal("a.txt was deleted with the question out of sight")
+	}
+}
+
+// failingTerm is a terminal whose output fails after its first n writes, as a hung-up terminal does.
+type failingTerm struct{ n int }
+
+func (*failingTerm) IsTerminal() bool { return true }
+
+func (f *failingTerm) Write(p []byte) (int, error) {
+	if f.n <= 0 {
+		return 0, errors.New("input/output error")
+	}
+	f.n--
+	return len(p), nil
+}
+
+// TestDeleteStopsWhenOutputFails: once output fails, nothing is deleted, with or without a question: what is deleted
+// must have been shown. The run exits 1 with the reason.
+func TestDeleteStopsWhenOutputFails(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		args  []string
+		stdin io.Reader
+	}{
+		{"answered a", []string{"delete"}, terminalInput{strings.NewReader("a\n")}},
+		{"-y", []string{"delete", "-y"}, strings.NewReader("")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ct := newCLITest(t)
+			setNow(t, time.Date(2026, 11, 13, 12, 0, 0, 0, time.Local))
+			ct.write("a.txt", "a")
+			ct.filo(ExitOK, "", false, "roots", "add", ct.root)
+			csvPath := filepath.Join(ct.work, "r.csv")
+			ct.filo(ExitOK, "", false, "export", "retention", "-o", csvPath)
+			editCSV(t, csvPath, setRetention(map[string]string{"a.txt": "2026-11-01"}))
+			ct.filo(ExitOK, "", false, "update", csvPath)
+			var errb bytes.Buffer
+			env := map[string]string{"NO_COLOR": "1"}
+			for k, v := range ct.env {
+				env[k] = v
+			}
+			code := Run(ct.ctx, tc.args, tc.stdin, &failingTerm{n: 2}, &errb, func(k string) string { return env[k] })
+			if code != ExitError || !strings.Contains(errb.String(), "input/output error") {
+				t.Errorf("code %d, stderr %q; want 1 and the write error", code, errb.String())
+			}
+			if !ct.exists("a.txt") {
+				t.Fatal("a.txt was deleted though the output had failed")
+			}
+		})
 	}
 }

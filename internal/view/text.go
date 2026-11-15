@@ -53,17 +53,43 @@ func (r *Renderer) Outcome(title string, facts ...string) { r.titleLine(title, f
 // Section writes a section's title, with its facts at the right edge of the terminal ("Past their retention
 // … 5 files · 820 MB"), or after it when there is no width.
 func (r *Renderer) Section(title string, facts ...string) {
-	head := styled(title, bold)
+	r.rightAligned([]span{styled(title, bold)}, facts)
+}
+
+// rightAligned writes head with facts at the right edge, one column short of it (some consoles wrap as soon as the
+// last column is written), or three spaces after head when there is no width or no room.
+func (r *Renderer) rightAligned(head []span, facts []string) {
 	if len(facts) == 0 {
-		r.write(head)
+		r.write(head...)
 		return
 	}
 	tail := plain(strings.Join(facts, r.sep()))
 	gap := 3
 	if r.o.Width > 0 {
-		gap = max(r.o.Width-1-width(head, tail), 3) // one column short: some consoles wrap on the last one
+		gap = max(r.o.Width-1-width(append(head, tail)...), 3)
 	}
-	r.write(head, spaces(gap), tail)
+	r.write(append(head, spaces(gap), tail)...)
+}
+
+// Entry writes a root (or another place) in a section, with its facts at the right edge: "  ~/Documents      13
+// files · 313 KiB · 2 symlinks". The path is shown as a name, with ~ for home.
+func (r *Renderer) Entry(indent int, path string, facts ...string) {
+	r.rightAligned([]span{spaces(indent), styledName(r.Tilde(path), bold)}, facts)
+}
+
+// Detail writes a dimmed line of detail under an entry or a list: "    last scan 1, 2026-11-15 16:39, whole root".
+func (r *Renderer) Detail(indent int, text string) { r.write(spaces(indent), styled(text, dim)) }
+
+// DetailPath writes a dimmed line of detail that ends in a path, shown as a name with ~ for home: "    on the
+// filesystem mounted at /media/archive".
+func (r *Renderer) DetailPath(indent int, text, path string) {
+	r.write(spaces(indent), styled(text, dim), styledName(r.Tilde(path), dim))
+}
+
+// CountName is Count with a path in the middle of the text, shown as a name (a trailing space as \x20): "  ! none in
+// ~/x, though the register has changed".
+func (r *Renderer) CountName(m Mark, before, path, after string) {
+	r.write(spaces(2), r.mark(m), plain(" "+before), name(r.Tilde(path)), plain(after))
 }
 
 // Count writes one line of a summary under a marker: "  ✓ 41 files given a retention".

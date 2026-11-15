@@ -440,7 +440,7 @@ func Scan(ctx context.Context, s *store.Store, opt Options) (Summary, error) {
 			pairedNew[p[1]] = true
 			detail := fmt.Sprintf("returned (missing since scan %d)", g.MissingSince)
 			if g.LastRootID != root.ID {
-				detail += " from root " + rootPaths[g.LastRootID]
+				detail += store.EventFromRoot + rootPaths[g.LastRootID]
 			}
 			moveTo(g.FileID, news[p[1]].e.Path, news[p[1]], g.LastPath, detail)
 		}

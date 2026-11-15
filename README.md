@@ -67,7 +67,7 @@ Copy `bin/filo` somewhere on your `PATH`, or run it from the repository.
 ```sh
 filo roots add ~          # register a directory as a root and scan it; the first scan hashes everything, so it is slow
 filo scan                 # scan every root again: only what changed is rehashed
-filo report               # totals, files needing a date, largest files, duplicates, unreadable files, recent changes
+filo report               # totals, files needing a retention, largest files, duplicates, unreadable files, events
 ```
 
 A scan prints a summary like this:
@@ -76,35 +76,41 @@ A scan prints a summary like this:
 /home/you/FiloTest: 15 files seen in 10ms (scan 2)
   new 3   changed 2   moved 2   missing 2   possible moves 1   errors 2
   moved:
-    moved     docs/contract.txt -> notes/contract-final.txt
-    moved     photos/img2.bin -> photos/img2-renamed.bin
+    moved         docs/contract.txt -> notes/contract-final.txt
+    moved         photos/img2.bin -> photos/img2-renamed.bin
   changed:
-    changed   link-to-report (symlink: docs/report-2024.txt -> docs/report-2024.txt (broken))
-    changed   notes/todo.md (content)
+    changed       link-to-report (symlink: docs/report-2024.txt -> docs/report-2024.txt (broken))
+    changed       notes/todo.md (content)
   missing:
-    missing   docs/receipt-tyre.txt
-    missing   docs/report-2024.txt
+    missing       docs/receipt-tyre.txt
+    missing       docs/report-2024.txt
   possible moves (not applied):
-    possible  docs/report-2024.txt -> archive/report-2024.txt ? (same name, different content)
+    possible move docs/report-2024.txt -> archive/report-2024.txt ? (same name, different content)
   errors:
-    error     docs/private.txt (hash: open /home/you/FiloTest/docs/private.txt: permission denied)
-    error     locked (open /home/you/FiloTest/locked: permission denied)
+    error         docs/private.txt (hash: open /home/you/FiloTest/docs/private.txt: permission denied)
+    error         locked (open /home/you/FiloTest/locked: permission denied)
 ```
 
 The two errors are a file and a directory made unreadable. The files inside `locked` aren't reported missing,
 because Filo couldn't look.
 
-And `filo report` includes, among other things:
+And `filo report` gives the overview, a section at a time (paths are relative to the root named at the top; an
+empty section is one line ending in `none`, or `none yet` with what to do). Among other things:
 
 ```
-Duplicates: 1 group, 3 files, 195 KiB reclaimable
-  3 copies of 97.7 KiB, 195 KiB reclaimable
-    /home/you/FiloTest/photos/img1-copy.bin
-    /home/you/FiloTest/photos/img1-copy2.bin
-    /home/you/FiloTest/photos/img1.bin
+Register   13 files · 313 KiB · ~/FiloTest
 
-Unreadable files: 1
-  since scan 2  /home/you/FiloTest/docs/private.txt
+Duplicates                                 1 group · 3 copies · 195 KiB reclaimable
+    img1-copy.bin · 97.7 KiB each · 3 copies · 195 KiB reclaimable
+      photos/img1-copy.bin
+      photos/img1-copy2.bin
+      photos/img1.bin
+
+Unreadable files                                                                1
+    since
+    scan 2   docs/private.txt
+
+Recent events                                                                none
 ```
 
 ## Setting retentions

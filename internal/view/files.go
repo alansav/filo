@@ -1,5 +1,7 @@
 package view
 
+import "slices"
+
 // Column is one fixed column of a file list, before the path: a date, a size, a retention.
 type Column struct {
 	Header string // shown above the column when any column has one
@@ -9,6 +11,9 @@ type Column struct {
 // FileRow is one file in a list: where it is, its cells for the columns, and an optional note after the path.
 type FileRow struct {
 	Root, Rel string // the root, absolute, and the path relative to it ('/' separators)
+	From      string // a move's earlier path: shown as "from -> Rel"
+	FromRoot  string // the root From is relative to, when not the row's own (a file back from another root): in full
+	Label     string // in place of a path, for a row that has none: shown as "(Label)", never as a path
 	Cells     []string
 	Note      string
 }
@@ -17,6 +22,7 @@ type FileRow struct {
 type FileList struct {
 	Columns []Column
 	Rows    []FileRow
+	ByRoot  bool   // the rows are ordered by root (then path): sub-headings per root; never guessed from the rows
 	Max     int    // show at most this many, then "… N more <More>"; 0 = all
 	More    string // the noun for the rest, such as "files"
 	MoreOne string // the noun for one more, such as "file" (More if empty)
@@ -65,10 +71,46 @@ func (r *Renderer) Files(l FileList) {
 		return out
 	}
 	indent := 4
+	// Sub-headings, one per root, only for a list its caller ordered by root (ByRoot), whose rows all have a root,
+	// with some row outside the heading's root: then every root gets one, the heading's too, so no row reads as part
+	// of the root above it. Any other list (sorted by size or time) has no sub-headings: a row in the heading's root
+	// is relative, any other shows its full path. The component never guesses the order from the rows.
+	grouped := l.ByRoot
+	var roots []string
+	for _, row := range rows {
+		if row.Root == "" || row.Label != "" {
+			grouped = false
+			break
+		}
+		if !slices.Contains(roots, row.Root) {
+			roots = append(roots, row.Root)
+		}
+	}
+	grouped = grouped && (len(roots) > 1 || (len(roots) == 1 && roots[0] != r.root))
 	group := func(root string) {
-		if root != r.root || r.root == "" {
+		if grouped {
 			r.write(spaces(2), styledName(r.Tilde(root), bold))
 		}
+	}
+	// where shows a row's path or paths: relative under a sub-heading, else as Path does.
+	where := func(row FileRow) []span {
+		if row.Label != "" {
+			return []span{styled("("+row.Label+")", dim)}
+		}
+		show := func(rel string) string {
+			if grouped {
+				return relName(rel)
+			}
+			return r.Path(row.Root, rel)
+		}
+		if row.From != "" {
+			from := show(row.From)
+			if row.FromRoot != "" && row.FromRoot != row.Root {
+				from = r.Full(row.FromRoot, row.From) // another root: never under this one
+			}
+			return []span{name(from), plain(" -> "), name(show(row.Rel))}
+		}
+		return []span{name(show(row.Rel))}
 	}
 	if headed {
 		headers := make([]string, len(l.Columns))
@@ -83,13 +125,12 @@ func (r *Renderer) Files(l FileList) {
 			group(row.Root)
 			lastRoot = row.Root
 		}
-		path := relName(row.Rel) // relative to the heading's root, or to its root's sub-heading
 		line := append([]span{spaces(indent)}, cells(row.Cells, "")...)
 		var tail []span
 		if len(l.Columns) > 0 {
 			tail = append(tail, spaces(3))
 		}
-		tail = append(tail, name(path))
+		tail = append(tail, where(row)...)
 		if row.Note != "" {
 			tail = append(tail, spaces(3), styled(row.Note, dim))
 		}
@@ -106,12 +147,13 @@ func (r *Renderer) Files(l FileList) {
 		if one == "" {
 			one = l.More
 		}
-		r.more(more, one, l.More)
+		r.More(more, one, l.More)
 	}
 }
 
-// more writes "… N more files" under a cut list.
-func (r *Renderer) more(n int, one, many string) {
+// More writes "… N more files" under a list that was cut, by a component or by whoever gathered it (a report's top
+// entries).
+func (r *Renderer) More(n int, one, many string) {
 	noun := many
 	if n == 1 {
 		noun = one

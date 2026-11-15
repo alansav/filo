@@ -3,15 +3,18 @@ package cli
 import (
 	"bytes"
 	"context"
+	"errors"
 	"flag"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/alansav/filo/internal/fsid"
 	"github.com/alansav/filo/internal/reconcile"
@@ -231,14 +234,14 @@ func TestEndToEnd(t *testing.T) {
 	// mutate makes a directory and a file unreadable; root ignores permissions, so as root there are no errors.
 	asRoot := os.Geteuid() == 0
 	wantSecond := []string{
-		"moved     docs/contract.txt -> notes/contract-final.txt",
-		"possible  docs/report-2024.txt -> archive/report-2024.txt ?",
+		"moved         docs/contract.txt -> notes/contract-final.txt",
+		"possible move docs/report-2024.txt -> archive/report-2024.txt ?",
 	}
 	if asRoot {
 		wantSecond = append(wantSecond, "new 3   changed 2   moved 2   missing 2   possible moves 1   errors 0")
 	} else {
 		wantSecond = append(wantSecond, "new 3   changed 2   moved 2   missing 2   possible moves 1   errors 2",
-			"error     docs/private.txt (hash: ", "error     locked (")
+			"error         docs/private.txt (hash: ", "error         locked (")
 	}
 	out := must("scan") // every root
 	for _, want := range wantSecond {
@@ -248,23 +251,22 @@ func TestEndToEnd(t *testing.T) {
 	}
 
 	out = must("report", "--top", "3")
-	photos := filepath.Join(tree, "photos")
 	for _, want := range []string{
-		"Duplicates: 1 group, 3 files, 195 KiB reclaimable",
-		"3 copies of 97.7 KiB, 195 KiB reclaimable",
-		filepath.Join(photos, "img1-copy.bin"), filepath.Join(photos, "img1-copy2.bin"),
-		"Broken symlinks: 2",
-		filepath.Join(tree, "broken-link") + " -> nowhere",
-		"117 KiB  " + filepath.Join(photos, "img2-renamed.bin"), // largest first
+		"Duplicates   1 group . 3 copies . 195 KiB reclaimable",
+		"    img1-copy.bin . 97.7 KiB each",
+		"      photos/img1-copy.bin", "      photos/img1-copy2.bin",
+		"Broken symlinks   2",
+		"    broken-link   -> nowhere",
+		"     117 KiB   photos/img2-renamed.bin", // largest first
 		"last scan 2",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("report lacks %q:\n%s", want, out)
 		}
 	}
-	wantUnreadable := "Unreadable files: 1\n  since scan 2  " + filepath.Join(tree, "docs", "private.txt") + "\n"
+	wantUnreadable := "Unreadable files   1\n    since\n    scan 2   docs/private.txt\n"
 	if asRoot {
-		wantUnreadable = "Unreadable files: none\n"
+		wantUnreadable = "Unreadable files   none\n"
 	}
 	if !strings.Contains(out, wantUnreadable) {
 		t.Errorf("report lacks %q:\n%s", wantUnreadable, out)
@@ -530,5 +532,50 @@ func TestRootsAddAbsorbs(t *testing.T) {
 	if r.code != ExitError || !strings.Contains(r.stderr, "is already inside root "+home+
 		"; scan just that folder with: filo scan "+in("Documents")) {
 		t.Errorf("adding a folder inside a root: code %d\n%s", r.code, r.stderr)
+	}
+}
+
+// TestReportGolden: filo report's whole plain output (docs/design.md, Terminal output), with times shown as <time>
+// and the work folder as <work>: every section, the empty ones as one line.
+func TestReportGolden(t *testing.T) {
+	ct := newCLITest(t)
+	setNow(t, time.Date(2026, 11, 14, 12, 0, 0, 0, time.Local))
+	ct.write("photos/img1.bin", "photo one")
+	ct.write("photos/img1-copy.bin", "photo one")
+	ct.write("photos/img2.bin", "photo two, larger")
+	ct.write("docs/contract.txt", "contract")
+	ct.write("notes/ideas.md", "ideas")
+	if err := os.Symlink("nowhere", ct.in("broken-link")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Link(ct.in("photos/img2.bin"), ct.in("photos/img2-link.bin")); err != nil { // one file, two paths
+		t.Fatal(err)
+	}
+	ct.filo(ExitOK, "", false, "roots", "add", ct.root)
+	out := ct.filo(ExitOK, "", false, "report").stdout
+	out = regexp.MustCompile(`\d{4}-\d\d-\d\d \d\d:\d\d`).ReplaceAllString(out, "<time>")
+	out = strings.ReplaceAll(out, ct.root, "<root>") // the root first: it is inside the work folder
+	out = strings.ReplaceAll(out, ct.work, "<work>")
+	golden(t, "report.txt", ct.root, out)
+}
+
+// errOut is a stdout that fails every write, as a full disk or a closed pipe does.
+type errOut struct{}
+
+func (errOut) Write([]byte) (int, error) { return 0, errors.New("no space left on device") }
+
+// TestOutputErrorFails: a command whose output could not be written exits 1 with the reason, not 0.
+func TestOutputErrorFails(t *testing.T) {
+	ct := newCLITest(t)
+	ct.write("a.txt", "a")
+	ct.filo(ExitOK, "", false, "roots", "add", ct.root)
+	var errb bytes.Buffer
+	for _, cmd := range []string{"report", "scan"} { // through the components, and through safeText
+		errb.Reset()
+		code := Run(ct.ctx, []string{cmd}, strings.NewReader(""), errOut{}, &errb,
+			func(k string) string { return ct.env[k] })
+		if code != ExitError || !strings.Contains(errb.String(), "no space left on device") {
+			t.Errorf("%s: code %d, stderr %q; want 1 and the write error", cmd, code, errb.String())
+		}
 	}
 }

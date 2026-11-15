@@ -130,6 +130,10 @@ type NewFile struct {
 }
 
 // Event is one reported change. FileID 0 means no file.
+// EventFromRoot ends a moved event's detail when the file came back from another root: the rest is that root's path,
+// and the event's OtherPath is relative to it, not to the event's own root.
+const EventFromRoot = " from root "
+
 type Event struct {
 	Kind      string
 	FileID    int64

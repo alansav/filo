@@ -11,8 +11,8 @@ Iterations 1 (scan, register, report), 2 (lifespan: retention through the retent
 chosen ones, each only after it is re-read and found unchanged) are done, as are register snapshots and the duplicates
 CSV (`filo export duplicates`, `filo update` records Y/N decisions, `filo delete` deletes marked copies only after a
 kept copy is re-read; only `filo delete` deletes). The order of the next work is in `docs/design.md` section 5, starting
-with the terminal output (designed 2026-11-15, see "Terminal output": `internal/view`, `delete` and `update` are done;
-then `report`, `scan` and `roots`, `export` and help, one at a time), then the duplicates redesign (2026-11-16, see
+with the terminal output (designed 2026-11-15, see "Terminal output": `internal/view`, `delete`, `update` and `report`
+are done; then `scan` and `roots`, `export` and help, one at a time), then the duplicates redesign (2026-11-16, see
 "Duplicates": `filo delete FILE.csv` with no stored decisions to delete, the `action` column, records, always and `filo
 duplicates`).
 **`internal/dispose` is the only code allowed to delete the user's files**, and only from `filo delete`; everything

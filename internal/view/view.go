@@ -8,6 +8,7 @@
 package view
 
 import (
+	"fmt"
 	"io"
 	"path/filepath"
 	"strings"
@@ -30,6 +31,23 @@ type Options struct {
 type Renderer struct {
 	o    Options
 	root string // the one root the current heading names, "" if several or none
+	err  error  // the first write error: once one write fails, nothing more is written
+}
+
+// Err returns the first error writing the output met (a hung-up terminal, a full disk, a closed pipe), or nil. A
+// command checks it before doing anything on the strength of what it showed: filo delete before each question and
+// each deletion, so nothing is done that the person could not see. (Every command's exit code also reflects it, from
+// the CLI's own record of stdout's first error.)
+func (r *Renderer) Err() error { return r.err }
+
+// out writes text in one call, keeping the first error and writing nothing after it.
+func (r *Renderer) out(text string) {
+	if r.err != nil {
+		return
+	}
+	if _, err := io.WriteString(r.o.Out, text); err != nil {
+		r.err = fmt.Errorf("write output: %w", err)
+	}
 }
 
 // New returns a Renderer. A terminal with no width gets DefaultWidth; a non-terminal gets no width and no colour.
@@ -140,7 +158,7 @@ func (r *Renderer) write(spans ...span) {
 	for len(spans) > 0 && spans[len(spans)-1].pad {
 		spans = spans[:len(spans)-1]
 	}
-	io.WriteString(r.o.Out, r.render(spans)+"\n")
+	r.out(r.render(spans) + "\n")
 }
 
 // render joins spans (already escaped) into text, each in its style when there is colour.
@@ -186,11 +204,17 @@ func (r *Renderer) Tilde(abs string) string {
 }
 
 // Full is a file's full path, with ~ for home: what the last confirmation before a deletion shows.
-func (r *Renderer) Full(root, rel string) string { return r.Tilde(join(root, rel)) }
+func (r *Renderer) Full(root, rel string) string {
+	if root == "" {
+		return r.Tilde(rel) // a path in no root, already whole
+	}
+	return r.Tilde(join(root, rel))
+}
 
 // Path names a file for reading: relative to the heading's root if it is in it, else in full.
+// It is the one place this choice is made: lists and duplicate groups go through it.
 func (r *Renderer) Path(root, rel string) string {
-	if root == r.root && r.root != "" {
+	if root != "" && root == r.root {
 		return relName(rel)
 	}
 	return r.Full(root, rel)
@@ -206,11 +230,41 @@ func join(root, rel string) string {
 // shorten shows filo's own message text with the heading's root left out of the paths in it, as the paths in the
 // columns are: "/home/u/Documents/b/doc is kept until …" becomes "b/doc is kept until …".
 func (r *Renderer) shorten(text string) string {
-	if r.root == "" {
-		return text
+	if r.root == "" || r.root == string(filepath.Separator) {
+		return text // a root of / would strip every separator
 	}
-	return strings.ReplaceAll(text, r.root+string(filepath.Separator), "")
+	return strings.ReplaceAll(text, withSep(r.root), "")
+}
+
+// SplitRoot splits an absolute path into the root it is in (the longest of roots that contains it) and the path
+// relative to it ('/' separators), for showing it relative to its root. A path in no root comes back whole, with no
+// root.
+func SplitRoot(roots []string, abs string) (root, rel string) {
+	for _, r := range roots {
+		if len(r) <= len(root) {
+			continue
+		}
+		if abs == r {
+			root, rel = r, "."
+			continue
+		}
+		if rest, ok := strings.CutPrefix(abs, withSep(r)); ok {
+			root, rel = r, filepath.ToSlash(rest)
+		}
+	}
+	if root == "" {
+		return "", abs
+	}
+	return root, rel
+}
+
+// withSep is a root with a separator after it, for matching the paths in it: "/" stays "/", not "//".
+func withSep(root string) string {
+	if strings.HasSuffix(root, string(filepath.Separator)) {
+		return root
+	}
+	return root + string(filepath.Separator)
 }
 
 // Blank writes an empty line.
-func (r *Renderer) Blank() { io.WriteString(r.o.Out, "\n") }
+func (r *Renderer) Blank() { r.out("\n") }
