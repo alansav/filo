@@ -1,0 +1,24 @@
+$ filo export retention tax
+Retention export   export 1 . 2 files . <root>, under tax/
+
+  - 2 without a retention, 0 with one
+  [!] 1 file_date filled in from the file name: check it before counting from it
+
+Next: fill in retention (7y, 18m, forever or a date), then filo update <work>/l.csv
+
+$ filo export retention empty
+Retention export   no files . <root>, under empty/
+Nothing exported.
+
+$ filo export duplicates
+Duplicates export   export 2 . 1 group . 2 copies . <root>
+
+  - in each group you decide on: Y under delete for the copies to delete, N for those to keep
+  - two or more N: identical copies meant to exist, no longer listed as duplicates
+
+Next: filo update '<work>/my d.csv'
+
+$ filo export duplicates --separate
+Separate contents export   no contents marked separate . <root>
+Nothing exported.
+

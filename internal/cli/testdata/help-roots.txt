@@ -1,0 +1,22 @@
+filo roots
+filo roots add DIR [--include-hidden] [--ignore NAME]... [--no-scan]
+filo roots set DIR [--include-hidden | --skip-hidden] [--ignore NAME]...
+
+  A root's settings apply to every scan of it, whole or partial.
+
+Flags
+  --include-hidden         also scan hidden files and directories (names
+                           starting with .)
+  --skip-hidden            skip them again (roots set only; the default)
+  --ignore NAME            skip entries with this name, at any depth
+                           (repeatable); node_modules, __pycache__ and .filo are
+                           always skipped
+  --no-scan                roots add only: register the root without scanning it
+
+  roots add scans the new root straight away; --no-scan only registers it. roots
+  set replaces the whole set, so name every --ignore you want to keep.
+
+  A root that contains existing roots on the same filesystem takes them in,
+  keeping their files' history and retentions; its settings then apply to all of
+  it. A directory inside an existing root is already covered: scan it with filo
+  scan DIR.

@@ -3,19 +3,23 @@ package cli
 import (
 	"bytes"
 	"context"
+	"errors"
 	"flag"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/alansav/filo/internal/fsid"
 	"github.com/alansav/filo/internal/reconcile"
 	"github.com/alansav/filo/internal/store"
+	"github.com/alansav/filo/internal/view"
 )
 
 type result struct {
@@ -127,22 +131,24 @@ func TestUsageAndHelp(t *testing.T) {
 		inStdout string
 		inStderr string
 	}{
-		{"no arguments prints usage", nil, ExitOK, "Usage:", ""},
-		{"help", []string{"help"}, ExitOK, "filo roots add DIR", ""},
-		{"-h", []string{"-h"}, ExitOK, "Usage:", ""},
+		{"no arguments prints usage", nil, ExitOK, "\nCommands\n", ""},
+		{"help", []string{"help"}, ExitOK, "  roots add DIR [flags]", ""},
+		{"-h", []string{"-h"}, ExitOK, "\nCommands\n", ""},
 		{"help roots", []string{"help", "roots"}, ExitOK, "--include-hidden", ""},
 		{"help export", []string{"help", "export"}, ExitOK, "keep_until", ""},
 		{"scan no longer takes root settings", []string{"--db", db, "scan", "--include-hidden"}, ExitUsage, "",
 			"include-hidden"},
 		{"review is gone", []string{"--db", db, "review"}, ExitUsage, "", "export retention and update"},
 		{"unknown roots command", []string{"--db", db, "roots", "bogus"}, ExitUsage, "", `unknown roots command "bogus"`},
-		{"roots set without a dir", []string{"--db", db, "roots", "set"}, ExitUsage, "", "exactly one DIR"},
+		{"roots set without a dir", []string{"--db", db, "roots", "set"}, ExitUsage, "",
+			"filo: roots set takes exactly one DIR (see filo help roots)\n"},
 		{"roots set both ways", []string{"--db", db, "roots", "set", "x", "--include-hidden", "--skip-hidden"},
 			ExitUsage, "", "not both"},
 		{"roots add with a bad ignore", []string{"--db", db, "roots", "add", "x", "--ignore", "a/b"}, ExitUsage, "",
 			"plain file or directory name"},
 		{"scan -h", []string{"scan", "-h"}, ExitOK, "--allow-empty", ""},
-		{"unknown command", []string{"bogus"}, ExitUsage, "", `unknown command "bogus"`},
+		{"unknown command", []string{"bogus"}, ExitUsage, "", "filo: unknown command \"bogus\" (see filo help)\n"},
+		{"no help for", []string{"help", "bogus"}, ExitUsage, "", "filo: no help for \"bogus\" (see filo help)\n"},
 		{"unknown flag", []string{"scan", "--bogus"}, ExitUsage, "", "bogus"},
 		{"workers out of range", []string{"--db", db, "scan", "--workers", "0"}, ExitUsage, "", "--workers"},
 		{"two dirs", []string{"--db", db, "scan", "a", "b"}, ExitUsage, "", "at most one DIR"},
@@ -154,6 +160,9 @@ func TestUsageAndHelp(t *testing.T) {
 			r := run(t, context.Background(), nil, tc.args...)
 			if r.code != tc.code || !strings.Contains(r.stdout, tc.inStdout) || !strings.Contains(r.stderr, tc.inStderr) {
 				t.Errorf("code %d\nstdout: %s\nstderr: %s", r.code, r.stdout, r.stderr)
+			}
+			if tc.code == ExitUsage && strings.Count(r.stderr, "\n") != 1 {
+				t.Errorf("a usage error is one line: %q", r.stderr)
 			}
 		})
 	}
@@ -219,26 +228,30 @@ func TestEndToEnd(t *testing.T) {
 
 	sh("init")
 	// roots add scans the new root straight away.
-	if out := must("roots", "add", tree); !strings.Contains(out, "Added root "+tree+" (hidden files skipped)") ||
-		!strings.Contains(out, "15 files seen") || !strings.Contains(out, "new 15 ") {
+	if out := must("roots", "add", tree); !strings.Contains(out, "Root added   "+tree+"\n  - hidden files skipped\n") ||
+		!strings.Contains(out, "15 files seen") || !strings.Contains(out, "\n  - 15 new\n") {
 		t.Errorf("roots add: %s", out)
 	}
-	if out := must("roots"); !strings.Contains(out, "last scan") || !strings.Contains(out, "settings: hidden files skipped") {
+	if out := must("roots"); !strings.Contains(out, "last scan") || !strings.Contains(out, "\n    hidden files skipped\n") {
 		t.Errorf("roots: %s", out)
 	}
 	sh("mutate")
 	t.Cleanup(func() { sh("unlock") }) // or the temp dir cannot be removed
 	// mutate makes a directory and a file unreadable; root ignores permissions, so as root there are no errors.
 	asRoot := os.Geteuid() == 0
+	counts := "  - 3 new\n  - 2 changed\n  - 2 moved\n  - 2 missing\n  [!] 1 possible move, not applied\n"
 	wantSecond := []string{
-		"moved     docs/contract.txt -> notes/contract-final.txt",
-		"possible  docs/report-2024.txt -> archive/report-2024.txt ?",
+		"    moved           docs/contract.txt -> notes/contract-final.txt\n",
+		"    possible move   docs/report-2024.txt -> archive/report-2024.txt   same name, different content\n",
 	}
 	if asRoot {
-		wantSecond = append(wantSecond, "new 3   changed 2   moved 2   missing 2   possible moves 1   errors 0")
+		wantSecond = append(wantSecond, counts+"\nChanges")
 	} else {
-		wantSecond = append(wantSecond, "new 3   changed 2   moved 2   missing 2   possible moves 1   errors 2",
-			"error     docs/private.txt (hash: ", "error     locked (")
+		wantSecond = append(wantSecond,
+			counts+"  [refused] 2 could not be read: none marked missing\n\nEvents",
+			"    error           docs/private.txt   hash: open "+filepath.Join(tree, "docs", "private.txt")+
+				": permission denied\n",
+			"    error           locked   open "+filepath.Join(tree, "locked")+": permission denied\n")
 	}
 	out := must("scan") // every root
 	for _, want := range wantSecond {
@@ -248,23 +261,22 @@ func TestEndToEnd(t *testing.T) {
 	}
 
 	out = must("report", "--top", "3")
-	photos := filepath.Join(tree, "photos")
 	for _, want := range []string{
-		"Duplicates: 1 group, 3 files, 195 KiB reclaimable",
-		"3 copies of 97.7 KiB, 195 KiB reclaimable",
-		filepath.Join(photos, "img1-copy.bin"), filepath.Join(photos, "img1-copy2.bin"),
-		"Broken symlinks: 2",
-		filepath.Join(tree, "broken-link") + " -> nowhere",
-		"117 KiB  " + filepath.Join(photos, "img2-renamed.bin"), // largest first
+		"Duplicates   1 group . 3 copies . 195 KiB reclaimable",
+		"    img1-copy.bin . 97.7 KiB each",
+		"      photos/img1-copy.bin", "      photos/img1-copy2.bin",
+		"Broken symlinks   2",
+		"    broken-link   -> nowhere",
+		"     117 KiB   photos/img2-renamed.bin", // largest first
 		"last scan 2",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("report lacks %q:\n%s", want, out)
 		}
 	}
-	wantUnreadable := "Unreadable files: 1\n  since scan 2  " + filepath.Join(tree, "docs", "private.txt") + "\n"
+	wantUnreadable := "Unreadable files   1\n    since\n    scan 2   docs/private.txt\n"
 	if asRoot {
-		wantUnreadable = "Unreadable files: none\n"
+		wantUnreadable = "Unreadable files   none\n"
 	}
 	if !strings.Contains(out, wantUnreadable) {
 		t.Errorf("report lacks %q:\n%s", wantUnreadable, out)
@@ -278,15 +290,15 @@ func TestScanErrors(t *testing.T) {
 		name     string
 		setup    func(t *testing.T, env map[string]string) []string // returns the args
 		code     int
-		inStdout string
+		inStdout []string
 		inStderr string
 	}{
 		{"no roots yet", func(t *testing.T, env map[string]string) []string {
 			return []string{"scan"}
-		}, ExitError, "", "no roots yet; add one with: filo roots add DIR"},
+		}, ExitError, nil, "no roots yet; add one with: filo roots add DIR"},
 		{"path outside every root", func(t *testing.T, env map[string]string) []string {
 			return []string{"scan", canonicalTemp(t)}
-		}, ExitError, "", "filo roots add"},
+		}, ExitError, nil, "filo roots add"},
 		{"database locked by another process", func(t *testing.T, env map[string]string) []string {
 			s, err := store.Open(ctx, store.Options{DBPath: env["FILO_DB"]})
 			if err != nil {
@@ -294,7 +306,7 @@ func TestScanErrors(t *testing.T) {
 			}
 			t.Cleanup(func() { s.Close() })
 			return []string{"roots"}
-		}, ExitError, "", "locked by another filo process"},
+		}, ExitError, nil, "locked by another filo process"},
 		{"one unmounted root: the other is still scanned", func(t *testing.T, env map[string]string) []string {
 			base := canonicalTemp(t)
 			disk, home := filepath.Join(base, "disk"), filepath.Join(base, "home")
@@ -314,7 +326,8 @@ func TestScanErrors(t *testing.T) {
 			}
 			sameDevice(t, nil) // now unmounted
 			return []string{"scan"}
-		}, ExitError, "new 1 ", "root looks unmounted"},
+		}, ExitError, []string{"  [refused] not scanned: the root looks unmounted (", "\n  - 1 new\n"},
+			"could not be scanned: "},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -322,10 +335,14 @@ func TestScanErrors(t *testing.T) {
 			env := map[string]string{"FILO_DB": filepath.Join(t.TempDir(), "filo.db")}
 			args := tc.setup(t, env)
 			r := run(t, ctx, env, args...)
-			if r.code != tc.code || !strings.Contains(r.stdout, tc.inStdout) || !strings.Contains(r.stderr, tc.inStderr) {
+			ok := r.code == tc.code && strings.Contains(r.stderr, tc.inStderr)
+			for _, want := range tc.inStdout {
+				ok = ok && strings.Contains(r.stdout, want)
+			}
+			if !ok {
 				t.Errorf("code %d\nstdout: %s\nstderr: %s", r.code, r.stdout, r.stderr)
 			}
-			if strings.Count(strings.TrimSpace(r.stderr), "\n") > 0 && tc.name != "one unmounted root: the other is still scanned" {
+			if strings.Count(strings.TrimSpace(r.stderr), "\n") > 0 {
 				t.Errorf("error should be one line: %q", r.stderr)
 			}
 		})
@@ -375,39 +392,72 @@ func TestProgress(t *testing.T) {
 		p.HashBytes.Store(118 << 30)
 		p.Hash.Files.Store(1204)
 		p.Hash.Bytes.Store(3 << 30)
-		if got := progressLine(p); !strings.Contains(got, "hashing 1,204 / 52,310 files, 3.0 GiB / 118 GiB") {
-			t.Errorf("hashing line = %q", got)
+		tests := []struct {
+			phase     int32
+			of, where string
+			want      string
+		}{
+			{reconcile.PhaseHashing, "root 2 of 3", "~/Pictures",
+				"hashing · 1,204 / 52,310 files · 3.0 / 118 GiB · root 2 of 3 · ~/Pictures"},
+			{reconcile.PhaseHashing, "", "~/Pictures", "hashing · 1,204 / 52,310 files · 3.0 / 118 GiB · ~/Pictures"},
+			{reconcile.PhaseWalking, "", "/data", "walking · 12,345 entries · /data"},
+			{reconcile.PhaseWriting, "", "/data", "writing the register · /data"},
+			{reconcile.PhaseIdle, "", "/data", ""},
 		}
-		p.Phase.Store(reconcile.PhaseWalking)
 		p.Walked.Store(12345)
-		if got := progressLine(p); !strings.Contains(got, "walking, 12,345 entries") {
-			t.Errorf("walking line = %q", got)
+		for _, tc := range tests {
+			p.Phase.Store(tc.phase)
+			if got := progressLine(p, tc.of, tc.where); got != tc.want {
+				t.Errorf("phase %d: %q, want %q", tc.phase, got, tc.want)
+			}
 		}
-		p.Phase.Store(reconcile.PhaseIdle)
-		if got := progressLine(p); got != "" {
-			t.Errorf("idle line = %q, want none", got)
+	})
+	t.Run("sizes share their unit", func(t *testing.T) {
+		for _, tc := range []struct {
+			done, total int64
+			want        string
+		}{
+			{3 << 30, 118 << 30, "3.0 / 118 GiB"},
+			{512, 2 << 20, "512 B / 2.0 MiB"},
+		} {
+			if got := sizePair(tc.done, tc.total); got != tc.want {
+				t.Errorf("sizePair(%d, %d) = %q, want %q", tc.done, tc.total, got, tc.want)
+			}
 		}
 	})
 	t.Run("terminal gets a cleared line, a plain writer gets nothing", func(t *testing.T) {
 		term := &fakeTerminal{}
-		e := &env{stderr: term, rawStderr: term}
+		noEnv := func(string) string { return "" }
+		e := &env{rawStderr: term, view: view.New(view.Options{Out: io.Discard}), getenv: noEnv}
 		opt := reconcile.Options{}
-		stop := e.startProgress(&opt)
+		pr := e.startProgress(&opt)
 		if opt.Progress == nil {
 			t.Fatal("no progress attached for a terminal")
 		}
-		stop()
-		stop() // safe twice
-		if !strings.Contains(term.String(), "\r\x1b[K") {
-			t.Errorf("terminal output %q lacks a line clear", term.String())
+		opt.Progress.Phase.Store(reconcile.PhaseWriting)
+		pr.label("/data")
+		pr.draw()
+		pr.stop()
+		pr.stop() // safe twice
+		if got, want := term.String(), "\r\x1b[Kwriting the register · /data\r\x1b[K"; got != want {
+			t.Errorf("terminal output %q, want %q", got, want)
 		}
 
 		var plain bytes.Buffer
-		e = &env{stderr: &plain, rawStderr: &plain}
+		e = &env{rawStderr: &plain, getenv: noEnv}
 		opt = reconcile.Options{}
-		e.startProgress(&opt)()
+		e.startProgress(&opt).stop()
 		if opt.Progress != nil || plain.Len() != 0 {
 			t.Errorf("plain writer: progress %v, output %q", opt.Progress, plain.String())
+		}
+
+		// TERM=dumb cannot redraw a line: its control codes would show as text.
+		dumb := &fakeTerminal{}
+		e = &env{rawStderr: dumb, getenv: func(k string) string { return map[string]string{"TERM": "dumb"}[k] }}
+		opt = reconcile.Options{}
+		e.startProgress(&opt).stop()
+		if opt.Progress != nil || dumb.Len() != 0 {
+			t.Errorf("TERM=dumb: progress %v, output %q", opt.Progress, dumb.String())
 		}
 	})
 }
@@ -432,9 +482,9 @@ func TestBinary(t *testing.T) {
 		code int
 		want string
 	}{
-		{[]string{"help"}, 0, "Usage:"},
-		{[]string{"roots", "add", root}, 0, "new 1 "},
-		{[]string{"scan", root}, 0, "new 0 "},
+		{[]string{"help"}, 0, "\nCommands\n"},
+		{[]string{"roots", "add", root}, 0, "- 1 new"},
+		{[]string{"scan", root}, 0, "[ok] no changes"},
 		{[]string{"bogus"}, 2, "unknown command"},
 	}
 	for _, tc := range tests {
@@ -487,13 +537,13 @@ func TestRootsAddAbsorbs(t *testing.T) {
 	// Pictures are known; .config is skipped, not missing.
 	out := must("roots", "add", home)
 	for _, want := range []string{
-		"Added root " + home + " (hidden files skipped)",
-		"It now includes the roots " + in(".config") + ", " + in("Documents") + " and " + in("Pictures") +
-			", with their history and keep_until dates.",
-		"Note: " + in(".config") + " is skipped by the settings of " + home + ", so its files are no longer scanned",
-		"Note: " + in("Pictures") + " had other settings (hidden files skipped; ignoring raw); the settings of " +
-			home + " apply to it now.",
-		"new 1   changed 0   moved 0   missing 0",
+		"Root added   " + home + "\n  - hidden files skipped\n",
+		"Took in 3 roots, with their history and retentions\n",
+		"  [!] .config   skipped by these settings: its files are neither checked nor marked missing\n",
+		"  - Documents\n",
+		"  - Pictures   had other settings (hidden files skipped . ignoring raw): these apply now\n",
+		"Next: filo roots set " + home + " --include-hidden, to scan .config again\n",
+		"\n  - 1 new\n\nNext: filo report\n",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("roots add lacks %q:\n%s", want, out)
@@ -501,8 +551,8 @@ func TestRootsAddAbsorbs(t *testing.T) {
 	}
 	var listed []string
 	for _, l := range strings.Split(must("roots"), "\n") {
-		if l != "" && !strings.HasPrefix(l, " ") {
-			listed = append(listed, l)
+		if strings.HasPrefix(l, "  ") && !strings.HasPrefix(l, "    ") { // an entry, not its details
+			listed = append(listed, strings.Fields(l)[0])
 		}
 	}
 	if !reflect.DeepEqual(listed, []string{home}) {
@@ -511,13 +561,13 @@ func TestRootsAddAbsorbs(t *testing.T) {
 
 	// Including hidden files brings .config back: its file is known, not new.
 	out = must("roots", "set", home, "--include-hidden")
-	if !strings.Contains(out, "settings were hidden files skipped; now hidden files included") {
+	if !strings.Contains(out, "  - was   hidden files skipped\n  [ok] now   hidden files included\n") {
 		t.Errorf("roots set:\n%s", out)
 	}
-	if out := must("scan"); !strings.Contains(out, "new 0   changed 0   moved 0   missing 0") {
+	if out := must("scan"); !strings.Contains(out, "[ok] no changes") {
 		t.Errorf("scan after including hidden files:\n%s", out)
 	}
-	if out := must("roots", "set", home, "--include-hidden"); !strings.Contains(out, "settings unchanged") {
+	if out := must("roots", "set", home, "--include-hidden"); !strings.Contains(out, "Settings unchanged   "+home+"\n") {
 		t.Errorf("roots set again:\n%s", out)
 	}
 	if r := run(t, ctx, env, "roots", "set", in("Documents")); r.code != ExitError ||
@@ -530,5 +580,50 @@ func TestRootsAddAbsorbs(t *testing.T) {
 	if r.code != ExitError || !strings.Contains(r.stderr, "is already inside root "+home+
 		"; scan just that folder with: filo scan "+in("Documents")) {
 		t.Errorf("adding a folder inside a root: code %d\n%s", r.code, r.stderr)
+	}
+}
+
+// TestReportGolden: filo report's whole plain output (docs/design.md, Terminal output), with times shown as <time>
+// and the work folder as <work>: every section, the empty ones as one line.
+func TestReportGolden(t *testing.T) {
+	ct := newCLITest(t)
+	setNow(t, time.Date(2026, 11, 14, 12, 0, 0, 0, time.Local))
+	ct.write("photos/img1.bin", "photo one")
+	ct.write("photos/img1-copy.bin", "photo one")
+	ct.write("photos/img2.bin", "photo two, larger")
+	ct.write("docs/contract.txt", "contract")
+	ct.write("notes/ideas.md", "ideas")
+	if err := os.Symlink("nowhere", ct.in("broken-link")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Link(ct.in("photos/img2.bin"), ct.in("photos/img2-link.bin")); err != nil { // one file, two paths
+		t.Fatal(err)
+	}
+	ct.filo(ExitOK, "", false, "roots", "add", ct.root)
+	out := ct.filo(ExitOK, "", false, "report").stdout
+	out = regexp.MustCompile(`\d{4}-\d\d-\d\d \d\d:\d\d`).ReplaceAllString(out, "<time>")
+	out = strings.ReplaceAll(out, ct.root, "<root>") // the root first: it is inside the work folder
+	out = strings.ReplaceAll(out, ct.work, "<work>")
+	golden(t, "report.txt", ct.root, out)
+}
+
+// errOut is a stdout that fails every write, as a full disk or a closed pipe does.
+type errOut struct{}
+
+func (errOut) Write([]byte) (int, error) { return 0, errors.New("no space left on device") }
+
+// TestOutputErrorFails: a command whose output could not be written exits 1 with the reason, not 0.
+func TestOutputErrorFails(t *testing.T) {
+	ct := newCLITest(t)
+	ct.write("a.txt", "a")
+	ct.filo(ExitOK, "", false, "roots", "add", ct.root)
+	var errb bytes.Buffer
+	for _, cmd := range []string{"report", "scan"} {
+		errb.Reset()
+		code := Run(ct.ctx, []string{cmd}, strings.NewReader(""), errOut{}, &errb,
+			func(k string) string { return ct.env[k] })
+		if code != ExitError || !strings.Contains(errb.String(), "no space left on device") {
+			t.Errorf("%s: code %d, stderr %q; want 1 and the write error", cmd, code, errb.String())
+		}
 	}
 }

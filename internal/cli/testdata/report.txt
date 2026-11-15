@@ -1,0 +1,39 @@
+Register   6 files . 65 B . <root>
+
+Roots
+  <root>   6 files . 65 B . 1 symlink
+    hidden files skipped
+    last scan 1, <time>, whole root: 7 seen, new 7, changed 0, moved 0, missing 0, errors 0
+
+Retention   7 files and symlinks
+  [!] 7 need a retention (no retention 7)
+    Where most need one (to depth 2)
+    files   size
+        4   52 B   photos
+        1    0 B   .
+        1    8 B   docs
+        1    5 B   notes
+    Next: filo export retention [DIR] -o FILE, then filo update FILE
+
+Largest files   top 5
+    size
+    17 B   photos/img2-link.bin   and 1 hard link, the same file
+     9 B   photos/img1-copy.bin
+     9 B   photos/img1.bin
+     8 B   docs/contract.txt
+     5 B   notes/ideas.md
+
+Duplicates   1 group . 2 copies . 9 B reclaimable
+    img1-copy.bin . 9 B each . 2 copies . 9 B reclaimable
+      photos/img1-copy.bin
+      photos/img1.bin
+
+Broken symlinks   1
+    broken-link   -> nowhere
+
+Unreadable files   none
+
+Recent events   none
+
+Register snapshots   1, latest <time>
+    <work>/filo.db.snapshots

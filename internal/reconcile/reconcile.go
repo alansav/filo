@@ -12,7 +12,6 @@ import (
 	"path"
 	"path/filepath"
 	"slices"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -28,7 +27,7 @@ const (
 	Changed      = "changed"
 	PossibleMove = "possible_move"
 	Error        = "error"
-	OtherFS      = "other_fs"
+	OtherFS      = store.EventOtherFS
 	// SameAsDeleted is a hint: a new file has the content of a file filo deleted (restored from a backup, say). It
 	// stays a new file that needs a retention; the old one's is never carried over.
 	SameAsDeleted = store.EventSameAsDeleted
@@ -66,24 +65,12 @@ type Progress struct {
 	HashFiles atomic.Int64 // files to hash in this scan
 	HashBytes atomic.Int64 // bytes to hash (sizes from the walk)
 	Hash      hasher.Progress
-	mu        sync.Mutex
-	root      string
 }
 
-// Root is the root being scanned.
-func (p *Progress) Root() string {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.root
-}
-
-func (p *Progress) start(root string) {
+func (p *Progress) start() {
 	if p == nil {
 		return
 	}
-	p.mu.Lock()
-	p.root = root
-	p.mu.Unlock()
 	p.Walked.Store(0)
 	p.HashFiles.Store(0)
 	p.HashBytes.Store(0)
@@ -113,33 +100,6 @@ type Summary struct {
 	Samples       map[string][]store.Event // first SampleSize events of each kind
 	OtherFS       []string
 	FailedDirs    []string
-}
-
-// RootResult is one root's outcome in ScanAll.
-type RootResult struct {
-	Root    store.Root
-	Summary Summary
-	Err     error
-}
-
-// ScanAll scans every root in turn, each in its own transaction. A root that fails (for example an unmounted disk)
-// is reported in its result and the others still run. Only cancellation stops it early.
-func ScanAll(ctx context.Context, s *store.Store, opt Options) ([]RootResult, error) {
-	roots, err := s.Roots(ctx)
-	if err != nil {
-		return nil, err
-	}
-	var out []RootResult
-	for _, r := range roots {
-		o := opt
-		o.Target = r.Path
-		sum, err := Scan(ctx, s, o)
-		out = append(out, RootResult{Root: r, Summary: sum, Err: err})
-		if ctx.Err() != nil {
-			return out, ctx.Err()
-		}
-	}
-	return out, nil
 }
 
 type newItem struct {
@@ -176,7 +136,7 @@ func Scan(ctx context.Context, s *store.Store, opt Options) (Summary, error) {
 	}
 
 	pr := opt.Progress
-	pr.start(root.Path)
+	pr.start()
 	defer pr.phase(PhaseIdle)
 	var walked *atomic.Int64
 	if pr != nil {
@@ -440,7 +400,7 @@ func Scan(ctx context.Context, s *store.Store, opt Options) (Summary, error) {
 			pairedNew[p[1]] = true
 			detail := fmt.Sprintf("returned (missing since scan %d)", g.MissingSince)
 			if g.LastRootID != root.ID {
-				detail += " from root " + rootPaths[g.LastRootID]
+				detail += store.EventFromRoot + rootPaths[g.LastRootID]
 			}
 			moveTo(g.FileID, news[p[1]].e.Path, news[p[1]], g.LastPath, detail)
 		}

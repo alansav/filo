@@ -12,13 +12,13 @@ import (
 	"path"
 	"path/filepath"
 	"slices"
-	"strings"
 	"time"
 
 	"github.com/alansav/filo/internal/duplicates"
 	"github.com/alansav/filo/internal/report"
 	"github.com/alansav/filo/internal/retention"
 	"github.com/alansav/filo/internal/store"
+	"github.com/alansav/filo/internal/view"
 )
 
 // now is the clock for keep_until dates; tests replace it.
@@ -29,20 +29,25 @@ func today() string { return retention.Today(now().Local()) }
 // exportKinds are the CSVs filo can export. Each names what the CSV is for.
 var exportKinds = []string{"retention", "duplicates"}
 
-// filterFor maps an optional DIR to a filter, and says where it points.
-func filterFor(ctx context.Context, s *store.Store, pos []string) (store.Filter, string, error) {
+// filterFor turns the DIR argument, if any, into a filter on the register and the place a heading names: the root
+// DIR is in and the folder under it, or every root when there is no DIR.
+func filterFor(ctx context.Context, s *store.Store, pos []string) (store.Filter, view.Where, error) {
 	if len(pos) == 0 {
-		return store.Filter{}, "", nil
+		roots, err := s.Roots(ctx)
+		if err != nil {
+			return store.Filter{}, view.Where{}, err
+		}
+		var w view.Where
+		for _, r := range roots {
+			w.Roots = append(w.Roots, r.Path)
+		}
+		return store.Filter{}, w, nil
 	}
 	root, scope, err := s.Resolve(ctx, pos[0])
 	if err != nil {
-		return store.Filter{}, "", err
+		return store.Filter{}, view.Where{}, err
 	}
-	where := root.Path
-	if scope != "" {
-		where = filepath.Join(root.Path, filepath.FromSlash(scope))
-	}
-	return store.Filter{RootID: root.ID, Scope: scope}, where, nil
+	return store.Filter{RootID: root.ID, Scope: scope}, view.Where{Roots: []string{root.Path}, Under: scope}, nil
 }
 
 func (e *env) export(ctx context.Context, dbBefore string, args []string) error {
@@ -113,11 +118,10 @@ func (e *env) export(ctx context.Context, dbBefore string, args []string) error 
 			}
 		}
 	}
-	if where != "" {
-		where = " under " + where
-	}
+	v := e.view
 	if len(items) == 0 {
-		fmt.Fprintf(e.stdout, "No files%s; nothing exported.\n", where)
+		v.Heading("Retention export", where, "no files")
+		v.Next("Nothing exported.")
 		return nil
 	}
 
@@ -133,15 +137,18 @@ func (e *env) export(ctx context.Context, dbBefore string, args []string) error 
 			undated++
 		}
 	}
-	fmt.Fprintf(e.stdout, "Exported %s%s to %s (export %d), %s without a retention.\n",
-		report.Plural(int64(len(items)), "file", "files"), where, csvPath, id, report.Count(int64(undated)))
+	// docs/design.md, Terminal output, Export.
+	v.Heading("Retention export", where, fmt.Sprintf("export %d", id), report.Plural(int64(len(items)), "file", "files"))
+	v.Blank()
+	v.Count(view.Neutral, report.Count(int64(undated))+" without a retention, "+
+		report.Count(int64(len(items)-undated))+" with one")
 	if suggested > 0 {
-		fmt.Fprintf(e.stdout, "file_date was filled in from the name of %s; check it before counting from it.\n",
-			report.Plural(int64(suggested), "file", "files"))
+		v.Count(view.Attention, report.Plural(int64(suggested), "file_date", "file_dates")+
+			" filled in from the file name: check "+pluralWord(suggested, "it", "them")+" before counting from "+
+			pluralWord(suggested, "it", "them"))
 	}
-	fmt.Fprintln(e.stdout, "Set retention (a period from file_date such as 7y or 18m, forever, or a date YYYY-MM-DD) "+
-		"where you want it, then run:")
-	fmt.Fprintf(e.stdout, "  filo update %s\n", csvPath)
+	v.Blank()
+	v.Next("Next: fill in retention (7y, 18m, forever or a date), then filo update " + shellQuote(csvPath))
 	return nil
 }
 
@@ -179,9 +186,6 @@ func writeExport(csvPath string, record func(write func(int64) error) (int64, er
 	return id, nil
 }
 
-// clearsShown is how many files the clear prompt names before "and N more".
-const clearsShown = 10
-
 func (e *env) update(ctx context.Context, dbBefore string, args []string) error {
 	fs := e.flags("update")
 	db := dbFlag(fs, dbBefore)
@@ -217,130 +221,200 @@ func (e *env) update(ctx context.Context, dbBefore string, args []string) error 
 		return err
 	}
 	defer e.closeStore(s)
-	asked := false
-	confirm := func(cs []store.Clear) bool {
-		if !isTerminal(e.stdin) {
-			return false
-		}
-		asked = true
-		return e.confirmClears(cs)
-	}
-	res, err := s.UpdateRetention(ctx, parsed.Rows, now(), today(), path, *dry, confirm)
+	roots, err := registeredRoots(ctx, s)
 	if err != nil {
 		return err
 	}
-
-	bad := e.printRefusals(path, parsed.Problems, res.Refusals)
-
-	w := e.stdout
+	r := e.view
+	total := len(parsed.Rows) + len(parsed.Problems)
+	title := "Retention update"
 	if *dry {
-		fmt.Fprintln(w, "Dry run: nothing was written.")
-		fmt.Fprintf(w, "Would update %s and clear %s.\n", report.Plural(int64(res.Set), "file", "files"),
-			report.Plural(int64(res.Cleared), "retention", "retentions"))
-	} else {
-		fmt.Fprintf(w, "Updated %s, cleared %s.\n", report.Plural(int64(res.Set), "file", "files"),
-			report.Plural(int64(res.Cleared), "retention", "retentions"))
+		title += " (dry run)"
 	}
-	if n := int64(len(res.NowPast)); n > 0 {
-		what := report.Plural(n, "file is", "files are")
+	r.Heading(title, view.Where{Roots: roots}, csvFacts(path, retentionExports(parsed.Rows),
+		report.Plural(int64(total), "row", "rows"))...)
+	r.Blank()
+
+	asking := e.canPrompt()
+	var pr *prompter
+	if asking {
+		pr = newPrompter(e.stdin)
+		pr.end, pr.check = r.Blank, e.outputErr
+		defer pr.close()
+	}
+	asked := false
+	confirm := func(cs []store.Clear) bool {
+		if !asking {
+			return false
+		}
+		asked = true
+		ok, err := e.confirmClears(ctx, pr, roots, cs)
+		return ok && err == nil // a cancelled context also stops the update itself: nothing is recorded
+	}
+	res, err := s.UpdateRetention(ctx, parsed.Rows, now(), today(), path, *dry, confirm)
+	if err != nil {
+		return interruptedUpdate(err)
+	}
+
+	would := func(done, dryRun string) string {
 		if *dry {
-			what = report.Plural(n, "file would be", "files would be")
+			return dryRun
 		}
-		fmt.Fprintf(w, "%s past their retention (check for a typo, such as 7d for 7y); see filo delete:\n", what)
-		for i, p := range res.NowPast {
-			if i == clearsShown {
-				fmt.Fprintf(w, "  and %s more\n", report.Count(n-clearsShown))
-				break
-			}
-			what := p.Retention
-			if p.KeepUntil != p.Retention {
-				what += " (until " + p.KeepUntil + ")"
-			}
-			fmt.Fprintf(w, "  %s  %s\n", what, p.Path)
-		}
+		return done
+	}
+	refused := refusalProblems(roots, parsed.Problems, res.Refusals)
+	if res.Set > 0 {
+		r.Count(view.Done, report.Plural(int64(res.Set), "file", "files")+would(" given a retention",
+			" would be given a retention"))
+	}
+	if res.Cleared > 0 {
+		r.Count(view.Done, report.Plural(int64(res.Cleared), "retention", "retentions")+would(" cleared",
+			" would be cleared (filo update asks first)"))
+	}
+	if res.Unchanged > 0 {
+		r.Count(view.Neutral, report.Plural(int64(res.Unchanged), "row", "rows")+" unchanged")
 	}
 	if res.ClearsSkipped > 0 {
 		why := "not confirmed"
 		if !asked {
 			why = "there is no terminal to ask in; run filo update in a terminal to clear them"
 		}
-		fmt.Fprintf(w, "Left %s whose cell is blank (%s).\n",
-			report.Plural(int64(res.ClearsSkipped), "retention", "retentions"), why)
+		r.Count(view.Attention, report.Plural(int64(res.ClearsSkipped), "retention left as it was",
+			"retentions left as they were")+", though the cell is blank ("+why+")")
 	}
-	var notes []string
-	if res.Unchanged > 0 {
-		notes = append(notes, report.Plural(int64(res.Unchanged), "row", "rows")+" unchanged")
+	if len(refused) > 0 {
+		r.Count(view.Refused, report.Plural(int64(len(refused)), "row", "rows")+" refused")
 	}
-	if bad > 0 {
-		notes = append(notes, report.Plural(int64(bad), "row", "rows")+" refused (listed above)")
+	if res.Set+res.Cleared+res.Unchanged+res.ClearsSkipped+len(refused) == 0 {
+		r.Count(view.Neutral, "nothing to change")
 	}
-	if len(notes) > 0 {
-		fmt.Fprintf(w, "%s.\n", strings.Join(notes, ", "))
+	if len(refused) > 0 {
+		r.Blank()
+		r.Problems("Refused: fix these rows in the CSV and run filo update again", view.Refused, refused)
 	}
-	if bad > 0 {
+	if n := len(res.NowPast); n > 0 {
+		rows := make([]view.FileRow, n)
+		for i, p := range res.NowPast {
+			root, rel := view.SplitRoot(roots, p.Path)
+			rows[i] = view.FileRow{Root: root, Rel: rel, Cells: []string{p.Retention, p.KeepUntil}}
+		}
+		r.Blank()
+		what := report.Plural(int64(n), "file is now past its", "files are now past their")
+		if *dry {
+			what = report.Plural(int64(n), "file would be past its", "files would be past their")
+		}
+		r.Note(view.Attention, what+" retention. Check for a typo, such as 7d for 7y:")
+		r.Files(view.FileList{Columns: []view.Column{{Header: "retention"}, {Header: "until"}}, Rows: rows,
+			Max: r.Overview(), More: "files", MoreOne: "file"})
+	}
+	r.Blank()
+	switch {
+	case *dry:
+		r.Next("Dry run: nothing was written.")
+	case len(res.NowPast) > 0:
+		r.Next("Nothing has been deleted. Next: filo delete")
+	}
+	if len(refused) > 0 {
 		return errReported
 	}
 	return nil
 }
 
-// printRefusals prints the rows the CSV reader refused and the rows or groups the register refused, in CSV line
-// order, one line each on stderr, and returns how many.
-func (e *env) printRefusals(path string, problems []retention.Problem, refusals []store.Refusal) int {
-	type line struct {
-		n   int
-		msg string
+// csvFacts are an update heading's facts: the CSV's name, its export (when the rows name one), and a count.
+func csvFacts(path string, exports []int64, count string) []string {
+	facts := []string{filepath.Base(path)}
+	if len(exports) == 1 {
+		facts = append(facts, fmt.Sprintf("export %d", exports[0]))
 	}
-	var bad []line
+	return append(facts, count)
+}
+
+// retentionExports lists the exports a retention CSV's rows name, each once.
+func retentionExports(rows []store.RetentionRow) []int64 {
+	var out []int64
+	for _, row := range rows {
+		if !slices.Contains(out, row.ExportID) {
+			out = append(out, row.ExportID)
+		}
+	}
+	return out
+}
+
+// refusalProblems turns the rows the CSV reader refused and the rows or groups the register refused into one list in
+// CSV line order, each file shown relative to its root and each group in the group column. When the CSV mixes rows
+// from several exports, a group's reason names its export too, since a group number alone would be ambiguous.
+func refusalProblems(roots []string, problems []retention.Problem, refusals []store.Refusal) []view.Problem {
+	exports := map[int64]bool{}
+	for _, rf := range refusals {
+		if rf.Export != 0 {
+			exports[rf.Export] = true
+		}
+	}
+	var out []view.Problem
 	for _, p := range problems {
-		bad = append(bad, line{p.Line, p.Msg})
+		out = append(out, view.Problem{Line: p.Line, Reason: p.Msg})
 	}
-	for _, r := range refusals {
-		where := r.Path
-		if where == "" {
-			where = fmt.Sprintf("file %d", r.FileID)
+	for _, rf := range refusals {
+		p := view.Problem{Line: rf.Line, Group: int(rf.Group), Reason: rf.Reason}
+		if rf.Export != 0 && len(exports) > 1 {
+			p.Reason = fmt.Sprintf("export %d: %s", rf.Export, rf.Reason)
 		}
-		bad = append(bad, line{r.Line, where + ": " + r.Reason})
+		if rf.Path == "" {
+			p.Reason = fmt.Sprintf("file %d: %s", rf.FileID, rf.Reason)
+		} else {
+			p.Root, p.Rel = view.SplitRoot(roots, rf.Path)
+		}
+		out = append(out, p)
 	}
-	slices.SortStableFunc(bad, func(a, b line) int { return a.n - b.n })
-	for _, b := range bad {
-		fmt.Fprintf(e.stderr, "filo: %s line %d: %s\n", filepath.Base(path), b.n, b.msg)
-	}
-	return len(bad)
+	slices.SortStableFunc(out, func(a, b view.Problem) int { return a.Line - b.Line })
+	return out
 }
 
-// askYesNo prints prompt and reads one answer from standard input. Only "y" or "yes" (any case) is a yes.
-func (e *env) askYesNo(prompt string) bool {
-	fmt.Fprint(e.stdout, prompt)
-	answer, err := bufio.NewReader(e.stdin).ReadString('\n')
-	if err != nil && !errors.Is(err, io.EOF) {
-		return false
-	}
-	switch strings.ToLower(strings.TrimSpace(answer)) {
-	case "y", "yes":
-		return true
-	}
-	return false
-}
-
-// confirmClears lists the retentions a blank cell would clear and asks once. Only "y" or "yes" confirms.
-func (e *env) confirmClears(cs []store.Clear) bool {
-	w := e.stdout
-	fmt.Fprintf(w, "%s a retention but a blank cell in the CSV:\n",
-		report.Plural(int64(len(cs)), "file has", "files have"))
+// confirmClears lists the retentions blank cells would clear (the first ones, or all with l) and asks once. Only a
+// yes confirms; the other rows are recorded either way.
+func (e *env) confirmClears(ctx context.Context, pr *prompter, roots []string, cs []store.Clear) (bool, error) {
+	r := e.view
+	rows := make([]view.FileRow, len(cs))
 	for i, c := range cs {
-		if i == clearsShown {
-			fmt.Fprintf(w, "  and %s more\n", report.Count(int64(len(cs)-clearsShown)))
-			break
+		row := view.FileRow{Cells: []string{c.Retention, c.KeepUntil}}
+		if c.Path == "" {
+			row.Label = fmt.Sprintf("file %d, no current path", c.FileID)
+		} else {
+			row.Root, row.Rel = view.SplitRoot(roots, c.Path)
 		}
-		where := c.Path
-		if where == "" {
-			where = fmt.Sprintf("file %d", c.FileID)
-		}
-		what := c.Retention
-		if c.KeepUntil != c.Retention {
-			what += " (until " + c.KeepUntil + ")"
-		}
-		fmt.Fprintf(w, "  %s  %s\n", what, where)
+		rows[i] = row
 	}
-	return e.askYesNo(fmt.Sprintf("Clear the retention of %s? [y/n] ", report.Plural(int64(len(cs)), "file", "files")))
+	list := func(max int) {
+		r.Files(view.FileList{Columns: []view.Column{{Header: "retention"}, {Header: "until"}}, Rows: rows,
+			Max: max, More: "files", MoreOne: "file"})
+		r.Blank()
+	}
+	r.Note(view.Attention, report.Plural(int64(len(cs)), "row has", "rows have")+" a blank retention where one is "+
+		"stored. Recording clears it:")
+	list(r.Overview())
+	question := "Clear this retention? The other rows are recorded either way."
+	if len(cs) > 1 {
+		question = fmt.Sprintf("Clear these %s retentions? The other rows are recorded either way.",
+			report.Count(int64(len(cs))))
+	}
+	for {
+		key, err := e.askChoice(ctx, pr, question, yesNoList, "n")
+		if err != nil {
+			return false, err
+		}
+		if key != "l" {
+			r.Blank()
+			return key == "y", nil
+		}
+		r.Blank()
+		list(0)
+	}
+}
+
+// interruptedUpdate words a cancelled update: the transaction was not committed.
+func interruptedUpdate(err error) error {
+	if errors.Is(err, context.Canceled) {
+		return errors.New("interrupted; nothing was recorded")
+	}
+	return err
 }

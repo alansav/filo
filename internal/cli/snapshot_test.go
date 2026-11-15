@@ -34,11 +34,12 @@ func TestSnapshots(t *testing.T) {
 
 	filo(ExitOK, "roots", "add", root)
 	r := filo(ExitOK, "scan")
-	if !strings.Contains(r.stdout, "1 file seen") || !strings.Contains(r.stdout, "new 0") {
+	if !strings.Contains(r.stdout, "1 file seen") || !strings.Contains(r.stdout, "[ok] no changes") {
 		t.Errorf("the scan saw the database or its snapshots:\n%s", r.stdout)
 	}
 	r = filo(ExitOK, "report")
-	if !strings.Contains(r.stdout, "Register snapshots\n  2 in "+store.SnapshotDir(db)+", latest ") {
+	if !strings.Contains(r.stdout, "Register snapshots   2, latest ") || !strings.Contains(r.stdout,
+		"    "+store.SnapshotDir(db)+"\n") {
 		t.Errorf("report lacks the snapshot line:\n%s", r.stdout)
 	}
 	if strings.Contains(r.stdout, "after the latest snapshot") {
@@ -57,7 +58,7 @@ func TestSnapshots(t *testing.T) {
 		t.Errorf("no warning for a failed snapshot:\n%s", r.stderr)
 	}
 	r = filo(ExitOK, "report")
-	if !strings.Contains(r.stdout, "warning: cannot read "+store.SnapshotDir(db)+": not a directory") {
+	if !strings.Contains(r.stdout, "[!] cannot read "+store.SnapshotDir(db)+": not a directory") {
 		t.Errorf("report does not warn about missing snapshots:\n%s", r.stdout)
 	}
 }

@@ -1,0 +1,15 @@
+Ready to delete   2 files . 13 B . <root>
+
+Past their retention   1 file . 5 B
+    until        size
+    2025-09-01    5 B   video/2015/summer holiday in the south of France with the whole family, day 3.mp4
+
+Duplicate copies marked for deletion   1 file in 1 group . 8 B
+    contract.pdf . 8 B each
+      keep     a/contract.pdf   forever
+      delete   b/contract.pdf   forever
+
+Done   deleted 1 file . freed 8 B . removed 1 empty folder
+
+Skipped 1: nothing was changed
+  [!] video/2015/summer holiday in the south of France with the whole family, day 3.mp4: changed since its retention was set; run filo scan, then give it a new retention

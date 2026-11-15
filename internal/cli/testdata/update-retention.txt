@@ -1,0 +1,14 @@
+Retention update   r.csv . export 1 . 4 rows . <root>
+
+  [ok] 2 files given a retention
+  [refused] 2 rows refused
+
+Refused: fix these rows in the CSV and run filo update again
+  [refused] line 2    retention "2027-02-29" is not a retention: use a period such as 7y, 18m, 6w or 30d (counted from file_date), forever, or a date YYYY-MM-DD (a spreadsheet may have rewritten it; format the column as text)
+  [refused] line 3    notes/old draft.txt: retention 7y needs a file_date to count from
+
+[!] 1 file is now past its retention. Check for a typo, such as 7d for 7y:
+    retention   until
+    7d          2023-01-08   receipts/2023-01-01 coffee.pdf
+
+Nothing has been deleted. Next: filo delete
