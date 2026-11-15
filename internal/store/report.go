@@ -147,27 +147,11 @@ type Duplicates struct {
 // reclaimable space, and what is not counted as duplicates on purpose.
 func (s *Store) Duplicates(ctx context.Context, n int) (Duplicates, error) {
 	var d Duplicates
-	contents, err := loadContents(ctx, s.db, hashesShared)
+	all, nc, err := s.groupsAndNotCounted(ctx)
 	if err != nil {
 		return d, err
 	}
-	// One pass: the groups, and what would be a group but is kept out on purpose (an always content, or a set of
-	// records, with two or more copies; one with a single copy left keeps nothing out).
-	var all []DupContent
-	for _, c := range contents {
-		switch {
-		case c.IsGroup():
-			all = append(all, c)
-		case len(c.Copies) < 2:
-		case c.Always:
-			d.NotCounted.Always++
-		case c.OneRecordSet():
-			d.NotCounted.RecordSets++
-		}
-	}
-	if err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM excluded_dirs`).Scan(&d.NotCounted.Dirs); err != nil {
-		return d, fmt.Errorf("read excluded directories: %w", err)
-	}
+	d.NotCounted = nc
 	// Sort by reclaimable space and keep the top n before building any path list.
 	type ranked struct {
 		c           DupContent
@@ -201,6 +185,39 @@ func (s *Store) Duplicates(ctx context.Context, n int) (Duplicates, error) {
 		d.Top = append(d.Top, g)
 	}
 	return d, nil
+}
+
+// NotCounted counts what is kept out of the duplicate groups on purpose, across the register.
+func (s *Store) NotCounted(ctx context.Context) (NotCounted, error) {
+	_, nc, err := s.groupsAndNotCounted(ctx)
+	return nc, err
+}
+
+// groupsAndNotCounted reads every duplicate group, and in the same pass what would be a group but is kept out on
+// purpose: an always content, or a set of records, with two or more copies (one with a single copy left keeps
+// nothing out); and the excluded directories.
+func (s *Store) groupsAndNotCounted(ctx context.Context) ([]DupContent, NotCounted, error) {
+	var nc NotCounted
+	contents, err := loadContents(ctx, s.db, hashesShared)
+	if err != nil {
+		return nil, nc, err
+	}
+	var groups []DupContent
+	for _, c := range contents {
+		switch {
+		case c.IsGroup():
+			groups = append(groups, c)
+		case len(c.Copies) < 2:
+		case c.Always:
+			nc.Always++
+		case c.OneRecordSet():
+			nc.RecordSets++
+		}
+	}
+	if err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM excluded_dirs`).Scan(&nc.Dirs); err != nil {
+		return nil, nc, fmt.Errorf("read excluded directories: %w", err)
+	}
+	return groups, nc, nil
 }
 
 // LinkRow is one present symlink.

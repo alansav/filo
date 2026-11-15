@@ -5,9 +5,11 @@ import (
 	"encoding/csv"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
+	"github.com/alansav/filo/internal/duplicates"
 	"github.com/alansav/filo/internal/fsid"
 	"github.com/alansav/filo/internal/store"
 )
@@ -30,11 +32,11 @@ func readRows(t *testing.T, path string) []map[string]string {
 	return out
 }
 
-// setDelete returns a CSV edit that sets the delete cell of the rows whose absolute path is a key.
-func setDelete(values map[string]string) func(map[string]string) {
+// setAction returns a CSV edit that sets the action cell of the rows whose absolute path is a key.
+func setAction(values map[string]string) func(map[string]string) {
 	return func(row map[string]string) {
 		if v, ok := values[row["directory"]+"/"+row["name"]]; ok {
-			row["delete"] = v
+			row["action"] = v
 		}
 	}
 }
@@ -66,7 +68,7 @@ func TestUpdateRefusesDuplicatesCSV(t *testing.T) {
 	ct.filo(ExitOK, "", false, "roots", "add", ct.root)
 	dcsv := filepath.Join(ct.work, "d.csv")
 	ct.filo(ExitOK, "", false, "export", "duplicates", "-o", dcsv)
-	editCSV(t, dcsv, setDelete(map[string]string{ct.in("a/contract.pdf"): "N", ct.in("b/contract.pdf"): "Y"}))
+	editCSV(t, dcsv, setAction(map[string]string{ct.in("a/contract.pdf"): "keep", ct.in("b/contract.pdf"): "delete"}))
 	r := ct.filo(ExitError, "", false, "update", dcsv)
 	if want := "filo: " + dcsv + " is a duplicates CSV: filo update records retentions only; carry it out with " +
 		"filo delete " + dcsv + "\n"; r.stderr != want || r.stdout != "" {
@@ -139,5 +141,72 @@ func TestDistinctOnDiskRecords(t *testing.T) {
 				t.Errorf("copies = %d, want 2 (c merged into a)", len(got[0].Copies))
 			}
 		})
+	}
+}
+
+// TestDuplicatesCSVRoundTrip: a CSV exported by filo export duplicates, edited, read and planned against the groups
+// the register recorded for that export (what filo delete FILE will start from): each group's decision as written,
+// a sorted CSV included.
+func TestDuplicatesCSVRoundTrip(t *testing.T) {
+	ct := newCLITest(t)
+	for _, rel := range []string{"a/contract.pdf", "b/contract.pdf", "c/contract.pdf"} {
+		ct.write(rel, "contract")
+	}
+	for _, rel := range []string{"a/LICENSE", "b/LICENSE"} {
+		ct.write(rel, "MIT")
+	}
+	ct.write("a/notes.txt", "notes")
+	ct.write("b/notes.txt", "notes")
+	ct.filo(ExitOK, "", false, "roots", "add", ct.root)
+	dcsv := filepath.Join(ct.work, "d.csv")
+	ct.filo(ExitOK, "", false, "export", "duplicates", "-o", dcsv)
+	editCSV(t, dcsv, setAction(map[string]string{
+		ct.in("a/contract.pdf"): "keep", ct.in("b/contract.pdf"): "delete", ct.in("c/contract.pdf"): "d",
+		ct.in("a/LICENSE"): "always", ct.in("b/LICENSE"): "A",
+		// notes.txt left blank: not decided
+	}))
+
+	data, err := os.ReadFile(dcsv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := duplicates.ReadCSV(bytes.NewReader(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := store.Open(ct.ctx, store.Options{DBPath: ct.db})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	exported, err := s.ExportedGroups(ct.ctx, []int64{1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plans, problems := duplicates.Plan(parsed, exported)
+	if len(problems) > 0 {
+		t.Fatalf("problems: %+v", problems)
+	}
+	// Groups are numbered in order of their first path: LICENSE (a/LICENSE), contract.pdf, notes.txt.
+	byName := map[string]duplicates.GroupPlan{}
+	names := map[int64]string{}
+	for _, r := range readRows(t, dcsv) {
+		g, _ := strconv.ParseInt(r["group"], 10, 64)
+		names[g] = r["name"]
+	}
+	for _, p := range plans {
+		byName[names[p.Key.Group]] = p
+	}
+	if p := byName["contract.pdf"]; p.Status != duplicates.Decided || len(p.Keep) != 1 || len(p.Delete) != 2 {
+		t.Errorf("contract.pdf: %+v, want decided, keeping 1 and deleting 2", p)
+	}
+	if p := byName["LICENSE"]; p.Status != duplicates.Decided || !p.Always {
+		t.Errorf("LICENSE: %+v, want decided always", p)
+	}
+	if p := byName["notes.txt"]; p.Status != duplicates.NotDecided {
+		t.Errorf("notes.txt: %+v, want not decided", p)
+	}
+	if len(plans) != 3 {
+		t.Errorf("%d groups planned, want 3", len(plans))
 	}
 }

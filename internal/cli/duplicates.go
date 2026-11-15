@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"slices"
 	"time"
 
 	"github.com/alansav/filo/internal/dispose"
@@ -21,7 +22,7 @@ func (e *env) exportDuplicates(ctx context.Context, s *store.Store, f store.Filt
 		return err
 	}
 	groups = distinctOnDisk(groups)
-	// docs/design.md, Terminal output, Export. The duplicates redesign rewords it and keeps the shape.
+	// docs/design.md, Terminal output, Export, in the words of Duplicates, Output.
 	v := e.view
 	if len(groups) == 0 {
 		v.Heading("Duplicates export", where, "no groups")
@@ -30,21 +31,41 @@ func (e *env) exportDuplicates(ctx context.Context, s *store.Store, f store.Filt
 	}
 	id, err := writeExport(csvPath, func(write func(int64) error) (int64, error) {
 		return s.RecordDuplicatesExport(ctx, csvPath, now(), groups, write)
-	}, func(w io.Writer, id int64) error { return duplicates.WriteCSV(w, id, groups, "", time.Local) })
+	}, func(w io.Writer, id int64) error { return duplicates.WriteCSV(w, id, groups, time.Local) })
 	if err != nil {
 		return err
 	}
-	var copies int64
+	nc, err := s.NotCounted(ctx)
+	if err != nil {
+		return err
+	}
+	var copies, keepFilled int64
 	for _, g := range groups {
 		copies += int64(len(g.Copies))
+		if slices.ContainsFunc(g.Copies, func(c store.DupCopy) bool { return c.RecordSet != 0 }) {
+			keepFilled++
+		}
 	}
 	v.Heading("Duplicates export", where, fmt.Sprintf("export %d", id),
 		report.Plural(int64(len(groups)), "group", "groups"), report.Plural(copies, "copy", "copies"))
 	v.Blank()
-	v.Count(view.Neutral, "in each group you decide on: Y under delete for the copies to delete, N for those to keep")
-	v.Count(view.Neutral, "two or more N: identical copies meant to exist, no longer listed as duplicates")
+	// docs/design.md, Duplicates, Output.
+	v.Count(view.Neutral, "in each group: keep for the copy to keep, delete for the rest; always on every row if the "+
+		"content belongs everywhere")
+	v.Count(view.Neutral, "keep on two or more copies: they are records, each kept with its own retention")
+	if keepFilled > 0 {
+		v.Count(view.Neutral, report.Plural(keepFilled, "group has", "groups have")+" keep filled in: a new copy of a "+
+			"set of records; delete it, or keep it to join the set")
+	}
+	if line := report.NotCountedLine(nc); line != "" {
+		v.Count(view.Neutral, line)
+	}
+	if nc.Dirs == 0 { // once a folder is excluded, the feature is known
+		v.Count(view.Neutral, "folders that are copies on purpose (backups) can be left out entirely: filo duplicates "+
+			"exclude DIR")
+	}
 	v.Blank()
-	v.Next("Next: filo update " + shellQuote(csvPath))
+	v.Next("Next: edit the action column, then filo delete " + shellQuote(csvPath))
 	return nil
 }
 

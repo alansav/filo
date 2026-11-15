@@ -475,8 +475,9 @@ rules, the listing before the question and the check at the moment of deleting b
 
 **Being built** (on branch `duplicates-redesign`, see section 5). Slice 1, the register, is done: schema 8, the
 group definition below, the report's "not counted" line; the first design's `filo update` of a duplicates CSV, its
-marks in `filo delete` and `--separate` are gone. Until slices 2 and 3 land, a duplicates CSV can be exported (still
-with the first design's `delete` column) but not carried out. See "The first design, and why it changed" at the end
+marks in `filo delete` and `--separate` are gone. Slice 2, the CSV, is done: the `action` column, `keep` filled in
+for records, and reading it into a plan per group (`duplicates.Plan`). Until slice 3 lands, a duplicates CSV can be
+exported and edited but not carried out. See "The first design, and why it changed" at the end
 of this section.
 
 - **The principle** (2026-11-16). The duplicates process decides which copy to keep, never whether the content goes.
@@ -1468,7 +1469,26 @@ put first on 2026-11-15). Each is an open question below until it is designed.
    once, nothing deleted). The tests of the first design's flow went with it; their scenarios return in slices 2
    and 3, the bind-mounted copy in the check at the moment of deleting among them. Reviewed the same day: a copy is a record if any of
    its paths is (hard links held as two file rows, and bind-mounted paths merged by the export, which then decides
-   again which contents are groups), and "not counted" counts only what would otherwise be a group. The output of `filo duplicates`, `exclude`,
+   again which contents are groups), and "not counted" counts only what would otherwise be a group. Slice 2 done on
+   2026-11-15: `duplicates.ReadCSV` refuses a CSV of the first design, a retention CSV and one without an action
+   column; `duplicates.Plan` applies the group rules and the structure checks to the rows, against the groups the
+   register recorded for each export (`store.ExportedGroups`), and notes each group's exported copies with no row in
+   the CSV for slice 3's check against the disk (C1). Tests: `TestParseAction`, `TestPlanGroupRules` (every row of
+   the rules table, C3), `TestPlanStructure` (C2, C5, C1), `TestWriteCSV` (F3), `TestReadCSVRefusesOtherCSVs`, and
+   `TestDuplicatesCSVRoundTrip` from export to plan; the export's words as agreed (Duplicates, Output). A CSV may
+   hold groups of several exports, each row checked against its own (agreed 2026-11-15); and it may be partial: groups
+   deleted from it are not planned and blank ones are left alone, so a CSV can be worked through and run several
+   times.
+   **To resume (2026-11-15):** slice 2 is built but not yet reviewed: review it first. Then slice 3, `filo delete
+   FILE.csv`, in the order of its steps under Duplicates (read and plan with `duplicates.ReadCSV` / `Plan` and
+   `store.ExportedGroups`; check each decided group against the disk, C1 through each plan's `Missing`; the
+   retention rule with `store.LastsAtLeast`; the kept-copy check at the moment of deleting with
+   `dispose.CheckKept`, `dispose.SameFile` and `Disposer.DeleteDuplicate`; store the records and always as each
+   group is reached, which needs their store writes; the output as in the Terminal output mockups "Will delete /
+   Will record / Won't touch"). The first design's CLI half of the kept-copy check (`findKept`) and its group loop
+   in `filo delete` were removed in slice 1 and are in git at commit 0bf2240 (`internal/cli/duplicates.go`,
+   `internal/cli/delete.go`) to work from. Write the scenario tests first: A1-A2, B1-B3, C1, C4, D1-D4, E1-E4, and
+   the bind-mounted copy. Do not run the branch's build on the real register before slice 3 is done. The output of `filo duplicates`, `exclude`,
    `include` and the export's new words agreed the same day (see Duplicates, Output).
 3. Named retention policies.
 4. Folder rules (default retention policies on directories).

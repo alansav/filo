@@ -250,6 +250,32 @@ func (s *Store) RecordDuplicatesExport(ctx context.Context, path string, now tim
 	}, write)
 }
 
+// ExportedGroups returns, for each of the given exports that is a duplicates export, each file's group as exported:
+// what a duplicates CSV's rows are checked against. An export that is not one (a retention export, the first design's
+// separate export, or no export of this register) is left out.
+func (s *Store) ExportedGroups(ctx context.Context, exportIDs []int64) (map[int64]map[int64]int64, error) {
+	out := map[int64]map[int64]int64{}
+	for _, id := range exportIDs {
+		rows, err := queryAll(ctx, s.db, func(rows *sql.Rows) ([2]int64, error) {
+			var r [2]int64
+			err := rows.Scan(&r[0], &r[1])
+			return r, err
+		}, `SELECT er.file_id, er.dup_group FROM export_rows er JOIN exports e ON e.id = er.export_id
+			WHERE er.export_id = ? AND e.kind = ? AND er.dup_group IS NOT NULL`, id, ExportDuplicates)
+		if err != nil {
+			return nil, fmt.Errorf("read export %d: %w", id, err)
+		}
+		if len(rows) == 0 {
+			continue
+		}
+		out[id] = map[int64]int64{}
+		for _, r := range rows {
+			out[id][r[0]] = r[1]
+		}
+	}
+	return out, nil
+}
+
 // LastsAtLeast reports whether a copy kept until kept (YYYY-MM-DD, Forever or "" for no retention) lasts at least as
 // long as one kept until other, so other can go without a decision being lost. No retention lasts no time.
 func LastsAtLeast(kept, other string) bool {
