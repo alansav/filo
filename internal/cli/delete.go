@@ -75,7 +75,7 @@ func (e *env) delete(ctx context.Context, dbBefore string, args []string) error 
 	}
 	// Ask only if both the question can be seen (stdout) and answered (stdin): with stdout in a file, the list and the
 	// question would go there while filo waited on the keyboard.
-	asking := !*yes && canAsk(e.stdin) && r.Terminal()
+	asking := !*yes && e.canPrompt()
 	// The full list unless a question follows: with -y, or with no terminal to ask in, the output is the record.
 	max := 0
 	if asking {
@@ -99,54 +99,34 @@ func (e *env) delete(ctx context.Context, dbBefore string, args []string) error 
 			{Key: "n", Word: "none"}}
 		question := fmt.Sprintf("Delete all %s, select one by one, list them all, or none?", report.Count(int64(total)))
 		yesNo := []view.Choice{{Key: "y", Word: "yes"}, {Key: "n", Word: "no"}}
-		// confirm shows everything before a cut list's all is carried out, and asks again: everything deleted is on
-		// screen right before the last question (docs/design.md, Terminal output).
-		confirm := func() (bool, error) {
-			r.Blank()
-			list.draw(r, 0)
-			for {
-				ans, ok, err := pr.ask(ctx, func() {
-					r.Ask(fmt.Sprintf("Delete these %s?", report.Plural(int64(total), "file", "files")), yesNo, "n")
-				})
-				if err != nil || !ok {
-					return false, err
-				}
-				k, known := view.Pick(ans, yesNo, "n")
-				if known {
-					return k == "y", nil
-				}
-				r.Again(yesNo)
-			}
-		}
 	ask:
 		for {
-			ans, ok, err := pr.ask(ctx, func() { r.Ask(question, choices, "n") })
+			key, err := e.askChoice(ctx, pr, question, choices, "n")
 			if err != nil {
 				return interrupted(err)
 			}
-			if !ok {
-				ans = ""
-			}
-			key, known := view.Pick(ans, choices, "n")
-			switch {
-			case !known:
-				r.Again(choices)
-			case key == "a" && cut:
-				sure, err := confirm()
+			switch key {
+			case "a":
+				if !cut {
+					break ask
+				}
+				// Everything deleted is on screen right before the last question (docs/design.md, Terminal output).
+				r.Blank()
+				list.draw(r, 0)
+				sure, err := e.askChoice(ctx, pr, fmt.Sprintf("Delete these %s?", report.Plural(int64(total), "file",
+					"files")), yesNo, "n")
 				if err != nil {
 					return interrupted(err)
 				}
-				if !sure {
+				if sure != "y" {
 					r.Next("Nothing deleted.")
 					return nil
 				}
 				break ask
-			case key == "a":
-				break ask
-			case key == "s":
+			case "s":
 				selecting = true
 				break ask
-			case key == "l":
+			case "l":
 				r.Blank()
 				cut = list.draw(r, 0)
 			default:

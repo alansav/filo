@@ -1,0 +1,16 @@
+Retention update   r2.csv . export 2 . 4 rows . <root>
+
+[!] 2 rows have a blank retention where one is stored. Recording clears it:
+    retention   until
+    7d          2023-01-08   receipts/2023-01-01 coffee.pdf
+    forever     forever      tax/2020 return.pdf
+
+Clear these 2 retentions? The other rows are recorded either way. [y/N/l] 
+    retention   until
+    7d          2023-01-08   receipts/2023-01-01 coffee.pdf
+    forever     forever      tax/2020 return.pdf
+
+Clear these 2 retentions? The other rows are recorded either way. [y/N/l] 
+  [ok] 2 retentions cleared
+  - 2 rows unchanged
+

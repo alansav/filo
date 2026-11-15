@@ -49,7 +49,7 @@ func (r *Renderer) Problems(title string, m Mark, ps []Problem) {
 				}
 			}
 			where := "lines " + strconv.Itoa(lo) + "-" + strconv.Itoa(hi) + "   " + strconv.Itoa(n) + " rows"
-			r.write(spaces(2), r.mark(m), plain(" "+where+"   "+p.Reason))
+			r.write(spaces(2), r.mark(m), plain(" "+where+"   "+r.shorten(p.Reason)))
 			continue
 		}
 		pm := m
@@ -74,7 +74,7 @@ func (r *Renderer) Problems(title string, m Mark, ps []Problem) {
 		if p.Root != "" || p.Rel != "" {
 			spans = append(spans, name(r.Path(p.Root, p.Rel)), plain(": "))
 		}
-		spans = append(spans, plain(p.Reason))
+		spans = append(spans, plain(r.shorten(p.Reason)))
 		r.write(spans...)
 	}
 }

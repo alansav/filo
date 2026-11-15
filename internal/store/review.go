@@ -254,6 +254,8 @@ type Refusal struct {
 	FileID int64
 	Path   string // absolute, "" if the file has no current path
 	Reason string
+	Group  int64 // a duplicates group refused whole: its group in the CSV, 0 otherwise
+	Export int64 // and the export the group is in
 }
 
 // Clear is a row whose blank retention would clear a stored one.

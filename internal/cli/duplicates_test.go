@@ -110,27 +110,31 @@ func TestDuplicatesRoundTrip(t *testing.T) {
 
 	// Without a terminal nothing is recorded; the refusals are listed.
 	r = filo(ExitError, "", false, "update", dcsv)
-	contains("no terminal", r.stderr, "every copy is marked Y, which would leave none",
-		in("b/doc")+" is kept until forever, longer than every copy marked N",
-		"every copy of a decided group needs Y or N (1 is blank or missing)", "1 other hard link",
-		"frees nothing")
-	contains("no terminal", r.stdout, "1 content to be marked separate", in("a/LICENSE"),
+	contains("no terminal", r.stdout, "Duplicates update   d.csv . export 2 . 7 groups . "+root,
+		"Refused: nothing in these groups is recorded",
+		"[refused] group 5   line 11   a/x: every copy is marked Y, which would leave none",
+		"[refused] group 3   line 7    a/doc: b/doc is kept until forever, longer than every copy marked N",
+		"every copy of a decided group needs Y or N (1 is blank or missing)", "1 other hard link", "frees nothing",
+		"[kept] 1 content to be marked separate", "    a/LICENSE",
 		"Nothing recorded (there is no terminal to ask in", "1 group left alone")
-	lacks("no terminal", r.stderr, "contract.pdf")
+	lacks("no terminal", r.stdout, "contract.pdf:")
+	if r.stderr != "" {
+		t.Errorf("update wrote to stderr: %q", r.stderr)
+	}
 	contains("nothing marked", filo(ExitOK, "", false, "delete").stdout, "No files are past their retention.")
 
 	// A dry run says what would happen; declining records nothing.
 	r = filo(ExitError, "", false, "update", "--dry-run", dcsv)
-	contains("dry run", r.stdout, "Dry run: nothing was written.",
-		"Would record: 2 copies to delete in 1 group, 1 content marked separate.", "would ask before recording")
+	contains("dry run", r.stdout, "Duplicates update (dry run)", "[ok] 2 copies would be marked for deletion in 1 "+
+		"group", "[kept] 1 content would be marked separate", "Dry run: nothing was written.", "would ask before recording")
 	r = filo(ExitError, "n\n", true, "update", dcsv)
 	contains("declined", r.stdout, "Record these decisions (2 copies to delete in 1 group, 1 content marked "+
-		"separate)? [y/n]", "Nothing recorded (not confirmed)")
+		"separate)? [y/N/l]", "Nothing recorded (not confirmed)")
 
 	// Confirmed: the groups that passed are recorded; nothing is deleted.
 	r = filo(ExitError, "y\n", true, "update", dcsv)
-	contains("confirmed", r.stdout, "Recorded: 2 copies to delete in 1 group, 1 content marked separate.",
-		"Nothing has been deleted. Run filo delete")
+	contains("confirmed", r.stdout, "[ok] 2 copies marked for deletion in 1 group", "[kept] 1 content marked separate",
+		"Nothing has been deleted. Next: filo delete (2 copies to review)")
 	for _, rel := range []string{"b/contract.pdf", "c/contract.pdf", "a/x", "c/x", "b/doc"} {
 		if !exists(rel) {
 			t.Errorf("update deleted %s", rel)
@@ -154,7 +158,7 @@ func TestDuplicatesRoundTrip(t *testing.T) {
 		}
 	})
 	r = filo(ExitError, "n\n", true, "update", d2)
-	contains("wrong group", r.stderr, "not 1 (a sorted or pasted row?)", "is in the wrong group")
+	contains("wrong group", r.stdout, "not 1 (a sorted or pasted row?)", "is in the wrong group")
 
 	// filo delete lists the group with its kept copy; without a terminal it deletes nothing.
 	r = filo(ExitOK, "", false, "delete")
@@ -168,7 +172,7 @@ func TestDuplicatesRoundTrip(t *testing.T) {
 	}
 	r = filo(ExitOK, "", false, "delete", "-y")
 	contains("kept copy gone", r.stdout, "Done   deleted 0 files", "no other copy could be checked, so it is not deleted",
-		in("a/contract.pdf")+": no longer at this path")
+		"a/contract.pdf: no longer at this path")
 	if !exists("b/contract.pdf") || !exists("c/contract.pdf") {
 		t.Fatal("a copy was deleted while the kept copy was gone")
 	}
@@ -198,7 +202,7 @@ func TestDuplicatesRoundTrip(t *testing.T) {
 	}
 	editCSV(t, scsv, func(row map[string]string) { row["delete"] = "" })
 	r = filo(ExitOK, "", false, "update", scsv)
-	contains("undo", r.stdout, "Recorded: 1 content no longer separate.")
+	contains("undo", r.stdout, "  - 1 content no longer separate")
 	d3 := filepath.Join(work, "d3.csv")
 	filo(ExitOK, "", false, "export", "duplicates", "-o", d3)
 	if !strings.Contains(string(mustRead(t, d3)), "LICENSE") {
@@ -211,13 +215,14 @@ func TestDuplicatesRoundTrip(t *testing.T) {
 	s2 := filepath.Join(work, "s2.csv")
 	filo(ExitOK, "", false, "export", "duplicates", "--separate", "-o", s2)
 	editCSV(t, s2, setDelete(map[string]string{in("b/LICENSE"): "Y"}))
-	contains("Y in separate", filo(ExitError, "n\n", true, "update", s2).stderr, "a Y in an export of separate contents")
+	contains("Y in separate", filo(ExitError, "n\n", true, "update", s2).stdout, "a Y in an export of separate contents")
 	bad := filepath.Join(work, "bad.csv")
 	row := readRows(t, d3)[0]
 	if err := os.WriteFile(bad, []byte("id,export,retention\n"+row["id"]+","+row["export"]+",7y\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	contains("retention row", filo(ExitError, "", false, "update", bad).stderr, "is a duplicates export, not a retention export")
+	contains("retention row", filo(ExitError, "", false, "update", bad).stdout,
+		"is a duplicates export, not a retention export")
 }
 
 // TestDeleteListsMarkedCopies: a marked copy also past its retention is listed once, under retention; a symlink to a
@@ -310,8 +315,8 @@ func TestDuplicatesNeverLastCopy(t *testing.T) {
 		t.Errorf("the list does not say the kept copy will not count:\n%s", out)
 	}
 	r := filo(ExitOK, "delete", "-y")
-	for _, want := range []string{in("a/k") + ": past its own retention, so this run may delete it too",
-		in("a/m") + ": the same file as " + in("b/m") + " (a hard link or a bind mount)"} {
+	for _, want := range []string{"a/k: past its own retention, so this run may delete it too",
+		"a/m: the same file as b/m (a hard link or a bind mount)"} {
 		if !strings.Contains(r.stdout, want) {
 			t.Errorf("delete lacks %q:\n%s", want, r.stdout)
 		}
@@ -346,7 +351,7 @@ func TestUpdateRetentionWithGroupColumn(t *testing.T) {
 		t.Fatal(err)
 	}
 	ct.contains("update of a retention CSV with a group column", ct.filo(ExitOK, "", false, "update", rcsv).stdout,
-		"Updated 1 file")
+		"Retention update", "1 file given a retention")
 }
 
 // TestDuplicateSelectResults: select mode does not predict a duplicate copy's fate; once its group is done, each copy
@@ -386,7 +391,7 @@ func TestDuplicateSelectResults(t *testing.T) {
 	}
 	// Skip t's copies, choose y/c: its kept copy has a shorter retention, so it is not deleted, and the screen says so.
 	r = filo(ExitOK, "s\ns\ns\nd\n", true, "delete")
-	ct.contains("shorter retention", r.stdout, "not deleted y/c: the copy kept, "+in("x/c")+", has a shorter retention")
+	ct.contains("shorter retention", r.stdout, "not deleted y/c: the copy kept, x/c, has a shorter retention")
 	ct.lacks("shorter retention", r.stdout, "deleted y/c\n")
 	if !ct.exists("y/c") {
 		t.Fatal("y/c was deleted though its kept copy has a shorter retention")

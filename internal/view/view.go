@@ -61,6 +61,7 @@ const (
 	Refused               // ✗ refused or failed
 	Attention             // ! needs attention
 	Neutral               // · for information
+	Kept                  // ◆ kept on purpose (contents marked separate)
 )
 
 // marks: rich symbol, its colour, and the plain marker.
@@ -71,16 +72,18 @@ var marks = map[Mark]struct {
 	Refused:   {"✗", red, "[refused]"},
 	Attention: {"!", yellow, "[!]"},
 	Neutral:   {"·", dim, "-"},
+	Kept:      {"◆", magenta, "[kept]"},
 }
 
 // ANSI styles.
 const (
-	reset  = "\x1b[0m"
-	bold   = "\x1b[1m"
-	dim    = "\x1b[2m"
-	red    = "\x1b[31m"
-	green  = "\x1b[32m"
-	yellow = "\x1b[33m"
+	reset   = "\x1b[0m"
+	bold    = "\x1b[1m"
+	dim     = "\x1b[2m"
+	red     = "\x1b[31m"
+	green   = "\x1b[32m"
+	yellow  = "\x1b[33m"
+	magenta = "\x1b[35m"
 )
 
 // span is a piece of a line with its style ("" = plain), its text escaped once, when it is made, with the columns
@@ -198,6 +201,15 @@ func join(root, rel string) string {
 		return root
 	}
 	return filepath.Join(root, filepath.FromSlash(rel))
+}
+
+// shorten shows filo's own message text with the heading's root left out of the paths in it, as the paths in the
+// columns are: "/home/u/Documents/b/doc is kept until …" becomes "b/doc is kept until …".
+func (r *Renderer) shorten(text string) string {
+	if r.root == "" {
+		return text
+	}
+	return strings.ReplaceAll(text, r.root+string(filepath.Separator), "")
 }
 
 // Blank writes an empty line.

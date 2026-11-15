@@ -36,7 +36,7 @@ func (r *Renderer) ItemPath(word, root, rel, note string) {
 func (r *Renderer) ResultFile(m Mark, what, root, rel, reason string) {
 	spans := []span{spaces(8), r.mark(m), plain(" " + what + " "), name(r.Path(root, rel))}
 	if reason != "" {
-		spans = append(spans, plain(": "+reason))
+		spans = append(spans, plain(": "+r.shorten(reason)))
 	}
 	r.write(spans...)
 }

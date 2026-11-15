@@ -131,34 +131,40 @@ func TestRetentionRoundTrip(t *testing.T) {
 	editCSV(t, r1, setRetention(map[string]string{"a.txt": "2027-01-01", "2023-03 invoice.pdf": "3y",
 		"c.txt": "2027-02-29", "🏖️ beach.jpg": "Forever"}))
 	r := filo(ExitError, "", false, "update", r1, "--dry-run")
-	contains("dry run", r.stdout, "Dry run: nothing was written.", "Would update 3 files",
-		"1 file would be past their retention")
+	contains("dry run", r.stdout, "Retention update (dry run)   r1.csv . export 1 . 4 rows . "+root,
+		"Dry run: nothing was written.", "3 files would be given a retention", "1 file would be past its retention")
 	wantDates("after a dry run", map[string]string{"a.txt": " undated"})
 	r = filo(ExitError, "", false, "update", r1)
-	contains("update", r.stdout, "Updated 3 files, cleared 0 retentions.",
-		"1 file is past their retention (check for a typo, such as 7d for 7y); see filo delete:",
-		"  3y (until 2026-03-31)  "+in("docs/2023-03 invoice.pdf"), "1 row refused")
-	contains("update", r.stderr, `r1.csv line 4: retention "2027-02-29" is not a retention`)
+	contains("update", r.stdout, "[ok] 3 files given a retention",
+		"[!] 1 file is now past its retention. Check for a typo, such as 7d for 7y:",
+		"    retention   until", "    3y          2026-03-31   docs/2023-03 invoice.pdf", "[refused] 1 row refused",
+		"Refused: fix these rows in the CSV and run filo update again",
+		`[refused] line 4    retention "2027-02-29" is not a retention`, "Nothing has been deleted. Next: filo delete")
+	if r.stderr != "" {
+		t.Errorf("update wrote to stderr: %q", r.stderr)
+	}
 	wantDates("after update", map[string]string{"a.txt": "2027-01-01 kept",
 		"docs/2023-03 invoice.pdf": "2026-03-31 expired", "docs/c.txt": " undated",
 		"📷 Pictures/🏖️ beach.jpg": "forever forever"})
 
 	// The same CSV again changes nothing. Editing it again replaces what it set; a period on a file without a
 	// file_date is refused; typing in keep_until is refused.
-	contains("update again", filo(ExitError, "", false, "update", r1).stdout, "Updated 0 files")
+	contains("update again", filo(ExitError, "", false, "update", r1).stdout, "3 rows unchanged")
 	editCSV(t, r1, setRetention(map[string]string{"2023-03 invoice.pdf": "", "c.txt": "7y"}))
 	editCSV(t, r1, setCells("file_date", map[string]string{"2023-03 invoice.pdf": ""}))
 	editCSV(t, r1, setCells("keep_until", map[string]string{"a.txt": "2030-01-01"}))
 	r = filo(ExitError, "", false, "update", r1)
-	contains("re-edited", r.stderr, in("docs/c.txt")+": retention 7y needs a file_date",
-		in("a.txt")+`: keep_until was changed to "2030-01-01", but filo works it out; change retention instead`)
-	contains("re-edited, no terminal", r.stdout, "Left 1 retention whose cell is blank (there is no terminal")
+	contains("re-edited", r.stdout, "docs/c.txt: retention 7y needs a file_date",
+		`a.txt: keep_until was changed to "2030-01-01", but filo works it out; change retention instead`)
+	contains("re-edited, no terminal", r.stdout, "[!] 1 retention left as it was, though the cell is blank (there "+
+		"is no terminal")
 	editCSV(t, r1, setCells("keep_until", map[string]string{"a.txt": ""}))
 	editCSV(t, r1, setCells("file_date", map[string]string{"c.txt": "2026-01-15"}))
 	r = filo(ExitOK, "y\n", true, "update", r1)
-	contains("re-edited, confirmed", r.stdout, "1 file has a retention but a blank cell",
-		"3y (until 2026-03-31)  "+in("docs/2023-03 invoice.pdf"), "Clear the retention of 1 file? [y/n]",
-		"Updated 1 file, cleared 1 retention.")
+	contains("re-edited, confirmed", r.stdout, "[!] 1 row has a blank retention where one is stored. Recording "+
+		"clears it:", "    3y          2026-03-31   docs/2023-03 invoice.pdf",
+		"Clear this retention? The other rows are recorded either way. [y/N/l]", "[ok] 1 file given a retention",
+		"[ok] 1 retention cleared")
 	wantDates("re-edited", map[string]string{"docs/c.txt": "2033-01-15 kept", "docs/2023-03 invoice.pdf": " undated"})
 
 	// A day later, the re-export shows what was set, with keep_until worked out.
@@ -179,8 +185,8 @@ func TestRetentionRoundTrip(t *testing.T) {
 
 	// An older export cannot overwrite a retention changed from a later one.
 	editCSV(t, r1, setRetention(map[string]string{"a.txt": "2029-01-01"}))
-	contains("stale", filo(ExitError, "", false, "update", r1).stderr,
-		in("a.txt")+": its retention was changed after export 1; export again")
+	contains("stale", filo(ExitError, "", false, "update", r1).stdout,
+		"a.txt: its retention was changed after export 1; export again")
 
 	// A file changed since the export is refused; once past its retention, a changed file needs a new one.
 	r3 := filepath.Join(work, "r3.csv")
@@ -189,8 +195,8 @@ func TestRetentionRoundTrip(t *testing.T) {
 	write("docs/2023-03 invoice.pdf", "changed too")
 	filo(ExitOK, "", false, "scan")
 	editCSV(t, r3, setRetention(map[string]string{"c.txt": "2027-06-30"}))
-	contains("changed", filo(ExitError, "", false, "update", r3).stderr,
-		in("docs/c.txt")+": changed since export 3; export again to set its retention")
+	contains("changed", filo(ExitError, "", false, "update", r3).stdout,
+		"docs/c.txt: changed since export 3; export again to set its retention")
 	wantDates("changed", map[string]string{"docs/2023-03 invoice.pdf": "2026-11-10 changed"})
 	contains("delete after a change", filo(ExitOK, "", false, "delete").stdout, "No files are past their retention.")
 
@@ -198,7 +204,8 @@ func TestRetentionRoundTrip(t *testing.T) {
 	if err := os.WriteFile(r3, append(mustRead(t, r3), []byte("9999,3,/x,y,1,m,,2027-01-01,\n")...), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	contains("added row", filo(ExitError, "", false, "update", r3).stderr, "file 9999 is not in export 3 (rows cannot be added)")
+	contains("added row", filo(ExitError, "", false, "update", r3).stdout,
+		"file 9999 is not in export 3 (rows cannot be added)")
 }
 
 func mustRead(t *testing.T, path string) []byte {
@@ -221,4 +228,45 @@ func TestUpdateNotARetentionCSV(t *testing.T) {
 	if r.code != ExitError || !strings.Contains(r.stderr, "from an older filo; export again with: filo export retention") {
 		t.Errorf("code %d\n%s", r.code, r.stderr)
 	}
+}
+
+// TestUpdateGolden: filo update's whole plain output for the designed scenarios (docs/design.md, Terminal output):
+// a retention update with refusals and the typo warning, a dry run, a clear confirmed after listing with l, and a
+// duplicates update with refusals and a separate content, confirmed.
+func TestUpdateGolden(t *testing.T) {
+	ct := newCLITest(t)
+	setNow(t, time.Date(2026, 11, 14, 12, 0, 0, 0, time.Local))
+	work, root, filo := ct.work, ct.root, ct.filo
+	ct.write("receipts/2023-01-01 coffee.pdf", "coffee")
+	ct.write("invoices/2019-03.pdf", "invoice")
+	ct.write("notes/old draft.txt", "draft")
+	ct.write("tax/2020 return.pdf", "tax")
+	filo(ExitOK, "", false, "roots", "add", root)
+	rcsv := filepath.Join(work, "r.csv")
+	filo(ExitOK, "", false, "export", "retention", "-o", rcsv)
+	editCSV(t, rcsv, setRetention(map[string]string{"2023-01-01 coffee.pdf": "7d", "2019-03.pdf": "2027-02-29",
+		"old draft.txt": "7y", "2020 return.pdf": "forever"}))
+	golden(t, "update-retention-dry.txt", root, filo(ExitError, "", false, "update", "--dry-run", rcsv).stdout)
+	golden(t, "update-retention.txt", root, filo(ExitError, "", false, "update", rcsv).stdout)
+	// A new export shows the stored retentions; blanking two clears them: listed, l lists them again in full, then
+	// yes.
+	r2 := filepath.Join(work, "r2.csv")
+	filo(ExitOK, "", false, "export", "retention", "-o", r2)
+	editCSV(t, r2, setRetention(map[string]string{"2020 return.pdf": "", "2023-01-01 coffee.pdf": ""}))
+	golden(t, "update-retention-clear.txt", root, filo(ExitOK, "l\ny\n", true, "update", r2).stdout)
+
+	for _, d := range []string{"a", "b", "c"} {
+		ct.write(d+"/contract.pdf", "contract")
+	}
+	ct.write("a/LICENSE", "MIT")
+	ct.write("b/LICENSE", "MIT")
+	ct.write("a/x", "x")
+	ct.write("b/x", "x")
+	filo(ExitOK, "", false, "scan")
+	dcsv := filepath.Join(work, "d.csv")
+	filo(ExitOK, "", false, "export", "duplicates", "-o", dcsv)
+	editCSV(t, dcsv, setDelete(map[string]string{ct.in("a/contract.pdf"): "N", ct.in("b/contract.pdf"): "Y",
+		ct.in("c/contract.pdf"): "Y", ct.in("a/LICENSE"): "N", ct.in("b/LICENSE"): "N", ct.in("a/x"): "Y",
+		ct.in("b/x"): "Y"}))
+	golden(t, "update-duplicates.txt", root, filo(ExitError, "y\n", true, "update", dcsv).stdout)
 }

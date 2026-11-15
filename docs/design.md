@@ -726,7 +726,10 @@ topic at a time from mockups; the mockups below are the reference.
     do"). Piped, with `-y`, or with no terminal to ask in: always the full list, since the output is then the record
     (and with no question, `l` could not be asked for).
   - *Needs fixing* (refusals, skips): every item; more than 10 with the same reason collapse into one line with the
-    count and the line range (a sorted CSV can refuse every row for one reason).
+    count and the line range (a sorted CSV can refuse every row for one reason). Skips that come from no CSV line are
+    always listed one by one. A refused duplicates group shows its number in a group column (and its export only
+    when the CSV mixes exports), and the paths inside a reason are shown relative to the heading's root, like the
+    columns.
   - *What a confirmation covers* (clears, contents always and sets of records, files now past their retention): the
     first 10 and "and N more", and the prompt offers `l` to list everything before answering (`[y/N/l]`).
 - **Width.** A path is never cut, not even with `…`: every path printed is about to be acted on or names something to
@@ -1052,7 +1055,9 @@ put first on 2026-11-15). Each is an open question below until it is designed.
 
 1. Terminal output (designed 2026-11-15, see Terminal output): `internal/view` and its components, then the
    commands one at a time (`delete`, `update`, `report`, `scan` and `roots`, `export` and help). `internal/view` and
-   `delete` done on 2026-11-16 (component tests in `internal/view`, golden files `internal/cli/testdata/delete-*.txt`). Done when each
+   `delete` done on 2026-11-16 (component tests in `internal/view`, golden files `internal/cli/testdata/delete-*.txt`);
+   `update`, retention and duplicates CSVs both, done on 2026-11-16 (golden files `testdata/update-*.txt`; every
+   question in `delete` and `update` goes through one helper, `askChoice`). Done when each
    command's mocked scenarios have golden tests of the plain output, and read as designed by hand in a terminal, a
    40-column terminal, piped through `cat` and with `NO_COLOR=1`. First, since the duplicates re-plan changes what
    `update` and `delete` print and can then use the components.

@@ -312,6 +312,16 @@ func (s *Store) UpdateDuplicates(ctx context.Context, rows []DupRow, rowsRefused
 		res.Refusals = append(res.Refusals, Refusal{Line: line, FileID: fileID, Path: p, Reason: reason})
 		return nil
 	}
+	// refuseGroup refuses a whole group: the refusal names the group (and its export) as fields, for the output to
+	// show in its group column.
+	refuseGroup := func(line int, fileID int64, k dupGroupKey, reason string) error {
+		if err := refuse(line, fileID, reason); err != nil {
+			return err
+		}
+		res.Refusals[len(res.Refusals)-1].Group = k.group
+		res.Refusals[len(res.Refusals)-1].Export = k.export
+		return nil
+	}
 
 	// The exports the rows name, and their rows.
 	type exportData struct {
@@ -447,7 +457,7 @@ func (s *Store) UpdateDuplicates(ctx context.Context, rows []DupRow, rowsRefused
 			}
 		}
 		groupRefusal := func(reason string) error {
-			return refuse(firstLine, files[0], fmt.Sprintf("group %d of export %d: %s", k.group, k.export, reason))
+			return refuseGroup(firstLine, files[0], k, reason)
 		}
 		if why := refused[k]; why != "" {
 			if err := groupRefusal(why); err != nil {

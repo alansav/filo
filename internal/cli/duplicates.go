@@ -13,6 +13,7 @@ import (
 	"github.com/alansav/filo/internal/duplicates"
 	"github.com/alansav/filo/internal/report"
 	"github.com/alansav/filo/internal/store"
+	"github.com/alansav/filo/internal/view"
 )
 
 // exportDuplicates writes the duplicate groups with a copy under the filter (or, with separate, the contents marked
@@ -107,56 +108,143 @@ func (e *env) updateDuplicates(ctx context.Context, db, path string, data []byte
 		return err
 	}
 	defer e.closeStore(s)
-
-	printed, asked := false, false
-	show := func(res store.DupResult) {
-		if printed {
-			return
-		}
-		printed = true
-		e.printDupRefusals(path, parsed, res)
-		e.printSeparate(res, dry)
-	}
-	confirm := func(res store.DupResult) bool {
-		show(res)
-		if !isTerminal(e.stdin) {
-			return false
-		}
-		asked = true
-		return e.askYesNo(fmt.Sprintf("Record these decisions (%s)? [y/n] ", dupSummary(res)))
-	}
-	res, err := s.UpdateDuplicates(ctx, parsed.Rows, len(parsed.Problems), now(), path, dry, confirm)
+	roots, err := registeredRoots(ctx, s)
 	if err != nil {
 		return err
 	}
-	show(res)
+	r := e.view
+	var exports []int64
+	groups := map[[2]int64]bool{}
+	for _, row := range parsed.Rows {
+		if !slices.Contains(exports, row.ExportID) {
+			exports = append(exports, row.ExportID)
+		}
+		groups[[2]int64{row.ExportID, row.Group}] = true
+	}
+	title := "Duplicates update"
+	if dry {
+		title += " (dry run)"
+	}
+	r.Heading(title, view.Where{Roots: roots}, csvFacts(path, exports,
+		report.Plural(int64(len(groups)), "group", "groups"))...)
+	r.Blank()
 
-	w := e.stdout
+	asking := e.canPrompt()
+	var pr *prompter
+	if asking {
+		pr = newPrompter(e.stdin)
+		pr.end = r.Blank
+		defer pr.close()
+	}
+	// show lists what needs a look before anything is recorded: the refusals, and the contents to be marked separate
+	// (a fill-down of N would mark every group). It is shown once, at the question or at the end.
+	shown, asked := false, false
+	refused := func(res store.DupResult) []view.Problem {
+		return refusalProblems(roots, parsed.Problems, res.Refusals)
+	}
+	separate := func(res store.DupResult, max int) {
+		rows := make([]view.FileRow, len(res.Separate))
+		for i, p := range res.Separate {
+			rows[i].Root, rows[i].Rel = splitRoot(roots, p)
+		}
+		r.Files(view.FileList{Rows: rows, Max: max, More: "contents", MoreOne: "content"})
+	}
+	show := func(res store.DupResult, max int) {
+		if ps := refused(res); len(ps) > 0 {
+			r.Problems("Refused: nothing in these groups is recorded", view.Refused, ps)
+			r.Blank()
+		}
+		if n := len(res.Separate); n > 0 {
+			verb := " to be marked separate"
+			if dry {
+				verb = " would be marked separate"
+			}
+			r.Note(view.Kept, report.Plural(int64(n), "content", "contents")+verb+" (identical copies meant to "+
+				"exist; no longer listed as duplicates):")
+			separate(res, max)
+			r.Blank()
+		}
+	}
+	confirm := func(res store.DupResult) bool {
+		show(res, r.Overview())
+		shown = true
+		if !asking {
+			return false
+		}
+		asked = true
+		question := fmt.Sprintf("Record these decisions (%s)?", dupSummary(res))
+		for {
+			key, err := e.askChoice(ctx, pr, question, yesNoList, "n")
+			if err != nil {
+				return false // a cancelled context also stops the update itself: nothing is recorded
+			}
+			r.Blank()
+			if key != "l" {
+				return key == "y"
+			}
+			show(res, 0)
+		}
+	}
+	res, err := s.UpdateDuplicates(ctx, parsed.Rows, len(parsed.Problems), now(), path, dry, confirm)
+	if err != nil {
+		return interruptedUpdate(err)
+	}
+	if !shown {
+		show(res, r.Overview())
+	}
+
+	nRefused := len(refused(res))
+	if !res.NotRecorded {
+		would := func(done, dryRun string) string {
+			if dry {
+				return dryRun
+			}
+			return done
+		}
+		if res.Marked > 0 {
+			r.Count(view.Done, report.Plural(int64(res.Marked), "copy", "copies")+would(" marked", " would be marked")+
+				" for deletion in "+report.Plural(int64(res.MarkedGroups), "group", "groups"))
+		}
+		if n := len(res.Separate); n > 0 {
+			r.Count(view.Kept, report.Plural(int64(n), "content", "contents")+would(" marked", " would be marked")+
+				" separate")
+		}
+		if n := len(res.NotSeparate); n > 0 {
+			r.Count(view.Neutral, report.Plural(int64(n), "content", "contents")+would(" no longer", " would no longer be")+
+				" separate")
+		}
+		if res.Unmarked > 0 {
+			r.Count(view.Neutral, report.Plural(int64(res.Unmarked), "mark", "marks")+would(" removed", " would be removed"))
+		}
+	}
+	if res.Undecided > 0 {
+		r.Count(view.Neutral, report.Plural(int64(res.Undecided), "group", "groups")+" left alone (no Y or N)")
+	}
+	if res.Appeared > 0 {
+		r.Count(view.Neutral, report.Plural(int64(res.Appeared), "copy", "copies")+" of these contents appeared since "+
+			"the export; they count as kept copies")
+	}
+	if nRefused > 0 {
+		r.Count(view.Refused, report.Plural(int64(nRefused), "row or group", "rows or groups")+" refused")
+	}
+	r.Blank()
 	switch {
 	case dry:
-		fmt.Fprintln(w, "Dry run: nothing was written.")
-		fmt.Fprintf(w, "Would record: %s.\n", dupSummary(res))
 		if res.NeedsConfirm() {
-			fmt.Fprintln(w, "filo update would ask before recording, because of what is listed above.")
+			r.Next("Dry run: nothing was written. filo update would ask before recording, because of what is listed " +
+				"above.")
+		} else {
+			r.Next("Dry run: nothing was written.")
 		}
 	case res.NotRecorded:
 		why := "not confirmed"
 		if !asked {
 			why = "there is no terminal to ask in; run filo update in a terminal"
 		}
-		fmt.Fprintf(w, "Nothing recorded (%s). Fix the CSV and run filo update again.\n", why)
-	default:
-		fmt.Fprintf(w, "Recorded: %s.\n", dupSummary(res))
-		if res.Marked > 0 {
-			fmt.Fprintln(w, "Nothing has been deleted. Run filo delete to review and delete the copies marked Y.")
-		}
-	}
-	if res.Appeared > 0 {
-		fmt.Fprintf(w, "%s of these contents appeared since the export; they count as kept copies.\n",
-			report.Plural(int64(res.Appeared), "copy", "copies"))
-	}
-	if res.Undecided > 0 {
-		fmt.Fprintf(w, "%s left alone (no Y or N).\n", report.Plural(int64(res.Undecided), "group", "groups"))
+		r.Next(fmt.Sprintf("Nothing recorded (%s). Fix the CSV and run filo update again.", why))
+	case res.Marked > 0:
+		r.Next(fmt.Sprintf("Nothing has been deleted. Next: filo delete (%s to review)",
+			report.Plural(int64(res.Marked), "copy", "copies")))
 	}
 	if len(res.Refusals) > 0 || len(parsed.Problems) > 0 {
 		return errReported
@@ -184,35 +272,6 @@ func dupSummary(res store.DupResult) string {
 		return "nothing"
 	}
 	return strings.Join(parts, ", ")
-}
-
-// printDupRefusals lists what was refused, in CSV line order, one line each.
-func (e *env) printDupRefusals(path string, parsed duplicates.Parsed, res store.DupResult) {
-	if n := e.printRefusals(path, parsed.Problems, res.Refusals); n > 0 {
-		fmt.Fprintf(e.stdout, "%s refused (listed above); nothing in a refused group is recorded.\n",
-			report.Plural(int64(n), "row or group", "rows or groups"))
-	}
-}
-
-// printSeparate lists the contents an update marks separate, so a fill-down of N is seen before it is confirmed.
-func (e *env) printSeparate(res store.DupResult, dry bool) {
-	if len(res.Separate) == 0 {
-		return
-	}
-	w := e.stdout
-	verb := "to be"
-	if dry {
-		verb = "would be"
-	}
-	fmt.Fprintf(w, "%s %s marked separate (identical copies meant to exist; no longer listed as duplicates):\n",
-		report.Plural(int64(len(res.Separate)), "content", "contents"), verb)
-	for i, p := range res.Separate {
-		if i == clearsShown {
-			fmt.Fprintf(w, "  and %s more\n", report.Count(int64(len(res.Separate)-clearsShown)))
-			break
-		}
-		fmt.Fprintf(w, "  %s\n", p)
-	}
 }
 
 // markedGroups returns the duplicate copies marked for deletion under the filter, without those that are also past
