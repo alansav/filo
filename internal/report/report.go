@@ -103,8 +103,8 @@ func Build(ctx context.Context, s *store.Store, top int, today string) (Report, 
 
 // Render writes the report through the terminal output components (docs/design.md, Terminal output). Every section
 // is shown, so it is seen to have been checked: an empty one is one line ending in "none", except Roots and Register
-// snapshots, which say "none yet" with what to do, and Duplicates, which says "no groups" when it still lists contents
-// marked separate or copies marked for deletion.
+// snapshots, which say "none yet" with what to do, and Duplicates, which says "no groups" when it still says what is
+// not counted on purpose.
 func (r Report) Render(v *view.Renderer) {
 	var roots []string
 	var files, bytes int64
@@ -144,7 +144,7 @@ func (r Report) Render(v *view.Renderer) {
 	v.Blank()
 	d := r.Duplicates
 	switch {
-	case d.Groups == 0 && d.Separate == 0 && d.Marked == 0:
+	case d.Groups == 0 && d.NotCounted == (store.NotCounted{}):
 		v.Section("Duplicates", "none")
 	case d.Groups == 0:
 		v.Section("Duplicates", "no groups")
@@ -165,12 +165,8 @@ func (r Report) Render(v *view.Renderer) {
 			v.More(int(more), "group", "groups")
 		}
 	}
-	if d.Separate > 0 {
-		v.Count(view.Kept, Plural(d.Separate, "content", "contents")+" marked separate ("+
-			Plural(d.SeparateFiles, "file", "files")+"): identical, but not counted as duplicates")
-	}
-	if d.Marked > 0 {
-		v.Count(view.Attention, Plural(d.Marked, "copy", "copies")+" marked for deletion: see filo delete")
+	if line := NotCountedLine(d.NotCounted); line != "" {
+		v.Count(view.Kept, line)
 	}
 
 	v.Blank()
@@ -257,6 +253,25 @@ func SettingsParts(set store.Settings) []string {
 		parts = append(parts, "ignoring "+strings.Join(set.Ignore, ", "))
 	}
 	return parts
+}
+
+// NotCountedLine says what is kept out of the duplicate groups on purpose: "not counted: 1 excluded directory, 2
+// contents always, 1 set of records (filo duplicates)", or "" when nothing is.
+func NotCountedLine(n store.NotCounted) string {
+	var parts []string
+	if n.Dirs > 0 {
+		parts = append(parts, Plural(n.Dirs, "excluded directory", "excluded directories"))
+	}
+	if n.Always > 0 {
+		parts = append(parts, Plural(n.Always, "content always", "contents always"))
+	}
+	if n.RecordSets > 0 {
+		parts = append(parts, Plural(n.RecordSets, "set of records", "sets of records"))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return "not counted: " + strings.Join(parts, ", ") + " (filo duplicates)"
 }
 
 // renderRetention writes the retention section: how many files need a retention (and where most of them are), how

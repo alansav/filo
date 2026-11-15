@@ -495,7 +495,7 @@ func TestMigrateFromV1ToCurrent(t *testing.T) {
 	db := tempDB(t)
 	mustClose(t, mustOpen(t, Options{DBPath: db}))
 	rawExec(t, db,
-		dropV7, `DROP TABLE reviews`, `DROP TABLE review_batches`, `DROP TABLE export_rows`, `DROP TABLE exports`,
+		dropDuplicates, `DROP TABLE reviews`, `DROP TABLE review_batches`, `DROP TABLE export_rows`, `DROP TABLE exports`,
 		`DROP TABLE files`, schemaV1Files, `DROP TABLE roots`, schemaV3Roots, `ALTER TABLE scans DROP COLUMN kind`,
 		`UPDATE meta SET value = '1' WHERE key = 'schema_version'`,
 		`INSERT INTO roots (id, path, added_utc) VALUES (1, '/r', '2026-01-01T00:00:00Z')`,
@@ -554,7 +554,7 @@ func TestMigrateFromV3(t *testing.T) {
 	db := tempDB(t)
 	mustClose(t, mustOpen(t, Options{DBPath: db}))
 	rawExec(t, db,
-		dropV7, `DROP TABLE reviews`, `DROP TABLE review_batches`, `DROP TABLE export_rows`, `DROP TABLE exports`,
+		dropDuplicates, `DROP TABLE reviews`, `DROP TABLE review_batches`, `DROP TABLE export_rows`, `DROP TABLE exports`,
 		`DROP TABLE files`, schemaV3Files, `DROP TABLE roots`, schemaV3Roots, reviewSQLv3,
 		`ALTER TABLE scans DROP COLUMN kind`,
 		`UPDATE meta SET value = '3' WHERE key = 'schema_version'`,
@@ -654,14 +654,14 @@ func TestMigrateFromV3(t *testing.T) {
 	}
 }
 
-// dropV7 removes what schema version 7 added that the older tables in these tests do not drop themselves.
-const dropV7 = `DROP TABLE duplicate_reviews; DROP TABLE separate_hashes; DROP TABLE duplicate_marks;
+// dropDuplicates removes the duplicates tables of the current schema (8), for a test that rebuilds an older one.
+const dropDuplicates = `DROP TABLE always_hashes; DROP TABLE duplicate_records; DROP TABLE excluded_dirs;
 DROP INDEX ix_files_inode;`
 
 func TestMigrateFromV6(t *testing.T) {
 	db := tempDB(t)
 	mustClose(t, mustOpen(t, Options{DBPath: db}))
-	rawExec(t, db, dropV7,
+	rawExec(t, db, dropDuplicates,
 		`ALTER TABLE exports DROP COLUMN kind`, `ALTER TABLE export_rows DROP COLUMN dup_group`,
 		`ALTER TABLE export_rows DROP COLUMN path_id`,
 		`UPDATE meta SET value = '6' WHERE key = 'schema_version'`,

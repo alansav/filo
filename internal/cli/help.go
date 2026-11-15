@@ -23,12 +23,12 @@ var overview = struct {
 		{Name: "report [--top N]", Text: "totals, files needing a retention, largest files, duplicates, events"},
 		{Name: "export retention [DIR] -o FILE",
 			Text: "write every file under DIR (or every root) with its retention, as CSV"},
-		{Name: "export duplicates [DIR] [--separate] -o FILE",
+		{Name: "export duplicates [DIR] -o FILE",
 			Text: "write the duplicate groups with a copy under DIR, as CSV"},
 		{Name: "update FILE [--dry-run]",
-			Text: "record the retentions or duplicate decisions edited in an exported CSV"},
+			Text: "record the retentions edited in an exported CSV"},
 		{Name: "delete [DIR] [-y]",
-			Text: "delete the files past their retention and the duplicate copies marked for deletion, after asking"},
+			Text: "delete the files past their retention, after asking"},
 		{Name: "help [COMMAND]", Text: "this overview, or a command's flags and rules"},
 	},
 	after: "Every command accepts --db PATH (default: $FILO_DB, then the user data directory).",
@@ -87,7 +87,7 @@ var commandHelps = map[string]commandHelp{
 	"export": {
 		usage: []string{
 			"filo export retention [DIR] -o FILE",
-			"filo export duplicates [DIR] [--separate] -o FILE",
+			"filo export duplicates [DIR] -o FILE",
 		},
 		before: []string{
 			"Writes every file under DIR (inside a root), or under every root, as CSV (UTF-8) to FILE, which must " +
@@ -97,15 +97,12 @@ var commandHelps = map[string]commandHelp{
 				"last day); check it. On a large system, export one directory at a time.",
 			"export duplicates writes each duplicate group (two or more copies of the same content; hard links to " +
 				"one file are one copy) with a copy under DIR, with all its copies. Columns: id, export, group, " +
-				"copies, directory, name, size, modified, file_date, retention, keep_until, delete. In each group " +
-				"you decide on, write Y under delete for the copies to delete and N for the ones to keep, then run " +
-				"filo update FILE; filo delete deletes them later. Two or more N mark the content separate: " +
-				"identical copies meant to exist, no longer listed as duplicates.",
+				"copies, directory, name, size, modified, file_date, retention, keep_until, delete. Carrying out the " +
+				"decisions in it is being rebuilt: filo update no longer records them, and filo delete FILE will " +
+				"carry the CSV out.",
 		},
 		flags: []view.Term{
 			{Name: "-o FILE", Text: "the CSV to write; it must not exist"},
-			{Name: "--separate", Text: "export duplicates only: export the contents marked separate, with N filled " +
-				"in; blank a group's cells to make it a duplicate group again"},
 		},
 	},
 	"update": {
@@ -119,12 +116,8 @@ var commandHelps = map[string]commandHelp{
 				"terminal leaves them alone. A row is refused, with one line saying why, if a value does not parse, " +
 				"a period has no file_date, the file changed since the export, or its retention was changed from a " +
 				"later export. The other rows are still applied.",
-			"A duplicates CSV (from export duplicates) only records decisions; it never deletes. A group whose " +
-				"cells are all blank is left alone. A decided group needs Y or N on every copy and at least one N; " +
-				"a copy can be marked Y only if a copy marked N is kept at least as long. Otherwise the group is " +
-				"refused, with one line saying why. If anything is refused, or a content would be marked separate, " +
-				"filo lists it and asks once before recording anything; without a terminal it records nothing. " +
-				"Then run filo delete.",
+			"A duplicates CSV (from export duplicates) is refused: its decisions are not recorded, but carried " +
+				"out by filo delete FILE.",
 		},
 		flags: []view.Term{{Name: "--dry-run", Text: "check everything and write nothing"}},
 	},
@@ -132,18 +125,13 @@ var commandHelps = map[string]commandHelp{
 		usage: []string{"filo delete [DIR] [-y]"},
 		before: []string{
 			"Lists the files past their retention under DIR (inside a root), or under every root, whose content " +
-				"has not changed since the retention was set, and the duplicate copies marked for deletion (see " +
-				"filo help update) with the copies kept, then asks: all, select one by one, list them all, or none " +
-				"[a/s/l/N]. In a terminal the list shows 10 entries per section; l lists every one. Select goes " +
-				"file by file: d delete, r new retention, s skip or q quit; for a duplicate copy, u unmark in place " +
-				"of r. Enter, or an answer filo does not know, never deletes anything. Without a terminal it only " +
+				"has not changed since the retention was set, then asks: all, select one by one, list them all, or " +
+				"none [a/s/l/N]. In a terminal the list shows 10 entries; l lists every one. Select goes file by " +
+				"file: d delete, r new retention, s skip or q quit. Enter, or an answer filo does not know, never deletes anything. Without a terminal it only " +
 				"lists. Deletion is permanent: there is no recycle bin, so keep backups.",
 		},
 		flags: []view.Term{{Name: "-y", Text: "delete them all without asking"}},
 		after: []string{
-			"A duplicate copy is deleted only after another copy of the same content has been read again and " +
-				"found unchanged at its path, and only if that copy is kept at least as long; otherwise its group " +
-				"is skipped. The last copy of a content is never deleted this way.",
 			"Just before deleting, each file is read again. It is deleted only if it is still at its path as the " +
 				"same file and its content is still the content its retention was set on; otherwise it is skipped " +
 				"with one line saying why. A file that cannot be read is never deleted. Folders the run emptied are " +

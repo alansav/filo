@@ -256,18 +256,4 @@ func TestUpdateGolden(t *testing.T) {
 	editCSV(t, r2, setRetention(map[string]string{"2020 return.pdf": "", "2023-01-01 coffee.pdf": ""}))
 	golden(t, "update-retention-clear.txt", root, filo(ExitOK, "l\ny\n", true, "update", r2).stdout)
 
-	for _, d := range []string{"a", "b", "c"} {
-		ct.write(d+"/contract.pdf", "contract")
-	}
-	ct.write("a/LICENSE", "MIT")
-	ct.write("b/LICENSE", "MIT")
-	ct.write("a/x", "x")
-	ct.write("b/x", "x")
-	filo(ExitOK, "", false, "scan")
-	dcsv := filepath.Join(work, "d.csv")
-	filo(ExitOK, "", false, "export", "duplicates", "-o", dcsv)
-	editCSV(t, dcsv, setDelete(map[string]string{ct.in("a/contract.pdf"): "N", ct.in("b/contract.pdf"): "Y",
-		ct.in("c/contract.pdf"): "Y", ct.in("a/LICENSE"): "N", ct.in("b/LICENSE"): "N", ct.in("a/x"): "Y",
-		ct.in("b/x"): "Y"}))
-	golden(t, "update-duplicates.txt", root, filo(ExitError, "y\n", true, "update", dcsv).stdout)
 }

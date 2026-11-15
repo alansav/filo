@@ -153,13 +153,31 @@ func TestRenderSnapshots(t *testing.T) {
 func TestRenderDuplicatesAndEvents(t *testing.T) {
 	var b strings.Builder
 	Report{Roots: []store.RootTotal{{Root: store.Root{Path: "/r"}}},
-		Duplicates: store.Duplicates{Separate: 2, SeparateFiles: 4},
+		Duplicates: store.Duplicates{NotCounted: store.NotCounted{Dirs: 1, Always: 2, RecordSets: 1}},
 		Events:     []store.EventRow{{Event: store.Event{Kind: "error", Detail: "permission denied"}, ScanID: 4, RootPath: "/r"}},
 	}.Render(view.New(view.Options{Out: &b}))
-	for _, want := range []string{"Duplicates   no groups\n", "  [kept] 2 contents marked separate (4 files)",
+	for _, want := range []string{"Duplicates   no groups\n",
+		"  [kept] not counted: 1 excluded directory, 2 contents always, 1 set of records (filo duplicates)\n",
 		"    scan 4   error   .   permission denied\n"} {
 		if !strings.Contains(b.String(), want) {
 			t.Errorf("lacks %q:\n%s", want, b.String())
+		}
+	}
+}
+
+// TestNotCountedLine: only what there is is named, in order; nothing is no line.
+func TestNotCountedLine(t *testing.T) {
+	tests := []struct {
+		n    store.NotCounted
+		want string
+	}{
+		{store.NotCounted{}, ""},
+		{store.NotCounted{Always: 1}, "not counted: 1 content always (filo duplicates)"},
+		{store.NotCounted{Dirs: 2, RecordSets: 3}, "not counted: 2 excluded directories, 3 sets of records (filo duplicates)"},
+	}
+	for _, tc := range tests {
+		if got := NotCountedLine(tc.n); got != tc.want {
+			t.Errorf("NotCountedLine(%+v) = %q, want %q", tc.n, got, tc.want)
 		}
 	}
 }

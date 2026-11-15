@@ -74,9 +74,25 @@ func WriteCSV(w io.Writer, exportID int64, groups []store.DupContent, prefill st
 	return cw.Error()
 }
 
+// Decisions in a delete cell (the first design's CSV, until the action column replaces it).
+const (
+	DecideNone   byte = 0
+	DecideDelete byte = 'Y'
+	DecideKeep   byte = 'N'
+)
+
+// Row is one row of an edited duplicates CSV.
+type Row struct {
+	Line     int // the CSV line, for messages
+	ExportID int64
+	FileID   int64
+	Group    int64
+	Decision byte
+}
+
 // Parsed is what ReadCSV found.
 type Parsed struct {
-	Rows     []store.DupRow
+	Rows     []Row
 	Problems []retention.Problem // rows refused before they reach the register
 }
 
@@ -84,11 +100,11 @@ type Parsed struct {
 func ParseDecision(s string) (byte, error) {
 	switch strings.ToLower(strings.TrimSpace(s)) {
 	case "":
-		return store.DecideNone, nil
+		return DecideNone, nil
 	case "y", "yes":
-		return store.DecideDelete, nil
+		return DecideDelete, nil
 	case "n", "no":
-		return store.DecideKeep, nil
+		return DecideKeep, nil
 	}
 	return 0, fmt.Errorf("delete %q: write Y to delete this copy or N to keep it, or leave it blank", s)
 }
@@ -135,13 +151,13 @@ func ReadCSV(r io.Reader) (Parsed, error) {
 			bad("%v", err)
 			return
 		}
-		p.Rows = append(p.Rows, store.DupRow{Line: row.Line, ExportID: ex, FileID: id, Group: group, Decision: d})
+		p.Rows = append(p.Rows, Row{Line: row.Line, ExportID: ex, FileID: id, Group: group, Decision: d})
 	})
 	if err != nil {
 		return p, err
 	}
-	p.Rows = sheet.DropRepeated(p.Rows, func(r store.DupRow) [2]int64 { return [2]int64{r.ExportID, r.FileID} },
-		func(r store.DupRow) {
+	p.Rows = sheet.DropRepeated(p.Rows, func(r Row) [2]int64 { return [2]int64{r.ExportID, r.FileID} },
+		func(r Row) {
 			p.Problems = append(p.Problems, retention.Problem{Line: r.Line,
 				Msg: fmt.Sprintf("file %d of export %d is listed more than once", r.FileID, r.ExportID)})
 		})

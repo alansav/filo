@@ -5,11 +5,11 @@ import (
 	"encoding/csv"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/alansav/filo/internal/fsid"
+	"github.com/alansav/filo/internal/store"
 )
 
 // readRows reads an exported CSV as rows keyed by column name.
@@ -39,304 +39,6 @@ func setDelete(values map[string]string) func(map[string]string) {
 	}
 }
 
-// TestDuplicatesRoundTrip runs the duplicates workflow the ways a person would: export, decide, update (refused
-// groups, the confirmation, no terminal, a dry run), delete (the kept copy gone, select with unmark, all), and undo
-// a separate content.
-func TestDuplicatesRoundTrip(t *testing.T) {
-	ct := newCLITest(t)
-	setNow(t, time.Date(2026, 11, 14, 12, 0, 0, 0, time.Local))
-	work, root := ct.work, ct.root
-	in, write, exists, filo, contains, lacks := ct.in, ct.write, ct.exists, ct.filo, ct.contains, ct.lacks
-
-	for _, d := range []string{"a", "b", "c"} {
-		write(d+"/contract.pdf", "contract")
-	}
-	write("a/LICENSE", "MIT")
-	write("b/LICENSE", "MIT")
-	write("a/x", "x")
-	write("c/x", "x")
-	write("a/doc", "doc")
-	write("b/doc", "doc")
-	write("a/y", "y")
-	write("b/y", "y")
-	write("a/z", "z")
-	write("b/z", "z")
-	write("a/p.jpg", "photo") // a hard link: one file with two paths, not a duplicate
-	if err := os.Link(in("a/p.jpg"), in("b/p-link.jpg")); err != nil {
-		t.Fatal(err)
-	}
-	write("a/q", "q") // a hard link with a real copy elsewhere: two copies
-	if err := os.Link(in("a/q"), in("b/q-link")); err != nil {
-		t.Fatal(err)
-	}
-	write("c/q", "q")
-	filo(ExitOK, "", false, "roots", "add", root)
-
-	// b/doc is kept forever: it may not go while a/doc, which has no retention, stays.
-	rcsv := filepath.Join(work, "r.csv")
-	filo(ExitOK, "", false, "export", "retention", in("b"), "-o", rcsv)
-	editCSV(t, rcsv, setRetention(map[string]string{"doc": "forever"}))
-	filo(ExitOK, "", false, "update", rcsv)
-
-	// The export: every group, hard links as one copy.
-	dcsv := filepath.Join(work, "d.csv")
-	r := filo(ExitOK, "", false, "export", "duplicates", "-o", dcsv)
-	contains("export", r.stdout, "Duplicates export   export 2 . 7 groups . 15 copies", "Next: filo update "+dcsv+"\n")
-	rows := readRows(t, dcsv)
-	paths := map[string]map[string]string{}
-	for _, row := range rows {
-		paths[row["directory"]+"/"+row["name"]] = row
-	}
-	if len(rows) != 15 || paths[in("a/p.jpg")] != nil || paths[in("b/p-link.jpg")] != nil {
-		t.Fatalf("exported rows: %d, want 15, without the hard-linked photo: %v", len(rows), paths)
-	}
-	if paths[in("a/q")] == nil || paths[in("b/q-link")] != nil || paths[in("a/q")]["copies"] != "2" {
-		t.Errorf("a/q and b/q-link should be one copy of two: %v", paths[in("a/q")])
-	}
-	if paths[in("b/doc")]["retention"] != "forever" {
-		t.Errorf("b/doc retention = %q, want forever shown", paths[in("b/doc")]["retention"])
-	}
-
-	decide := map[string]string{
-		in("a/contract.pdf"): "N", in("b/contract.pdf"): "Y", in("c/contract.pdf"): "yes", // two to delete
-		in("a/LICENSE"): "N", in("b/LICENSE"): "n", // separate
-		in("a/x"): "Y", in("c/x"): "Y", // every copy Y
-		in("a/doc"): "N", in("b/doc"): "Y", // the forever copy may not go
-		in("a/z"): "N",                 // b/z blank
-		in("a/q"): "Y", in("c/q"): "N", // a/q has a hard link
-		// y: all blank, left alone
-	}
-	editCSV(t, dcsv, setDelete(decide))
-
-	// Without a terminal nothing is recorded; the refusals are listed.
-	r = filo(ExitError, "", false, "update", dcsv)
-	contains("no terminal", r.stdout, "Duplicates update   d.csv . export 2 . 7 groups . "+root,
-		"Refused: nothing in these groups is recorded",
-		"[refused] group 5   line 11   a/x: every copy is marked Y, which would leave none",
-		"[refused] group 3   line 7    a/doc: b/doc is kept until forever, longer than every copy marked N",
-		"every copy of a decided group needs Y or N (1 is blank or missing)", "1 other hard link", "frees nothing",
-		"[kept] 1 content to be marked separate", "    a/LICENSE",
-		"Nothing recorded (there is no terminal to ask in", "1 group left alone")
-	lacks("no terminal", r.stdout, "contract.pdf:")
-	if r.stderr != "" {
-		t.Errorf("update wrote to stderr: %q", r.stderr)
-	}
-	contains("nothing marked", filo(ExitOK, "", false, "delete").stdout, "No files are past their retention.")
-
-	// A dry run says what would happen; declining records nothing.
-	r = filo(ExitError, "", false, "update", "--dry-run", dcsv)
-	contains("dry run", r.stdout, "Duplicates update (dry run)", "[ok] 2 copies would be marked for deletion in 1 "+
-		"group", "[kept] 1 content would be marked separate", "Dry run: nothing was written.", "would ask before recording")
-	r = filo(ExitError, "n\n", true, "update", dcsv)
-	contains("declined", r.stdout, "Record these decisions (2 copies to delete in 1 group, 1 content marked "+
-		"separate)? [y/N/l]", "Nothing recorded (not confirmed)")
-
-	// Confirmed: the groups that passed are recorded; nothing is deleted.
-	r = filo(ExitError, "y\n", true, "update", dcsv)
-	contains("confirmed", r.stdout, "[ok] 2 copies marked for deletion in 1 group", "[kept] 1 content marked separate",
-		"Nothing has been deleted. Next: filo delete (2 copies to review)")
-	for _, rel := range []string{"b/contract.pdf", "c/contract.pdf", "a/x", "c/x", "b/doc"} {
-		if !exists(rel) {
-			t.Errorf("update deleted %s", rel)
-		}
-	}
-	contains("report", filo(ExitOK, "", false, "report").stdout,
-		"[kept] 1 content marked separate (2 files): identical, but not counted as duplicates",
-		"[!] 2 copies marked for deletion: see filo delete")
-
-	// The separate content is no longer exported; a row moved into another group is refused with both groups.
-	d2 := filepath.Join(work, "d2.csv")
-	contains("export again", filo(ExitOK, "", false, "export", "duplicates", "-o", d2).stdout,
-		" . 6 groups . ")
-	if strings.Contains(string(mustRead(t, d2)), "LICENSE") {
-		t.Error("a separate content was exported again")
-	}
-	editCSV(t, d2, func(row map[string]string) {
-		if row["directory"]+"/"+row["name"] == in("a/y") {
-			row["group"] = "1"
-			row["delete"] = "N"
-		}
-	})
-	r = filo(ExitError, "n\n", true, "update", d2)
-	contains("wrong group", r.stdout, "not 1 (a sorted or pasted row?)", "is in the wrong group")
-
-	// filo delete lists the group with its kept copy; without a terminal it deletes nothing.
-	r = filo(ExitOK, "", false, "delete")
-	contains("list", r.stdout, "Duplicate copies marked for deletion   2 files in 1 group . 16 B",
-		"    contract.pdf . 8 B each", "      keep     a/contract.pdf", "      delete   b/contract.pdf",
-		"      delete   c/contract.pdf", "Nothing deleted: there is no terminal")
-
-	// The copy kept was moved away after the update: nothing in the group is deleted.
-	if err := os.Rename(in("a/contract.pdf"), filepath.Join(work, "aside.pdf")); err != nil {
-		t.Fatal(err)
-	}
-	r = filo(ExitOK, "", false, "delete", "-y")
-	contains("kept copy gone", r.stdout, "Done   deleted 0 files", "no other copy could be checked, so it is not deleted",
-		"a/contract.pdf: no longer at this path")
-	if !exists("b/contract.pdf") || !exists("c/contract.pdf") {
-		t.Fatal("a copy was deleted while the kept copy was gone")
-	}
-	if err := os.Rename(filepath.Join(work, "aside.pdf"), in("a/contract.pdf")); err != nil {
-		t.Fatal(err)
-	}
-
-	// File by file: unmark b, delete c.
-	r = filo(ExitOK, "s\nu\nd\n", true, "delete")
-	contains("select", r.stdout, "[1/2]  duplicate . contract.pdf . 8 B", "          keep     "+in("a/contract.pdf"),
-		"d delete . u unmark . s skip . q quit  > ", "Done   deleted 1 file . freed 8 B", "  - 1 copy unmarked")
-	if !exists("a/contract.pdf") || !exists("b/contract.pdf") || exists("c/contract.pdf") {
-		t.Errorf("after select: a %v, b %v, c %v; want a and b kept, c deleted", exists("a/contract.pdf"),
-			exists("b/contract.pdf"), exists("c/contract.pdf"))
-	}
-	contains("nothing left", filo(ExitOK, "", false, "delete").stdout, "No files are past their retention.")
-	contains("event", filo(ExitOK, "", false, "report").stdout, "duplicate; the copy kept is "+in("a/contract.pdf"))
-
-	// Undo the separate content: blank its cells.
-	scsv := filepath.Join(work, "s.csv")
-	r = filo(ExitOK, "", false, "export", "duplicates", "--separate", "-o", scsv)
-	contains("separate export", r.stdout, "Separate contents export   export ", " . 1 content . 2 copies")
-	for _, row := range readRows(t, scsv) {
-		if row["delete"] != "N" || row["name"] != "LICENSE" {
-			t.Errorf("separate export row %v, want LICENSE with N", row)
-		}
-	}
-	editCSV(t, scsv, func(row map[string]string) { row["delete"] = "" })
-	r = filo(ExitOK, "", false, "update", scsv)
-	contains("undo", r.stdout, "  - 1 content no longer separate")
-	d3 := filepath.Join(work, "d3.csv")
-	filo(ExitOK, "", false, "export", "duplicates", "-o", d3)
-	if !strings.Contains(string(mustRead(t, d3)), "LICENSE") {
-		t.Error("LICENSE is still separate after the undo")
-	}
-
-	// A Y in an export of separate contents is refused; so is a retention row naming a duplicates export.
-	editCSV(t, d3, setDelete(map[string]string{in("a/LICENSE"): "N", in("b/LICENSE"): "N"}))
-	filo(ExitOK, "y\n", true, "update", d3)
-	s2 := filepath.Join(work, "s2.csv")
-	filo(ExitOK, "", false, "export", "duplicates", "--separate", "-o", s2)
-	editCSV(t, s2, setDelete(map[string]string{in("b/LICENSE"): "Y"}))
-	contains("Y in separate", filo(ExitError, "n\n", true, "update", s2).stdout, "a Y in an export of separate contents")
-	bad := filepath.Join(work, "bad.csv")
-	row := readRows(t, d3)[0]
-	if err := os.WriteFile(bad, []byte("id,export,retention\n"+row["id"]+","+row["export"]+",7y\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	contains("retention row", filo(ExitError, "", false, "update", bad).stdout,
-		"is a duplicates export, not a retention export")
-}
-
-// TestDeleteListsMarkedCopies: a marked copy also past its retention is listed once, under retention; a symlink to a
-// marked copy is named; a mark whose copy changed since no longer counts.
-func TestDeleteListsMarkedCopies(t *testing.T) {
-	ct := newCLITest(t)
-	setNow(t, time.Date(2026, 11, 14, 12, 0, 0, 0, time.Local))
-	work, root := ct.work, ct.root
-	in, filo := ct.in, ct.filo
-	for _, rel := range []string{"a/m", "b/m", "a/e", "b/e", "a/s", "b/s"} {
-		ct.write(rel, rel[len(rel)-1:])
-	}
-	if err := os.Symlink("../b/m", in("a/to-m")); err != nil {
-		t.Fatal(err)
-	}
-	filo(ExitOK, "", false, "roots", "add", root)
-	dcsv := filepath.Join(work, "d.csv")
-	filo(ExitOK, "", false, "export", "duplicates", "-o", dcsv)
-	editCSV(t, dcsv, setDelete(map[string]string{in("a/m"): "N", in("b/m"): "Y", in("a/e"): "N", in("b/e"): "Y",
-		in("a/s"): "N", in("b/s"): "Y"}))
-	filo(ExitOK, "", false, "update", dcsv)
-
-	// b/e is also past its retention; b/s changes and a scan records it.
-	rcsv := filepath.Join(work, "r.csv")
-	filo(ExitOK, "", false, "export", "retention", in("b"), "-o", rcsv)
-	editCSV(t, rcsv, setRetention(map[string]string{"e": "2026-11-01"}))
-	filo(ExitOK, "", false, "update", rcsv)
-	if err := os.WriteFile(in("b/s"), []byte("s, edited"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	filo(ExitOK, "", false, "scan")
-
-	out := filo(ExitOK, "", false, "delete").stdout
-	for _, want := range []string{"Past their retention   1 file", "    2026-11-01    1 B   b/e",
-		"Duplicate copies marked for deletion   1 file in 1 group", "      delete   b/m",
-		"-> the symlink " + in("a/to-m") + " points here and would break",
-		"[!] 1 mark no longer counts: the copy changed since it was marked"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("delete list lacks %q:\n%s", want, out)
-		}
-	}
-	if strings.Count(out, "b/e") != 1 {
-		t.Errorf("b/e is listed %d times, want once:\n%s", strings.Count(out, "b/e"), out)
-	}
-
-	// Quit at the first copy: nothing is deleted.
-	r := filo(ExitOK, "s\nq\n", true, "delete")
-	if !strings.Contains(r.stdout, "Done   deleted 0 files") || !strings.Contains(r.stdout, "2 files left for later") {
-		t.Errorf("quit:\n%s", r.stdout)
-	}
-}
-
-// TestDuplicatesNeverLastCopy: found in the code review of 2026-11-14. A kept copy that is itself past its retention,
-// or that is on disk the same file as the copy marked for deletion (a bind mount seen by two roots), never counts as
-// kept, so one run cannot remove every copy.
-func TestDuplicatesNeverLastCopy(t *testing.T) {
-	ct := newCLITest(t)
-	setNow(t, time.Date(2026, 11, 14, 12, 0, 0, 0, time.Local))
-	work, root := ct.work, ct.root
-	in, exists := ct.in, ct.exists
-	filo := func(wantCode int, args ...string) result { t.Helper(); return ct.filo(wantCode, "", false, args...) }
-	for _, rel := range []string{"a/k", "b/k", "a/m", "b/m"} {
-		ct.write(rel, rel[len(rel)-1:])
-	}
-	filo(ExitOK, "roots", "add", root)
-	dcsv := filepath.Join(work, "d.csv")
-	filo(ExitOK, "export", "duplicates", "-o", dcsv)
-	editCSV(t, dcsv, setDelete(map[string]string{in("a/k"): "N", in("b/k"): "Y", in("a/m"): "N", in("b/m"): "Y"}))
-	filo(ExitOK, "update", dcsv)
-
-	// a/k, the copy kept, is then given a retention that has passed: this run will delete it.
-	rcsv := filepath.Join(work, "r.csv")
-	filo(ExitOK, "export", "retention", in("a"), "-o", rcsv)
-	editCSV(t, rcsv, setRetention(map[string]string{"k": "2026-11-01"}))
-	filo(ExitOK, "update", rcsv)
-
-	// b/m is, on disk, the file a/m (another root's bind mount, faked: the device and inode of a/m).
-	t.Cleanup(fsid.SetForTest(func(p string, real func(string) (fsid.ID, error)) (fsid.ID, error) {
-		if p == in("b/m") {
-			p = in("a/m")
-		}
-		id, err := real(p)
-		id.Dev = 1
-		return id, err
-	}))
-
-	// The list says so before anything is done: the copy past its own retention does not count as kept.
-	if out := filo(ExitOK, "delete").stdout; !strings.Contains(out, "past its own retention: does not count as kept "+
-		"in this run") {
-		t.Errorf("the list does not say the kept copy will not count:\n%s", out)
-	}
-	r := filo(ExitOK, "delete", "-y")
-	for _, want := range []string{"a/k: past its own retention, so this run may delete it too",
-		"a/m: the same file as b/m (a hard link or a bind mount)"} {
-		if !strings.Contains(r.stdout, want) {
-			t.Errorf("delete lacks %q:\n%s", want, r.stdout)
-		}
-	}
-	if !exists("b/k") || exists("a/k") {
-		t.Errorf("a/k exists %v, b/k exists %v; want a/k deleted for its retention and b/k kept", exists("a/k"),
-			exists("b/k"))
-	}
-	if !exists("a/m") || !exists("b/m") {
-		t.Error("a copy of m was deleted through what is one file on disk")
-	}
-
-	// The export now treats the two paths of m as one copy, so there is no group to decide.
-	d2 := filepath.Join(work, "d2.csv")
-	if out := filo(ExitOK, "export", "duplicates", "-o", d2).stdout; !strings.Contains(out, "Duplicates export   no groups") ||
-		!strings.Contains(out, "\nNothing exported.\n") {
-		t.Errorf("export of one file seen twice:\n%s", out)
-	}
-}
-
 // TestUpdateRetentionWithGroupColumn: a retention CSV with a group column of the person's own is still a retention
 // CSV (found in the code review of 2026-11-14).
 func TestUpdateRetentionWithGroupColumn(t *testing.T) {
@@ -355,46 +57,87 @@ func TestUpdateRetentionWithGroupColumn(t *testing.T) {
 		"Retention update", "1 file given a retention")
 }
 
-// TestDuplicateSelectResults: select mode does not predict a duplicate copy's fate; once its group is done, each copy
-// chosen gets its real result, and a group left unfinished by quitting says its chosen copies were not deleted.
-func TestDuplicateSelectResults(t *testing.T) {
+// TestUpdateRefusesDuplicatesCSV: decisions to delete are not stored any more (docs/design.md, Duplicates), so filo
+// update refuses a duplicates CSV, in one line, pointing at filo delete, and records nothing.
+func TestUpdateRefusesDuplicatesCSV(t *testing.T) {
 	ct := newCLITest(t)
-	setNow(t, time.Date(2026, 11, 14, 12, 0, 0, 0, time.Local))
-	in, filo := ct.in, ct.filo
-	for _, rel := range []string{"x/c", "y/c", "a/t", "b/t", "c/t"} {
-		ct.write(rel, rel[len(rel)-1:])
-	}
-	filo(ExitOK, "", false, "roots", "add", ct.root)
+	ct.write("a/contract.pdf", "contract")
+	ct.write("b/contract.pdf", "contract")
+	ct.filo(ExitOK, "", false, "roots", "add", ct.root)
 	dcsv := filepath.Join(ct.work, "d.csv")
-	filo(ExitOK, "", false, "export", "duplicates", "-o", dcsv)
-	editCSV(t, dcsv, setDelete(map[string]string{in("x/c"): "N", in("y/c"): "Y", in("a/t"): "N", in("b/t"): "Y",
-		in("c/t"): "Y"}))
-	filo(ExitOK, "", false, "update", dcsv)
-	// After the update, the copy marked for deletion is given a longer retention than the copy kept.
-	rcsv := filepath.Join(ct.work, "r.csv")
-	filo(ExitOK, "", false, "export", "retention", "-o", rcsv)
-	editCSV(t, rcsv, func(row map[string]string) {
-		switch row["directory"] + "/" + row["name"] {
-		case in("x/c"):
-			row["retention"] = "2027-01-01"
-		case in("y/c"):
-			row["retention"] = "forever"
-		}
-	})
-	filo(ExitOK, "", false, "update", rcsv)
-
-	// Group t first (a/t sorts first): choose b/t, then quit at c/t. Nothing in t is deleted.
-	r := filo(ExitOK, "s\nd\nq\n", true, "delete")
-	ct.contains("quit", r.stdout, "chosen: checked against its kept copy just before deleting",
-		"not deleted: 1 copy chosen in this group, left for later since the group was not finished")
-	if !ct.exists("b/t") || !ct.exists("c/t") {
-		t.Fatal("a copy of an unfinished group was deleted")
+	ct.filo(ExitOK, "", false, "export", "duplicates", "-o", dcsv)
+	editCSV(t, dcsv, setDelete(map[string]string{ct.in("a/contract.pdf"): "N", ct.in("b/contract.pdf"): "Y"}))
+	r := ct.filo(ExitError, "", false, "update", dcsv)
+	if want := "filo: " + dcsv + " is a duplicates CSV: filo update records retentions only; carry it out with " +
+		"filo delete " + dcsv + "\n"; r.stderr != want || r.stdout != "" {
+		t.Errorf("stdout %q, stderr %q; want only %q", r.stdout, r.stderr, want)
 	}
-	// Skip t's copies, choose y/c: its kept copy has a shorter retention, so it is not deleted, and the screen says so.
-	r = filo(ExitOK, "s\ns\ns\nd\n", true, "delete")
-	ct.contains("shorter retention", r.stdout, "not deleted y/c: the copy kept, x/c, has a shorter retention")
-	ct.lacks("shorter retention", r.stdout, "deleted y/c\n")
-	if !ct.exists("y/c") {
-		t.Fatal("y/c was deleted though its kept copy has a shorter retention")
+	// filo delete lists only files past their retention: there is nothing marked to delete.
+	ct.contains("delete", ct.filo(ExitOK, "", false, "delete").stdout, "No files are past their retention.")
+	if !ct.exists("a/contract.pdf") || !ct.exists("b/contract.pdf") {
+		t.Error("a copy was deleted")
+	}
+}
+
+// TestExportMergesOneFileSeenTwice: a file seen at two paths (a folder bind-mounted into a second root, faked with
+// the device and inode of the first) is one copy on disk, so it is no duplicate group, though the register holds it
+// as two files.
+func TestExportMergesOneFileSeenTwice(t *testing.T) {
+	ct := newCLITest(t)
+	ct.write("a/m", "m")
+	ct.write("b/m", "m")
+	ct.filo(ExitOK, "", false, "roots", "add", ct.root)
+	t.Cleanup(fsid.SetForTest(func(p string, real func(string) (fsid.ID, error)) (fsid.ID, error) {
+		if p == ct.in("b/m") {
+			p = ct.in("a/m")
+		}
+		id, err := real(p)
+		id.Dev = 1
+		return id, err
+	}))
+	out := ct.filo(ExitOK, "", false, "export", "duplicates", "-o", filepath.Join(ct.work, "d.csv")).stdout
+	ct.contains("export", out, "Duplicates export   no groups", "\nNothing exported.\n")
+}
+
+// TestDistinctOnDiskRecords: copies merged as one file on disk (a bind mount) are decided again: two records of one
+// set plus the same file as one of them seen again is no group, whichever path holds the record; without records it
+// is a group of two.
+func TestDistinctOnDiskRecords(t *testing.T) {
+	ct := newCLITest(t)
+	for _, rel := range []string{"a", "b", "c"} {
+		ct.write(rel, "x")
+	}
+	t.Cleanup(fsid.SetForTest(func(p string, real func(string) (fsid.ID, error)) (fsid.ID, error) {
+		if p == ct.in("c") {
+			p = ct.in("a") // c is a seen through a bind mount
+		}
+		id, err := real(p)
+		id.Dev = 1
+		return id, err
+	}))
+	cp := func(rel string, set int64) store.DupCopy {
+		c := store.DupCopy{RecordSet: set}
+		c.RootPath, c.Path = ct.root, rel
+		return c
+	}
+	tests := []struct {
+		name   string
+		copies []store.DupCopy
+		group  bool
+	}{
+		{"records a and b, c the same file as a", []store.DupCopy{cp("a", 1), cp("b", 1), cp("c", 0)}, false},
+		{"the record held on the bind-mounted path", []store.DupCopy{cp("a", 0), cp("b", 1), cp("c", 1)}, false},
+		{"no records: a group of two", []store.DupCopy{cp("a", 0), cp("b", 0), cp("c", 0)}, true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := distinctOnDisk([]store.DupContent{{Hash: "h", Size: 1, Copies: tc.copies}})
+			if (len(got) == 1) != tc.group {
+				t.Errorf("groups after merging = %d, want group %v", len(got), tc.group)
+			}
+			if tc.group && len(got[0].Copies) != 2 {
+				t.Errorf("copies = %d, want 2 (c merged into a)", len(got[0].Copies))
+			}
+		})
 	}
 }

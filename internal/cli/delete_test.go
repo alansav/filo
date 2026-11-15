@@ -197,24 +197,16 @@ func TestDeleteGolden(t *testing.T) {
 	write("tax/2017 return.pdf", "tax return")
 	write("notes/meeting.txt", "notes")
 	write("video/2015/summer holiday in the south of France with the whole family, day 3.mp4", "video")
-	write("a/contract.pdf", "contract")
-	write("b/contract.pdf", "contract")
 	filo(ExitOK, "", false, "roots", "add", root)
 	rcsv := filepath.Join(work, "r.csv")
 	filo(ExitOK, "", false, "export", "retention", "-o", rcsv)
 	editCSV(t, rcsv, setRetention(map[string]string{"2017 return.pdf": "2024-12-31", "meeting.txt": "2025-06-30",
-		"summer holiday in the south of France with the whole family, day 3.mp4": "2025-09-01",
-		"contract.pdf": "forever"}))
+		"summer holiday in the south of France with the whole family, day 3.mp4": "2025-09-01"}))
 	filo(ExitOK, "", false, "update", rcsv)
-	dcsv := filepath.Join(work, "d.csv")
-	filo(ExitOK, "", false, "export", "duplicates", "-o", dcsv)
-	editCSV(t, dcsv, setDelete(map[string]string{ct.in("a/contract.pdf"): "N", ct.in("b/contract.pdf"): "Y"}))
-	filo(ExitOK, "", false, "update", dcsv)
 
 	golden(t, "delete-list.txt", root, filo(ExitOK, "", false, "delete").stdout)
-	// Select (files come in path order): skip the duplicate, delete the notes, give the tax return a new retention,
-	// quit at the video.
-	golden(t, "delete-select.txt", root, filo(ExitOK, "s\ns\nd\nr\n2030-01-01\nq\n", true, "delete").stdout)
+	// Select (files come in path order): delete the notes, give the tax return a new retention, quit at the video.
+	golden(t, "delete-select.txt", root, filo(ExitOK, "s\nd\nr\n2030-01-01\nq\n", true, "delete").stdout)
 	// -y, with the video changed since its retention was set.
 	write("video/2015/summer holiday in the south of France with the whole family, day 3.mp4", "edited")
 	golden(t, "delete-yes.txt", root, filo(ExitOK, "", false, "delete", "-y").stdout)

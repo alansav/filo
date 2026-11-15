@@ -473,9 +473,11 @@ checks every group against the disk, lists what it will and will not do, asks, a
 rule that a delete column in a spreadsheet is unsafe (a sort or a fill-down puts it on the wrong rows), hence the group
 rules, the listing before the question and the check at the moment of deleting below.
 
-**Until it is built**, filo works as the first design: `filo export duplicates`, then `filo update` records Y/N
-decisions (two or more N mark a content *separate*), then `filo delete` deletes the copies marked, with the
-`--separate` export to undo. See "The first design, and why it changed" at the end of this section.
+**Being built** (on branch `duplicates-redesign`, see section 5). Slice 1, the register, is done: schema 8, the
+group definition below, the report's "not counted" line; the first design's `filo update` of a duplicates CSV, its
+marks in `filo delete` and `--separate` are gone. Until slices 2 and 3 land, a duplicates CSV can be exported (still
+with the first design's `delete` column) but not carried out. See "The first design, and why it changed" at the end
+of this section.
 
 - **The principle** (2026-11-16). The duplicates process decides which copy to keep, never whether the content goes.
   A duplicates decision never removes a content or shortens its life; only a retention does.
@@ -1229,7 +1231,7 @@ $ filo roots add
 filo: roots add takes exactly one DIR (see filo help roots)
 ```
 
-## 3. Data model (schema version 7)
+## 3. Data model (schema version 8)
 
 Carried over from the C# prototype. Adjust freely in the Go port, but keep the interval history and the partial unique
 index.
@@ -1293,7 +1295,8 @@ CREATE TABLE exports (
     id INTEGER PRIMARY KEY, created_utc TEXT NOT NULL,
     path TEXT,                          -- the CSV written (NULL only for exports to standard output before version 4)
     after_scan INTEGER REFERENCES scans(id),           -- the latest finished scan at export
-    kind TEXT NOT NULL DEFAULT 'retention');           -- version 7: 'retention', 'duplicates' or 'separate'
+    kind TEXT NOT NULL DEFAULT 'retention');           -- version 7: 'retention' or 'duplicates' ('separate',
+                                                       -- the first design's, no longer written since version 8)
 CREATE TABLE export_rows (
     export_id INTEGER NOT NULL REFERENCES exports(id), file_id INTEGER NOT NULL REFERENCES files(id),
     hash TEXT,                          -- the content shown; the update refuses the row if it has changed
@@ -1303,7 +1306,7 @@ CREATE TABLE export_rows (
     dup_group INTEGER,                  -- version 7: duplicates exports: the group number in the CSV
     path_id INTEGER REFERENCES paths(id),              -- version 7: duplicates exports: the path shown
     PRIMARY KEY (export_id, file_id));
-CREATE TABLE review_batches (
+CREATE TABLE review_batches (           -- version 8 dropped the batches only the first design's duplicates used
     id INTEGER PRIMARY KEY, created_utc TEXT NOT NULL,
     command TEXT NOT NULL,              -- 'update', or 'delete' for a retention typed at filo delete's prompt
                                         -- ('set-date' in databases from before version 4)
@@ -1316,21 +1319,20 @@ CREATE TABLE reviews (                  -- append-only: every keep_until ever se
     file_date TEXT, retention TEXT);    -- version 5
 CREATE INDEX ix_reviews_file ON reviews(file_id);
 
--- version 7: duplicates (version 8, planned with the duplicates redesign, drops duplicate_marks and
--- duplicate_reviews, renames separate_hashes to always_hashes, and adds duplicate_records and excluded_dirs)
-CREATE TABLE duplicate_marks (          -- copies marked for deletion; a mark counts only while hash = files.hash
-    file_id INTEGER PRIMARY KEY REFERENCES files(id), hash TEXT NOT NULL,
-    export_id INTEGER REFERENCES exports(id), batch_id INTEGER NOT NULL REFERENCES review_batches(id));
-CREATE TABLE separate_hashes (          -- contents marked separate: identical copies that are not duplicates
-    hash TEXT PRIMARY KEY, export_id INTEGER REFERENCES exports(id),
-    batch_id INTEGER NOT NULL REFERENCES review_batches(id));
+-- version 8: duplicates (the redesign; version 7's duplicate_marks, duplicate_reviews and separate_hashes are
+-- gone: no decisions to delete are stored, see Duplicates)
+CREATE TABLE always_hashes (            -- contents that belong everywhere: never a duplicate group
+    hash TEXT PRIMARY KEY, added_utc TEXT NOT NULL);    -- from version 7's separate_hashes, with its batch's time
 CREATE INDEX ix_files_inode ON files(inode);                -- version 7: hard links
-CREATE TABLE duplicate_reviews (        -- append-only: every duplicates decision
-    id INTEGER PRIMARY KEY, batch_id INTEGER NOT NULL REFERENCES review_batches(id),
-    export_id INTEGER REFERENCES exports(id),
-    file_id INTEGER REFERENCES files(id),              -- NULL for a decision about a content
-    hash TEXT NOT NULL,
-    decision TEXT NOT NULL);            -- 'delete', 'keep', 'unmark', 'separate', 'not separate'
+CREATE TABLE duplicate_records (        -- copies kept on purpose together; a file is one only while hash = files.hash
+    file_id INTEGER PRIMARY KEY REFERENCES files(id), hash TEXT NOT NULL,
+    set_id INTEGER NOT NULL, added_utc TEXT NOT NULL);
+CREATE INDEX ix_duplicate_records_set ON duplicate_records(set_id);
+CREATE TABLE excluded_dirs (            -- files under them (the whole subtree) never count as duplicates
+    root_id INTEGER NOT NULL REFERENCES roots(id),
+    path TEXT NOT NULL,                 -- relative to the root, '/'-separated; '' = the whole root; moved with
+                                        -- the root when a new root takes it in
+    added_utc TEXT NOT NULL, PRIMARY KEY (root_id, path));
 ```
 
 "Present" means a file has a path interval with `valid_to_scan IS NULL`; there is no status column. "New" means
@@ -1456,7 +1458,17 @@ put first on 2026-11-15). Each is an open question below until it is designed.
    deleting through `dispose`, recording records and always, the output as mocked; A, B, D, E, C1, C4); (4)
    `filo duplicates` list, `exclude` and `include` (mockup to agree first); (5) README, help and status. Between
    slices 1 and 3 duplicates cannot be deleted at all (accepted: the real-data run waits for the redesign anyway);
-   slices 1 to 3 stay on one branch, so `main` never sits in that gap. The output of `filo duplicates`, `exclude`,
+   slices 1 to 4 stay on one branch, so `main` never sits in that gap nor points at a `filo duplicates` not yet
+   built (changed from 1 to 3 after the review of slice 1: its messages name `filo delete FILE` and `filo
+   duplicates`, true only once those slices land). The branch's build is not run on the real register before slice
+   3: the upgrade's warning is shown once, and its advice (export again to decide) can only be followed from then. Slice 1 done on 2026-11-15
+   (`TestDuplicateGroups` for the group definition, F2 and F3; `TestMigrateFromV7` and `TestMigrateFromV7Quiet` for
+   the upgrade; `TestNotCounted`, `TestAbsorbMovesExclusions`; `TestUpdateRefusesDuplicatesCSV`; and by hand: a
+   register made by the release before, with a mark and a separate content, upgraded by this build, the warning
+   once, nothing deleted). The tests of the first design's flow went with it; their scenarios return in slices 2
+   and 3, the bind-mounted copy in the check at the moment of deleting among them. Reviewed the same day: a copy is a record if any of
+   its paths is (hard links held as two file rows, and bind-mounted paths merged by the export, which then decides
+   again which contents are groups), and "not counted" counts only what would otherwise be a group. The output of `filo duplicates`, `exclude`,
    `include` and the export's new words agreed the same day (see Duplicates, Output).
 3. Named retention policies.
 4. Folder rules (default retention policies on directories).

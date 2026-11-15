@@ -16,13 +16,13 @@ func TestParseDecision(t *testing.T) {
 		want    byte
 		wantErr bool
 	}{
-		{"", store.DecideNone, false},
-		{"  ", store.DecideNone, false},
-		{"Y", store.DecideDelete, false},
-		{"y", store.DecideDelete, false},
-		{" Yes ", store.DecideDelete, false},
-		{"N", store.DecideKeep, false},
-		{"no", store.DecideKeep, false},
+		{"", DecideNone, false},
+		{"  ", DecideNone, false},
+		{"Y", DecideDelete, false},
+		{"y", DecideDelete, false},
+		{" Yes ", DecideDelete, false},
+		{"N", DecideKeep, false},
+		{"no", DecideKeep, false},
 		{"x", 0, true},
 		{"delete", 0, true},
 		{"keep", 0, true},
@@ -61,7 +61,7 @@ func TestWriteAndReadCSV(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []store.DupRow{{Line: 2, ExportID: 12, FileID: 4, Group: 1, Decision: 'N'},
+	want := []Row{{Line: 2, ExportID: 12, FileID: 4, Group: 1, Decision: 'N'},
 		{Line: 3, ExportID: 12, FileID: 9, Group: 1, Decision: 'N'}}
 	if len(p.Problems) != 0 || len(p.Rows) != 2 || p.Rows[0] != want[0] || p.Rows[1] != want[1] {
 		t.Errorf("ReadCSV = %+v, want %+v", p, want)

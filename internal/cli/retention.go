@@ -54,7 +54,6 @@ func (e *env) export(ctx context.Context, dbBefore string, args []string) error 
 	fl := e.flags("export")
 	db := dbFlag(fl, dbBefore)
 	out := fl.String("o", "", "")
-	separate := fl.Bool("separate", false, "")
 	pos, err := e.parse(fl, "export", args)
 	if err != nil {
 		return err
@@ -65,9 +64,6 @@ func (e *env) export(ctx context.Context, dbBefore string, args []string) error 
 	kind := pos[0]
 	if !slices.Contains(exportKinds, kind) {
 		return usageError{fmt.Sprintf("unknown export %q; the exports are retention and duplicates", kind)}
-	}
-	if *separate && kind != "duplicates" {
-		return usageError{"--separate goes with export duplicates"}
 	}
 	pos = pos[1:]
 	if len(pos) > 1 {
@@ -100,7 +96,7 @@ func (e *env) export(ctx context.Context, dbBefore string, args []string) error 
 		return err
 	}
 	if kind == "duplicates" {
-		return e.exportDuplicates(ctx, s, f, where, csvPath, *separate)
+		return e.exportDuplicates(ctx, s, f, where, csvPath)
 	}
 	items, err := s.Files(ctx, today(), f)
 	if err != nil {
@@ -208,8 +204,11 @@ func (e *env) update(ctx context.Context, dbBefore string, args []string) error 
 	if err != nil {
 		return fmt.Errorf("open %s: %w", path, err)
 	}
+	// No decisions to delete are stored any more (docs/design.md, Duplicates): a duplicates CSV is carried out by
+	// filo delete, which checks it against the disk at the time.
 	if duplicates.IsDuplicatesCSV(data) {
-		return e.updateDuplicates(ctx, *db, path, data, *dry)
+		return fmt.Errorf("%s is a duplicates CSV: filo update records retentions only; carry it out with filo delete %s",
+			path, shellQuote(path))
 	}
 	parsed, err := retention.ReadCSV(bytes.NewReader(data))
 	if err != nil {

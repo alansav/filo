@@ -141,9 +141,6 @@ func (r *DeleteRun) Deleted(ctx context.Context, c Candidate, now time.Time) err
 		if n, err := res.RowsAffected(); err != nil || n != 1 {
 			return fmt.Errorf("path %d was not current (affected %d, %v)", c.PathID, n, err)
 		}
-		if _, err := tx.ExecContext(ctx, `DELETE FROM duplicate_marks WHERE file_id = ?`, c.FileID); err != nil {
-			return err
-		}
 		detail := "retention " + c.Retention
 		if c.KeepUntil != c.Retention {
 			detail += ", kept until " + c.KeepUntil

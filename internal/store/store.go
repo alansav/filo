@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/alansav/filo/internal/hasher"
@@ -43,7 +44,12 @@ type Store struct {
 	// changed: this run committed a change to the register, so Close takes a snapshot. Every write goes through
 	// commit or exec, which set it only once the change is committed: a rolled-back transaction changed nothing.
 	changed bool
+	notes   []string // what this run's schema upgrade dropped or changed, for a warning (UpgradeNotes)
 }
+
+// UpgradeNotes is what the schema upgrade this run made dropped or changed, a sentence each, for the command to show
+// once as a warning: none when the register was already current.
+func (s *Store) UpgradeNotes() []string { return s.notes }
 
 // commit commits tx and notes that this run changed the register.
 func (s *Store) commit(tx *sql.Tx) error {
@@ -177,7 +183,7 @@ func openLocked(ctx context.Context, dbPath string) (*Store, error) {
 	// One connection: the per-connection pragmas apply to it, and Filo has one writer anyway.
 	db.SetMaxOpenConns(1)
 
-	changed, err := initOrCheck(ctx, db, dbPath)
+	changed, notes, err := initOrCheck(ctx, db, dbPath)
 	if err != nil {
 		db.Close()
 		return nil, fmt.Errorf("database %s: %w", dbPath, err)
@@ -188,7 +194,7 @@ func openLocked(ctx context.Context, dbPath string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("database %s: set WAL mode: %w", dbPath, err)
 	}
-	return &Store{db: db, dbPath: dbPath, changed: changed}, nil
+	return &Store{db: db, dbPath: dbPath, changed: changed, notes: notes}, nil
 }
 
 // precreate makes a new database file with mode 0600 so the register is private to its owner (SQLite would use
@@ -209,20 +215,21 @@ func precreate(dbPath string) error {
 }
 
 // initOrCheck creates the register in an empty database or checks (and upgrades) an existing one. It reports
-// whether it changed the database: created it, or upgraded its schema.
-func initOrCheck(ctx context.Context, db *sql.DB, dbPath string) (bool, error) {
+// whether it changed the database (created it, or upgraded its schema) and what an upgrade dropped or changed.
+func initOrCheck(ctx context.Context, db *sql.DB, dbPath string) (bool, []string, error) {
 	var tables int
 	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM sqlite_master WHERE type = 'table'`).Scan(&tables); err != nil {
-		return false, err
+		return false, nil, err
 	}
 	if tables == 0 {
-		return true, create(ctx, db)
+		return true, nil, create(ctx, db)
 	}
 	before, _ := metaValue(ctx, db, metaSchemaVersion) // check reports a missing or unreadable version
-	if err := check(ctx, db, dbPath); err != nil {
-		return false, err
+	notes, err := check(ctx, db, dbPath)
+	if err != nil {
+		return false, nil, err
 	}
-	return before != strconv.Itoa(SchemaVersion), nil
+	return before != strconv.Itoa(SchemaVersion), notes, nil
 }
 
 func create(ctx context.Context, db *sql.DB) error {
@@ -248,31 +255,31 @@ func create(ctx context.Context, db *sql.DB) error {
 	return tx.Commit()
 }
 
-func check(ctx context.Context, db *sql.DB, dbPath string) error {
+func check(ctx context.Context, db *sql.DB, dbPath string) ([]string, error) {
 	var hasMeta int
 	if err := db.QueryRowContext(ctx,
 		`SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'meta'`).Scan(&hasMeta); err != nil {
-		return err
+		return nil, err
 	}
 	if hasMeta == 0 {
-		return fmt.Errorf("%w: no meta table", ErrNotFiloDB)
+		return nil, fmt.Errorf("%w: no meta table", ErrNotFiloDB)
 	}
 
 	version, err := metaValue(ctx, db, metaSchemaVersion)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	v, err := strconv.Atoi(version)
 	if err != nil {
-		return fmt.Errorf("%w: unreadable value %q", ErrSchemaVersion, version)
+		return nil, fmt.Errorf("%w: unreadable value %q", ErrSchemaVersion, version)
 	}
 	if v > SchemaVersion {
-		return fmt.Errorf("%w: database is version %d, this filo supports %d; upgrade filo", ErrSchemaVersion, v, SchemaVersion)
+		return nil, fmt.Errorf("%w: database is version %d, this filo supports %d; upgrade filo", ErrSchemaVersion, v, SchemaVersion)
 	}
 	for m := v; m < SchemaVersion; m++ {
 		if _, ok := migrations[m]; !ok {
-			return fmt.Errorf("%w: database is version %d, this filo supports %d and has no migration", ErrSchemaVersion, v, SchemaVersion)
+			return nil, fmt.Errorf("%w: database is version %d, this filo supports %d and has no migration", ErrSchemaVersion, v, SchemaVersion)
 		}
 	}
 
@@ -280,46 +287,93 @@ func check(ctx context.Context, db *sql.DB, dbPath string) error {
 	var algo string
 	err = db.QueryRowContext(ctx, `SELECT value FROM meta WHERE key = ?`, metaHashAlgorithm).Scan(&algo)
 	if errors.Is(err, sql.ErrNoRows) {
-		return fmt.Errorf("%w: database records no hash algorithm", ErrSchemaVersion)
+		return nil, fmt.Errorf("%w: database records no hash algorithm", ErrSchemaVersion)
 	}
 	if err != nil {
-		return fmt.Errorf("read meta %s: %w", metaHashAlgorithm, err)
+		return nil, fmt.Errorf("read meta %s: %w", metaHashAlgorithm, err)
 	}
 	if algo != hasher.Algorithm {
-		return fmt.Errorf("%w: database hashes are %s, this filo uses %s", ErrSchemaVersion, algo, hasher.Algorithm)
+		return nil, fmt.Errorf("%w: database hashes are %s, this filo uses %s", ErrSchemaVersion, algo, hasher.Algorithm)
 	}
 	// A copy of the database as it was, kept outside the rotation, before anything is changed. No copy, no upgrade.
 	if v < SchemaVersion {
 		if err := snapshotBeforeUpgrade(ctx, db, dbPath, v, time.Now()); err != nil {
-			return err
+			return nil, err
 		}
 	}
+	var notes []string
 	for ; v < SchemaVersion; v++ {
-		if err := migrate(ctx, db, v); err != nil {
-			return err
+		note, err := migrate(ctx, db, v)
+		if err != nil {
+			return nil, err
+		}
+		if note != "" {
+			notes = append(notes, note)
 		}
 	}
-	return nil
+	return notes, nil
 }
 
-// migrate upgrades the database from version v to v+1 in one transaction. The caller holds the lock.
-func migrate(ctx context.Context, db *sql.DB, v int) error {
+// migrate upgrades the database from version v to v+1 in one transaction, and returns what the upgrade dropped or
+// changed that the person should hear about ("" for nothing). The caller holds the lock.
+func migrate(ctx context.Context, db *sql.DB, v int) (string, error) {
+	fail := func(err error) (string, error) {
+		return "", fmt.Errorf("upgrade database from version %d to %d: %w", v, v+1, err)
+	}
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
-		return err
+		return "", err
 	}
 	defer tx.Rollback()
+	note := ""
+	if v == 7 {
+		if note, err = upgradeNote7(ctx, tx); err != nil {
+			return fail(err)
+		}
+	}
 	if _, err := tx.ExecContext(ctx, migrations[v]); err != nil {
-		return fmt.Errorf("upgrade database from version %d to %d: %w", v, v+1, err)
+		return fail(err)
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE meta SET value = ? WHERE key = ?`, strconv.Itoa(v+1),
 		metaSchemaVersion); err != nil {
-		return fmt.Errorf("upgrade database from version %d to %d: %w", v, v+1, err)
+		return fail(err)
 	}
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("upgrade database from version %d to %d: %w", v, v+1, err)
+		return fail(err)
 	}
-	return nil
+	return note, nil
+}
+
+// upgradeNote7 counts, before the upgrade to schema 8 drops them, the duplicate decisions not carried out (marks on
+// a copy that is still there with the content it was marked on) and the contents marked separate, which become
+// always (docs/design.md, Duplicates, Register).
+func upgradeNote7(ctx context.Context, tx *sql.Tx) (string, error) {
+	var marks, separate int64
+	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM duplicate_marks m JOIN files f ON f.id = m.file_id
+		WHERE f.hash = m.hash AND f.deleted_utc IS NULL`).Scan(&marks); err != nil {
+		return "", err
+	}
+	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM separate_hashes`).Scan(&separate); err != nil {
+		return "", err
+	}
+	var parts []string
+	if marks > 0 {
+		parts = append(parts, fmt.Sprintf("the upgrade dropped %d duplicate %s not carried out (kept in the "+
+			"pre-upgrade snapshot); export duplicates again to decide %s", marks, plural(marks, "decision", "decisions"),
+			plural(marks, "it", "them")))
+	}
+	if separate > 0 {
+		parts = append(parts, fmt.Sprintf("%d %s now always", separate,
+			plural(separate, "content marked separate is", "contents marked separate are")))
+	}
+	return strings.Join(parts, "; "), nil
+}
+
+func plural(n int64, one, many string) string {
+	if n == 1 {
+		return one
+	}
+	return many
 }
 
 func metaValue(ctx context.Context, db *sql.DB, key string) (string, error) {

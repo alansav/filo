@@ -18,7 +18,3 @@ Duplicates export   export 2 . 1 group . 2 copies . <root>
 
 Next: filo update '<work>/my d.csv'
 
-$ filo export duplicates --separate
-Separate contents export   no contents marked separate . <root>
-Nothing exported.
-

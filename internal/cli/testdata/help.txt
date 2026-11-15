@@ -10,13 +10,11 @@ Commands
   export retention [DIR] -o FILE
                            write every file under DIR (or every root) with its
                            retention, as CSV
-  export duplicates [DIR] [--separate] -o FILE
+  export duplicates [DIR] -o FILE
                            write the duplicate groups with a copy under DIR, as
                            CSV
-  update FILE [--dry-run]  record the retentions or duplicate decisions edited
-                           in an exported CSV
-  delete [DIR] [-y]        delete the files past their retention and the
-                           duplicate copies marked for deletion, after asking
+  update FILE [--dry-run]  record the retentions edited in an exported CSV
+  delete [DIR] [-y]        delete the files past their retention, after asking
   help [COMMAND]           this overview, or a command's flags and rules
 
 Every command accepts --db PATH (default: $FILO_DB, then the user data
