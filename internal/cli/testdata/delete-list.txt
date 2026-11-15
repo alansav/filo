@@ -1,0 +1,14 @@
+Ready to delete   4 files . 28 B . <root>
+
+Past their retention   3 files . 20 B
+    until        size
+    2025-06-30    5 B   notes/meeting.txt
+    2024-12-31   10 B   tax/2017 return.pdf
+    2025-09-01    5 B   video/2015/summer holiday in the south of France with the whole family, day 3.mp4
+
+Duplicate copies marked for deletion   1 file in 1 group . 8 B
+    contract.pdf . 8 B each
+      keep     a/contract.pdf   forever
+      delete   b/contract.pdf   forever
+
+Nothing deleted: there is no terminal to ask in. Run filo delete in a terminal, or pass -y to delete them all.

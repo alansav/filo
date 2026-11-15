@@ -653,7 +653,12 @@ decisions (two or more N mark a content *separate*), then `filo delete` deletes 
   `\n`, so a name cannot add invented lines to that list (found in the code review of 2026-11-13; the first version
   let newlines through). Tabs are shown as `\t` and a backslash as `\\`, so an escape cannot be confused with a
   name holding the same text. Filo's own multi-line text (help) is written a line at a time; only the progress
-  line's own control codes bypass the writer. The CSV export guards against spreadsheet formulas separately.
+  line's own control codes bypass the writer. Since the terminal output components (2026-11-16, see Terminal
+  output), the Renderer escapes every text it is given the same way (`view.Escape`) and then adds only its own colour
+  codes, so it writes to stdout itself. Trailing alignment is dropped from a line, but a space that ends a file
+  name is shown as `\x20` (2026-11-16, from the code review), so `report ` and `report` never read the same; and a
+  relative path that starts with `~` (a folder named `~` inside a root) is shown as `./~/…`, so it never reads as a
+  path in the home directory. The CSV export guards against spreadsheet formulas separately.
 - **Prompts only in a terminal** (2026-11-12, replacing "no interactive prompts"). A command asks only where a person
   should look first: `filo update` before clearing dates, and `filo delete`. Declining, or having no
   terminal on standard input, is always the safe choice, so Filo still works the same from a script or a timer.
@@ -695,7 +700,8 @@ output is built from components, so files, groups, problems and prompts look the
 topic at a time from mockups; the mockups below are the reference.
 
 - **Rich in a terminal, plain when piped.** Colour and symbols (`✓` done, `✗` refused, `!` needs attention, `·`
-  neutral, `◆` separate; green, red, yellow, dim) only when stdout is a terminal and `NO_COLOR` is unset. Piped,
+  neutral, `◆` separate; green, red, yellow, dim) only when stdout is a terminal (one whose window size can be read,
+  not just any character device) and `NO_COLOR` is unset and `TERM` is not `dumb`. Piped,
   the words and their order are the same, with ASCII markers (`[ok]`, `[refused]`, `[!]`). ANSI codes are written
   by filo itself: no new dependency.
 - **One shape for every command**: a heading line (what, how many, where), sections, a result line, then the next
@@ -707,12 +713,16 @@ topic at a time from mockups; the mockups below are the reference.
   the full path.
 - **Streams and exit codes.** Refusals and skips are part of the report: stdout, in their section, so a log holds the
   whole story in order. stderr carries only errors that stop the command, one line `filo: <message>`. Exit codes are
-  unchanged: 0 nothing went wrong (rows unchanged, groups left alone and declining a prompt included), 1 something
-  refused, skipped or failed, 2 a usage error. A finer split waits for scheduled scans.
+  unchanged: 0 nothing went wrong (rows unchanged, groups left alone, declining a prompt, and a file `filo delete`
+  skipped because it changed, all included), 1 an error, a CSV row or group refused, or a file `filo delete` could
+  not read, delete, or tidy up after, 2 a usage error. A finer split waits for scheduled scans.
 - **Long lists**, three kinds:
   - *About to be deleted* (the `filo delete` overview): in a terminal 10 per section, then `… N more`, and the
-    question gains `l` to list everything and ask again (`[a/s/l/N]`). Piped or with `-y`: always the full list,
-    since the output is then the record of what was deleted.
+    question gains `l` to list everything and ask again (`[a/s/l/N]`). If the list was cut, `a` first shows every
+    file and asks once more ("Delete these 300 files? [y/N]"), so nothing is deleted that was not on screen just
+    before the last question (2026-11-16, from the code review: CLAUDE.md's "anything destructive shows what it will
+    do"). Piped, with `-y`, or with no terminal to ask in: always the full list, since the output is then the record
+    (and with no question, `l` could not be asked for).
   - *Needs fixing* (refusals, skips): every item; more than 10 with the same reason collapse into one line with the
     count and the line range (a sorted CSV can refuse every row for one reason).
   - *What a confirmation covers* (clears, contents always and sets of records, files now past their retention): the
@@ -1036,7 +1046,8 @@ its own identity. Reclaimable space is size × (copies − 1) per group. Paths a
 put first on 2026-11-15). Each is an open question below until it is designed.
 
 1. Terminal output (designed 2026-11-15, see Terminal output): `internal/view` and its components, then the
-   commands one at a time (`delete`, `update`, `report`, `scan` and `roots`, `export` and help). Done when each
+   commands one at a time (`delete`, `update`, `report`, `scan` and `roots`, `export` and help). `internal/view` and
+   `delete` done on 2026-11-16 (component tests in `internal/view`, golden files `internal/cli/testdata/delete-*.txt`). Done when each
    command's mocked scenarios have golden tests of the plain output, and read as designed by hand in a terminal, a
    40-column terminal, piped through `cat` and with `NO_COLOR=1`. First, since the duplicates re-plan changes what
    `update` and `delete` print and can then use the components.

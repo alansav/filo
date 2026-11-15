@@ -4,9 +4,10 @@ Filo keeps a register of your files: what they are, where they live, how that ch
 should be kept. It is the start of a review-and-dispose workflow meant to stop files piling up forever ("keep it in
 case someone asks").
 
-**Status: iteration 2 of 5: lifespan.** Filo is **read-only on your files**: it never modifies, moves, renames or
-deletes anything outside its own database. You can give every file a retention (how long to keep it), and Filo lists the files past
-theirs; deleting them comes in a later iteration (see [Roadmap](#roadmap)).
+**Status: iterations 1 to 3 done: scan, lifespan, delete.** You give every file a retention (how long to keep it), and
+`filo delete` lists the files past theirs, asks, and deletes the ones you choose. Apart from that, Filo is
+**read-only on your files**: no other command modifies, moves, renames or deletes anything outside its own database.
+See [Roadmap](#roadmap) for what comes next.
 
 ## What it does today
 
@@ -24,8 +25,11 @@ theirs; deleting them comes in a later iteration (see [Roadmap](#roadmap)).
   **duplicate groups with the space you could reclaim**, broken symlinks, unreadable files, and recent changes
   (including moved and missing files).
 - **Tracks how long to keep each file.** Each file has a retention (`7y` from the file's date, `forever`, or a fixed
-  date), which you set in a spreadsheet: export a CSV, fill in the retentions, update the register from it. When a date passes, the file is listed as a deletion
-  candidate. Nothing is ever deleted because a date passed.
+  date), which you set in a spreadsheet: export a CSV, fill in the retentions, update the register from it. When a
+  date passes, the file is listed as a deletion candidate. Nothing is ever deleted because a date passed: `filo
+  delete` shows you the list and asks.
+- **Deletes what you confirm**, after reading each file again just before deleting it: a file that changed since its
+  retention was set, moved, or can't be read is skipped, never deleted.
 - **Rescans quickly.** A file is only re-read when its size, modification time, change time (ctime) or inode changes.
   The change time is what catches a file whose permissions changed, or one rewritten with its old modification time
   put back. Windows has no change time, so there it isn't compared.
@@ -109,7 +113,7 @@ Unreadable files: 1
 filo export retention ~/Documents -o docs.csv    # every file under ~/Documents, with its retention
 # open docs.csv in a spreadsheet, fill in retention, save it as CSV
 filo update docs.csv                            # apply what you changed
-filo delete                                     # list the files past their retention (deletes nothing yet)
+filo delete                                     # list the files past their retention, ask, delete
 ```
 
 The CSV has one row per file: `id, export, directory, name, size, modified, file_date, retention, keep_until`. Sort
@@ -146,8 +150,52 @@ shows the files still to decide.
   a later export. The other rows are still applied. `--dry-run` checks everything and writes nothing.
 - On a large system, export one directory at a time, so the spreadsheet stays fast.
 
-Nothing is deleted because a date passed: `filo delete` lists the candidates, and in a later version will ask before
-deleting each one.
+Nothing is deleted because a date passed: `filo delete` lists the candidates and asks (see [Deleting](#deleting)).
+
+## Deleting
+
+`filo delete [DIR]` lists the files past their retention under `DIR` (or every root), then asks:
+
+```
+$ filo delete
+
+Ready to delete   5 files · 820 MB · ~/Documents
+
+Past their retention                                     5 files · 820 MB
+    until        size
+    2024-12-31   12 MB   tax/2017 return.pdf
+    2025-06-30    3 KB   notes/meeting.txt
+    2025-09-01  640 MB
+      video/2015/summer holiday in the south of France with the whole family, day 3.mp4
+    2025-11-01  160 MB   backups/old-phone.zip
+    2025-11-14    8 KB   receipts/2018-11-14 taxi.pdf
+
+Delete all 5, select one by one, list them all, or none? [a/s/l/N]
+```
+
+- **The answers:** `a` deletes them all, `s` goes one by one, `l` lists every file (in a terminal the list shows 10
+  per section) and asks again, and `n` deletes nothing. If the list was cut short, `a` first shows every file and
+  asks once more, so you always see what will be deleted. The capital letter is the default: Enter, or an answer
+  Filo doesn't know, never deletes anything. Without a terminal it lists everything and deletes nothing; `-y` deletes
+  them all without asking.
+- **One by one**, each file is shown with its full path, and you choose `d` delete, `r` give it a new retention, `s`
+  skip, or `q` quit:
+
+  ```
+  [2/5]  past its retention · until 2025-06-30 · 3 KB
+            ~/Documents/notes/meeting.txt
+          d delete · r new retention · s skip · q quit  › d
+          ✓ deleted
+  ```
+- **Just before deleting**, each file is read again. It is deleted only if it is still at its path as the same file
+  and its content is still the content its retention was set on. Otherwise it is skipped and listed with the reason,
+  and nothing about it changes.
+- **Deletion is permanent:** there is no recycle bin, so keep backups. Folders the run emptied are removed, up to the
+  root. A file you restore from a backup comes back as a new file, needing a retention.
+
+In a terminal the output has colour and symbols (set `NO_COLOR`, or `TERM=dumb`, to turn colour off) and fits the
+window: a path is never cut, but a long one moves to its own line. Piped into a file or another program, it is plain
+text with the same words, one line per file.
 
 ## Commands
 
@@ -159,8 +207,9 @@ deleting each one.
 | `filo scan [DIR]` | Scan `DIR` (a directory inside a root: a partial scan), or every root if omitted. |
 | `filo report [--top N]` | Show the overview; `--top` sets how many entries each list shows (default 10). |
 | `filo export retention [DIR] -o FILE` | Write every file under `DIR` (or every root) with its retention, as CSV. |
-| `filo update FILE [--dry-run]` | Apply the retentions edited in an exported CSV. |
-| `filo delete` | List the files past their retention. Deletes nothing in this version. |
+| `filo export duplicates [DIR] -o FILE` | Write the duplicate groups as CSV, to decide which copies to keep (being redesigned). |
+| `filo update FILE [--dry-run]` | Apply the retentions (or duplicate decisions) edited in an exported CSV. |
+| `filo delete [DIR] [-y]` | List the files past their retention (and duplicate copies marked for deletion), ask, and delete the ones you choose. See [Deleting](#deleting). |
 | `filo help [COMMAND]` | Show usage. `-h` works on every command. |
 
 Options for `filo roots add` and `filo roots set`, which every scan of the root then uses:
@@ -183,8 +232,9 @@ Every command accepts `--db PATH`. Options can come before or after `DIR`. A pro
 scans when the output is a terminal. The only questions Filo asks are in a terminal, and saying no (or running
 without a terminal, as a timer does) is always the safe choice.
 
-Exit codes: `0` success (files that couldn't be read are reported but don't fail the scan), `1` an error, a root
-that failed during `filo scan` of every root, or a CSV row that `filo update` refused, `2` a usage error.
+Exit codes: `0` success (files that couldn't be read are reported but don't fail the scan; saying no at a question
+is not a failure), `1` an error, a root that failed during `filo scan` of every root, a CSV row that `filo update`
+refused, or a file `filo delete` couldn't read or delete, `2` a usage error.
 
 ## Roots
 
@@ -261,16 +311,17 @@ Enable it with `systemctl --user enable --now filo-scan.timer`.
 ## Roadmap
 
 1. **Scan, register, report**, read-only. Done.
-2. **Lifespan**: a retention for every file, set through a CSV (this release).
-3. **Quarantine and delete**: `filo delete` asks `Delete [a]ll, [s]elect or [n]one?`, with safety checks at the
-   moment of acting, holds that veto disposal, `filo restore`, and a history of retired files.
-4. **Revert directory moves** from the location history.
-5. **A UI** in place of the CSV.
+2. **Lifespan**: a retention for every file, set through a CSV. Done.
+3. **Delete**: `filo delete` lists, asks, and deletes, with checks at the moment of deleting. Done.
+4. **Next**: clearer terminal output for every command (started with `filo delete`), then a redesign of how
+   duplicates are decided and deleted, then named retention policies. The order is in
+   [docs/design.md](docs/design.md), section 5.
+5. Later: **a UI** in place of the CSV.
 
 Principles that won't change:
 - A retention is never a trigger: reaching its end makes a file a candidate you confirm.
-- Holds override everything.
-- Disposal is staged and reversible.
+- A file is deleted only if it is still exactly the content you decided on; one that can't be read is never deleted.
+- Deletion is permanent, so keep backups: Filo has no recycle bin.
 - Anything ambiguous is reported, never guessed.
 
 The full design, settled decisions and open questions are in [docs/design.md](docs/design.md).

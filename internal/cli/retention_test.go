@@ -172,7 +172,7 @@ func TestRetentionRoundTrip(t *testing.T) {
 	editCSV(t, r2, setRetention(map[string]string{"2023-03 invoice.pdf": "2026-11-10", "a.txt": "2027-02-01"}))
 	filo(ExitOK, "", false, "update", r2)
 	r = filo(ExitOK, "", false, "delete")
-	contains("delete", r.stdout, "Past their retention: 1 file", "2026-11-10", in("docs/2023-03 invoice.pdf"),
+	contains("delete", r.stdout, "Past their retention   1 file", "2026-11-10", "   docs/2023-03 invoice.pdf",
 		"Nothing deleted: there is no terminal to ask in")
 	contains("report", filo(ExitOK, "", false, "report").stdout, "Past their retention: 1 file; see filo delete",
 		"Kept until a later date: 2 files", "Kept forever: 1 file")

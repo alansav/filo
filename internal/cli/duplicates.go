@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -238,60 +237,15 @@ func markedGroups(ctx context.Context, s *store.Store, f store.Filter, cands []s
 	return out, stale, nil
 }
 
-// listMarked prints the duplicates section of filo delete's list.
-func (e *env) listMarked(ctx context.Context, s *store.Store, groups []store.MarkedGroup, stale int,
-	under string) error {
-	w := e.stdout
-	var targets []string
-	var files int
-	var total int64
-	for _, g := range groups {
-		for _, c := range g.Delete {
-			targets = append(targets, c.AbsPath())
-			files++
-			total += c.Size
-		}
-	}
-	links, err := s.SymlinksTo(ctx, targets)
-	if err != nil {
-		return err
-	}
-	if len(groups) > 0 {
-		fmt.Fprintf(w, "Duplicate copies marked for deletion%s: %s in %s, %s\n", under,
-			report.Plural(int64(files), "file", "files"), report.Plural(int64(len(groups)), "group", "groups"),
-			report.Size(total))
-	}
-	for _, g := range groups {
-		fmt.Fprintf(w, "  %s, %s each\n", filepath.Base(g.Delete[0].AbsPath()), report.Size(g.Size))
-		if len(g.Keep) == 0 {
-			fmt.Fprintln(w, "    keep    (no other copy is left; this group will be skipped)")
-		}
-		for _, k := range g.Keep {
-			fmt.Fprintf(w, "    keep    %s%s\n", k.AbsPath(), retentionNote(k))
-		}
-		for _, c := range g.Delete {
-			fmt.Fprintf(w, "    delete  %s%s\n", c.AbsPath(), retentionNote(c))
-			for _, l := range links[c.AbsPath()] {
-				fmt.Fprintf(w, "            the symlink %s points to it and would break\n", l)
-			}
-		}
-	}
-	if stale > 0 {
-		fmt.Fprintf(w, "%s no longer %s: the copy changed since it was marked (export duplicates again).\n",
-			report.Plural(int64(stale), "mark", "marks"), pluralWord(stale, "counts", "count"))
-	}
-	return nil
-}
-
-// retentionNote shows a copy's retention in the duplicates list.
+// retentionNote shows a copy's retention next to its path: "forever", "until 2027-03-31", or nothing.
 func retentionNote(c store.Candidate) string {
 	switch c.KeepUntil {
 	case "":
 		return ""
 	case store.Forever:
-		return "  (kept forever)"
+		return "forever"
 	}
-	return "  (kept until " + c.KeepUntil + ")"
+	return "until " + c.KeepUntil
 }
 
 // findKept checks the group's unmarked copies on disk, longest retention first, and returns the first that is still

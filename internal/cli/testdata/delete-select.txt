@@ -1,0 +1,34 @@
+Ready to delete   4 files . 28 B . <root>
+
+Past their retention   3 files . 20 B
+    until        size
+    2025-06-30    5 B   notes/meeting.txt
+    2024-12-31   10 B   tax/2017 return.pdf
+    2025-09-01    5 B   video/2015/summer holiday in the south of France with the whole family, day 3.mp4
+
+Duplicate copies marked for deletion   1 file in 1 group . 8 B
+    contract.pdf . 8 B each
+      keep     a/contract.pdf   forever
+      delete   b/contract.pdf   forever
+
+Delete all 4, select one by one, list them all, or none? [a/s/l/N] 
+[1/4]  duplicate . contract.pdf . 8 B
+          keep     <root>/a/contract.pdf   forever
+          delete   <root>/b/contract.pdf   forever
+        d delete . u unmark . s skip . q quit  >         - skipped
+
+[2/4]  past its retention . until 2025-06-30 . 5 B
+          <root>/notes/meeting.txt
+        d delete . r new retention . s skip . q quit  >         [ok] deleted
+
+[3/4]  past its retention . until 2024-12-31 . 10 B
+          <root>/tax/2017 return.pdf
+        d delete . r new retention . s skip . q quit  >         new retention: forever or YYYY-MM-DD (a period needs a file_date, which this file has not got); blank to go back  >         [ok] kept until 2030-01-01
+
+[4/4]  past its retention . until 2025-09-01 . 5 B
+          <root>/video/2015/summer holiday in the south of France with the whole family, day 3.mp4
+        d delete . r new retention . s skip . q quit  > 
+Done   deleted 1 file . freed 5 B . removed 1 empty folder
+
+  - 1 file given a new retention
+  - 2 files left for later

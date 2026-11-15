@@ -158,16 +158,16 @@ func TestDuplicatesRoundTrip(t *testing.T) {
 
 	// filo delete lists the group with its kept copy; without a terminal it deletes nothing.
 	r = filo(ExitOK, "", false, "delete")
-	contains("list", r.stdout, "Duplicate copies marked for deletion: 2 files in 1 group, 16 B",
-		"contract.pdf, 8 B each", "    keep    "+in("a/contract.pdf"), "    delete  "+in("b/contract.pdf"),
-		"    delete  "+in("c/contract.pdf"), "Nothing deleted: there is no terminal")
+	contains("list", r.stdout, "Duplicate copies marked for deletion   2 files in 1 group . 16 B",
+		"    contract.pdf . 8 B each", "      keep     a/contract.pdf", "      delete   b/contract.pdf",
+		"      delete   c/contract.pdf", "Nothing deleted: there is no terminal")
 
 	// The copy kept was moved away after the update: nothing in the group is deleted.
 	if err := os.Rename(in("a/contract.pdf"), filepath.Join(work, "aside.pdf")); err != nil {
 		t.Fatal(err)
 	}
 	r = filo(ExitOK, "", false, "delete", "-y")
-	contains("kept copy gone", r.stdout, "Deleted 0 files", "no other copy could be checked, so it is not deleted",
+	contains("kept copy gone", r.stdout, "Done   deleted 0 files", "no other copy could be checked, so it is not deleted",
 		in("a/contract.pdf")+": no longer at this path")
 	if !exists("b/contract.pdf") || !exists("c/contract.pdf") {
 		t.Fatal("a copy was deleted while the kept copy was gone")
@@ -178,8 +178,8 @@ func TestDuplicatesRoundTrip(t *testing.T) {
 
 	// File by file: unmark b, delete c.
 	r = filo(ExitOK, "s\nu\nd\n", true, "delete")
-	contains("select", r.stdout, "(1/2) duplicate", "[d]elete, [u]nmark, [s]kip, [q]uit?", "Deleted 1 file (8 B).",
-		"Unmarked 1 copy")
+	contains("select", r.stdout, "[1/2]  duplicate . contract.pdf . 8 B", "          keep     "+in("a/contract.pdf"),
+		"d delete . u unmark . s skip . q quit  > ", "Done   deleted 1 file . freed 8 B", "  - 1 copy unmarked")
 	if !exists("a/contract.pdf") || !exists("b/contract.pdf") || exists("c/contract.pdf") {
 		t.Errorf("after select: a %v, b %v, c %v; want a and b kept, c deleted", exists("a/contract.pdf"),
 			exists("b/contract.pdf"), exists("c/contract.pdf"))
@@ -251,21 +251,21 @@ func TestDeleteListsMarkedCopies(t *testing.T) {
 	filo(ExitOK, "", false, "scan")
 
 	out := filo(ExitOK, "", false, "delete").stdout
-	for _, want := range []string{"Past their retention: 1 file", "2026-11-01", in("b/e"),
-		"Duplicate copies marked for deletion: 1 file in 1 group", "    delete  " + in("b/m"),
-		"the symlink " + in("a/to-m") + " points to it and would break",
-		"1 mark no longer counts: the copy changed since it was marked"} {
+	for _, want := range []string{"Past their retention   1 file", "    2026-11-01    1 B   b/e",
+		"Duplicate copies marked for deletion   1 file in 1 group", "      delete   b/m",
+		"-> the symlink " + in("a/to-m") + " points here and would break",
+		"[!] 1 mark no longer counts: the copy changed since it was marked"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("delete list lacks %q:\n%s", want, out)
 		}
 	}
-	if strings.Count(out, in("b/e")) != 1 {
-		t.Errorf("b/e is listed %d times, want once:\n%s", strings.Count(out, in("b/e")), out)
+	if strings.Count(out, "b/e") != 1 {
+		t.Errorf("b/e is listed %d times, want once:\n%s", strings.Count(out, "b/e"), out)
 	}
 
 	// Quit at the first copy: nothing is deleted.
 	r := filo(ExitOK, "s\nq\n", true, "delete")
-	if !strings.Contains(r.stdout, "Deleted 0 files") || !strings.Contains(r.stdout, "Left 2 files for later.") {
+	if !strings.Contains(r.stdout, "Done   deleted 0 files") || !strings.Contains(r.stdout, "2 files left for later") {
 		t.Errorf("quit:\n%s", r.stdout)
 	}
 }
@@ -304,6 +304,11 @@ func TestDuplicatesNeverLastCopy(t *testing.T) {
 		return id, err
 	}))
 
+	// The list says so before anything is done: the copy past its own retention does not count as kept.
+	if out := filo(ExitOK, "delete").stdout; !strings.Contains(out, "past its own retention: does not count as kept "+
+		"in this run") {
+		t.Errorf("the list does not say the kept copy will not count:\n%s", out)
+	}
 	r := filo(ExitOK, "delete", "-y")
 	for _, want := range []string{in("a/k") + ": past its own retention, so this run may delete it too",
 		in("a/m") + ": the same file as " + in("b/m") + " (a hard link or a bind mount)"} {
@@ -342,4 +347,48 @@ func TestUpdateRetentionWithGroupColumn(t *testing.T) {
 	}
 	ct.contains("update of a retention CSV with a group column", ct.filo(ExitOK, "", false, "update", rcsv).stdout,
 		"Updated 1 file")
+}
+
+// TestDuplicateSelectResults: select mode does not predict a duplicate copy's fate; once its group is done, each copy
+// chosen gets its real result, and a group left unfinished by quitting says its chosen copies were not deleted.
+func TestDuplicateSelectResults(t *testing.T) {
+	ct := newCLITest(t)
+	setNow(t, time.Date(2026, 11, 14, 12, 0, 0, 0, time.Local))
+	in, filo := ct.in, ct.filo
+	for _, rel := range []string{"x/c", "y/c", "a/t", "b/t", "c/t"} {
+		ct.write(rel, rel[len(rel)-1:])
+	}
+	filo(ExitOK, "", false, "roots", "add", ct.root)
+	dcsv := filepath.Join(ct.work, "d.csv")
+	filo(ExitOK, "", false, "export", "duplicates", "-o", dcsv)
+	editCSV(t, dcsv, setDelete(map[string]string{in("x/c"): "N", in("y/c"): "Y", in("a/t"): "N", in("b/t"): "Y",
+		in("c/t"): "Y"}))
+	filo(ExitOK, "", false, "update", dcsv)
+	// After the update, the copy marked for deletion is given a longer retention than the copy kept.
+	rcsv := filepath.Join(ct.work, "r.csv")
+	filo(ExitOK, "", false, "export", "retention", "-o", rcsv)
+	editCSV(t, rcsv, func(row map[string]string) {
+		switch row["directory"] + "/" + row["name"] {
+		case in("x/c"):
+			row["retention"] = "2027-01-01"
+		case in("y/c"):
+			row["retention"] = "forever"
+		}
+	})
+	filo(ExitOK, "", false, "update", rcsv)
+
+	// Group t first (a/t sorts first): choose b/t, then quit at c/t. Nothing in t is deleted.
+	r := filo(ExitOK, "s\nd\nq\n", true, "delete")
+	ct.contains("quit", r.stdout, "chosen: checked against its kept copy just before deleting",
+		"not deleted: 1 copy chosen in this group, left for later since the group was not finished")
+	if !ct.exists("b/t") || !ct.exists("c/t") {
+		t.Fatal("a copy of an unfinished group was deleted")
+	}
+	// Skip t's copies, choose y/c: its kept copy has a shorter retention, so it is not deleted, and the screen says so.
+	r = filo(ExitOK, "s\ns\ns\nd\n", true, "delete")
+	ct.contains("shorter retention", r.stdout, "not deleted y/c: the copy kept, "+in("x/c")+", has a shorter retention")
+	ct.lacks("shorter retention", r.stdout, "deleted y/c\n")
+	if !ct.exists("y/c") {
+		t.Fatal("y/c was deleted though its kept copy has a shorter retention")
+	}
 }

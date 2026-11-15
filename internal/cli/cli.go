@@ -17,6 +17,7 @@ import (
 	"github.com/alansav/filo/internal/reconcile"
 	"github.com/alansav/filo/internal/report"
 	"github.com/alansav/filo/internal/store"
+	"github.com/alansav/filo/internal/view"
 	"github.com/alansav/filo/internal/walk"
 )
 
@@ -118,9 +119,11 @@ terminal it records nothing. Then run filo delete.
 
 Lists the files past their retention under DIR (inside a root), or under every root, whose content has not changed
 since the retention was set, and the duplicate copies marked for deletion (see filo help update) with the copies
-kept, then asks: Delete [a]ll, [s]elect or [n]one? Select goes file by file: [d]elete, [r]etention (give it a new
-one), [s]kip or [q]uit; for a duplicate copy, [u]nmark in place of [r]etention. Without a terminal it only lists;
--y deletes them all without asking. Deletion is permanent: there is no recycle bin, so keep backups.
+kept, then asks: all, select one by one, list them all, or none [a/s/l/N]. In a terminal the list shows 10 entries
+per section; l lists every one. Select goes file by file: d delete, r new retention, s skip or q quit; for a
+duplicate copy, u unmark in place of r. Enter, or an answer filo does not know, never deletes anything. Without a
+terminal it only lists; -y deletes them all without asking. Deletion is permanent: there is no recycle bin, so
+keep backups.
 
 A duplicate copy is deleted only after another copy of the same content has been read again and found unchanged
 at its path, and only if that copy is kept at least as long; otherwise its group is skipped. The last copy of a
@@ -136,8 +139,9 @@ could not be read or deleted.
 // env is one invocation's surroundings.
 type env struct {
 	stdin          io.Reader
-	stdout, stderr io.Writer // through safeText: what filo prints can never act as terminal control codes
-	rawStderr      io.Writer // for the progress line's own control codes, and to ask whether it is a terminal
+	view           *view.Renderer // the terminal output components (docs/design.md, Terminal output)
+	stdout, stderr io.Writer      // through safeText: what filo prints can never act as terminal control codes
+	rawStderr      io.Writer      // for the progress line's own control codes, and to ask whether it is a terminal
 	getenv         func(string) string
 }
 
@@ -148,7 +152,8 @@ func (e usageError) Error() string { return e.msg }
 
 // Run executes one command line (without the program name) and returns the exit code.
 func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(string) string) int {
-	e := &env{stdin: stdin, stdout: safeText{stdout}, stderr: safeText{stderr}, rawStderr: stderr, getenv: getenv}
+	e := &env{stdin: stdin, view: newView(stdout, getenv), stdout: safeText{stdout}, stderr: safeText{stderr},
+		rawStderr: stderr, getenv: getenv}
 	err := e.run(ctx, args)
 	var ue usageError
 	switch {
@@ -166,6 +171,18 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		fmt.Fprintf(e.stderr, "filo: %s\n", err)
 		return ExitError
 	}
+}
+
+// newView makes the Renderer for stdout: rich and as wide as the terminal when stdout is one (colour unless NO_COLOR
+// is set or TERM is dumb), plain otherwise. A character device that is not a terminal is plain too: reading the
+// window size tells them apart.
+func newView(stdout io.Writer, getenv func(string) string) *view.Renderer {
+	o := view.Options{Out: stdout, Terminal: isTerminal(stdout), Home: getenv("HOME")}
+	if f, ok := stdout.(*os.File); ok && o.Terminal {
+		o.Width, o.Terminal = view.Size(f)
+	}
+	o.Color = o.Terminal && getenv("NO_COLOR") == "" && getenv("TERM") != "dumb"
+	return view.New(o)
 }
 
 // errReported means the details were already printed.
@@ -680,6 +697,19 @@ func isTerminal(w any) bool {
 	}
 	fi, err := f.Stat()
 	return err == nil && fi.Mode()&os.ModeCharDevice != 0
+}
+
+// canAsk reports whether a question can be answered on in: a terminal, and for a real file one whose window size can
+// be read (a character device such as /dev/null is not).
+func canAsk(in io.Reader) bool {
+	if !isTerminal(in) {
+		return false
+	}
+	if f, ok := in.(*os.File); ok {
+		_, terminal := view.Size(f)
+		return terminal
+	}
+	return true
 }
 
 // progressInterval is how often the progress line is redrawn.

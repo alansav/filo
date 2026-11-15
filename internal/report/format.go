@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strconv"
 	"time"
+
+	"github.com/alansav/filo/internal/view"
 )
 
 // Size formats a byte count with binary units: 512 B, 1.5 KiB, 118 GiB.
@@ -25,33 +27,11 @@ func Size(n int64) string {
 	return fmt.Sprintf("%.1f %s", v, suffix)
 }
 
-// Count formats an integer with thousands separators: 52,310.
-func Count(n int64) string {
-	s := strconv.FormatInt(n, 10)
-	neg := s[0] == '-'
-	if neg {
-		s = s[1:]
-	}
-	var out []byte
-	for i := range len(s) {
-		if i > 0 && (len(s)-i)%3 == 0 {
-			out = append(out, ',')
-		}
-		out = append(out, s[i])
-	}
-	if neg {
-		return "-" + string(out)
-	}
-	return string(out)
-}
+// Count formats an integer with thousands separators: 52,310. (One implementation, in view.)
+func Count(n int64) string { return view.Count(n) }
 
 // Plural formats a count with a singular or plural noun: "1 group", "3 groups".
-func Plural(n int64, one, many string) string {
-	if n == 1 {
-		return Count(n) + " " + one
-	}
-	return Count(n) + " " + many
-}
+func Plural(n int64, one, many string) string { return view.Plural(n, one, many) }
 
 // Time shows a stored UTC timestamp as local time to the minute; anything unparsable is shown as stored.
 func Time(utc string) string {

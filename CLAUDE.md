@@ -6,14 +6,15 @@ in the same commit when a design decision changes.
 
 ## Current state
 
-Iterations 1 (scan, register, report), 2 (lifespan: retention through the retention CSV, `filo export retention`
-then `filo update`) and 3 (delete: `filo delete [DIR] [-y]` lists the files past their retention, asks, and deletes
-the chosen ones, each only after it is re-read and found unchanged) are done, as are register snapshots and the
-duplicates CSV (`filo export duplicates`, `filo update` records Y/N decisions, `filo delete` deletes marked copies
-only after a kept copy is re-read; only `filo delete` deletes). The order of the next work is in `docs/design.md`
-section 5, starting with the terminal output (designed 2026-11-15, see "Terminal output": the `internal/view`
-components, then the commands one at a time), then the duplicates redesign (2026-11-16, see "Duplicates": `filo
-delete FILE.csv` with no stored decisions to delete, the `action` column, records, always and `filo duplicates`).
+Iterations 1 (scan, register, report), 2 (lifespan: retention through the retention CSV, `filo export retention` then
+`filo update`) and 3 (delete: `filo delete [DIR] [-y]` lists the files past their retention, asks, and deletes the
+chosen ones, each only after it is re-read and found unchanged) are done, as are register snapshots and the duplicates
+CSV (`filo export duplicates`, `filo update` records Y/N decisions, `filo delete` deletes marked copies only after a
+kept copy is re-read; only `filo delete` deletes). The order of the next work is in `docs/design.md` section 5, starting
+with the terminal output (designed 2026-11-15, see "Terminal output": `internal/view` and `delete` are done; then
+`update`, `report`, `scan` and `roots`, `export` and help, one at a time), then the duplicates redesign (2026-11-16, see
+"Duplicates": `filo delete FILE.csv` with no stored decisions to delete, the `action` column, records, always and `filo
+duplicates`).
 **`internal/dispose` is the only code allowed to delete the user's files**, and only from `filo delete`; everything
 else stays read-only on them, and nothing overwrites an existing file. Stay inside the current piece of work.
 
@@ -23,9 +24,10 @@ else stays read-only on them, and nothing overwrites an existing file. Stay insi
   its companion files and its `<db>.snapshots/` directory) except through `filo delete`, or the later work that
   calls for it. Anything destructive shows what it will do and asks first (or needs `-y`).
 - Treat file names and the register as untrusted input: delete only inside a root (`internal/dispose` checks), and
-  print through the CLI's escaping writer (`safeText`), never straight to `os.Stdout`. Write each line of output with
-  one call (a newline inside a write is escaped, since only a file name puts one there); filo's own multi-line text
-  goes through `writeLines`.
+  print through `internal/view` (its Renderer escapes every text it is given with `view.Escape`, then adds only its
+  own colour codes) or, for output not yet moved to it, the CLI's escaping writer (`safeText`); never write text
+  straight to `os.Stdout`. Write each line of output with one call (a newline inside a write is escaped, since only a
+  file name puts one there); filo's own multi-line text goes through `writeLines`.
 - In `internal/store`, every write goes through `s.commit(tx)` or `s.exec`, so a run that changes the register gets
   its snapshot (`TestWritesGoThroughTheHelpers` guards it).
 - Fail safe: a file with missing or ambiguous data is "new, needs a date", never "eligible for deletion". Reaching a
@@ -67,8 +69,9 @@ Run `go vet` and the tests before saying a change is done.
 
 - `cmd/filo/`: the command-line entry point, kept thin.
 - `internal/`: the logic, in small packages (walking, hashing, the store, reconcile, report, retention CSV,
-  duplicates CSV, sheet (what spreadsheets do to a CSV), dispose; view, the terminal output components, once
-  built). Keep OS-specific code (hidden files, inodes, symlinks, path separators) behind small functions.
+  duplicates CSV, sheet (what spreadsheets do to a CSV), dispose, view (the terminal output: one Renderer and its
+  components; commands hand it data and never format output themselves)). Keep OS-specific code (hidden files,
+  inodes, symlinks, path separators, the terminal's width) behind small functions.
 - `scripts/`: helper scripts (`dev.sh`, `testtree.sh`).
 - `.devcontainer/Containerfile`: the dev container. `docs/design.md`: the design.
 
