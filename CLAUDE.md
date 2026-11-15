@@ -12,8 +12,8 @@ the chosen ones, each only after it is re-read and found unchanged) are done, as
 duplicates CSV (`filo export duplicates`, `filo update` records Y/N decisions, `filo delete` deletes marked copies
 only after a kept copy is re-read; only `filo delete` deletes). The order of the next work is in `docs/design.md`
 section 5, starting with the terminal output (designed 2026-11-15, see "Terminal output": the `internal/view`
-components, then the commands one at a time), then re-planning how a second duplicates export shows the decisions
-recorded (a fix was abandoned; see the open question "Duplicates: showing the decisions recorded").
+components, then the commands one at a time), then the duplicates redesign (2026-11-16, see "Duplicates": `filo
+delete FILE.csv` with no stored decisions to delete, the `action` column, records, always and `filo duplicates`).
 **`internal/dispose` is the only code allowed to delete the user's files**, and only from `filo delete`; everything
 else stays read-only on them, and nothing overwrites an existing file. Stay inside the current piece of work.
 
@@ -40,8 +40,8 @@ else stays read-only on them, and nothing overwrites an existing file. Stay insi
 - Do not run `git commit` or `git push`, and do not set a git identity. The user commits from the host.
 - Before changing any file in the repo, check the branch with `git branch --show-current`. If it is `main`, stop and
   ask the user to check out a branch; do not create or switch branches yourself.
-- Command names stay plain and easy to remember: `roots`, `scan`, `report`, `export`, `update`, `delete`, `revert`.
-  No themed names.
+- Command names stay plain and easy to remember: `roots`, `scan`, `report`, `export`, `update`, `delete`,
+  `duplicates`, `revert`. No themed names.
 
 ## Commands
 

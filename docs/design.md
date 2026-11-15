@@ -10,9 +10,9 @@ reconcile rules were carried over. The second shape of the retention CSV (`file_
 6); it passes its test-tree criterion and has not yet been run on real files. Register snapshots (rolling copies of
 the database next to it) were added on 2026-11-13. The order of the next work was agreed the same day (section 5).
 The duplicates CSV was designed on 2026-11-13/14 and taken ahead of that order (schema version 7); a gap found on
-2026-11-14 (a second export shows decided groups blank) is to be re-planned (section 6). The terminal output was
-designed on 2026-11-15 and comes first (Terminal output). Last updated:
-2026-11-15.
+2026-11-14 (a second export shows decided groups blank) led to a redesign on 2026-11-16 (Duplicates: `filo delete
+FILE.csv`, no stored decisions to delete, four kinds of keep), not built yet. The terminal output was designed on
+2026-11-15 and is built first (Terminal output). Last updated: 2026-11-16.
 
 This file records settled decisions, the planned data model and the open questions. When a decision changes,
 change it here in the same commit.
@@ -466,97 +466,178 @@ files). Replaces the earlier plan of a quarantine, holds and several checks at t
   - *Prompts* are read in the background, so Ctrl-C ends a wait for an answer; nothing is deleted after it.
 - Scheduled runs only ever scan; Filo never schedules a deletion.
 
-### Duplicates (designed 2026-11-13/14)
-The report finds duplicate groups (297 groups, 605 files on the real home directory) but nothing acts on them. The
-duplicates CSV is a round trip like the retention CSV: export the groups, decide per copy in a spreadsheet, update,
-then delete. It brushes against the rule that a delete column in a spreadsheet is unsafe (a sort or a fill-down puts
-it on the wrong rows), hence the group rules, the confirmation and the check at the moment of deleting below.
+### Duplicates (designed 2026-11-13/14; redesigned 2026-11-16, not built yet)
+The report finds duplicate groups (297 groups, 605 files on the real home directory). The duplicates CSV lets the
+person act on them: export the groups, decide per copy in a spreadsheet, then run `filo delete` on the CSV, which
+checks every group against the disk, lists what it will and will not do, asks, and does it. It brushes against the
+rule that a delete column in a spreadsheet is unsafe (a sort or a fill-down puts it on the wrong rows), hence the group
+rules, the listing before the question and the check at the moment of deleting below.
 
-- **Only `filo delete` deletes** (a rule, 2026-11-13). `filo update` on a duplicates CSV records decisions and never
-  deletes; it ends with "run filo delete to review and delete them". Time passes between the two, which is what the
-  check at the moment of deleting is for.
-- **A group** is a content (hash) held by two or more *copies*: present regular files, size above zero, not deleted.
-  Hard links (same inode in the same root; a root never leaves its filesystem) are one copy: two paths to one file
-  are not a duplicate, and deleting one frees nothing. So a group needs two distinct copies, and the report's
-  reclaimable space counts copies, not paths. A copy with more than one link can be kept (N) but not deleted (Y).
+**Until it is built**, filo works as the first design: `filo export duplicates`, then `filo update` records Y/N
+decisions (two or more N mark a content *separate*), then `filo delete` deletes the copies marked, with the
+`--separate` export to undo. See "The first design, and why it changed" at the end of this section.
+
+- **The principle** (2026-11-16). The duplicates process decides which copy to keep, never whether the content goes.
+  A duplicates decision never removes a content or shortens its life; only a retention does.
+- **No stored decisions to delete** (2026-11-16). There is no `filo update` for duplicates. The CSV is the person's
+  saved work: they keep editing it and run `filo delete FILE.csv` when ready. Nothing waits in the register between
+  deciding and deleting, so a second export never disagrees with a first, and an old CSV is safe to run: a group is
+  acted on only if its files are still exactly as exported. The only duplicates state stored is what is meant to
+  exist: excluded directories, contents *always*, and sets of *records* (below). Setting a retention stays a separate
+  step (`filo update` on a retention CSV), since it never deletes: deletes happen later.
+- **A group** is a content (hash) held by two or more *copies*: present regular files, size above zero, not deleted,
+  not under an excluded directory, the content not *always*, and not all members of one set of records. Hard links
+  (same inode in the same root; a root never leaves its filesystem) are one copy: two paths to one file are not a
+  duplicate, and deleting one frees nothing. So a group needs two distinct copies, and the report's reclaimable space
+  counts copies, not paths. A copy with more than one link can be kept but not deleted.
+- **Why identical files exist, and the four kinds of keep** (2026-11-16):
+
+  | reason | example | the decision is about | a new copy found later |
+  |---|---|---|---|
+  | a copy made by accident | a download saved twice | which copy to keep (`keep` one, `delete` the rest) | a new duplicate to decide |
+  | copies that are each a record | insurance terms received in 2020 and again in 2021, each with its own retention | these copies (`keep` on two or more): *records* | a new duplicate to decide |
+  | a content that belongs everywhere | `LICENSE`, `__init__.py`, a template in each project | the content (`always`) | not a duplicate |
+  | a deliberate copy of a folder | a backup, an old laptop's files | a directory (`filo duplicates exclude`) | not a duplicate |
+
+- **Excluded directories.** `filo duplicates` lists everything not counted as duplicates; `filo duplicates exclude DIR`
+  makes files under DIR (its whole subtree) never count as duplicates, of each other or of files elsewhere;
+  `filo duplicates include DIR` removes the exclusion. Directories are included by default, so `include` only removes
+  an entry: if DIR is not excluded itself but a parent is, it says so ("~/Backup/Documents is not excluded itself;
+  ~/Backup is"). `exclude` replaces the exclusions under DIR and says which ("excluded ~/Backup (replaces
+  ~/Backup/Documents)"). DIR must be inside a root; exclusions are stored in the register. Retention is unaffected. A
+  file with two copies in `~/Documents` and one in an excluded `~/Backup` is still a group, of the two. Filo does not
+  try to spot such directories (any threshold would miss odd cases); `filo export duplicates` lists the exclusions and
+  always ends with "Folders that are copies on purpose (backups) can be left out entirely: filo duplicates exclude
+  DIR". Expected to be used rarely, mainly for backups.
 - **`filo export duplicates [DIR] -o FILE`** writes every group with at least one copy under DIR, and all of that
-  group's copies, also those outside DIR (the copy to keep may live elsewhere). One row per copy, groups numbered in
-  order of their first path. Same CSV rules as the retention CSV (byte order mark, formula guard, `-o` required,
-  mode 0600, never overwrite). Columns: `id, export, group, copies, directory, name, size, modified, file_date,
-  retention, keep_until, delete`. `copies` is the group's size, so a filtered view shows when copies are hidden. The
-  retention columns are display only. `export_rows` records each row's hash, group and path.
-- **The `delete` cell**: `Y` or `N` (any case, also `yes` / `no`); blank is no decision; anything else is refused. N
-  means "this copy is meant to exist".
-- **Group rules** (2026-11-14). Each group is decided on its own; groups whose rows are all blank are not reviewed
-  yet and are left alone, so a CSV can be worked through over several updates.
+  group's copies, also those outside DIR (the copy to keep may live elsewhere), so exports of different directories
+  can overlap. One row per copy, groups numbered in order of their first path. Same CSV rules as the retention CSV
+  (byte order mark, formula guard, `-o` required, mode 0600, never overwrite). Columns: `id, export, group, copies,
+  directory, name, size, modified, file_date, retention, keep_until, action`. `copies` is the group's size, so a
+  filtered view shows when copies are hidden. The retention columns are display only. `export_rows` records each
+  row's hash, group and path. The `action` cell is blank, except `keep` on a copy that is one of a set of records (a
+  new copy of records is exported with them: `delete` it, or `keep` it to join the set).
+- **The `action` cell**: `delete` (`d`), `keep` (`k`) or `always` (`a`): the full word or its single letter, any case,
+  spaces around it ignored. Anything else (`del`, `delete this`) refuses the group. Blank is no decision.
+- **Group rules.** Each group is decided on its own; a group whose rows are all blank is not decided and is skipped,
+  so a CSV can be worked through and run several times.
 
-  | rows of a group | meaning |
+  | rows of a group | result |
   |---|---|
-  | all blank (or deleted from the CSV) | not reviewed: nothing recorded |
-  | some Y/N, some blank or missing | group refused: every copy of a decided group needs Y or N |
-  | every row Y | refused: this workflow never removes the last copy ("to remove this content entirely, give it a past retention") |
-  | exactly one N, the rest Y | the Ys are marked for deletion |
-  | two or more N, the rest Y or none | the Ys are marked for deletion, and the content is marked **separate** |
+  | all blank | not decided: skipped |
+  | some blank, some filled | refused: every copy needs a value |
+  | one `keep`, the rest `delete` | the `delete` copies are deleted |
+  | two or more `keep`, the rest `delete` or none | the `delete` copies are deleted; the kept copies are stored as a set of records |
+  | every row `always` | the content is stored as always; nothing is deleted |
+  | `always` with anything else | refused: `always` is about the content, so it goes on every row |
+  | every row `delete` | refused: "no copy would be left; to remove this content entirely, give it a past retention" |
 
-  A decided group replaces that group's earlier decisions: an N on a copy marked before removes its mark.
-- **Retention across copies** (2026-11-14; replaces a carry-over of the longer retention, considered the same day):
-  a copy can be marked Y only if a copy marked N lasts at least as long: the same or a later `keep_until`, or
-  `forever` (a copy with no retention lasts no time, so it may go whatever is kept). Otherwise the group is refused
-  ("keep the copy with the longer retention, or give the kept copy a longer retention first"). Filo never changes a
-  retention to make a group pass. `filo delete` checks it again.
-- **Separate contents.** Two or more N say these copies are intended (`LICENSE`, `__init__.py`, a template copied
-  into each project). The decision is about the content, so it is stored per hash: any file with that content, in
-  any directory, now or later, is no longer a duplicate (not exported, not in the report's groups or reclaimable
-  space). It never affects retention. An edited file has a new hash, so it can become a duplicate again. `filo
-  report` counts the contents marked separate so they stay visible. Undo: `filo export duplicates [DIR] --separate
-  -o FILE` writes the separate contents with every row filled in N; a group with any row blanked is a duplicate
-  again; a Y there is refused (undo first, then decide in a later export).
-- **What `filo update` refuses** (the whole group, with one line each): a row not in its export or with a `group`
-  that is not the export's group for that file (a sorted or pasted row); a file no longer present, moved, changed
-  since the export, or flagged unreadable; a Y on a copy with several hard links; the group rules and the retention
-  rule above. Rows of a retention export in a duplicates CSV, and the reverse, are refused.
-- **One confirmation.** If anything is refused, or any content would be marked separate (a fill-down of N shows up
-  as "297 contents would be marked separate"), `filo update` lists it all and asks once, `Record these decisions?
-  [y/n]`. Anything but yes records nothing, so the CSV can be fixed and updated again; without a terminal it records
-  nothing and says so. With nothing to confirm it records straight away. `--dry-run` lists and records nothing. Exit
-  code 1 if anything was refused. (Stricter than the retention CSV, where refused rows do not stop the others,
-  because this CSV leads to deletions.)
-- **A copy that appeared since the export** is not in the CSV. It joins a content marked separate (it is the same
-  content) and counts as a kept copy for deletions; the summary mentions it.
-- **`filo delete`** lists two sections: "Past their retention" and "Duplicate copies marked for deletion", the latter
-  per group with its `keep` and `delete` rows, and a total. The prompt is the same; in select mode a marked copy gets
-  `[d]elete, [u]nmark, [s]kip, [q]uit` (*unmark* removes the mark). `-y` deletes marked copies too. A marked copy that
-  is also past its retention is listed once, under retention. A mark on a copy whose content has changed since is
-  ignored (it needs a new decision), and the list says how many. A symlink in the register that points at a marked
-  copy is named next to it, since it would break.
+  To remove every copy of a content: `keep` one and `delete` the rest, run `filo delete`, then remove the last one by
+  hand or with a retention. There is no `DELETE` word for every row: it adds risk, and a fill-down of it is as easy as
+  of `delete`.
+- **Retention across copies** (2026-11-14, kept on 2026-11-16): a copy can be deleted only if a kept copy lasts at
+  least as long: the same or a later `keep_until`, or `forever` (a copy with no retention lasts no time, so it may go
+  whatever is kept). A retention belongs to a copy (counted from its own `file_date`), so a content must exist until
+  the latest `keep_until` of its copies. Insurance terms from 2020 and 2021, each `7y`: keeping 2020 and deleting
+  2021 is refused ("keep the 2021 copy instead, or keep both"); keeping 2021 and deleting 2020 is allowed and shortens
+  nothing, so such copies stay duplicates (hiding them would hide a safe saving). Filo never changes a retention to
+  make a group pass. (Considered on 2026-11-16: allowing it with a warning; rejected, since it would let a decision
+  cut a retention short.) It also means a kept copy that reaches its own date needs no rule: it outlasts every copy
+  deleted, so by then every copy's retention has passed.
+- **`filo delete FILE.csv [-y]`**, in order:
+  1. Read the CSV: a CSV from the first design (a `delete` column) is refused ("this CSV is from an older export:
+     export again"); a retention CSV is refused; each group's values and structure are checked. A row not in its
+     export, or whose `group` is not the export's group for that file (its `group` edited, pasted from another
+     export, added or duplicated), refuses both groups it touches; the other groups are still processed, and the
+     output advises a new export. Sorting is fine: groups are found by each row's `group` cell, not by row order.
+  2. Check every decided group against the disk, not the last scan. A file whose folder can be read and that is not
+     in it is gone: its row is reported and ignored, and the rest of the group is decided as usual (also when the row
+     was deleted from the CSV). A row deleted from the CSV whose file is still there: the group is skipped. A file
+     filo cannot check (drive not mounted, folder unreadable) is never "gone": its group is skipped ("can't check …:
+     is the drive mounted?"). Each copy must still be at its path and the content the export recorded (strict: a
+     group any of whose files changed or moved since the export is skipped whole, even if its copies still match
+     each other, so a file is deleted only if it is still exactly the content decided on). Then the retention rule.
+  3. List, under the Terminal output rules: "Will delete" (per group, `keep` and `delete` lines, symlinks that would
+     break), "Will record" (contents always, sets of records), "Won't touch" (each refused or skipped group with its
+     line and reason; groups not decided as a count), and ask once: `Delete 9 copies and record 2 decisions?
+     [y/s/l/N]`. `s` goes group by group (`d do it · s skip · q quit`); `-y` does all of it without asking; without a
+     terminal nothing is done and one line says so.
+  4. Carry it out a group at a time, each with the check at the moment of deleting (below); records and always are
+     stored as their group is reached.
+  5. The result: the "Done" summary, then anything skipped at the last moment, with its reason.
+
+  Files gone by then: all of a group's copies gone, or the copies to delete gone and the kept one there, is reported
+  (removed outside filo). One copy to delete gone and the kept one there: the others are deleted. The kept copy gone:
+  the group is skipped, since no copy would be left. A group already carried out by an earlier run is reported as
+  gone and skipped. An interrupted run keeps what it did.
 - **Never the last copy: the check at the moment of deleting.** The register is not trusted for this; the disk is.
-  Duplicates are deleted first, a group at a time. Before a group's first deletion, Filo looks for a kept copy: a
-  present, unmarked copy (not a hard link of a marked one) that is at its path as the same file, readable, and
-  re-hashed to the same content, tried in order of the longest retention. Two more never count (found in the code
-  review of 2026-11-14): a copy on this run's retention list, since the run may delete it later (a kept copy past its
-  date with a marked copy that has no retention would otherwise lose both), and a copy that is, on disk, the same
-  file as a copy to delete (same device and inode, looked at live: a folder bind-mounted into a second root shows the
-  same file as two copies, and the register keeps no device numbers). The export merges such paths into one copy,
-  and the device and inode are compared again at the last look before each unlink. If none passes, nothing in the group is
-  deleted and the list says why for each copy tried. The retention rule is then checked against that copy; if it
-  fails, the group is skipped. Each marked copy then goes through the usual check (path, inode, re-hash against the
-  hash it was marked on), and right before its unlink the kept copy is looked at again (same inode, size and
-  modification time). A copy deleted earlier in the run never counts as kept, since each group is checked right
-  before its own deletions. No scan is needed beforehand: a stale register means skips with "run filo scan", never a
-  wrong deletion. The `deleted` event says which copy was kept.
-- **Register (schema version 7)**: `exports.kind` (`retention`, `duplicates` or `separate`), `export_rows.dup_group`
-  and `export_rows.path_id`, `duplicate_marks` (the copies marked for deletion, with the hash they were marked on),
-  `separate_hashes`, and `duplicate_reviews` (append-only history of every decision, in a `review_batches` batch with
-  command `update`), and an index on `files(inode)` for finding hard links.
-- Later: "one decision for all copies" (offering a retention set on one copy to its undated copies).
-- **Known gap** (raised 2026-11-14): a second export shows decided groups with blank `delete` cells, so they look
-  undecided. A fix was attempted and abandoned on 2026-11-15; see Open questions, "Duplicates: showing the decisions
-  recorded".
+  Before a group's first deletion, Filo looks for a kept copy: a copy marked `keep` that is at its path as the same
+  file, readable, and re-hashed to the same content, tried in order of the longest retention. A copy that is, on
+  disk, the same file as a copy to delete never counts (same device and inode, looked at live: a folder bind-mounted
+  into a second root shows the same file as two copies, and the register keeps no device numbers; found in the code
+  review of 2026-11-14). The export merges such paths into one copy, and the device and inode are compared again at
+  the last look before each unlink. If none passes, nothing in the group is deleted and the list says why for each
+  copy tried. The retention rule is then checked against that copy; if it fails, the group is skipped. Each copy to
+  delete then goes through the usual check (path, inode, re-hash against the content exported), and right before its
+  unlink the kept copy is looked at again (same inode, size and modification time). A copy deleted earlier in the run
+  never counts as kept. No scan is needed beforehand: a stale register means skips with "run filo scan", never a wrong
+  deletion. The `deleted` event says which copy was kept, and a symlink in the register that points at a copy deleted
+  is named in the list, since it would break.
+- **`filo duplicates`: what is not counted, and undoing it.** It lists the excluded directories, the contents always
+  (with their copies and a few paths) and the sets of records. `filo duplicates include PATH` undoes whichever applies
+  ("count this as a duplicate again"): an excluded directory loses its exclusion; a copy of an always content makes
+  the content a duplicate again ("LICENSE is a duplicate again (5 copies)"); a copy that is one of a set of records
+  removes the whole set ("terms.pdf: the 2 records are duplicates again"); anything else says PATH is none of them.
+  Records are stored per copy and its content, so a record that is edited leaves its set by itself.
+- **The report** leaves out excluded directories, contents always and sets of records from its duplicate groups and
+  reclaimable space, with one line: "Not counted: 1 excluded directory, 2 contents always, 1 set of records (filo
+  duplicates)". The line "N copies marked for deletion" goes.
+- **The scenarios** (the test list): A a CSV run twice, B several CSVs, C editing the CSV, D files changing before the
+  run, E inside one run, F new copies.
+
+  | scenario | outcome |
+  |---|---|
+  | A1 a CSV run, edited further, run again | the groups done are gone (reported); the new decisions are carried out |
+  | A2 a group changed between two runs of the same CSV | the second run does what the CSV now says, if the files are as exported |
+  | B1 1.csv run after 2.csv | each run does what its CSV says, for the files still as exported |
+  | B2 a CSV run after another run deleted some of its copies | their rows reported and ignored |
+  | B3 exports of overlapping directories | fine: a group always comes with all its copies |
+  | C1 a row deleted from the CSV | the group skipped, unless that row's file is gone (B2) |
+  | C2 a row moved to another group, added or duplicated | both groups refused; the rest processed; export again |
+  | C3 partly filled, every row `delete`, `always` mixed, an unknown value | the group refused, with the reason |
+  | C4 a copy deleted with a longer retention than every kept copy | the group refused: keep the longer copy |
+  | C5 the spreadsheet sorted | fine |
+  | D1 a copy edited after the export | the group skipped; export again to decide it |
+  | D2 every copy edited the same way | skipped all the same |
+  | D3 a copy moved or renamed | skipped; run `filo scan` and export again |
+  | D4 a copy unreadable, or its drive not mounted | never counts as kept; the group skipped |
+  | E1 A kept, B and C to delete: B gone | C deleted |
+  | E2 A kept, B and C to delete: B and C gone | reported (removed outside filo) |
+  | E3 A kept, B and C to delete: A gone | the group skipped: no copy would be left |
+  | E4 the run interrupted | what was done stays done; the next run reports those groups as gone |
+  | F1 a new copy of a content decided before (now one copy left) | a new group to decide |
+  | F2 a new copy of an always content, or under an excluded directory | not a duplicate |
+  | F3 a new copy of a set of records | exported with the records as `keep`, itself blank |
+
+- **Register (schema version 8, planned)**: drops `duplicate_marks` and `duplicate_reviews` (and the review batches
+  only they used); renames `separate_hashes` to `always_hashes` (existing separate contents become always); adds
+  `duplicate_records` (file, hash, set) and `excluded_dirs` (root, path). `exports.kind` `separate` is no longer
+  written. The upgrade drops the first design's marks and decision history (the real register's were all carried out
+  already); each file's `deleted` events stay, as the history of what was deleted and which copy was kept.
+- **The first design, and why it changed** (2026-11-13/14, built; redesigned 2026-11-16). `filo update` recorded each
+  group's Y/N decisions as marks in the register (two or more N marked the content separate, everywhere), and
+  `filo delete` deleted the marked copies later, alongside retention candidates. A second export then showed decided
+  groups blank, though the marks were stored. A fix that filled the cells in from the register (branch
+  `fix-duplicates-includes-copy-decision`, kept at a4ffe5f) went through six code review rounds, each finding new
+  cases, and was abandoned on 2026-11-15: the same decision lived in three places (the register, the CSV and the
+  disk), each able to change on its own. Designing from the flow and its scenarios instead led to keeping no
+  decisions to delete at all, and to splitting "separate" into records (these copies) and always (the content), since
+  insurance terms kept as two records should not make every future copy of them acceptable.
 
 ### Commands and scheduling
-- Plain names, easy to remember: `roots`, `scan`, `report`, `export`, `update`, `delete` (a `revert` was
-  deferred). No themed subcommands. (`restore` was dropped on 2026-11-12: a file restored from a backup comes back
-  as a new file.)
+- Plain names, easy to remember: `roots`, `scan`, `report`, `export`, `update`, `delete`, `duplicates` (added
+  2026-11-16, see Duplicates; a `revert` was deferred). No themed subcommands. (`restore` was dropped on 2026-11-12:
+  a file restored from a backup comes back as a new file.)
   (Reshaped 2026-11-12: `review` and its subcommands `set-date`, `export` and
   `import` were replaced by `export lifespan` and `update`; "update" says that only existing files change, which
   "import" did not. `export lifespan` was renamed `export retention` the same day: the CSV's word names what is
@@ -586,9 +667,12 @@ it on the wrong rows), hence the group rules, the confirmation and the check at 
 - `filo report [--top N]`: see section 4.
 - `filo export retention [DIR] -o FILE` and `filo update FILE [--dry-run]`: see Lifespan. The word after `export`
   names the CSV, so a later CSV is a new word, not a new command; `update` tells the kind from the CSV's header.
-- `filo delete [DIR] [-y]`: lists the files past their keep-until date and the duplicate copies marked for deletion,
-  and deletes the ones chosen (see Disposal and Duplicates).
-- `filo export duplicates [DIR] [--separate] -o FILE`: see Duplicates; `filo update` tells it from its header.
+- `filo delete [DIR] [-y]`: lists the files past their keep-until date and deletes the ones chosen (see Disposal).
+  Until the duplicates redesign is built, it also lists and deletes the duplicate copies marked by `filo update`.
+- `filo delete FILE.csv [-y]` (redesign, not built yet): carries out a duplicates CSV (see Duplicates).
+- `filo export duplicates [DIR] -o FILE`: see Duplicates (`--separate` goes with the redesign).
+- `filo duplicates`, `filo duplicates exclude DIR`, `filo duplicates include PATH` (redesign, not built yet): what is
+  not counted as duplicates (excluded directories, contents always, sets of records), and undoing it.
 - `--db PATH` is accepted before or after any command; `FILO_DB` is the fallback, then the default location. Flags may
   come before or after PATH. Built on the standard library's `flag` package (no CLI framework).
 - **A path that starts with `~` is refused** (2026-11-11): every DIR and FILE, `-o`, `--db` and `FILO_DB`.
@@ -631,8 +715,8 @@ topic at a time from mockups; the mockups below are the reference.
     since the output is then the record of what was deleted.
   - *Needs fixing* (refusals, skips): every item; more than 10 with the same reason collapse into one line with the
     count and the line range (a sorted CSV can refuse every row for one reason).
-  - *What a confirmation covers* (clears, contents marked separate, files now past their retention): the first 10
-    and "and N more", and the prompt offers `l` to list everything before answering (`[y/N/l]`).
+  - *What a confirmation covers* (clears, contents always and sets of records, files now past their retention): the
+    first 10 and "and N more", and the prompt offers `l` to list everything before answering (`[y/N/l]`).
 - **Width.** A path is never cut, not even with `…`: every path printed is about to be acted on or names something
   to find. Short fixed columns (date, size, marker) come first and the path last; an entry whose path does not fit
   puts it on its own indented line, and the terminal wraps it if needed. Section totals sit at the right edge.
@@ -681,30 +765,37 @@ Nothing has been deleted. Next: filo delete
 ```
 
 ```
-$ filo update dupes.csv
+$ filo delete dupes.csv
 
-Duplicates update   export 7 · 12 groups · ~/Documents
+Duplicates   dupes.csv · export 7 · 12 groups · ~/Documents
+
+Will delete                                              9 copies in 6 groups · 1.2 GB
+    report.pdf · 4 MB each
+      keep     Documents/report.pdf
+      delete   Downloads/report.pdf
+    contract.pdf · 8 MB each
+      keep     a/contract.pdf          forever
+      delete   b/contract.pdf
+      delete   c/contract.pdf
+               ↳ the symlink ~/Desktop/contract points here and would break
+    … 4 more groups
 
 Will record
-  ✓ 9 copies to delete in 6 groups                     1.2 GB once deleted
-  ◆ 1 content marked separate (identical copies meant to exist)
-      LICENSE      a/LICENSE · b/LICENSE
-  · 3 groups left alone (no Y or N)
+  ◆ 1 content always (never a duplicate):  LICENSE (3 copies)
+  ◆ 1 set of 2 records:                     terms.pdf
 
-Refused: nothing in these groups is recorded
-  group 3  line 12  IMG_2041.jpg   every copy is Y; this would leave none
-  group 5  line 19  contract.pdf   b/contract.pdf is kept forever, longer than every copy marked N
-  group 8  line 27  q              a/q has a hard link, so deleting it frees nothing: mark it N
+Won't touch
+  ✗ group 3   line 12  IMG_2041.jpg   every copy is delete: no copy would be left
+  ✗ group 5   line 19  photo.jpg      b/photo.jpg changed since the export: export again
+  · 3 groups not decided (blank)
 
-Record these decisions? Refused groups stay as they are. [y/N/l] y
-
-✓ Recorded. Nothing has been deleted. Next: filo delete (9 copies to review)
+Delete 9 copies and record 2 decisions? [y/s/l/N]
 ```
 
 ```
 $ filo delete
 
-Ready to delete   14 files · 2.3 GB · ~/Documents
+Ready to delete   5 files · 820 MB · ~/Documents
 
 Past their retention                                     5 files · 820 MB
     until        size
@@ -715,30 +806,18 @@ Past their retention                                     5 files · 820 MB
     2025-11-01  160 MB   backups/old-phone.zip
     2025-11-14    8 KB   receipts/2018-11-14 taxi.pdf
 
-Duplicate copies marked for deletion                     9 files in 6 groups · 1.5 GB
-    contract.pdf · 8 MB each
-      keep     a/contract.pdf          forever
-      delete   b/contract.pdf
-      delete   c/contract.pdf
-               ↳ the symlink ~/Desktop/contract points here and would break
-    IMG_2041.jpg · 4 MB each
-      keep     photos/2019/IMG_2041.jpg
-      delete   phone-import/IMG_2041.jpg
-    … 4 more groups
-
-! 1 mark no longer counts: its copy changed since it was marked (export duplicates again).
-
-Delete all 14, select one by one, list them all, or none? [a/s/l/N]
+Delete all 5, select one by one, list them all, or none? [a/s/l/N]
 ```
 
 ```
-[3/14]  duplicate · contract.pdf · 8 MB
-          keep     ~/Documents/a/contract.pdf          forever
-          delete   ~/Documents/c/contract.pdf
-        d delete · u unmark · s skip · q quit  › d
-        ✓ deleted
+[2/6]  contract.pdf · 8 MB each                      (filo delete dupes.csv, s)
+         keep     ~/Documents/a/contract.pdf          forever
+         delete   ~/Documents/b/contract.pdf
+         delete   ~/Documents/c/contract.pdf
+       d do it · s skip · q quit  › d
+       ✓ deleted 2 copies
 
-[4/14]  past its retention · until 2024-12-31 · 12 MB
+[4/5]   past its retention · until 2024-12-31 · 12 MB  (filo delete, s)
           ~/Documents/tax/2017 return.pdf
         d delete · r new retention · s skip · q quit  › r
         retention (7y, forever or a date)  › 10y
@@ -746,11 +825,10 @@ Delete all 14, select one by one, list them all, or none? [a/s/l/N]
 ```
 
 ```
-Done   deleted 12 files · freed 2.1 GB · removed 1 empty folder
+Done   deleted 3 files · freed 812 MB · removed 1 empty folder
 
-Skipped 2: nothing was changed
+Skipped 1: nothing was changed
   tax/2017 return.pdf    changed since its retention was set: give it a new retention
-  b/contract.pdf         the kept copy a/contract.pdf moved: run filo scan, then filo delete
 
   · 1 file given a new retention
   · 0 left for later
@@ -759,9 +837,9 @@ Skipped 2: nothing was changed
 Piped or with `NO_COLOR`, the same text with ASCII markers:
 
 ```
-Duplicates update   export 7 . 12 groups . ~/Documents
+Duplicates   dupes.csv . export 7 . 12 groups . ~/Documents
   [ok] 9 copies to delete in 6 groups
-  [refused] 3 groups (listed below)
+  [refused] 2 groups (listed below)
 ```
 
 ## 3. Data model (schema version 7)
@@ -851,7 +929,8 @@ CREATE TABLE reviews (                  -- append-only: every keep_until ever se
     file_date TEXT, retention TEXT);    -- version 5
 CREATE INDEX ix_reviews_file ON reviews(file_id);
 
--- version 7: duplicates
+-- version 7: duplicates (version 8, planned with the duplicates redesign, drops duplicate_marks and
+-- duplicate_reviews, renames separate_hashes to always_hashes, and adds duplicate_records and excluded_dirs)
 CREATE TABLE duplicate_marks (          -- copies marked for deletion; a mark counts only while hash = files.hash
     file_id INTEGER PRIMARY KEY REFERENCES files(id), hash TEXT NOT NULL,
     export_id INTEGER REFERENCES exports(id), batch_id INTEGER NOT NULL REFERENCES review_batches(id));
@@ -961,8 +1040,10 @@ put first on 2026-11-15). Each is an open question below until it is designed.
    command's mocked scenarios have golden tests of the plain output, and read as designed by hand in a terminal, a
    40-column terminal, piped through `cat` and with `NO_COLOR=1`. First, since the duplicates re-plan changes what
    `update` and `delete` print and can then use the components.
-2. Duplicates: showing the decisions recorded in a second export (re-plan the strategy first; a fix was abandoned).
-   The strategy can be designed alongside item 1.
+2. Duplicates redesign (2026-11-16, see Duplicates): `filo delete FILE.csv` carries out a duplicates CSV with no
+   stored decisions to delete; the `action` column (`delete`, `keep`, `always`); records and always; `filo
+   duplicates` with excluded directories; schema version 8. Done when every scenario in its table has a test, and the
+   README explains the four kinds of keep and the rules. After item 1, so its output uses the components.
 3. Named retention policies.
 4. Folder rules (default retention policies on directories).
 5. Progress in the report, and `export retention --needing-retention`.
@@ -978,15 +1059,16 @@ shape.
 
 ## 6. Open questions
 
-- **Named retention policies** (raised 2026-11-13; next after the terminal output and the duplicates re-plan). A retention schedule written once, `bills = 7y`,
-  `payslips = forever`, and the policy name typed in the CSV (and later in folder rules) in place of a period. If the
-  law changes ("financial records: 10 years"), changing the policy changes every file using it. Proposed shape: a
-  name that is not a policy yet creates one with no period, and its files stay "needing a retention" until it has
-  one (fail safe); `filo update` lists the policies it created and asks once, so a typo (`bils`) does not quietly
-  make a new one; `forever` becomes a built-in policy; periods still count from `file_date`; fixed dates per file
-  stay possible. Changing a policy works out `keep_until` again for its files; lengthening is harmless, shortening
-  lists the files it makes past their date and asks. A command lists policies, flagging those without a period.
-  Worth having before the real home directory is dated, though setting `file_date`s does not depend on it.
+- **Named retention policies** (raised 2026-11-13; next after the terminal output and the duplicates redesign). A
+  retention schedule written once, `bills = 7y`, `payslips = forever`, and the policy name typed in the CSV (and later
+  in folder rules) in place of a period. If the law changes ("financial records: 10 years"), changing the policy changes
+  every file using it. Proposed shape: a name that is not a policy yet creates one with no period, and its files stay
+  "needing a retention" until it has one (fail safe); `filo update` lists the policies it created and asks once, so a
+  typo (`bils`) does not quietly make a new one; `forever` becomes a built-in policy; periods still count from
+  `file_date`; fixed dates per file stay possible. Changing a policy works out `keep_until` again for its files;
+  lengthening is harmless, shortening lists the files it makes past their date and asks. A command lists policies,
+  flagging those without a period. Worth having before the real home directory is dated, though setting `file_date`s
+  does not depend on it.
 - **Notes, links and tasks** (raised 2026-11-13; merges asset links, the long-term "projects and tasks linked to
   files", and notes on files). Notes on a file; links to an asset or project (modelled at that level, not per
   file); tasks, some with files and some without; possibly a productivity system built on the register. That is a
@@ -1025,54 +1107,13 @@ shape.
 - **Duplicates: one decision for all copies** (raised 2026-11-13). Retention is about content, so dating one copy
   could offer the same retention to its undated copies (one confirmation), and copies with different retentions are
   reported, not resolved. The duplicates CSV itself is designed and built (see Duplicates).
-- **Duplicates: showing the decisions recorded** (raised 2026-11-14; a fix was abandoned 2026-11-15, to be re-planned
-  with a clear strategy before any code). Export duplicates, decide some groups, `filo update`, then export again: the
-  decided groups come back with every `delete` cell blank, so they look undecided, though the marks are in the
-  register. The retention CSV fills in each row's stored `retention`, so the expectation is that the duplicates CSV
-  fills in `Y`/`N` too, and that a blank means "undecided" (blanking a decided group takes the decision back,
-  confirmed first).
-
-  *What was tried* (branch `fix-duplicates-includes-copy-decision`, kept for reference at a4ffe5f): fill each cell in from the
-  register (Y if marked on the current content; N if the copy's latest decision on it is keep, read from
-  `duplicate_reviews`; blank otherwise), then decide what an update means by comparing the CSV with a baseline. The
-  first baseline was the register as it is now. It let an old CSV undo later decisions, so a schema version 8 stored
-  the cell each export showed (`export_rows.delete_shown`) and the last decision before it
-  (`exports.dup_reviews_upto`), and the baseline became "what this export's own updates last recorded, else what it
-  showed", rebuilt from the history. Six code review rounds each found new cases; most came from that rebuilding (the
-  history does not always say what a CSV last meant: `filo delete` writes nothing to it, an undo touches only some
-  rows) and from the separate-contents export.
-
-  *What a design has to get right* (each found on that branch):
-  1. An old CSV, untouched, records nothing, whatever was decided since, and is never refused or asked about again.
-  2. The same CSV can be worked through over several updates, including taking a decision back.
-  3. A group decided again since the export (another export's update, an unmark in `filo delete`, the content made
-     separate or undone) is refused if changed in the CSV, so an old CSV never undoes a later decision.
-  4. A filtered or trimmed CSV changes nothing by itself (a missing row is no decision).
-  5. Copies deleted by `filo delete` since the export (their rows are still in the old CSV), and copies missing from
-     a scan that may come back (they must not keep a mark the person took back).
-  6. Separate contents: the `--separate` export; a separate content with a copy marked Y (two N and a Y); an undo
-     applied, then run again, partly blanked, or after the content was made separate again; a new Y there.
-  7. Clearing a whole column must not silently undo hundreds of decisions: made undecided and no longer separate are
-     listed and confirmed, like marking separate.
-  8. The same content in two groups of one CSV (rows pasted from two exports) must not give contradictory plans.
-  9. Summary and prompt text that says exactly what happens ("unchanged" is not "still in force"; name a group by
-     its first path).
-  10. Upgrading: released version 7 exports showed blank cells (N in a separate export); a development build
-      (00246ae) filled in Y/N, but no register that matters has its exports.
-  11. Smaller points: decisions matched by hash only (a file restored to the content it was decided on gets that
-      decision back); a decision recorded on another hard link of a copy is not shown; `created_utc` strings
-      (RFC3339Nano drops trailing zeros) do not sort as times, so order by ids or compare with `julianday`; an index
-      on `duplicate_reviews(export_id)` and `(hash, id)` if exports' own decisions are read.
-
-  *Ideas for the re-plan* (not decided):
-  - Store, per export row, the cell the last update of its group recorded (`delete_recorded`, starting as the cell
-    exported), and compare the CSV with that instead of rebuilding it from the history: "unchanged" is then exact.
-  - Ignore, when updating, a row whose copy `filo delete` has deleted, as if it were removed from the CSV.
-  - Make the separate-contents export undo-only (any blank undoes the content; a re-run is a no-op; it never shows Y),
-    or fold separate contents into the duplicates export.
-  - The simplest strategy may be one live export: an update of an export older than the latest decision on any of its
-    groups is refused for those groups ("export again"), which removes most of cases 1 to 3.
-  - Agree the strategy and its test cases (the list above) in this document first, then write the code.
+- **Duplicates: showing the decisions recorded** (raised 2026-11-14; resolved 2026-11-16 by the duplicates
+  redesign: nothing waits in the register to be shown; see Duplicates, "The first design, and why it changed").
+  Points the abandoned branch (`fix-duplicates-includes-copy-decision`, a4ffe5f) found that the redesign's build has
+  to keep in mind: records are matched by hash, so a file restored to the content it was kept on would rejoin its
+  set; a copy with hard links is one copy, named by its first path; `created_utc` strings do not sort as times
+  (order by ids); the same content in two groups of one CSV (rows pasted from two exports) must not give
+  contradictory actions.
 - **Progress** (raised 2026-11-13). A report line for how far dating has got: files with a `file_date`, files with
   a retention, and per directory what is left. And `export retention --needing-retention`, writing only the files
   the report counts as needing a retention, so each CSV is shorter.
