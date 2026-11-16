@@ -623,8 +623,8 @@ retention: the file becomes a candidate at its date and is deleted only through 
   | `bank/letter.pdf`, `bank/old/letter.pdf` | `financial`: `*`, from `bank` for both |
   | `bank/2024/DailyStatement-01.pdf` | `tax-2024`: the nearest directory with a matching rule wins |
 
-- **Changing a rule affects new files only**: files it already dated keep their policy, and `set` says so ("38 files
-  already have bills: the change applies to new files"). Moving them is a step of its own: `filo policies move` for
+- **Changing a rule affects new files only**: files it already set a policy on keep it, and `set` says so ("38 files
+  keep the policy it set: the change is for new files"). Moving them is a step of its own: `filo policies move` for
   every file of a policy, the CSV filtered on the directory for some.
 - **Policies and rules**: `filo policies remove` is refused while a rule names the policy ("2 rules use bills:
   filo rules lists them"), as it is while files use it. `filo policies move` takes the rules with the files: a rename
@@ -713,11 +713,11 @@ Nothing was changed.
 
 $ filo rules set bank '*Statement*' financial
 Done   bank · *Statement* → financial (was statements)
-  - 40 files it dated keep their policy: the change is for new files
+  - 40 files keep the policy it set: the change is for new files
 
 $ filo rules remove bank '*Statement*'
 Removed   bank · *Statement* → statements
-  - 40 files it dated keep their policy
+  - 40 files keep the policy it set
 ```
 
   Refusals are one line each: `bank: no rule *Statment* there (filo rules lists them)`, `bank: already has the rule
@@ -2077,7 +2077,7 @@ put first on 2026-11-15). Each is an open question below until it is designed.
       reached. Scenarios A, B4, D, F1.
       Done on 2026-11-16: `internal/cli/rules.go`, `view.Groups` (a table of rows under directory names),
       `store.RuleTies` (the list's "Not applied"); the help page `filo help rules`. `set` and `remove` say the files
-      a rule dated "keep their policy", not the rule's old policy by name: a rule set more than once may have dated
+      "keep the policy it set", not the rule's old policy by name: a rule set more than once may have dated
       them with different ones. `add`'s line ends with the root, as every heading does. Tests: `TestRulesGolden`
       (`testdata/rules.txt`), `TestRulesAdd`, `TestRulesSetRemove`, `TestRulesListScope`. Not tested: refusing a
       root that is not mounted (it is `store.Resolve`'s, and needs a real mount).
