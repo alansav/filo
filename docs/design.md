@@ -756,12 +756,12 @@ of this section.
      the outcome never depends on which group runs first; the same action, or a blank group, is fine.
   2. Check every decided group against the disk, not the last scan. A file whose directory can be read and that is not
      in it is gone: its row is reported and ignored, and the rest of the group is decided as usual (also when the row
-     was deleted from the CSV). A row deleted from the CSV whose file is still there: the group is skipped. A file
-     filo cannot check (drive not mounted, directory unreadable) is never "gone": its group is skipped ("can't check …:
-     is the drive mounted?"). Each copy must still be at its path and the content the export recorded (strict: a
-     group any of whose files changed or moved since the export is skipped whole, even if its copies still match
-     each other, so a file is deleted only if it is still exactly the content decided on). Then the retention rule.
-     This check reads no content (built 2026-11-16): each copy is looked at (`lstat`) and compared with the
+     was deleted from the CSV). A row deleted from the CSV whose file is still there: the group is skipped.
+     A file filo cannot check (drive not mounted, directory unreadable) is never "gone": its group is skipped
+     ("can't check …: is the drive mounted?"). Each copy must still be at its path and the content the export recorded
+     (strict: a group any of whose files changed or moved since the export is skipped whole, even if its copies still
+     match each other, so a file is deleted only if it is still exactly the content decided on). Then the retention
+     rule. This check reads no content (built 2026-11-16): each copy is looked at (`lstat`) and compared with the
      register (the export's hash still the register's, the same inode, size and modification time, no other current
      path), and a copy to keep is opened to see it can be read; the content is re-hashed once, at the moment of
      deleting. A copy moved without a scan since is not at its path, so it reads as gone, as above; one whose move
@@ -1960,9 +1960,9 @@ shape.
     the same directory is the fallback for files no pattern matched.
   - **Empty directories** (raised 2026-11-16). Removing directories that hold no files is part of this feature, as its
     own slice, since it is the only destructive part: it goes through `filo delete` and `internal/dispose` (for example
-    `filo delete --empty-dirs [DIR]`). Proposed: a fresh walk finds the directories with no files at any depth (the
-    register does not store directories); the list is shown and Filo asks (or `-y`); each is removed bottom-up with the
-    call that refuses a non-empty directory; never a root, a mount point, a directory that could not be read, or one
+    `filo delete --empty-directories [DIR]`). Proposed: a fresh walk finds the directories with no files at any depth
+    (the register does not store directories); the list is shown and Filo asks (or `-y`); each is removed bottom-up with
+    the call that refuses a non-empty directory; never a root, a mount point, a directory that could not be read, or one
     under the ignore rules. Open: whether a directory holding only `.DS_Store`, `Thumbs.db` or `desktop.ini` counts as
     empty (today it does not); and that some programs need their empty directories (a maildir's `cur`, `new`, `tmp`;
     `.git/refs/tags`; project skeletons), which argues for listing them and letting the person choose, as
