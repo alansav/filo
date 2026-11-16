@@ -145,6 +145,13 @@ func TestRuleTies(t *testing.T) {
 	if v := e.ruleColumns("bank/bank-2024.pdf"); v != "- - - rule - never hash -" {
 		t.Errorf("the tied file: %q, want undated", v)
 	}
+	ties, err := e.s.RuleTies(e.ctx, e.root.ID, ruleToday)
+	if err != nil || len(ties) != 1 || ties[0].Path != "bank/bank-2024.pdf" {
+		t.Errorf("RuleTies = %+v, %v; want bank-2024.pdf", ties, err)
+	}
+	if v := rawQueryString(t, e.db, `SELECT count(*) FROM reviews`); v != "1" {
+		t.Errorf("RuleTies left %s history rows, want the 1 from adding *bank*", v)
+	}
 }
 
 // TestRuleDatingHardLinks: a file with two present paths (hard links) is decided once, over both: dated if they agree
