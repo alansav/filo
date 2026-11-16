@@ -12,9 +12,9 @@ chosen ones, each only after it is re-read and found unchanged) are done, as are
 redesign (`docs/design.md`, Duplicates: `filo delete FILE.csv`, records, always, `filo duplicates`; schema 8) is done
 and merged. The terminal output is done (every command prints through `internal/view`, see "Terminal output"). Named
 retention policies (`docs/design.md`, Lifespan, Named retention policies; schema 9; `filo policies`) are done and
-merged. Replacing an existing `-o` file after asking (section 5 item 11) is done. Next in `docs/design.md` section 5:
-every export scans first (item 12, designed), then folder rules (design first: name patterns and empty folders are
-in Open questions).
+merged. Replacing an existing `-o` file after asking (section 5 item 11) and every export scanning first, `--no-scan`
+to skip it (item 12), are done. Next in `docs/design.md` section 5: folder rules (design first: name patterns and
+empty folders are in Open questions).
 **`internal/dispose` is the only code allowed to delete the user's files**, and only from `filo delete`; everything
 else stays read-only on them, and nothing overwrites an existing file without asking (only an `-o` output file,
 see the hard rules). Stay inside the current piece of work.

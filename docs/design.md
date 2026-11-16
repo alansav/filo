@@ -298,7 +298,7 @@ retention CSV and `filo update` write only the register and the CSV file the use
   holds **every present file** under DIR (or every root), with its current date, not a queue: dated files are
   reviewed too, and filtering on a blank `retention` gives the undated ones. Missing and moved files are not in it;
   they are in `filo report`. On a large system, export one directory at a time so a spreadsheet can open it.
-- **A scan first** (decided 2026-11-16, not built yet, section 5 item 12): every export scans before it reads the
+- **A scan first** (decided and built 2026-11-16, section 5 item 12): every export scans before it reads the
   register, so the CSV holds the files as they are now, not as of the last scan, and a file saved since is in it.
   `--no-scan` skips it (nothing changed, or the scan is slow). What it scans:
 
@@ -698,7 +698,7 @@ of this section.
   directory, name, size, modified, file_date, retention, keep_until, action`. `copies` is the group's size, so a
   filtered view shows when copies are hidden. The retention columns are display only. `export_rows` records each
   row's hash, group and path. **A scan first**, of every root, not only DIR, since a group's copies can be anywhere;
-  `--no-scan` skips it (see Lifespan, "A scan first"; not built yet, section 5 item 12). The `action` cell is blank, except `keep` on a copy that is one of a set of records (a
+  `--no-scan` skips it (see Lifespan, "A scan first"; section 5 item 12). The `action` cell is blank, except `keep` on a copy that is one of a set of records (a
   new copy of records is exported with them: `delete` it, or `keep` it to join the set).
 - **Why the export reads the register, not the disk alone** (considered 2026-11-16: an export that only walks DIR
   and hashes it, with no root or scan, so the CSV is never stale and no setup is needed; rejected, and the scan first
@@ -1321,7 +1321,7 @@ Next: filo scan /home/you/FiloTest
 
 **Export** (agreed 2026-11-15, one topic at a time):
 
-- **The scan first** (2026-11-16, not built yet): the scan block, as `filo scan` prints it, then the export's block.
+- **The scan first** (2026-11-16): the scan block, as `filo scan` prints it, then the export's block.
   With `--no-scan`, no scan block, and a `·` line in the export block: `not scanned first: as of the last scan,
   <when>`.
 - **`filo export retention`**: a heading, `Retention export`, with the export number (the one `filo update`
@@ -1819,7 +1819,9 @@ put first on 2026-11-15). Each is an open question below until it is designed.
     `TestExportReplace` (no terminal, no, Enter, yes, a folder, a symlink, a device, `-y`) and
     `TestWriteExportReplace` (a failed write and a file changed after asking leave the old file as it was).
 12. Every export scans first, `--no-scan` to skip it (decided 2026-11-16 for `export duplicates`, widened the same
-    day to `export retention`; see Lifespan, "A scan first"; small, can go earlier).
+    day to `export retention`; see Lifespan, "A scan first"). Done on 2026-11-16: `TestExportScansFirst` (a file
+    saved since the last scan, DIR only, every root for duplicates, `--no-scan` and its line, a failed root, Ctrl-C)
+    and the golden file `testdata/export.txt`.
 
 Later: the **UI** in place of the CSV, including viewing and editing the register in place, and notes, links and
 tasks (see Open questions). All of it hangs off the stable file ID, so none of it needs the register to change

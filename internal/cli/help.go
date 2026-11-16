@@ -97,11 +97,13 @@ var commandHelps = map[string]commandHelp{
 	},
 	"export": {
 		usage: []string{
-			"filo export retention [DIR] -o FILE",
-			"filo export duplicates [DIR] -o FILE",
+			"filo export retention [DIR] -o FILE [--no-scan]",
+			"filo export duplicates [DIR] -o FILE [--no-scan]",
 		},
 		before: []string{
-			"Writes every file under DIR (inside a root), or under every root, as CSV (UTF-8) to FILE. If FILE " +
+			"Scans first (DIR only; every root for export duplicates), then writes every file under DIR (inside a " +
+				"root), or under every root, as CSV (UTF-8) to FILE. A root that cannot be scanned stops the export. " +
+				"If FILE " +
 				"exists, filo asks before replacing it (only a regular file, and only at a terminal). Columns: id, " +
 				"export, directory, name, size, modified, file_date, retention, keep_until. " +
 				"Fill in retention in a spreadsheet (a period such as 7y counted from file_date, a date, forever, or " +
@@ -117,6 +119,7 @@ var commandHelps = map[string]commandHelp{
 		},
 		flags: []view.Term{
 			{Name: "-o FILE", Text: "the CSV to write; an existing file is replaced only after asking"},
+			{Name: "--no-scan", Text: "export the register as it is, without scanning first"},
 		},
 	},
 	"update": {

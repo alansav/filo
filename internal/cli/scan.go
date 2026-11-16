@@ -49,7 +49,7 @@ func (e *env) scan(ctx context.Context, dbBefore string, args []string) error {
 		if opt.Target, err = filepath.Abs(pos[0]); err != nil {
 			return err
 		}
-		return e.scanTarget(ctx, s, opt)
+		return e.scanTarget(ctx, s, opt, true)
 	}
 	roots, err := s.Roots(ctx)
 	if err != nil {
@@ -58,7 +58,7 @@ func (e *env) scan(ctx context.Context, dbBefore string, args []string) error {
 	if len(roots) == 0 {
 		return errors.New("no roots yet; add one with: filo roots add DIR")
 	}
-	return e.scanAll(ctx, s, opt, roots)
+	return e.scanAll(ctx, s, opt, roots, true)
 }
 
 // runScan is reconcile.Scan; tests replace it to interrupt a scan at a chosen point.
@@ -66,8 +66,10 @@ var runScan = reconcile.Scan
 
 // scanAll scans every root in turn, each in its own transaction and its own block of output (docs/design.md,
 // Terminal output, Scan and roots). A root that fails is a block of its own on stdout, and the others are still
-// scanned; the run then exits 1. Only cancellation stops it early.
-func (e *env) scanAll(ctx context.Context, s *store.Store, opt reconcile.Options, roots []store.Root) error {
+// scanned; the run then exits 1. Only cancellation stops it early. next adds "Next: filo report" where something needs
+// a look; a command with a next step of its own (export) leaves it out.
+func (e *env) scanAll(ctx context.Context, s *store.Store, opt reconcile.Options, roots []store.Root,
+	next bool) error {
 	v := e.view
 	pr := e.startProgress(&opt)
 	defer pr.stop()
@@ -112,10 +114,10 @@ func (e *env) scanAll(ctx context.Context, s *store.Store, opt reconcile.Options
 			facts = append(facts, report.Count(int64(failed))+" failed")
 		}
 		v.Outcome("Done", facts...)
-	} else if attention || failed > 0 {
+	} else if next && (attention || failed > 0) {
 		v.Blank()
 	}
-	if attention || failed > 0 {
+	if next && (attention || failed > 0) {
 		v.Next("Next: filo report")
 	}
 	if failed > 0 {
@@ -129,7 +131,8 @@ func (e *env) scanAll(ctx context.Context, s *store.Store, opt reconcile.Options
 }
 
 // scanTarget scans one directory (a root, or a directory inside one) with a progress line, and shows what it did.
-func (e *env) scanTarget(ctx context.Context, s *store.Store, opt reconcile.Options) error {
+// next is as for scanAll.
+func (e *env) scanTarget(ctx context.Context, s *store.Store, opt reconcile.Options, next bool) error {
 	pr := e.startProgress(&opt)
 	defer pr.stop()
 	pr.label(opt.Target)
@@ -139,7 +142,7 @@ func (e *env) scanTarget(ctx context.Context, s *store.Store, opt reconcile.Opti
 	if err != nil {
 		return err
 	}
-	if renderScan(e.view, sum, time.Since(start)) {
+	if renderScan(e.view, sum, time.Since(start)) && next {
 		e.view.Blank()
 		e.view.Next("Next: filo report")
 	}

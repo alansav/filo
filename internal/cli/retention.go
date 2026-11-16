@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/alansav/filo/internal/duplicates"
+	"github.com/alansav/filo/internal/reconcile"
 	"github.com/alansav/filo/internal/report"
 	"github.com/alansav/filo/internal/retention"
 	"github.com/alansav/filo/internal/store"
@@ -53,6 +54,7 @@ func (e *env) export(ctx context.Context, dbBefore string, args []string) error 
 	fl := e.flags("export")
 	db := dbFlag(fl, dbBefore)
 	out := fl.String("o", "", "")
+	noScan := fl.Bool("no-scan", false, "")
 	pos, err := e.parse(fl, "export", args)
 	if err != nil {
 		return err
@@ -96,8 +98,20 @@ func (e *env) export(ctx context.Context, dbBefore string, args []string) error 
 	if err != nil || !ok {
 		return err
 	}
+	// A scan first, so the CSV holds the files as they are now (docs/design.md, Lifespan, "A scan first").
+	var notScanned string
+	if *noScan {
+		if notScanned, err = lastScanLine(ctx, s, where.Roots); err != nil {
+			return err
+		}
+	} else {
+		if err := e.scanFirst(ctx, s, kind, pos); err != nil {
+			return err
+		}
+		e.view.Blank()
+	}
 	if kind == "duplicates" {
-		return e.exportDuplicates(ctx, s, f, where, csvPath, asked)
+		return e.exportDuplicates(ctx, s, f, where, csvPath, asked, notScanned)
 	}
 	items, err := s.Files(ctx, today(), f)
 	if err != nil {
@@ -118,6 +132,7 @@ func (e *env) export(ctx context.Context, dbBefore string, args []string) error 
 	v := e.view
 	if len(items) == 0 {
 		v.Heading("Retention export", where, "no files")
+		notScannedLine(v, notScanned)
 		v.Next("Nothing exported.")
 		return nil
 	}
@@ -144,9 +159,77 @@ func (e *env) export(ctx context.Context, dbBefore string, args []string) error 
 			" filled in from the file name: check "+pluralWord(suggested, "it", "them")+" before counting from "+
 			pluralWord(suggested, "it", "them"))
 	}
+	notScannedLine(v, notScanned)
 	v.Blank()
 	v.Next("Next: fill in retention (7y, 18m, forever or a date), then filo update " + shellQuote(csvPath))
 	return nil
+}
+
+// scanFirst is an export's scan (docs/design.md, Lifespan, "A scan first"): a retention export of DIR scans DIR;
+// any other export scans every root, since a duplicate group's copies can be anywhere. Its output is filo scan's,
+// without the scan's own next step. A root that fails to scan stops the export, so a missing disk never gives a CSV
+// that looks complete.
+func (e *env) scanFirst(ctx context.Context, s *store.Store, kind string, pos []string) error {
+	opt := reconcile.Options{Workers: reconcile.DefaultWorkers}
+	if kind == "retention" && len(pos) == 1 {
+		target, err := filepath.Abs(pos[0])
+		if err != nil {
+			return err
+		}
+		opt.Target = target
+		return scanStopped(e.scanTarget(ctx, s, opt, false))
+	}
+	roots, err := s.Roots(ctx)
+	if err != nil || len(roots) == 0 {
+		return err
+	}
+	return scanStopped(e.scanAll(ctx, s, opt, roots, false))
+}
+
+// scanStopped says that a failed or interrupted scan stopped the export.
+func scanStopped(err error) error {
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, context.Canceled):
+		return errors.New("interrupted; nothing was exported")
+	case errors.Is(err, errReported): // the failed roots are on stdout, and named on stderr by scanAll
+		return fmt.Errorf("nothing exported: a root could not be scanned; fix it, or export with --no-scan from the " +
+			"register as it is")
+	}
+	return fmt.Errorf("nothing exported: %w", err)
+}
+
+// lastScanLine is the line an export with --no-scan shows: the CSV is as of the last scan of the roots it covers (the
+// oldest, when there are several), or of none if one was never scanned.
+func lastScanLine(ctx context.Context, s *store.Store, roots []string) (string, error) {
+	totals, err := s.RootTotals(ctx)
+	if err != nil {
+		return "", err
+	}
+	oldest := ""
+	for _, t := range totals {
+		if !slices.Contains(roots, t.Root.Path) {
+			continue
+		}
+		if t.LastScan == nil {
+			return "not scanned first, and " + t.Root.Path + " has never been scanned", nil
+		}
+		if oldest == "" || t.LastScan.FinishedUTC < oldest {
+			oldest = t.LastScan.FinishedUTC
+		}
+	}
+	if oldest == "" {
+		return "", nil
+	}
+	return "not scanned first: as of the last scan, " + report.Time(oldest), nil
+}
+
+// notScannedLine shows lastScanLine's line, if there is one.
+func notScannedLine(v *view.Renderer, line string) {
+	if line != "" {
+		v.Count(view.Neutral, line)
+	}
 }
 
 func (e *env) update(ctx context.Context, dbBefore string, args []string) error {

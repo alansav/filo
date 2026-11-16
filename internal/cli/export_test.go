@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -9,6 +10,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/alansav/filo/internal/reconcile"
+	"github.com/alansav/filo/internal/store"
 )
 
 // TestExportGolden: filo export's whole plain output (docs/design.md, Terminal output, Export): a retention export
@@ -196,5 +200,74 @@ func TestWriteExportReplace(t *testing.T) {
 				t.Errorf("files left: %v", entries)
 			}
 		})
+	}
+}
+
+// TestExportScansFirst: every export scans first unless --no-scan (docs/design.md, Lifespan, "A scan first"): a file
+// saved since the last scan is in the CSV; export retention DIR scans DIR only, other exports every root; --no-scan
+// exports the register as it is and says so; a root that fails to scan, or Ctrl-C during the scan, stops the export
+// with no CSV written.
+func TestExportScansFirst(t *testing.T) {
+	ct := newCLITest(t)
+	setNow(t, time.Date(2026, 11, 16, 12, 0, 0, 0, time.Local))
+	write, filo, contains, lacks := ct.write, ct.filo, ct.contains, ct.lacks
+	csv := func(name string) string { return filepath.Join(ct.work, name) }
+	write("tax/a.txt", "a")
+	filo(ExitOK, "", false, "roots", "add", ct.root)
+
+	// Saved since the last scan: in the CSV, after the scan's block.
+	write("tax/new.txt", "new")
+	write("photos/p.jpg", "photo") // outside tax/
+	r := filo(ExitOK, "", false, "export", "retention", ct.in("tax"), "-o", csv("1.csv"))
+	contains("scan of DIR", r.stdout, "Scan   scan 2 . 2 files seen", "under tax/", "  - 1 new\n",
+		"Retention export   export 1 . 2 files")
+	lacks("scan of DIR", r.stdout, "Next: filo report")
+	contains("CSV of DIR", string(mustRead(t, csv("1.csv"))), ",new.txt,")
+
+	// DIR only: photos/ was not scanned, so a --no-scan export of the whole root does not know p.jpg yet.
+	r = filo(ExitOK, "", false, "export", "retention", "--no-scan", "-o", csv("2.csv"))
+	contains("--no-scan", r.stdout, "Retention export   export 2 . 2 files",
+		"  - not scanned first: as of the last scan, 2026-")
+	lacks("--no-scan", r.stdout, "Scan   ")
+	lacks("--no-scan CSV", string(mustRead(t, csv("2.csv"))), "p.jpg")
+
+	// A duplicates export scans every root: a copy saved in photos/ since makes a group.
+	write("photos/a copy.txt", "a")
+	r = filo(ExitOK, "", false, "export", "duplicates", ct.in("tax"), "-o", csv("d.csv"))
+	contains("duplicates", r.stdout, "Scan   scan 3", "  - 2 new\n", "Duplicates export   export 3 . 1 group . 2 copies")
+	contains("duplicates CSV", string(mustRead(t, csv("d.csv"))), ",a copy.txt,")
+
+	// A root that cannot be scanned stops the export: nothing written, nothing recorded.
+	second := filepath.Join(ct.work, "second")
+	if err := os.MkdirAll(second, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	filo(ExitOK, "", false, "roots", "add", second)
+	if err := os.Remove(second); err != nil {
+		t.Fatal(err)
+	}
+	r = filo(ExitError, "", false, "export", "duplicates", "-o", csv("x.csv"))
+	contains("failed root", r.stdout, "not scanned: ")
+	contains("failed root", r.stderr, "nothing exported: a root could not be scanned", "--no-scan")
+	if _, err := os.Lstat(csv("x.csv")); err == nil {
+		t.Error("x.csv was written after a failed scan")
+	}
+	r = filo(ExitOK, "", false, "export", "duplicates", "--no-scan", "-o", csv("x.csv"))
+	contains("failed root, --no-scan", r.stdout, "Duplicates export   export 4")
+
+	// Ctrl-C during the scan: nothing exported.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ct.ctx = ctx
+	real := runScan
+	runScan = func(ctx context.Context, s *store.Store, o reconcile.Options) (reconcile.Summary, error) {
+		cancel()
+		return reconcile.Summary{}, ctx.Err()
+	}
+	t.Cleanup(func() { runScan = real })
+	r = filo(ExitError, "", false, "export", "retention", ct.in("tax"), "-o", csv("c.csv"))
+	contains("Ctrl-C", r.stderr, "interrupted; nothing was exported")
+	if _, err := os.Lstat(csv("c.csv")); err == nil {
+		t.Error("c.csv was written after Ctrl-C")
 	}
 }
