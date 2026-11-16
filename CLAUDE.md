@@ -84,10 +84,12 @@ branch, never on `main`:
    pass, so every commit builds and is green on its own. Aim for about 100 changed lines of non-test code per
    commit; a small change stays one commit. Each message says what the commit adds and, if part of the work is
    still to come, what (for example "not called by any command yet").
-2. When the series is done, run one code review over all of it (the `code-review` skill, level `medium`, on
-   `main..HEAD`), fix what it finds, run the checks again, and commit the fixes as separate commits, one
-   "Review fixes for <subject>" commit per commit they belong to, so each can be read next to what it fixes.
-3. Stop and report the commits, each with a one-line summary. One review round only: do not review the fixes again.
+2. When the series is done (for an item built in slices, when each slice is done), run one code review over it (the
+   `code-review` skill, level `medium`, on that series' commits: `main..HEAD`, or from the previous slice's last
+   commit), fix what it finds, run the checks again, and commit the fixes as separate commits, one "Review fixes for
+   <subject>" commit per commit they belong to, so each can be read next to what it fixes.
+3. Stop and report the commits, each with a one-line summary; after a slice, wait for the user before the next one.
+   One review round only: do not review the fixes again.
 
 Stop and ask instead of committing if a check fails and the fix is not obvious, if a finding needs a design decision
 or a change to `docs/design.md`, if a finding looks wrong or out of scope, or if anything else is unclear.
