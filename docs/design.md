@@ -1972,6 +1972,12 @@ put first on 2026-11-15). Each is an open question below until it is designed.
       letter count, nearest directory first, ties reported); the store adds, changes, removes, moves and copies rules
       and dates files by them; rules get a root's prefix when a root is added above it; `filo policies` remove and
       move take rules into account. Nothing calls the rules yet. Scenarios C1-C3, D3, G1, F3.
+      Done on 2026-11-16: `internal/rules` (`Pattern`, `Letters`, `Match`, `Resolve`, `Compare`; a `[` or `\` in a
+      pattern is itself, and `**` is `*`); schema 10 (`TestMigrateFromV9`); `store.AddRule`, `SetRule`, `RemoveRule`,
+      `Rules`, `MoveRules` (move and copy), each of the three that apply rules with a preview that runs the same work
+      in a transaction it rolls back (`PreviewAddRule`, `PreviewMoveRules`); dating in `store/ruledate.go`. Tests:
+      `TestResolve`, `TestCompare`, `TestMatch`, `TestAddRule`, `TestSetAndRemoveRule`, `TestMoveRules`,
+      `TestPoliciesAndRules`, `TestRuleDating`, `TestRuleTies`, and the absorb test (F3).
    2. *`filo rules`*: the list (`[DIR]`, the order tried, counts, flags), `add` (a policy created if needed,
       `[y/N/l]`), `set`, `remove`, with output mocked and agreed first, and the help page. Scenarios A, B4, D, F1.
    3. *Applied by every scan*: the scan's sections on what it dated and did not; `filo report` counts files dated by a
