@@ -38,14 +38,14 @@ See [Roadmap](#roadmap) for what comes next.
   retention was set, moved, or can't be read is skipped, never deleted.
 - **Clears out duplicates you decide on**: export the groups of identical copies, write `keep` or `delete` against
   each, and `filo delete` deletes the extra copies, never the last one. Copies kept on purpose (records, a `LICENSE`
-  in every project, a backup folder) can be marked so they stop being reported. See [Duplicates](#duplicates).
+  in every project, a backup directory) can be marked so they stop being reported. See [Duplicates](#duplicates).
 - **Rescans quickly.** A file is only re-read when its size, modification time, change time (ctime) or inode changes.
   The change time is what catches a file whose permissions changed, or one rewritten with its old modification time
   put back. Windows has no change time, so there it isn't compared.
 
 It is built to fail safe:
 
-- **Partial scans are safe.** Scanning one folder never marks files elsewhere as missing.
+- **Partial scans are safe.** Scanning one directory never marks files elsewhere as missing.
 - **Unreadable directories are harmless.** A directory that can't be read never makes its files "missing".
 - **Unreadable files are flagged.** A file Filo can see but not read (for example permission denied) is reported as an
   error and flagged as unreadable since that scan, including a file you could read before. It keeps its record and its
@@ -160,7 +160,7 @@ and filter it however you like.
 - **`keep_until`** is worked out by Filo, so you can sort by it. Leave it alone: a cell holding a different date is
   refused.
 
-To set a whole folder at once, filter on `directory` and fill the retention down. Filtering on a blank `retention`
+To set a whole directory at once, filter on `directory` and fill the retention down. Filtering on a blank `retention`
 shows the files still to decide.
 
 - Only `id`, `export`, `file_date` and `retention` are read back, so you can reorder columns or add your own. Rows
@@ -262,8 +262,8 @@ Delete all 5, select one by one, list them all, or none? [a/s/l/N]
 - **Just before deleting**, each file is read again. It is deleted only if it is still at its path as the same file
   and its content is still the content its retention was set on. Otherwise it is skipped and listed with the reason,
   and nothing about it changes.
-- **Deletion is permanent:** there is no recycle bin, so keep backups. Folders the run emptied are removed, up to the
-  root. A file you restore from a backup comes back as a new file, needing a retention.
+- **Deletion is permanent:** there is no recycle bin, so keep backups. Directories the run emptied are removed, up to
+  the root. A file you restore from a backup comes back as a new file, needing a retention.
 
 In a terminal the output has colour and symbols (set `NO_COLOR`, or `TERM=dumb`, to turn colour off) and fits the
 window: a path is never cut, but a long one moves to its own line. Piped into a file or another program, it is plain
@@ -290,7 +290,7 @@ Identical files exist for four reasons, and each has its own kind of keep:
 | a copy made by accident | a download saved twice | `keep` one copy, `delete` the rest |
 | copies that are each a record | insurance terms received in 2020 and again in 2021, each with its own retention | `keep` on two or more: they are **kept as separate files** |
 | a content that belongs everywhere | `LICENSE`, `__init__.py`, a template in each project | `always` on every row: the content is never a duplicate again |
-| a deliberate copy of a folder | a backup, an old laptop's files | `filo duplicates exclude DIR`: nothing under it counts as a duplicate |
+| a deliberate copy of a directory | a backup, an old laptop's files | `filo duplicates exclude DIR`: nothing under it counts as a duplicate |
 
 The `action` cell takes `delete`, `keep` or `always` (or `d`, `k`, `a`, any case). Each group is decided on its own:
 
@@ -337,9 +337,9 @@ Delete 9 copies and record 2 decisions? [y/s/l/N]
 - **Strict about changes:** a group any of whose files changed or moved since the export is skipped whole, so a copy
   is deleted only if it is still exactly the content you decided on. A copy that is gone since (deleted by another
   run, or by you) is ignored and the rest of its group goes ahead. A file Filo can't check (a disk not mounted, a
-  folder it can't read) is never taken as gone: its group is skipped.
+  directory it can't read) is never taken as gone: its group is skipped.
 - **Never the last copy:** just before deleting, Filo reads a copy kept again and checks it is still there with the
-  same content, and is not the same file as the copy being deleted (a hard link, or a folder mounted twice). A copy
+  same content, and is not the same file as the copy being deleted (a hard link, or a directory mounted twice). A copy
   with other hard links can be kept but not deleted, since deleting it frees nothing.
 - **Run it again:** the CSV is your saved work, and nothing waits in the register between deciding and deleting.
   Edit it further and run it again: groups already done are reported as done, and only what is still as exported is
@@ -376,7 +376,7 @@ Next: filo duplicates include /home/you/Backup to undo it
 | `filo delete [DIR] [-y]` | List the files past their retention, ask, and delete the ones you choose. See [Deleting](#deleting). |
 | `filo delete FILE [-y]` | Carry out a duplicates CSV: check it against the disk, list, ask, and delete the copies marked `delete`. |
 | `filo duplicates` | List what is not counted as duplicates: excluded directories, contents marked always, identical files kept as separate files. |
-| `filo duplicates exclude DIR` | Never count the files under `DIR` as duplicates (a backup folder). |
+| `filo duplicates exclude DIR` | Never count the files under `DIR` as duplicates (a backup directory). |
 | `filo duplicates include PATH` | Undo one: a directory's exclusion, a file's content marked always, or its set of identical files kept as separate files. |
 | `filo policies` | List the retention policies, with what needs attention. See [Retention policies](#retention-policies). |
 | `filo policies add NAME [VALUE]` | Create a policy, with a period, a date or `forever`, or no value yet. |
@@ -452,7 +452,7 @@ Use `--db PATH` or the `FILO_DB` environment variable to choose another. The dat
 `0600`), and only one Filo process can use it at a time.
 
 **Don't sync the database between machines.** It describes one device's files. Keep it out of Syncthing or other
-synced folders (the default location already is).
+synced directories (the default location already is).
 
 You can look inside it with `sqlite3`; hashes are the same as `sha256sum` prints.
 
@@ -492,7 +492,7 @@ Enable it with `systemctl --user enable --now filo-scan.timer`.
 5. **Duplicates**: decide in a CSV which copies to keep, carried out by `filo delete`; files kept as separate files,
    contents marked always and excluded directories. Done.
 6. **Retention policies**: a named retention typed in the CSV, changed in one place. Done.
-7. **Next**: folder rules (a default policy on a directory). The order is in [docs/design.md](docs/design.md),
+7. **Next**: directory rules (a default policy on a directory). The order is in [docs/design.md](docs/design.md),
    section 5.
 8. Later: **a UI** in place of the CSV.
 

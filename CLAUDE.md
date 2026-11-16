@@ -13,8 +13,8 @@ redesign (`docs/design.md`, Duplicates: `filo delete FILE.csv`, records, always,
 and merged. The terminal output is done (every command prints through `internal/view`, see "Terminal output"). Named
 retention policies (`docs/design.md`, Lifespan, Named retention policies; schema 9; `filo policies`) are done and
 merged. Replacing an existing `-o` file after asking (section 5 item 11) and every export scanning first, `--no-scan`
-to skip it (item 12), are done. Next in `docs/design.md` section 5: folder rules (design first: name patterns and
-empty folders are in Open questions).
+to skip it (item 12), are done. Next in `docs/design.md` section 5: directory rules (design first: name patterns and
+empty directories are in Open questions).
 **`internal/dispose` is the only code allowed to delete the user's files**, and only from `filo delete`; everything
 else stays read-only on them, and nothing overwrites an existing file without asking (only an `-o` output file,
 see the hard rules). Stay inside the current piece of work.
@@ -103,6 +103,8 @@ or a change to `docs/design.md`, if a finding looks wrong or out of scope, or if
 
 - Idiomatic Go: wrap errors with `%w`, return errors instead of panicking, pass `context.Context` where work can be
   cancelled. User-facing errors are one clear line.
+- Say "directory", never "folder" (output, help, docs, comments); only Syncthing's own term stays "a Syncthing
+  folder" (see `docs/design.md`, Terminal output).
 - Tests are table-driven and use `t.TempDir()`. No test may touch the real home directory.
 - One database per device holds all roots. It is created automatically in the user data directory
   (`~/.local/share/filo/filo.db` on Linux); `--db` and `FILO_DB` override it. Roots are added explicitly. One writer at a
