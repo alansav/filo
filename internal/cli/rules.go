@@ -207,18 +207,18 @@ func datedRows(ds []store.RuleDated) []view.FileRow {
 	return rows
 }
 
-// ruleTies says which files no rule dates because rules match them equally, or their hard links are decided by
-// different rules, grouped by the rules involved (in any order) and listing each file once.
+// ruleTies says which files no rule dates because two or more rules of one directory match them equally, grouped by
+// the rules involved (in any order) and listing each file once.
 func (e *env) ruleTies(ties []store.RuleTie) {
 	type group struct {
-		t     store.RuleTie // the first: its rules and why
+		rules []store.Rule
 		files []view.FileRow
 	}
 	var groups []*group
 	byKey := map[string]*group{}
 	seen := map[int64]bool{}
 	for _, t := range ties {
-		if seen[t.FileID] { // a file with paths in two roots comes once per root
+		if seen[t.FileID] {
 			continue
 		}
 		seen[t.FileID] = true
@@ -227,10 +227,10 @@ func (e *env) ruleTies(ties []store.RuleTie) {
 			ids = append(ids, r.ID)
 		}
 		slices.Sort(ids)
-		key := fmt.Sprint(t.HardLinks, ids)
+		key := fmt.Sprint(ids)
 		g, ok := byKey[key]
 		if !ok {
-			g = &group{t: t}
+			g = &group{rules: t.Rules}
 			byKey[key] = g
 			groups = append(groups, g)
 		}
@@ -238,26 +238,15 @@ func (e *env) ruleTies(ties []store.RuleTie) {
 	}
 	r := e.view
 	for _, g := range groups {
-		n := int64(len(g.files))
-		var what string
-		if g.t.HardLinks {
-			var each []string
-			for _, x := range g.t.Rules {
-				each = append(each, e.ruleWhere(x.RootPath, x.Dir)+" "+x.Pattern)
-			}
-			what = report.Plural(n, "file has hard links", "files have hard links") + " that different rules decide (" +
-				strings.Join(each, ", ") + ")"
-		} else {
-			var patterns []string
-			for _, x := range g.t.Rules {
-				patterns = append(patterns, x.Pattern)
-			}
-			first := g.t.Rules[0]
-			what = report.Plural(n, "file matches", "files match") + " " + report.Count(int64(len(patterns))) +
-				" rules of " + e.ruleWhere(first.RootPath, first.Dir) + " equally (" + strings.Join(patterns, ", ") + ")"
+		var patterns []string
+		for _, x := range g.rules {
+			patterns = append(patterns, x.Pattern)
 		}
+		first := g.rules[0]
 		r.Blank()
-		r.Note(view.Attention, "Not applied   "+what)
+		r.Note(view.Attention, "Not applied   "+report.Plural(int64(len(g.files)), "file matches", "files match")+" "+
+			report.Count(int64(len(patterns)))+" rules of "+e.ruleWhere(first.RootPath, first.Dir)+" equally ("+
+			strings.Join(patterns, ", ")+")")
 		r.Files(view.FileList{Rows: g.files, Max: r.Overview(), More: "files", MoreOne: "file"})
 	}
 }

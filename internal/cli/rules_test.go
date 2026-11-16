@@ -186,6 +186,23 @@ func TestRulesReviewFindings(t *testing.T) {
 		t.Errorf("a set that changed nothing left a snapshot: %d, was %d", after, before)
 	}
 
+	// Scenario C4: a hard link is a file of its own, dated by its own directory's rule (docs/design.md, Directory
+	// rules); its other link follows the rule of its directory.
+	rt.write("docs/a.pdf", "linked")
+	if err := os.MkdirAll(rt.in("private"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Link(rt.in("docs/a.pdf"), rt.in("private/a.pdf")); err != nil {
+		t.Fatal(err)
+	}
+	rt.filo(ExitOK, "", false, "scan")
+	rt.contains("first link", rt.filo(ExitOK, "", false, "rules", "add", rt.in("docs"), "statements").stdout,
+		"1 file dated")
+	rt.contains("other link", rt.filo(ExitOK, "", false, "rules", "add", rt.in("private"), "private").stdout,
+		"1 file dated")
+	rt.contains("each on its own policy", rt.filo(ExitOK, "", false, "rules").stdout,
+		"  docs\n    *   statements", "  private\n    *   private")
+
 	// A DIR with no rules at or below it says so, not "none yet".
 	rt.contains("none below", rt.filo(ExitOK, "", false, "rules", rt.in("bank/2024")).stdout,
 		"none at or below it (the rules above it are listed by filo rules)")
