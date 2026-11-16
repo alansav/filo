@@ -55,8 +55,19 @@ func (m RuleMove) newDir(dir string) string {
 }
 
 // checkMove refuses a move of a directory's rules to itself or inside it, from a directory with no rules, or to one
-// with rules at or below it, and returns the rules to move.
+// with rules at or below it, and returns the rules to move. A move to a directory above (bank/2024 to bank) does not
+// count its own rules as there already: they leave as they arrive. A copy does, since they stay.
 func checkMove(ctx context.Context, q querier, m RuleMove) ([]Rule, error) {
+	for _, dir := range []string{m.FromDir, m.ToDir} {
+		if err := checkRuleDir(dir); err != nil {
+			return nil, err
+		}
+	}
+	for _, root := range []int64{m.FromRoot, m.ToRoot} {
+		if err := checkRuleRoot(ctx, q, root); err != nil {
+			return nil, err
+		}
+	}
 	if m.FromRoot == m.ToRoot && isAtOrUnder(m.ToDir, m.FromDir) {
 		return nil, ErrRuleInside
 	}
@@ -67,9 +78,19 @@ func checkMove(ctx context.Context, q querier, m RuleMove) ([]Rule, error) {
 	if len(from) == 0 {
 		return nil, ErrNoRulesToMove
 	}
-	there, err := readRules(ctx, q, m.ToRoot, m.ToDir)
+	moving := map[int64]bool{}
+	for _, r := range from {
+		moving[r.ID] = !m.Copy
+	}
+	all, err := readRules(ctx, q, m.ToRoot, m.ToDir)
 	if err != nil {
 		return nil, err
+	}
+	var there []Rule
+	for _, r := range all {
+		if !moving[r.ID] {
+			there = append(there, r)
+		}
 	}
 	if len(there) > 0 {
 		return nil, RulesThereError{Rules: there}

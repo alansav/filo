@@ -77,6 +77,41 @@ func TestMoveRules(t *testing.T) {
 			t.Errorf("after copy: %q, want %q", got, want)
 		}
 	})
+	t.Run("a move to the directory above", func(t *testing.T) {
+		e := newReviewEnv(t)
+		e.addRule("a/b", "", "bills")
+		e.addRule("a/b/c", "*.pdf", "tax")
+		up := RuleMove{FromRoot: e.root.ID, FromDir: "a/b", ToRoot: e.root.ID, ToDir: "a", Copy: true}
+		var there RulesThereError
+		if _, _, err := e.s.MoveRules(e.ctx, up, ruleToday, policyNow); !errors.As(err, &there) ||
+			len(there.Rules) != 2 {
+			t.Errorf("copy a/b to a: %v, want refused: a/b's rules stay below a", err)
+		}
+		up.Copy = false
+		if _, _, err := e.s.MoveRules(e.ctx, up, ruleToday, policyNow); err != nil {
+			t.Fatalf("move a/b to a: %v", err)
+		}
+		if got, want := e.ruleList(0, ""), []string{"a * bills", "a/c *.pdf tax"}; !slices.Equal(got, want) {
+			t.Errorf("after the move up: %q, want %q", got, want)
+		}
+		e.addRule("x", "", "other")
+		e.addRule("x/y", "", "bills")
+		_, _, err := e.s.MoveRules(e.ctx, RuleMove{FromRoot: e.root.ID, FromDir: "x/y", ToRoot: e.root.ID, ToDir: "x"},
+			ruleToday, policyNow)
+		if !errors.As(err, &there) || len(there.Rules) != 1 || there.Rules[0].Dir != "x" {
+			t.Errorf("move x/y to x, which has a rule: %v (%+v), want refused naming x's rule only", err, there.Rules)
+		}
+		for _, m := range []RuleMove{{FromRoot: e.root.ID, FromDir: "a/", ToRoot: e.root.ID, ToDir: "z"},
+			{FromRoot: e.root.ID, FromDir: "a", ToRoot: e.root.ID, ToDir: "./z"}} {
+			if _, _, err := e.s.MoveRules(e.ctx, m, ruleToday, policyNow); !errors.Is(err, ErrRuleDir) {
+				t.Errorf("move %q to %q: err = %v, want ErrRuleDir", m.FromDir, m.ToDir, err)
+			}
+		}
+		if _, _, err := e.s.MoveRules(e.ctx, RuleMove{FromRoot: e.root.ID, FromDir: "a", ToRoot: 999, ToDir: "z"},
+			ruleToday, policyNow); !errors.Is(err, ErrRuleRoot) {
+			t.Errorf("move to a root that is not registered: err = %v, want ErrRuleRoot", err)
+		}
+	})
 	t.Run("E3 refused, nothing changed", func(t *testing.T) {
 		e := setup(t)
 		for _, tc := range []struct {
