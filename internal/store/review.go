@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
+	"strings"
 	"time"
 )
 
@@ -18,7 +20,10 @@ const (
 	StatusUnreadable Status = "unreadable"
 	// StatusPossibleMove: the new side of a possible move recorded after its last decision.
 	StatusPossibleMove Status = "possible_move"
-	// StatusUndated: it has no keep_until.
+	// StatusNeedsFileDate: its policy is a period, and it has no file_date to count from (docs/design.md, Named
+	// retention policies). Never a deletion candidate.
+	StatusNeedsFileDate Status = "needs_file_date"
+	// StatusUndated: it has no keep_until (a policy with no value included).
 	StatusUndated Status = "undated"
 	// StatusChanged: past its keep_until, but its content is not the content the date was set on (or the date was
 	// set without one), so it needs a new decision.
@@ -32,12 +37,13 @@ const (
 )
 
 // Statuses lists every status in priority order.
-var Statuses = []Status{StatusUnreadable, StatusPossibleMove, StatusUndated, StatusForever, StatusChanged,
-	StatusExpired, StatusKept}
+var Statuses = []Status{StatusUnreadable, StatusPossibleMove, StatusNeedsFileDate, StatusUndated, StatusForever,
+	StatusChanged, StatusExpired, StatusKept}
 
 // NeedsDecision reports whether a file with this status needs a keep_until decision.
 func (s Status) NeedsDecision() bool {
-	return s == StatusUnreadable || s == StatusPossibleMove || s == StatusUndated || s == StatusChanged
+	return s == StatusUnreadable || s == StatusPossibleMove || s == StatusNeedsFileDate || s == StatusUndated ||
+		s == StatusChanged
 }
 
 // FileItem is one present file with its retention.
@@ -50,7 +56,9 @@ type FileItem struct {
 	MtimeNS     int64
 	Hash        string // "" = none
 	FileDate    string // YYYY-MM-DD the retention counts from, "" = none
-	Retention   string // as given: a period (7y), Forever or YYYY-MM-DD; "" = none
+	Retention   string // as given: a period (7y), Forever or YYYY-MM-DD, or its policy's name; "" = none
+	Policy      string // its retention policy's name, "" = none (then Retention is its own)
+	PolicyValue string // that policy's value: a period, Forever, YYYY-MM-DD, or "" for none yet
 	KeepUntil   string // worked out from the two: YYYY-MM-DD, Forever, or "" = none
 	ReviewedUTC string // when the current retention was set; "" = never
 	Status      Status
@@ -66,21 +74,28 @@ func (f FileItem) AbsPath() string { return absPath(f.RootPath, f.Path) }
 
 // Filter limits a listing to one root, and optionally to a directory inside it.
 type Filter struct {
-	RootID int64  // 0 = every root
-	Scope  string // relative to the root, '/' separators; "" = the whole root
+	RootID   int64  // 0 = every root
+	Scope    string // relative to the root, '/' separators; "" = the whole root
+	PolicyID int64  // only the files on this retention policy; 0 = any
 }
 
 // scopeSQL returns a condition on alias p (paths) for the filter, and its arguments.
+// A policy filter is a condition on alias f (files).
 func (f Filter) scopeSQL() (string, []any) {
-	if f.RootID == 0 {
-		return "", nil
+	cond, args := "", []any(nil)
+	if f.PolicyID != 0 {
+		cond, args = " AND f.policy_id = ?", []any{f.PolicyID}
 	}
-	if f.Scope == "" {
-		return " AND p.root_id = ?", []any{f.RootID}
+	switch {
+	case f.RootID == 0:
+	case f.Scope == "":
+		cond, args = cond+" AND p.root_id = ?", append(args, f.RootID)
+	default:
+		// '0' sorts right after '/', so this range is every path below the scope (byte-wise, as BINARY compares).
+		cond += " AND p.root_id = ? AND (p.path = ? OR (p.path >= ? AND p.path < ?))"
+		args = append(args, f.RootID, f.Scope, f.Scope+"/", f.Scope+"0")
 	}
-	// '0' sorts right after '/', so this range is every path below the scope (byte-wise, as BINARY compares).
-	return " AND p.root_id = ? AND (p.path = ? OR (p.path >= ? AND p.path < ?))",
-		[]any{f.RootID, f.Scope, f.Scope + "/", f.Scope + "0"}
+	return cond, args
 }
 
 // fileRow is a present file with everything classify needs.
@@ -99,6 +114,9 @@ func classify(r fileRow, today string) Status {
 	}
 	if r.possibleMoveIn != 0 && r.reviewedAfter < r.possibleMoveIn {
 		return StatusPossibleMove
+	}
+	if it.NeedsFileDate() {
+		return StatusNeedsFileDate
 	}
 	if it.KeepUntil == "" {
 		return StatusUndated
@@ -131,7 +149,7 @@ func (s *Store) Files(ctx context.Context, today string, f Filter) ([]FileItem, 
 		it := &r.item
 		var moveRoot, moveRel string
 		if err := rows.Scan(&it.FileID, &it.RootPath, &it.Path, &it.Kind, &it.Size, &it.MtimeNS, &it.Hash,
-			&it.FileDate, &it.Retention, &it.KeepUntil, &it.ReviewedUTC, &r.reviewedAfter, &r.reviewedHash, &it.UnreadableSince,
+			&it.FileDate, &it.Retention, &it.Policy, &it.PolicyValue, &it.KeepUntil, &it.ReviewedUTC, &r.reviewedAfter, &r.reviewedHash, &it.UnreadableSince,
 			&it.UnreadableSinceUTC, &r.possibleMoveIn, &moveRoot, &moveRel, &it.MoveDetail); err != nil {
 			return *it, err
 		}
@@ -149,12 +167,12 @@ func (s *Store) Files(ctx context.Context, today string, f Filter) ([]FileItem, 
 			WHERE e.kind = 'possible_move'
 			GROUP BY np.file_id)
 		SELECT f.id, r.path, p.path, f.kind, f.size, f.mtime_ns, coalesce(f.hash, ''),
-		       coalesce(f.file_date, ''), coalesce(f.retention, ''), coalesce(f.keep_until, ''),
+		       coalesce(f.file_date, ''), `+retentionColumns+`, coalesce(f.keep_until, ''),
 		       coalesce(f.reviewed_utc, ''), coalesce(f.reviewed_after_scan, 0),
 		       f.reviewed_hash, coalesce(f.unreadable_since_scan, 0), coalesce(us.finished_utc, us.started_utc, ''),
 		       coalesce(pe.scan_id, 0), coalesce(pr.path, ''), coalesce(pe.other_path, ''), coalesce(pe.detail, '')
 		FROM paths p
-		JOIN files f ON f.id = p.file_id
+		JOIN files f ON f.id = p.file_id`+policyJoin+`
 		JOIN roots r ON r.id = p.root_id
 		LEFT JOIN scans us ON us.id = f.unreadable_since_scan
 		LEFT JOIN pm ON pm.file_id = f.id
@@ -243,7 +261,7 @@ type RetentionRow struct {
 	FileID       int64
 	FileDate     string // YYYY-MM-DD, "" = blank
 	HasFileDate  bool   // the CSV has a file_date column; without one, the file_date exported is kept
-	Retention    string // a period (7y), Forever or YYYY-MM-DD, as checked; "" = blank
+	Retention    string // a period (7y), Forever, YYYY-MM-DD or a policy name (lower case), as checked; "" = blank
 	KeepUntil    string // the display cell as read, to check it was left alone
 	HasKeepUntil bool   // the CSV has a keep_until column
 }
@@ -273,14 +291,31 @@ type Past struct {
 	KeepUntil string
 }
 
+// NewPolicy is a policy a CSV names that does not exist yet, and how many rows name it.
+type NewPolicy struct {
+	Name string
+	Rows int
+}
+
+// UpdateOptions are how an update runs: a dry run, and the questions it asks (nil declines, as with no terminal).
+type UpdateOptions struct {
+	DryRun          bool
+	ConfirmClears   func([]Clear) bool     // given every row that would clear a stored retention, once
+	ConfirmPolicies func([]NewPolicy) bool // given every new policy, once, before the clears
+}
+
 // UpdateResult counts what an update did (or, in a dry run, would do).
 type UpdateResult struct {
-	Set           int    // rows whose file_date or retention changed, clears not included
-	Cleared       int    // retentions cleared by a blank cell
-	ClearsSkipped int    // blank cells that would clear a retention, not confirmed
-	NowPast       []Past // of Set: files whose keep_until is today or earlier, so deletion candidates if unchanged
-	Unchanged     int    // rows as exported, or with the values already stored
-	Refusals      []Refusal
+	NewPolicies       []NewPolicy // the policies the CSV names that do not exist yet, by name
+	NoValue           int         // of Set: files put on a policy with no value yet, so still needing a retention
+	PoliciesCreated   int         // of those, created (confirmed)
+	PolicyRowsSkipped int         // rows naming a new policy not confirmed: left alone
+	Set               int         // rows whose file_date or retention changed, clears not included
+	Cleared           int         // retentions cleared by a blank cell
+	ClearsSkipped     int         // blank cells that would clear a retention, not confirmed
+	NowPast           []Past      // of Set: files whose keep_until is today or earlier, so deletion candidates if unchanged
+	Unchanged         int         // rows as exported, or with the values already stored
+	Refusals          []Refusal
 }
 
 // UpdateRetention checks each row against the register and applies the ones that pass, in one transaction. A blank
@@ -289,7 +324,17 @@ type UpdateResult struct {
 // source for the history.
 func (s *Store) UpdateRetention(ctx context.Context, rows []RetentionRow, now time.Time, today, detail string,
 	dryRun bool, confirm func([]Clear) bool) (UpdateResult, error) {
+	return s.UpdateRetentionWith(ctx, rows, now, today, detail, UpdateOptions{DryRun: dryRun, ConfirmClears: confirm})
+}
+
+// UpdateRetentionWith is UpdateRetention with its options. A retention cell may name a policy (docs/design.md,
+// Named retention policies): the file goes on it, its keep_until worked out from the policy's value. A name that is
+// not a policy yet creates one with no value, but only if ConfirmPolicies (given every new policy, once) returns true;
+// otherwise the rows naming it are left alone. A dry run lists the new policies and creates nothing.
+func (s *Store) UpdateRetentionWith(ctx context.Context, rows []RetentionRow, now time.Time, today, detail string,
+	opt UpdateOptions) (UpdateResult, error) {
 	var res UpdateResult
+	dryRun, confirm := opt.DryRun, opt.ConfirmClears
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return res, err
@@ -304,6 +349,7 @@ func (s *Store) UpdateRetention(ctx context.Context, rows []RetentionRow, now ti
 	var sets, clears []ok
 	var clearList []Clear
 	exports := map[int64]exportInfo{}
+	policies := policyCache{}
 	for _, r := range rows {
 		ex, found := exports[r.ExportID]
 		if !found {
@@ -312,7 +358,7 @@ func (s *Store) UpdateRetention(ctx context.Context, rows []RetentionRow, now ti
 			}
 			exports[r.ExportID] = ex
 		}
-		c, err := checkRow(ctx, tx, r, ex)
+		c, err := checkRow(ctx, tx, r, ex, policies)
 		if err != nil {
 			return res, err
 		}
@@ -332,16 +378,61 @@ func (s *Store) UpdateRetention(ctx context.Context, rows []RetentionRow, now ti
 			}
 		}
 	}
+	// The policies the rows name that do not exist yet, in order of name, with how many rows name each.
+	newRows := map[string]int{}
+	for _, a := range sets {
+		if a.c.newPolicy {
+			newRows[a.c.retention]++
+		}
+	}
+	for name, n := range newRows {
+		res.NewPolicies = append(res.NewPolicies, NewPolicy{Name: name, Rows: n})
+	}
+	slices.SortFunc(res.NewPolicies, func(a, b NewPolicy) int { return strings.Compare(a.Name, b.Name) })
 	res.Set = len(sets)
 	if dryRun {
 		res.Cleared = len(clears)
+		for _, a := range sets {
+			if a.c.policy && a.c.keepUntil == "" {
+				res.NoValue++
+			}
+		}
 		return res, nil
+	}
+	created := map[string]int64{} // new policy -> its ID, once created
+	if len(res.NewPolicies) > 0 {
+		if opt.ConfirmPolicies != nil && opt.ConfirmPolicies(res.NewPolicies) {
+			for _, np := range res.NewPolicies {
+				id, err := addPolicy(ctx, tx, np.Name, "", now)
+				if err != nil {
+					return res, err
+				}
+				created[np.Name] = id
+			}
+			res.PoliciesCreated = len(res.NewPolicies)
+		} else {
+			kept := sets[:0]
+			for _, a := range sets {
+				if a.c.newPolicy {
+					res.PolicyRowsSkipped++
+					continue
+				}
+				kept = append(kept, a)
+			}
+			sets = kept
+			res.Set = len(sets)
+		}
 	}
 	if len(clears) > 0 && (confirm == nil || !confirm(clearList)) {
 		res.ClearsSkipped = len(clears)
 		clears = nil
 	}
 	res.Cleared = len(clears)
+	for _, a := range sets {
+		if a.c.policy && a.c.keepUntil == "" {
+			res.NoValue++
+		}
+	}
 	apply := append(sets, clears...)
 	if len(apply) == 0 {
 		return res, nil
@@ -358,9 +449,18 @@ func (s *Store) UpdateRetention(ctx context.Context, rows []RetentionRow, now ti
 			nullString(c.retention), nullString(c.keepUntil), c.exportHash); err != nil {
 			return res, fmt.Errorf("record retention: %w", err)
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE files SET file_date = ?, retention = ?, keep_until = ?,
-			reviewed_utc = ?, reviewed_after_scan = ?, reviewed_hash = ? WHERE id = ?`, nullString(c.fileDate),
-			nullString(c.retention), nullString(c.keepUntil), utc(now), a.afterScan, c.exportHash,
+		// A file has a policy or a retention of its own, never both: a policy name goes in policy_id (the policy
+		// created above if it is new), anything else in retention, taking the file off its policy.
+		own, policy := nullString(c.retention), sql.NullInt64{}
+		if c.policy {
+			own, policy = sql.NullString{}, sql.NullInt64{Int64: c.policyID, Valid: true}
+			if c.newPolicy {
+				policy.Int64 = created[c.retention]
+			}
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE files SET file_date = ?, retention = ?, policy_id = ?,
+			keep_until = ?, reviewed_utc = ?, reviewed_after_scan = ?, reviewed_hash = ? WHERE id = ?`,
+			nullString(c.fileDate), own, policy, nullString(c.keepUntil), utc(now), a.afterScan, c.exportHash,
 			r.FileID); err != nil {
 			return res, fmt.Errorf("record retention: %w", err)
 		}
@@ -404,11 +504,14 @@ type checked struct {
 	exportHash sql.NullString
 
 	fileDate, retention, keepUntil   string // the values to store
-	storedRetention, storedKeepUntil string
+	storedRetention, storedKeepUntil string // the stored retention: its policy's name if it is on one
+	policy                           bool   // retention names a policy
+	policyID                         int64  // its ID, 0 for a new one
+	newPolicy                        bool   // one that does not exist yet: created with no value, once confirmed
 }
 
 // checkRow applies the update's rules to one row (design section 2, Retention CSV, second shape).
-func checkRow(ctx context.Context, tx *sql.Tx, r RetentionRow, ex exportInfo) (checked, error) {
+func checkRow(ctx context.Context, tx *sql.Tx, r RetentionRow, ex exportInfo, policies policyCache) (checked, error) {
 	var c checked
 	if !ex.found {
 		c.refusal = fmt.Sprintf("export %d is not in this register", r.ExportID)
@@ -466,9 +569,10 @@ func checkRow(ctx context.Context, tx *sql.Tx, r RetentionRow, ex exportInfo) (c
 	}
 	var hash sql.NullString
 	var storedDate string
-	if err := tx.QueryRowContext(ctx, `SELECT hash, coalesce(file_date, ''), coalesce(retention, ''),
-		coalesce(keep_until, '') FROM files WHERE id = ?`, r.FileID).
-		Scan(&hash, &storedDate, &c.storedRetention, &c.storedKeepUntil); err != nil {
+	var unused string // the policy's name and value, which the stored retention already says
+	if err := tx.QueryRowContext(ctx, `SELECT f.hash, coalesce(f.file_date, ''), `+retentionColumns+`,
+		coalesce(f.keep_until, '') FROM files f`+policyJoin+`WHERE f.id = ?`, r.FileID).
+		Scan(&hash, &storedDate, &c.storedRetention, &unused, &unused, &c.storedKeepUntil); err != nil {
 		return c, fmt.Errorf("read file %d: %w", r.FileID, err)
 	}
 	if !present {
@@ -493,10 +597,19 @@ func checkRow(ctx context.Context, tx *sql.Tx, r RetentionRow, ex exportInfo) (c
 		}
 	}
 
+	// The value the row's retention stands for: itself, or its policy's (none yet for a new policy).
+	value := c.retention
+	if c.policy = IsPolicyRef(c.retention); c.policy {
+		p, err := policies.get(ctx, tx, c.retention)
+		if err != nil {
+			return c, err
+		}
+		c.policyID, c.newPolicy, value = p.id, p.id == 0, p.value
+	}
 	// A file_date the export suggested from the name, left as it was, is a guess nobody has checked. It is stored
-	// only when the row's retention is a period, which is when it is used; otherwise a later period could count from
-	// it without anyone having looked.
-	if storedDate == "" && expDate.String != "" && c.fileDate == expDate.String && !IsPeriod(c.retention) {
+	// only when the row's retention is a period, or a policy whose value is one, which is when it is used; otherwise
+	// a later period could count from it without anyone having looked.
+	if storedDate == "" && expDate.String != "" && c.fileDate == expDate.String && !IsPeriod(value) {
 		c.fileDate = ""
 	}
 	if c.fileDate == storedDate && c.retention == c.storedRetention {
@@ -507,7 +620,11 @@ func checkRow(ctx context.Context, tx *sql.Tx, r RetentionRow, ex exportInfo) (c
 		c.refusal = fmt.Sprintf("changed since export %d; export again to set its retention", r.ExportID)
 		return c, nil
 	}
-	if c.keepUntil, err = KeepUntil(c.fileDate, c.retention); err != nil {
+	if c.policy && IsPeriod(value) && c.fileDate == "" {
+		c.refusal = NeedsFileDateError{c.retention, value}.Error()
+		return c, nil
+	}
+	if c.keepUntil, err = KeepUntil(c.fileDate, value); err != nil {
 		c.refusal = err.Error()
 		return c, nil
 	}

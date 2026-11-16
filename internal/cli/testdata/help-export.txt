@@ -4,10 +4,11 @@ filo export duplicates [DIR] -o FILE
   Writes every file under DIR (inside a root), or under every root, as CSV
   (UTF-8) to FILE, which must not exist. Columns: id, export, directory, name,
   size, modified, file_date, retention, keep_until. Fill in retention in a
-  spreadsheet, then run filo update FILE. A blank file_date is filled in from
-  the file name when the name holds one clear date (2023-03-14, 20230314, or
-  2023-03 for the month's last day); check it. On a large system, export one
-  directory at a time.
+  spreadsheet (a period such as 7y counted from file_date, a date, forever, or a
+  policy name: filo help policies), then run filo update FILE. A blank file_date
+  is filled in from the file name when the name holds one clear date
+  (2023-03-14, 20230314, or 2023-03 for the month's last day); check it. On a
+  large system, export one directory at a time.
 
   export duplicates writes each duplicate group (two or more copies of the same
   content; hard links to one file are one copy) with a copy under DIR, with all

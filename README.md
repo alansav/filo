@@ -4,7 +4,8 @@ Filo keeps a register of your files: what they are, where they live, how that ch
 should be kept. It is the start of a review-and-dispose workflow meant to stop files piling up forever ("keep it in
 case someone asks").
 
-**Status: scan, lifespan, delete and duplicates done.** You give every file a retention (how long to keep it), and
+**Status: scan, lifespan, delete, duplicates and retention policies done.** You give every file a retention (how
+long to keep it, often through a named policy such as `bills = 7y`), and
 `filo delete` lists the files past theirs, asks, and deletes the ones you choose. For identical copies you decide
 which to keep in a spreadsheet, and `filo delete` carries that out the same careful way. Apart from that, Filo is
 **read-only on your files**: no other command modifies, moves, renames or deletes anything outside its own database.
@@ -27,7 +28,8 @@ See [Roadmap](#roadmap) for what comes next.
   (including moved and missing files).
 - **Tracks how long to keep each file.** Each file has a retention (`7y` from the file's date, `forever`, or a fixed
   date), which you set in a spreadsheet: export a CSV, fill in the retentions, update the register from it. When a
-  date passes, the file is listed as a deletion candidate. Nothing is ever deleted because a date passed: `filo
+  date passes, the file is listed as a deletion candidate. A retention can be a named policy (`bills = 7y`), so
+  changing the rule changes every file using it. Nothing is ever deleted because a date passed: `filo
   delete` shows you the list and asks.
 - **Deletes what you confirm**, after reading each file again just before deleting it: a file that changed since its
   retention was set, moved, or can't be read is skipped, never deleted.
@@ -144,7 +146,8 @@ and filter it however you like.
 - **`retention`** is how long to keep the file:
   - a period counted from `file_date`: `7y`, `18m`, `6w` or `30d`;
   - `forever`: never a deletion candidate, and `filo report` counts how many files are kept forever;
-  - or a fixed date, `YYYY-MM-DD`.
+  - a fixed date, `YYYY-MM-DD`;
+  - or a policy name, such as `bills` (see [Retention policies](#retention-policies)).
 - **`file_date`** is the date the file is about, the date a period counts from (a tax year's end, an invoice's
   date). If it's blank, the export fills it in from the file name when the name holds one clear date:
   `2023-03-14 invoice.pdf`, `IMG_20230714_1032.jpg`, or `2023-03 rent.pdf` (the month's last day, so nothing is kept
@@ -168,11 +171,55 @@ shows the files still to decide.
   set.
 - A blank `retention` where one was set clears it, so the file needs a decision again. Filo lists those files and
   asks first; without a terminal it leaves them alone.
-- A row is refused, with one line saying why, if the file changed since the export or its retention was changed from
-  a later export. The other rows are still applied. `--dry-run` checks everything and writes nothing.
+- A row is refused, with one line saying why, if the file changed since the export or its retention was changed
+  after it (from a later export, or by `filo policies move`). The other rows are still applied. `--dry-run` checks everything and writes nothing.
 - On a large system, export one directory at a time, so the spreadsheet stays fast.
 
 Nothing is deleted because a date passed: `filo delete` lists the candidates and asks (see [Deleting](#deleting)).
+A file kept until a date is past its retention **on** that date: kept until 2026-12-31, it is listed by `filo
+delete` from 2026-12-31 on.
+
+## Retention policies
+
+A policy is a retention written once and named, so you type the name in the CSV instead of a period, and changing
+the rule changes every file using it. If the law moves financial records from 7 to 10 years, that's one command:
+
+```sh
+filo policies add bills 7y        # a policy: bills = 7y
+# in a retention CSV, type bills in the retention column of each bill, then filo update the CSV
+filo policies set bills 10y       # every file on bills is now kept 10 years from its own file_date
+filo policies                     # list them, with what needs attention
+```
+
+- **A policy's value** is a period (counted from each file's own `file_date`), a date (`project-x = 2030-12-31`:
+  every file of it ends that day), or `forever`. Names are letters, digits, `-` and `_`, starting with a letter, in
+  any case (`Bills` is `bills`); `forever` can't be a name.
+- **Typing a new name in the CSV creates the policy**, with no value yet. `filo update` lists the new names and asks
+  once (`Create 2 policies? [y/N]`), so a typo such as `bils` doesn't quietly become one; declined, those rows are
+  left alone. Its files need a retention until the policy gets a value: `filo policies set bils 7y`.
+- **Changing a policy** works out every file's `keep_until` again. Lengthening just does it. Shortening asks first
+  if it would put files past their retention, and lists them. Setting a period asks first if some files have no
+  `file_date` to count from; those then **need a file_date**, which `filo report`, `filo policies` and `filo
+  policies show` point out. They are never deleted until they have one.
+- **A typo or a duplicate**: `filo policies move bils bills` moves every file from one policy to another (into a new
+  name it's a rename), then `filo policies remove bils`. A policy in use can't be removed. A CSV exported before the
+  move never puts a file back on the old name: rows left as they were do nothing, and a row edited since is refused
+  ("export again").
+- **A policy whose date has passed** is flagged by `filo policies`, never removed automatically: set a new date (next
+  year's, say) or remove it.
+- A file has a policy or a retention of its own, never both; typing a period or a date over a policy name takes it
+  off the policy. In a duplicates CSV, a copy on a policy with no value, or one that needs a `file_date`, can't be
+  deleted until it has a date.
+
+```
+$ filo policies
+
+Policies   3 · 2 need attention
+
+  bills       7y           from each file's file_date   212 files
+  bils        no value                                    3 files   ! needs a retention
+  last-year   2025-12-31                                  0 files   ! passed: set a new date, or remove it
+```
 
 ## Deleting
 
@@ -328,6 +375,12 @@ Next: filo duplicates include /home/you/Backup to undo it
 | `filo duplicates` | List what is not counted as duplicates: excluded directories, contents always, sets of records. |
 | `filo duplicates exclude DIR` | Never count the files under `DIR` as duplicates (a backup folder). |
 | `filo duplicates include PATH` | Undo one: a directory's exclusion, a file's content always, or its set of records. |
+| `filo policies` | List the retention policies, with what needs attention. See [Retention policies](#retention-policies). |
+| `filo policies add NAME [VALUE]` | Create a policy, with a period, a date or `forever`, or no value yet. |
+| `filo policies set NAME VALUE [-y]` | Change a policy, and so every file using it; asks first if files would be put past their retention or left without a `file_date`. |
+| `filo policies move OLD NEW [-y]` | Move every file of a policy to another (a rename, if NEW is new). |
+| `filo policies remove NAME` | Delete a policy no file uses. |
+| `filo policies show NAME` | A policy's value and its files, those needing a `file_date` first. |
 | `filo help [COMMAND]` | Show usage. `-h` works on every command. |
 
 Options for `filo roots add` and `filo roots set`, which every scan of the root then uses:
@@ -435,9 +488,10 @@ Enable it with `systemctl --user enable --now filo-scan.timer`.
 4. **Clearer terminal output** for every command. Done.
 5. **Duplicates**: decide in a CSV which copies to keep, carried out by `filo delete`; records, always and excluded
    directories. Done.
-6. **Next**: named retention policies, then folder rules. The order is in [docs/design.md](docs/design.md),
+6. **Retention policies**: a named retention typed in the CSV, changed in one place. Done.
+7. **Next**: folder rules (a default policy on a directory). The order is in [docs/design.md](docs/design.md),
    section 5.
-7. Later: **a UI** in place of the CSV.
+8. Later: **a UI** in place of the CSV.
 
 Principles that won't change:
 - A retention is never a trigger: reaching its end makes a file a candidate you confirm.

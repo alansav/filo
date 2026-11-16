@@ -164,6 +164,8 @@ func (e *env) run(ctx context.Context, args []string) error {
 		return e.delete(ctx, *db, rest)
 	case "duplicates":
 		return e.duplicates(ctx, *db, rest)
+	case "policies":
+		return e.policies(ctx, *db, rest)
 	case "review":
 		return usageError{"review was replaced by export retention and update; see filo help"}
 	default:

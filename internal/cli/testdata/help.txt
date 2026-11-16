@@ -21,6 +21,13 @@ Commands
   duplicates exclude DIR   never count the files under DIR as duplicates
   duplicates include PATH  undo an exclusion, a content always or a set of
                            records
+  policies                 list the retention policies, and what needs attention
+  policies add NAME [VALUE]
+                           create a policy: a named retention such as bills = 7y
+  policies set NAME VALUE  change a policy, and so every file using it
+  policies move OLD NEW    move a policy's files to another, or rename it
+  policies remove NAME     delete a policy no file uses
+  policies show NAME       a policy's value and its files
   help [COMMAND]           this overview, or a command's flags and rules
 
 Every command accepts --db PATH (default: $FILO_DB, then the user data

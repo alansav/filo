@@ -247,7 +247,7 @@ func TestAbsorbMovesExclusions(t *testing.T) {
 func TestMigrateFromV7(t *testing.T) {
 	db := tempDB(t)
 	mustClose(t, mustOpen(t, Options{DBPath: db}))
-	rawExec(t, db, dropDuplicates, duplicatesSQLv7,
+	rawExec(t, db, dropPolicies, dropDuplicates, duplicatesSQLv7,
 		`UPDATE meta SET value = '7' WHERE key = 'schema_version'`,
 		`INSERT INTO roots (id, path, added_utc) VALUES (1, '/r', '2026-01-01T00:00:00Z')`,
 		`INSERT INTO scans (id, started_utc, root_id) VALUES (1, '2026-01-01T00:00:00Z', 1)`,
@@ -308,7 +308,7 @@ func TestMigrateFromV7(t *testing.T) {
 func TestMigrateFromV7Quiet(t *testing.T) {
 	db := tempDB(t)
 	mustClose(t, mustOpen(t, Options{DBPath: db}))
-	rawExec(t, db, dropDuplicates, duplicatesSQLv7, `UPDATE meta SET value = '7' WHERE key = 'schema_version'`)
+	rawExec(t, db, dropPolicies, dropDuplicates, duplicatesSQLv7, `UPDATE meta SET value = '7' WHERE key = 'schema_version'`)
 	s := mustOpen(t, Options{DBPath: db})
 	defer mustClose(t, s)
 	if got := s.UpgradeNotes(); len(got) != 0 {

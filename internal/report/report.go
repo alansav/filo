@@ -29,6 +29,9 @@ type Report struct {
 	UndecidedIn []DirGroup             // the directories holding most of them
 	Deleted     store.DeletedTotals    // what filo has deleted
 	Snapshots   store.SnapshotInfo     // copies of the register
+	Policies    int64                  // the named retention policies
+	PolicyAttn  int64                  // of those, the ones that need attention (PolicyAttention)
+	NeedDateIn  []string               // the policies of the files that need a file_date: "bills, 7y"
 }
 
 // DirDepth is how many levels below a root the report groups files needing a decision by.
@@ -41,6 +44,8 @@ func StatusLabel(s store.Status) string {
 		return "unreadable"
 	case store.StatusPossibleMove:
 		return "possible moves"
+	case store.StatusNeedsFileDate:
+		return "no file_date for their policy"
 	case store.StatusUndated:
 		return "no retention"
 	case store.StatusChanged:
@@ -74,7 +79,13 @@ func Build(ctx context.Context, s *store.Store, top int, today string) (Report, 
 		if it.Status.NeedsDecision() {
 			undecided = append(undecided, it)
 		}
+		// Named from the files the line counts, so a policy is named only for a file of that status.
+		if p := it.Policy + ", " + it.PolicyValue; it.Status == store.StatusNeedsFileDate &&
+			!slices.Contains(r.NeedDateIn, p) {
+			r.NeedDateIn = append(r.NeedDateIn, p)
+		}
 	}
+	slices.Sort(r.NeedDateIn)
 	r.Undecided = int64(len(undecided))
 	r.UndecidedIn = DirGroups(undecided, DirDepth, top)
 	if r.Largest, err = s.Largest(ctx, top); err != nil {
@@ -98,7 +109,34 @@ func Build(ctx context.Context, s *store.Store, top int, today string) (Report, 
 	if r.Snapshots, err = s.Snapshots(ctx, time.Now()); err != nil {
 		return r, err
 	}
+	policies, err := s.Policies(ctx)
+	if err != nil {
+		return r, err
+	}
+	r.Policies = int64(len(policies))
+	for _, p := range policies {
+		if PolicyAttention(p, today) != "" {
+			r.PolicyAttn++
+		}
+	}
 	return r, nil
+}
+
+// PolicyAttention is what needs attention about a policy, "" if nothing: no value, a date passed, files with no
+// file_date under a period (docs/design.md, Named retention policies). today is YYYY-MM-DD.
+func PolicyAttention(p store.Policy, today string) string {
+	dated := p.Value != "" && p.Value != store.Forever && !store.IsPeriod(p.Value)
+	switch {
+	case p.Value == "":
+		return "needs a retention"
+	case dated && p.Value <= today && p.Files == 0:
+		return "passed: set a new date, or remove it"
+	case dated && p.Value <= today:
+		return "passed: its files are past their retention (filo delete)"
+	case p.NoFileDate > 0:
+		return Count(p.NoFileDate) + " without a file_date"
+	}
+	return ""
 }
 
 // Render writes the report through the terminal output components (docs/design.md, Terminal output). Every section
@@ -283,6 +321,7 @@ func (r Report) renderRetention(v *view.Renderer) {
 	}
 	if total == 0 {
 		v.Section("Retention", "none")
+		r.renderPolicies(v) // a policy can need attention before any file uses it
 		return
 	}
 	v.Section("Retention", Plural(total, "file or symlink", "files and symlinks"))
@@ -309,6 +348,11 @@ func (r Report) renderRetention(v *view.Renderer) {
 		v.Detail(4, "Next: filo export retention [DIR] -o FILE, then filo update FILE")
 	}
 
+	// The files whose policy is a period and which have no file_date: the fix is named, with their policies.
+	if n := r.Status[store.StatusNeedsFileDate]; n > 0 {
+		v.Count(view.Attention, Plural(n, "file needs a file_date: its policy counts", "files need a file_date: "+
+			"their policy counts")+" from it ("+strings.Join(r.NeedDateIn, "; ")+")")
+	}
 	if n := r.Status[store.StatusKept]; n > 0 {
 		v.Count(view.Neutral, Count(n)+" kept until a later date")
 	}
@@ -327,6 +371,20 @@ func (r Report) renderRetention(v *view.Renderer) {
 		v.Count(view.Neutral, fmt.Sprintf("deleted by filo: %s, %s freed%s", Plural(d.Files, "file", "files"),
 			Size(d.Bytes), last))
 	}
+	r.renderPolicies(v)
+}
+
+// renderPolicies writes the policies line, when there are policies: how many, and how many need attention (marked
+// so when some do).
+func (r Report) renderPolicies(v *view.Renderer) {
+	if r.Policies == 0 {
+		return
+	}
+	line, mark := Plural(r.Policies, "policy", "policies"), view.Neutral
+	if r.PolicyAttn > 0 {
+		line, mark = line+", "+Plural(r.PolicyAttn, "needs attention", "need attention"), view.Attention
+	}
+	v.Count(mark, line+" (filo policies)")
 }
 
 // renderSnapshots shows the register's copies, and warns when they are missing or behind, which is how a failing

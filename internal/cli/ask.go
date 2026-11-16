@@ -30,6 +30,52 @@ func (e *env) askChoice(ctx context.Context, pr *prompter, question string, choi
 	}
 }
 
+// askYesNo asks a yes/no question on pr, Enter being no. relist, if not nil, offers l too: the list above the question
+// was cut, and l shows it whole before asking again (docs/design.md, Terminal output: everything a yes acts on can be
+// seen first).
+func (e *env) askYesNo(ctx context.Context, pr *prompter, question string, relist func()) (bool, error) {
+	choices := []view.Choice{{Key: "y", Word: "yes"}, {Key: "n", Word: "no"}}
+	if relist != nil {
+		choices = yesNoList
+	}
+	for {
+		key, err := e.askChoice(ctx, pr, question, choices, "n")
+		if err != nil {
+			return false, err
+		}
+		e.view.Blank()
+		if key != "l" {
+			return key == "y", nil
+		}
+		relist()
+	}
+}
+
+// confirmChange asks question before a change, unless yes (-y) says to go ahead. Without a terminal nothing is done,
+// and one line says so; declined, one line says nothing changed. relist is as for askYesNo.
+func (e *env) confirmChange(ctx context.Context, question string, yes bool, relist func()) (bool, error) {
+	r := e.view
+	if yes {
+		return true, nil
+	}
+	r.Blank()
+	if !e.canPrompt() {
+		r.Next("Nothing changed: there is no terminal to ask in. Run it in a terminal, or pass -y.")
+		return false, nil
+	}
+	pr := newPrompter(e.stdin)
+	pr.end, pr.check = r.Blank, e.outputErr
+	defer pr.close()
+	ok, err := e.askYesNo(ctx, pr, question, relist)
+	if err != nil {
+		return false, interrupted(err)
+	}
+	if !ok {
+		r.Next("Nothing changed.")
+	}
+	return ok, nil
+}
+
 // yesNoList are the answers to a confirmation that covers a list cut to its first entries.
 var yesNoList = []view.Choice{{Key: "y", Word: "yes"}, {Key: "n", Word: "no"}, {Key: "l", Word: "list"}}
 

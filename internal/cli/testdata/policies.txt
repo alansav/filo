@@ -1,0 +1,59 @@
+$ filo policies
+
+Policies   3 . 2 need attention
+
+  bills       7y           from each file's file_date   2 files
+  bils        no value                                   1 file   [!] needs a retention
+  last-year   2025-12-31                                0 files   [!] passed: set a new date, or remove it
+
+Next: filo policies show bils, then filo policies set bils VALUE or filo policies move bils NAME
+
+$ filo policies show bills
+
+Policy bills   7y from each file's file_date . 2 files . <root>
+
+    file_date    until
+    2015-06-30   2022-06-30   bills/2015-06.pdf
+    2022-01-31   2029-01-31   bills/2022-01.pdf
+
+Next: filo policies set bills VALUE to change it for all of them
+
+$ filo policies set bills 3y
+
+Shorten bills   7y -> 3y . 2 files . <root>
+
+[!] 1 file would be past its retention:
+    file_date    until
+    2022-01-31   2025-01-31   bills/2022-01.pdf
+
+Shorten bills for 2 files, putting 1 past its retention? [y/N] 
+Done   bills is 3y . 2 files updated . 1 past its retention
+
+Nothing has been deleted. Next: filo delete
+
+$ filo policies move bils bills
+
+Move bils   to bills (3y) . 1 file . <root>
+
+[!] 1 file has no file_date to count 3y from: it would need one
+    file_date   until
+                needs a file_date   bils/x.pdf
+
+Move 1 file from bils to bills (3y)? [y/N] 
+Done   moved 1 file to bills
+
+Next: filo policies remove bils, now it has no files
+
+$ filo policies remove bils
+
+Removed   bils
+
+$ filo policies
+
+Policies   2 . 2 need attention
+
+  bills       3y           from each file's file_date   3 files   [!] 1 without a file_date
+  last-year   2025-12-31                                0 files   [!] passed: set a new date, or remove it
+
+Next: filo policies show bills, then filo policies set bills VALUE or filo policies move bills NAME
+

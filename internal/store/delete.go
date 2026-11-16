@@ -226,7 +226,19 @@ func (s *Store) SetRetention(ctx context.Context, fileID int64, retention string
 	if err != nil {
 		return "", fmt.Errorf("read file %d: %w", fileID, err)
 	}
-	keep, err := KeepUntil(fileDate, retention)
+	// A policy name puts the file on that policy, which must exist: this prompt cannot ask to create one.
+	value, policy := retention, sql.NullInt64{}
+	if IsPolicyRef(retention) {
+		p, err := readPolicy(ctx, tx, retention)
+		if err != nil {
+			return "", err
+		}
+		if IsPeriod(p.Value) && fileDate == "" {
+			return "", NeedsFileDateError{p.Name, p.Value}
+		}
+		value, policy = p.Value, sql.NullInt64{Int64: p.ID, Valid: true}
+	}
+	keep, err := KeepUntil(fileDate, value)
 	if err != nil {
 		return "", err
 	}
@@ -243,8 +255,13 @@ func (s *Store) SetRetention(ctx context.Context, fileID int64, retention string
 		hash); err != nil {
 		return "", fmt.Errorf("record retention: %w", err)
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE files SET retention = ?, keep_until = ?, reviewed_utc = ?,
-		reviewed_after_scan = ?, reviewed_hash = ? WHERE id = ?`, nullString(retention), nullString(keep), utc(now),
+	// A retention of its own takes the file off its policy, if it had one; a policy name puts it on that one.
+	own := nullString(retention)
+	if policy.Valid {
+		own = sql.NullString{}
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE files SET retention = ?, policy_id = ?, keep_until = ?, reviewed_utc = ?,
+		reviewed_after_scan = ?, reviewed_hash = ? WHERE id = ?`, own, policy, nullString(keep), utc(now),
 		nullInt(after), hash, fileID); err != nil {
 		return "", fmt.Errorf("record retention: %w", err)
 	}

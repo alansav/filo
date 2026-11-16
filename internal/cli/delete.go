@@ -336,11 +336,11 @@ func (e *env) choose(ctx context.Context, pr *prompter, extra choice) (action, e
 // askRetention asks for a new retention until one is valid, and saves it. A blank answer goes back.
 func (e *env) askRetention(ctx context.Context, pr *prompter, s *store.Store, c store.Candidate) (bool, error) {
 	r := e.view
-	question := "new retention: a period from file_date " + c.FileDate + " (such as 7y), forever, or YYYY-MM-DD; " +
-		"blank to go back"
+	question := "new retention: a period from file_date " + c.FileDate + " (such as 7y), forever, YYYY-MM-DD, or a " +
+		"policy; blank to go back"
 	if c.FileDate == "" {
-		question = "new retention: forever or YYYY-MM-DD (a period needs a file_date, which this file has not got); " +
-			"blank to go back"
+		question = "new retention: forever, YYYY-MM-DD or a policy (a period needs a file_date, which this file has " +
+			"not got); blank to go back"
 	}
 	for {
 		ans, ok, err := pr.ask(ctx, func() { r.AskText(question) })
@@ -350,20 +350,33 @@ func (e *env) askRetention(ctx context.Context, pr *prompter, s *store.Store, c 
 		rt, err := retention.ParseRetention(ans)
 		if err != nil {
 			r.Result(view.Refused, fmt.Sprintf("%q is not a retention: use a period such as 7y, 18m, 6w or 30d, "+
-				"forever, or a date YYYY-MM-DD", ans))
+				"forever, a date YYYY-MM-DD, or a policy name (letters, digits, - and _)", ans))
 			continue
 		}
-		if _, err := store.KeepUntil(c.FileDate, rt); err != nil {
+		if !store.IsPolicyRef(rt) {
+			if _, err := store.KeepUntil(c.FileDate, rt); err != nil {
+				r.Result(view.Refused, err.Error())
+				continue
+			}
+		}
+		keep, err := s.SetRetention(ctx, c.FileID, rt, now())
+		var needs store.NeedsFileDateError
+		if errors.Is(err, store.ErrNoPolicy) || errors.As(err, &needs) {
+			// An unknown policy (this prompt does not create one), or a period policy with no file_date. Any other
+			// error is the register's, and ends the command.
 			r.Result(view.Refused, err.Error())
 			continue
 		}
-		keep, err := s.SetRetention(ctx, c.FileID, rt, now())
 		if err != nil {
 			return false, err
 		}
-		if keep != store.Forever && keep <= today() {
+		switch {
+		case keep == "" && store.IsPolicyRef(rt):
+			r.Result(view.Attention, "on policy "+rt+", which has no value yet: the file needs a retention until it "+
+				"gets one (filo policies set "+rt+" VALUE)")
+		case keep != store.Forever && keep <= today():
 			r.Result(view.Attention, "kept until "+keep+"; that is still past, so it will be listed again")
-		} else {
+		default:
 			r.Result(view.Done, "kept until "+keep)
 		}
 		return true, nil

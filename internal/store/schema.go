@@ -3,7 +3,7 @@ package store
 // SchemaVersion is the schema this build reads and writes. It is stored in meta.schema_version when a database is
 // created. An older database with a migration in migrations is upgraded when it is opened; any other version is
 // refused.
-const SchemaVersion = 8
+const SchemaVersion = 9
 
 // Meta keys.
 const (
@@ -61,7 +61,8 @@ CREATE TABLE files (
     reviewed_utc TEXT,
     reviewed_after_scan INTEGER REFERENCES scans(id),
     reviewed_hash TEXT,
-    deleted_utc TEXT                    -- when filo deleted it; its path is closed. NULL = not deleted by filo
+    deleted_utc TEXT,                   -- when filo deleted it; its path is closed. NULL = not deleted by filo
+    policy_id INTEGER                   -- its retention policy (policies.id; then retention is NULL), NULL = none
 );
 
 CREATE TABLE paths (
@@ -85,7 +86,7 @@ CREATE TABLE events (
     other_path TEXT,
     detail TEXT
 );
-` + reviewSQL + duplicatesSQL
+` + reviewSQL + duplicatesSQL + policiesSQL
 
 // reviewSQL is the export and review tables, as of schema version 8.
 const reviewSQL = `
@@ -212,7 +213,39 @@ DROP TABLE duplicate_marks;
 DROP TABLE duplicate_reviews;
 DELETE FROM review_batches WHERE id NOT IN (SELECT batch_id FROM reviews);
 ` + recordsSQL,
+	// 8 -> 9: named retention policies (docs/design.md, Lifespan, Named retention policies). Only new tables and a
+	// column: every file keeps its own retention, and no file is on a policy yet.
+	8: `
+ALTER TABLE files ADD COLUMN policy_id INTEGER;
+` + policiesSQL,
 }
+
+// policiesSQL is the named retention policies, added in schema version 9. A file on a policy has files.policy_id set
+// and files.retention NULL; its keep_until is worked out from the policy's value and stored, as for a retention of
+// its own. files.policy_id is not declared a foreign key, so the store keeps it pointing at a policy (a policy in use
+// is never removed). policy_changes is the history: kind 'add', 'set', 'rename', 'move' or 'remove', the policy's
+// name at the time, its old and new value (for 'rename' and 'move', new_value is the policy moved to) and how many
+// files the change touched.
+const policiesSQL = `
+CREATE TABLE policies (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE,              -- lower case: letters, digits, - and _, starting with a letter
+    value TEXT,                             -- a period (7y), a date (YYYY-MM-DD) or 'forever'; NULL = none yet
+    added_utc TEXT NOT NULL,
+    changed_utc TEXT NOT NULL
+);
+CREATE INDEX ix_files_policy ON files(policy_id);
+
+CREATE TABLE policy_changes (
+    id INTEGER PRIMARY KEY,
+    kind TEXT NOT NULL,
+    policy TEXT NOT NULL,
+    old_value TEXT,
+    new_value TEXT,
+    files INTEGER NOT NULL DEFAULT 0,
+    changed_utc TEXT NOT NULL
+);
+`
 
 // duplicatesSQL is the duplicates tables as of schema version 8. A content is always (never a duplicate group) while
 // its hash is in always_hashes. A file is one of a set of records while its row's hash is the file's hash, so an

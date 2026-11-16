@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"database/sql"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -484,4 +485,38 @@ func TestDuplicatesDeleteReviewFindings(t *testing.T) {
 		d.contains("run", d.run(ExitOK, p), "deleted 1 copy")
 		d.there("run", map[string]bool{"b/contract.pdf": true, "c/contract.pdf": false})
 	})
+}
+
+// TestDuplicatesDeleteNeedsFileDate: a copy to delete whose policy is a period and which has no file_date is not
+// deleted: its retention's end is not known, so no copy kept can be shown to outlast it (code review of policies
+// slice 1, 2026-11-16).
+func TestDuplicatesDeleteNeedsFileDate(t *testing.T) {
+	for _, tc := range []struct{ value, fileDate, want string }{
+		{"7y", "NULL", "needs a file_date first: its policy bills (7y)"},
+		{"", "'2020-01-01'", "its policy bills has no value yet"},
+	} {
+		t.Run(tc.want, func(t *testing.T) { dupDeleteOnPolicy(t, tc.value, tc.fileDate, tc.want) })
+	}
+}
+
+func dupDeleteOnPolicy(t *testing.T, value, fileDate, want string) {
+	d := newDupTest(t, map[string]string{"a/contract.pdf": "contract", "b/contract.pdf": "contract"})
+	p := d.export("d.csv")
+	d.decide(p, map[string]string{"a/contract.pdf": "keep", "b/contract.pdf": "delete"})
+	db, err := sql.Open("sqlite", d.db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range []string{
+		`INSERT INTO policies (name, value, added_utc, changed_utc) VALUES ('bills', nullif('` + value + `', ''), 'x', 'x')`,
+		`UPDATE files SET policy_id = (SELECT id FROM policies), file_date = ` + fileDate + `, retention = NULL
+			WHERE id = (SELECT file_id FROM paths WHERE path = 'b/contract.pdf')`,
+	} {
+		if _, err := db.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	db.Close()
+	d.contains("run", d.run(ExitError, p), "b/contract.pdf", want)
+	d.there("run", map[string]bool{"a/contract.pdf": true, "b/contract.pdf": true})
 }

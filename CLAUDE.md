@@ -10,9 +10,9 @@ Iterations 1 (scan, register, report), 2 (lifespan: retention through the retent
 `filo update`) and 3 (delete: `filo delete [DIR] [-y]` lists the files past their retention, asks, and deletes the
 chosen ones, each only after it is re-read and found unchanged) are done, as are register snapshots. The duplicates
 redesign (`docs/design.md`, Duplicates: `filo delete FILE.csv`, records, always, `filo duplicates`; schema 8) is done
-on branch `duplicates-redesign`, all five slices, not yet merged or run on the real register. The terminal output is
-done (every command prints through `internal/view`, see "Terminal output"). The order of the next work is in
-`docs/design.md` section 5: named retention policies next.
+and merged. The terminal output is done (every command prints through `internal/view`, see "Terminal output"). Named
+retention policies (`docs/design.md`, Lifespan, Named retention policies; schema 9; `filo policies`) are built on
+branch `retention-policies`, all four slices, not yet merged. Next in `docs/design.md` section 5: folder rules.
 **`internal/dispose` is the only code allowed to delete the user's files**, and only from `filo delete`; everything
 else stays read-only on them, and nothing overwrites an existing file. Stay inside the current piece of work.
 
@@ -42,7 +42,7 @@ else stays read-only on them, and nothing overwrites an existing file. Stay insi
 - Before changing any file in the repo, check the branch with `git branch --show-current`. If it is `main`, stop and
   ask the user to check out a branch; do not create or switch branches yourself.
 - Command names stay plain and easy to remember: `roots`, `scan`, `report`, `export`, `update`, `delete`,
-  `duplicates`, `revert`. No themed names.
+  `duplicates`, `policies`, `revert`. No themed names.
 
 ## Commands
 

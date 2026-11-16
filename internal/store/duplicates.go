@@ -74,18 +74,18 @@ func loadContents(ctx context.Context, q querier, hashes string, args ...any) ([
 		c := &r.c
 		var ino int64
 		err := rows.Scan(&c.FileID, &c.RootID, &c.RootPath, &c.PathID, &c.Path, &c.Size, &c.MtimeNS, &c.CtimeNS,
-			&c.Hash, &ino, &c.FileDate, &c.Retention, &c.KeepUntil, &c.ReviewedUTC, &c.ReviewedHash, &c.Unreadable,
+			&c.Hash, &ino, &c.FileDate, &c.Retention, &c.Policy, &c.PolicyValue, &c.KeepUntil, &c.ReviewedUTC, &c.ReviewedHash, &c.Unreadable,
 			&c.RecordSet, &r.always)
 		c.Kind = "file"
 		c.Ino = uint64(ino)
 		return r, err
 	}, `
 		SELECT f.id, p.root_id, r.path, p.id, p.path, f.size, f.mtime_ns, f.ctime_ns, f.hash, coalesce(f.inode, 0),
-		       coalesce(f.file_date, ''), coalesce(f.retention, ''), coalesce(f.keep_until, ''),
+		       coalesce(f.file_date, ''), `+retentionColumns+`, coalesce(f.keep_until, ''),
 		       coalesce(f.reviewed_utc, ''), coalesce(f.reviewed_hash, ''), f.unreadable_since_scan IS NOT NULL,
 		       coalesce(dr.set_id, 0), ah.hash IS NOT NULL
 		FROM paths p
-		JOIN files f ON f.id = p.file_id
+		JOIN files f ON f.id = p.file_id`+policyJoin+`
 		JOIN roots r ON r.id = p.root_id
 		LEFT JOIN duplicate_records dr ON dr.file_id = f.id AND dr.hash = f.hash
 		LEFT JOIN always_hashes ah ON ah.hash = f.hash

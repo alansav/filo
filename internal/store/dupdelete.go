@@ -50,7 +50,7 @@ func (s *Store) ExportedCopies(ctx context.Context, exportIDs []int64) (map[int6
 		var ino int64
 		var otherRoot, otherRel string
 		err := rows.Scan(&r.export, &c.Group, &c.FileID, &c.RootID, &c.RootPath, &c.PathID, &c.Path, &c.PathOpen,
-			&c.Kind, &c.Size, &c.MtimeNS, &c.CtimeNS, &c.Hash, &ino, &c.FileDate, &c.Retention, &c.KeepUntil,
+			&c.Kind, &c.Size, &c.MtimeNS, &c.CtimeNS, &c.Hash, &ino, &c.FileDate, &c.Retention, &c.Policy, &c.PolicyValue, &c.KeepUntil,
 			&c.ReviewedHash, &c.Deleted, &c.Unreadable, &c.RecordSet, &c.Always, &otherRoot, &otherRel)
 		c.Ino = uint64(ino)
 		if otherRoot != "" {
@@ -60,13 +60,13 @@ func (s *Store) ExportedCopies(ctx context.Context, exportIDs []int64) (map[int6
 	}, `
 		SELECT er.export_id, er.dup_group, f.id, r.id, r.path, p.id, p.path, p.valid_to_scan IS NULL, f.kind,
 		       coalesce(f.size, 0), coalesce(f.mtime_ns, 0), coalesce(f.ctime_ns, 0), coalesce(f.hash, ''),
-		       coalesce(f.inode, 0), coalesce(f.file_date, ''), coalesce(f.retention, ''),
+		       coalesce(f.inode, 0), coalesce(f.file_date, ''), `+retentionColumns+`,
 		       coalesce(f.keep_until, ''), coalesce(er.hash, ''), coalesce(f.deleted_utc, ''),
 		       f.unreadable_since_scan IS NOT NULL, coalesce(dr.set_id, 0), ah.hash IS NOT NULL,
 		       coalesce((SELECT r2.path `+other+`), ''), coalesce((SELECT p2.path `+other+`), '')
 		FROM export_rows er
 		JOIN exports e ON e.id = er.export_id
-		JOIN files f ON f.id = er.file_id
+		JOIN files f ON f.id = er.file_id`+policyJoin+`
 		JOIN paths p ON p.id = er.path_id
 		JOIN roots r ON r.id = p.root_id
 		LEFT JOIN duplicate_records dr ON dr.file_id = f.id AND dr.hash = f.hash
