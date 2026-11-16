@@ -107,11 +107,31 @@ func TestAddRule(t *testing.T) {
 		{"a pattern with /", "bank", "a/*", "bills", rules.ErrPattern},
 		{"not a policy name", "bank", "*.pdf", "bills!", ErrPolicyName},
 		{"forever is not a policy", "bank", "*.pdf", "forever", ErrPolicyName},
+		{"*? is ?*", "bank", "*?", "bills", nil},
+		{"?* after *?", "bank", "?*", "bills", ErrRuleExists},
+		{"a directory ending in /", "bank/", "*.pdf", "bills", ErrRuleDir},
+		{"a directory starting with ./", "./bank", "*.pdf", "bills", ErrRuleDir},
+		{"a directory with //", "bank//2024", "*.pdf", "bills", ErrRuleDir},
+		{"a directory with ..", "bank/../x", "*.pdf", "bills", ErrRuleDir},
+		{"an absolute directory", "/bank", "*.pdf", "bills", ErrRuleDir},
 	} {
-		if _, _, _, err := e.s.AddRule(e.ctx, e.root.ID, tc.dir, tc.pattern, tc.policy, ruleToday, policyNow); !errors.Is(err,
-			tc.want) {
+		if _, _, _, err := e.s.AddRule(e.ctx, e.root.ID, tc.dir, tc.pattern, tc.policy, ruleToday, policyNow); (err ==
+			nil) != (tc.want == nil) || !errors.Is(err, tc.want) {
 			t.Errorf("%s: err = %v, want %v", tc.name, err, tc.want)
 		}
+	}
+	if _, _, _, err := e.s.AddRule(e.ctx, 999, "bank", "*.doc", "nopolicy", ruleToday, policyNow); !errors.Is(err,
+		ErrRuleRoot) {
+		t.Errorf("a root that is not registered: err = %v, want ErrRuleRoot", err)
+	}
+	if _, err := e.s.Policy(e.ctx, "nopolicy"); err == nil {
+		t.Error("a rule refused for its root created its policy")
+	}
+	if _, err := e.s.RemoveRule(e.ctx, e.root.ID, "bank/", "*?"); !errors.Is(err, ErrRuleDir) {
+		t.Errorf("remove at bank/: err = %v, want ErrRuleDir", err)
+	}
+	if _, err := e.s.RemoveRule(e.ctx, e.root.ID, "bank", "*?"); err != nil {
+		t.Errorf("remove *? (stored as ?*): %v", err)
 	}
 	if _, err := e.s.Policy(e.ctx, "bills!"); err == nil {
 		t.Error("a refused rule created its policy")

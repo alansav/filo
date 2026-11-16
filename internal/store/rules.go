@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/alansav/filo/internal/rules"
@@ -21,6 +22,10 @@ var (
 	ErrRuleExists = errors.New("the directory has a rule with that pattern already")
 	// ErrNoRule means the directory has no rule with that pattern.
 	ErrNoRule = errors.New("no rule with that pattern there (filo rules lists them)")
+	// ErrRuleDir means a rule's directory not in the form the register keeps paths in.
+	ErrRuleDir = errors.New("not a directory relative to its root ('/'-separated, no . or .. and no / at either end)")
+	// ErrRuleRoot means a rule for a root that is not registered.
+	ErrRuleRoot = errors.New("no such root (filo roots lists them)")
 )
 
 // Rule is a directory rule, with the present files it has dated.
@@ -106,6 +111,9 @@ func findRule(ctx context.Context, q querier, rootID int64, dir, pattern string)
 	if err != nil {
 		return Rule{}, err
 	}
+	if err := checkRuleDir(dir); err != nil {
+		return Rule{}, err
+	}
 	rs, err := queryAll(ctx, q, scanRule, rulesQuery+` WHERE ru.root_id = ? AND ru.dir = ? AND ru.pattern_key = ?`,
 		rootID, dir, rules.Key(p))
 	if err != nil {
@@ -115,6 +123,33 @@ func findRule(ctx context.Context, q querier, rootID int64, dir, pattern string)
 		return Rule{}, fmt.Errorf("%s at %s: %w", p, dirName(dir), ErrNoRule)
 	}
 	return rs[0], nil
+}
+
+// checkRuleDir checks that dir is a directory of a root as the register keeps paths: '/'-separated, relative to the
+// root, "" for the root itself, with no empty, . or .. part. Any other form ("bank/", "./bank") would be stored and
+// never match a file, since files are matched against their own directories in that form.
+func checkRuleDir(dir string) error {
+	if dir == "" {
+		return nil
+	}
+	for _, part := range strings.Split(dir, "/") {
+		if part == "" || part == "." || part == ".." || strings.ContainsRune(part, 0) {
+			return fmt.Errorf("%q: %w", dir, ErrRuleDir)
+		}
+	}
+	return nil
+}
+
+// checkRuleRoot checks, in q, that the root is registered.
+func checkRuleRoot(ctx context.Context, q querier, rootID int64) error {
+	var n int
+	if err := q.QueryRowContext(ctx, `SELECT count(*) FROM roots WHERE id = ?`, rootID).Scan(&n); err != nil {
+		return fmt.Errorf("read root: %w", err)
+	}
+	if n == 0 {
+		return ErrRuleRoot
+	}
+	return nil
 }
 
 // dirName is a directory as an error names it: "the root" for "".
@@ -178,6 +213,12 @@ func addRule(ctx context.Context, tx *sql.Tx, rootID int64, dir, pattern, policy
 	now time.Time) (Rule, bool, RuleRun, error) {
 	p, err := rules.Pattern(pattern)
 	if err != nil {
+		return Rule{}, false, RuleRun{}, err
+	}
+	if err := checkRuleDir(dir); err != nil {
+		return Rule{}, false, RuleRun{}, err
+	}
+	if err := checkRuleRoot(ctx, tx, rootID); err != nil {
 		return Rule{}, false, RuleRun{}, err
 	}
 	policyID, created, err := rulePolicy(ctx, tx, policy, now)
