@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -16,6 +17,7 @@ import (
 	"github.com/alansav/filo/internal/hasher"
 	"github.com/alansav/filo/internal/reconcile"
 	"github.com/alansav/filo/internal/report"
+	"github.com/alansav/filo/internal/rules"
 	"github.com/alansav/filo/internal/store"
 	"github.com/alansav/filo/internal/view"
 )
@@ -231,8 +233,11 @@ func renderScan(v *view.Renderer, sum reconcile.Summary, took time.Duration) boo
 			rows = append(rows, report.EventRow(sum.Root, ev))
 		}
 	}
-	if len(rows) > 0 {
-		v.Blank() // a longer report: its counts and its events are sections apart
+	set, ties := len(sum.Rules.Dated), len(sum.Rules.Ties)
+	changes += set
+	found += set + ties
+	if len(rows) > 0 || set+ties > 0 {
+		v.Blank() // a longer report: its counts and its sections are apart
 	}
 	if found == 0 {
 		v.Count(view.Done, "no changes")
@@ -242,6 +247,13 @@ func renderScan(v *view.Renderer, sum reconcile.Summary, took time.Duration) boo
 			v.Count(k.mark, report.Count(int64(n))+" "+k.text(n))
 		}
 	}
+	if set > 0 {
+		v.Count(view.Neutral, report.Count(int64(set))+" given a policy by rules")
+	}
+	if ties > 0 {
+		v.Count(view.Attention, report.Count(int64(ties))+" not given a policy: "+tieWhy(sum.Rules.Ties))
+	}
+	renderRules(v, sum.Root, sum.Rules)
 	if len(rows) > 0 {
 		v.Blank()
 		v.Section("Events", fmt.Sprintf("up to %d of each kind", reconcile.SampleSize))
@@ -254,6 +266,56 @@ func renderScan(v *view.Renderer, sum reconcile.Summary, took time.Duration) boo
 		}
 	}
 	return changes > 0
+}
+
+// tieWhy says why tied files got no policy: "two rules match it equally", "two or more rules match each equally".
+func tieWhy(ties []store.RuleTie) string {
+	if len(ties) == 1 && len(ties[0].Rules) == 2 {
+		return "two rules match it equally"
+	}
+	if len(ties) == 1 {
+		return report.Count(int64(len(ties[0].Rules))) + " rules match it equally"
+	}
+	return "two or more rules match each equally"
+}
+
+// renderRules shows what a scan's directory rules did: the policies they set, a line per rule with its directory,
+// pattern and policy lined up, and every file they tie on, with the rules that match it equally.
+func renderRules(v *view.Renderer, root string, run store.RuleRun) {
+	if len(run.Dated) > 0 {
+		type tally struct {
+			rule         store.Rule
+			files, needs int64
+		}
+		var order []*tally
+		byID := map[int64]*tally{}
+		for _, d := range run.Dated {
+			t, ok := byID[d.Rule.ID]
+			if !ok {
+				t = &tally{rule: d.Rule}
+				byID[d.Rule.ID] = t
+				order = append(order, t)
+			}
+			t.files++
+			if d.NeedsFileDate() {
+				t.needs++
+			}
+		}
+		slices.SortFunc(order, func(a, b *tally) int { return rules.Compare(a.rule.Matcher(), b.rule.Matcher()) })
+		rows := make([]view.TableRow, len(order))
+		for i, t := range order {
+			note := ""
+			if t.needs > 0 {
+				note = report.Plural(t.needs, "needs a file_date", "need a file_date")
+			}
+			rows[i] = view.TableRow{Name: ruleWhere(v, root, t.rule.Dir), Cells: []string{t.rule.Pattern,
+				t.rule.Policy, report.Plural(t.files, "file", "files"), note}}
+		}
+		v.Blank()
+		v.Section("Policies set by rules")
+		v.HeadedTable([]string{"directory", "pattern", "policy"}, rows, false, false, true)
+	}
+	showRuleTies(v, run.Ties)
 }
 
 // duration shows how long a scan took: "under 0.1 s", "1.2 s", "3 min 12 s", "1 h 5 min". Each form is chosen

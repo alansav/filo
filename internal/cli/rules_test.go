@@ -207,3 +207,23 @@ func TestRulesReviewFindings(t *testing.T) {
 	rt.contains("none below", rt.filo(ExitOK, "", false, "rules", rt.in("bank/2024")).stdout,
 		"none at or below it (the rules above it are listed by filo rules)")
 }
+
+// TestScanRulesGolden: what a scan says about the directory rules (docs/design.md, Directory rules, Output): the
+// policies they set, a line per rule lined up, and every tie, every scan.
+func TestScanRulesGolden(t *testing.T) {
+	rt := newRuleTest(t)
+	bank := rt.in("bank")
+	rt.filo(ExitOK, "", false, "rules", "add", bank, "*DailyStatement*", "statements")
+	rt.filo(ExitOK, "", false, "rules", "add", bank, "*2024*", "tax")
+	rt.filo(ExitOK, "", false, "rules", "add", bank, "*bank*", "banking")
+	rt.filo(ExitOK, "", false, "rules", "add", rt.in("personal/home/electric"), "bills")
+	rt.write("bank/DailyStatement-2020-01.pdf", "1")
+	rt.write("bank/DailyStatement-2020-02.pdf", "2")
+	rt.write("personal/home/electric/2024-02.pdf", "3")
+	rt.write("bank/new-2024-bank.pdf", "4")
+	var out strings.Builder
+	for _, what := range []string{"four new files", "again: the tie is still listed"} {
+		out.WriteString("$ filo scan (" + what + ")\n" + rt.filo(ExitOK, "", false, "scan").stdout + "\n")
+	}
+	golden(t, "scan-rules.txt", rt.root, took.ReplaceAllString(out.String(), "<took>"))
+}

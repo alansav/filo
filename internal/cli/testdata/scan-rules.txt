@@ -1,0 +1,25 @@
+$ filo scan (four new files)
+Scan   scan 2 . 11 files seen . <took> . <root>
+
+  - 4 new
+  - 3 given a policy by rules
+  [!] 1 not given a policy: two rules match it equally
+
+Policies set by rules
+    directory                pattern            policy
+    bank                     *DailyStatement*   statements   2 files   2 need a file_date
+    personal/home/electric   *                  bills         1 file
+
+[!] Not applied   1 file matches 2 rules of bank equally (*2024*, *bank*)
+    bank/new-2024-bank.pdf
+
+Next: filo report
+
+$ filo scan (again: the tie is still listed)
+Scan   scan 3 . 11 files seen . <took> . <root>
+
+  [!] 1 not given a policy: two rules match it equally
+
+[!] Not applied   1 file matches 2 rules of bank equally (*2024*, *bank*)
+    bank/new-2024-bank.pdf
+

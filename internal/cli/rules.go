@@ -96,9 +96,11 @@ func ruleDir(ctx context.Context, s *store.Store, arg string, gone bool) (store.
 }
 
 // ruleWhere names a rule's directory in a line: relative to its root, or the root itself for "".
-func (e *env) ruleWhere(root, dir string) string {
+func (e *env) ruleWhere(root, dir string) string { return ruleWhere(e.view, root, dir) }
+
+func ruleWhere(v *view.Renderer, root, dir string) string {
 	if dir == "" {
-		return e.view.Tilde(root)
+		return v.Tilde(root)
 	}
 	return dir
 }
@@ -209,7 +211,10 @@ func datedRows(ds []store.RuleDated) []view.FileRow {
 
 // ruleTies says which files no rule dates because two or more rules of one directory match them equally, grouped by
 // the rules involved (in any order) and listing each file once.
-func (e *env) ruleTies(ties []store.RuleTie) {
+func (e *env) ruleTies(ties []store.RuleTie) { showRuleTies(e.view, ties) }
+
+// showRuleTies is ruleTies on a renderer, for the scan's output too.
+func showRuleTies(r *view.Renderer, ties []store.RuleTie) {
 	type group struct {
 		rules []store.Rule
 		files []view.FileRow
@@ -236,7 +241,6 @@ func (e *env) ruleTies(ties []store.RuleTie) {
 		}
 		g.files = append(g.files, view.FileRow{Root: t.RootPath, Rel: t.Path})
 	}
-	r := e.view
 	for _, g := range groups {
 		var patterns []string
 		for _, x := range g.rules {
@@ -245,7 +249,7 @@ func (e *env) ruleTies(ties []store.RuleTie) {
 		first := g.rules[0]
 		r.Blank()
 		r.Note(view.Attention, "Not applied   "+report.Plural(int64(len(g.files)), "file matches", "files match")+" "+
-			report.Count(int64(len(patterns)))+" rules of "+e.ruleWhere(first.RootPath, first.Dir)+" equally ("+
+			report.Count(int64(len(patterns)))+" rules of "+ruleWhere(r, first.RootPath, first.Dir)+" equally ("+
 			strings.Join(patterns, ", ")+")")
 		r.Files(view.FileList{Rows: g.files, Max: r.Overview(), More: "files", MoreOne: "file"})
 	}
