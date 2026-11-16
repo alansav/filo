@@ -202,10 +202,10 @@ func realFolders(root, rel string) (why string, ok bool) {
 		}
 		if fi.Mode()&fs.ModeSymlink != 0 {
 			target, _ := os.Readlink(dir)
-			return "a folder on its path is now a symlink (" + dir + " to " + target + "); run filo scan", true
+			return "a directory on its path is now a symlink (" + dir + " to " + target + "); run filo scan", true
 		}
 		if !fi.IsDir() {
-			return "a folder on its path is no longer a folder (" + dir + "); run filo scan", true
+			return "a directory on its path is no longer a directory (" + dir + "); run filo scan", true
 		}
 	}
 	return "", true
@@ -270,7 +270,7 @@ func (d *Disposer) PruneDirs() (removed []string, problems []error) {
 			if err := removeDir(dir); err != nil {
 				// Something appeared in it, or it cannot be removed: either way it stays.
 				if !errors.Is(err, fs.ErrExist) && !isNotEmpty(err) {
-					problems = append(problems, fmt.Errorf("could not remove the empty folder %s: %s", dir, store.ErrDetail(err)))
+					problems = append(problems, fmt.Errorf("could not remove the empty directory %s: %s", dir, store.ErrDetail(err)))
 				}
 				continue
 			}

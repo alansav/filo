@@ -152,7 +152,7 @@ var commandHelps = map[string]commandHelp{
 		after: []string{
 			"Just before deleting, each file is read again. It is deleted only if it is still at its path as the " +
 				"same file and its content is still the content its retention was set on; otherwise it is skipped " +
-				"with one line saying why. A file that cannot be read is never deleted. Folders the run emptied are " +
+				"with one line saying why. A file that cannot be read is never deleted. Directories the run emptied are " +
 				"removed, up to the root. Exit code 1 if a file could not be read or deleted.",
 			"A file kept until a date is past its retention on that date: kept until 2026-12-31, it is listed from " +
 				"2026-12-31 on. Nothing is deleted then; it is listed the next time filo delete runs.",

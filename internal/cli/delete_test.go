@@ -82,7 +82,7 @@ func TestDeleteRoundTrip(t *testing.T) {
 
 	// -y deletes without asking, and removes the folders it emptied, up to the root.
 	r = filo(ExitOK, "", false, "delete", "-y", in("old"))
-	contains("-y", r.stdout, "Done   deleted 2 files . freed 2 B . removed 2 empty folders")
+	contains("-y", r.stdout, "Done   deleted 2 files . freed 2 B . removed 2 empty directories")
 	gone("-y", map[string]bool{"old/a.txt": true, "old/sub": true, "old": true})
 
 	// All, half an hour later (a run is told apart from the last by when it started): e, the symlink and x/f.txt go; d is still a candidate in the register (no scan since its edit), so it is
@@ -90,7 +90,7 @@ func TestDeleteRoundTrip(t *testing.T) {
 	setNow(t, time.Date(2026, 11, 13, 12, 30, 0, 0, time.Local))
 	r = filo(ExitOK, "a\n", true, "delete")
 	contains("all", r.stdout, "Past their retention ", " 4 files . 3 B", "Done   deleted 3 files . freed 2 B . removed 1 "+
-		"empty folder", "Skipped 1:")
+		"empty directory", "Skipped 1:")
 	gone("all", map[string]bool{"e.txt": true, "link": true, "x": true, "keep/c.txt": false, "keep/d.txt": false})
 	if !exists(".") {
 		t.Fatal("the root was removed")

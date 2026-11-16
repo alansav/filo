@@ -578,7 +578,7 @@ func TestRootsAddAbsorbs(t *testing.T) {
 	// The reverse: a folder inside a root is not a new root.
 	r := run(t, ctx, env, "roots", "add", in("Documents"))
 	if r.code != ExitError || !strings.Contains(r.stderr, "is already inside root "+home+
-		"; scan just that folder with: filo scan "+in("Documents")) {
+		"; scan just that directory with: filo scan "+in("Documents")) {
 		t.Errorf("adding a folder inside a root: code %d\n%s", r.code, r.stderr)
 	}
 }

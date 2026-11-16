@@ -218,7 +218,7 @@ func overlap(p string, id fsid.ID, e Root) (string, error) {
 		return "", nil // nested across filesystems: both stay roots
 	}
 	if inside {
-		return "", fmt.Errorf("%w: %s is already inside root %s; scan just that folder with: filo scan %s",
+		return "", fmt.Errorf("%w: %s is already inside root %s; scan just that directory with: filo scan %s",
 			ErrRootOverlap, p, e.Path, p)
 	}
 	// e is inside p: by path, or below an alias of p (a bind mount).

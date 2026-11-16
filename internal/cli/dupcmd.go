@@ -94,7 +94,7 @@ func (e *env) duplicatesList(ctx context.Context, dbBefore string, args []string
 	if len(facts) == 0 {
 		r.Heading("Not counted as duplicates", view.Where{Roots: roots}, "none")
 		r.Blank()
-		r.Next("Next: filo duplicates exclude DIR to leave out a folder that is a copy on purpose (a backup)")
+		r.Next("Next: filo duplicates exclude DIR to leave out a directory that is a copy on purpose (a backup)")
 		return nil
 	}
 	r.Heading("Not counted as duplicates", view.Where{Roots: roots}, facts...)

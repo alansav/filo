@@ -26,7 +26,7 @@ func (e *env) askReplace(ctx context.Context, csvPath, dbPath string) (asked fs.
 		return nil, false, fmt.Errorf("check %s: %w", csvPath, err)
 	}
 	if !fi.Mode().IsRegular() {
-		return nil, false, fmt.Errorf("%s is not a regular file (a folder, link or device); choose another name",
+		return nil, false, fmt.Errorf("%s is not a regular file (a directory, link or device); choose another name",
 			csvPath)
 	}
 	if registerFile(fi, csvPath, dbPath) {

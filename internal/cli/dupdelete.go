@@ -275,7 +275,7 @@ groups:
 		facts = append(facts, "recorded "+report.Plural(int64(recorded), "decision", "decisions"))
 	}
 	if len(removed) > 0 {
-		facts = append(facts, "removed "+report.Plural(int64(len(removed)), "empty folder", "empty folders"))
+		facts = append(facts, "removed "+report.Plural(int64(len(removed)), "empty directory", "empty directories"))
 	}
 	r.Outcome("Done", facts...)
 	if len(skips) > 0 {
@@ -289,7 +289,7 @@ groups:
 			ps[i] = view.Problem{Reason: p.Error(), Failed: true}
 		}
 		r.Blank()
-		r.Problems(fmt.Sprintf("Folders not removed: %s", report.Count(int64(len(prob)))), view.Attention, ps)
+		r.Problems(fmt.Sprintf("Directories not removed: %s", report.Count(int64(len(prob)))), view.Attention, ps)
 	}
 	if left > 0 {
 		r.Blank()
