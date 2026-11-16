@@ -65,7 +65,7 @@ func (e *env) confirmChange(ctx context.Context, question string, yes bool, reli
 	}
 	ok, err := e.askOne(ctx, question, relist)
 	if err != nil {
-		return false, interrupted(err)
+		return false, interruptedUpdate(err) // "nothing was recorded": the change comes after the question
 	}
 	if !ok {
 		r.Next("Nothing changed.")
