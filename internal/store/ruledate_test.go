@@ -129,8 +129,13 @@ func TestRuleDating(t *testing.T) {
 // rule just added reports it.
 func TestRuleTies(t *testing.T) {
 	e := newReviewEnv(t)
-	e.addRule("bank", "*2024*", "tax")
+	// The files first, then *2024* written straight into the register, so it has set no policy yet (a scan would).
 	e.apply(Changes{New: []NewFile{f("bank/bank-2024.pdf", "h1"), f("bank/bank.pdf", "h2")}})
+	if _, err := e.s.db.Exec(`INSERT INTO policies (name, added_utc, changed_utc) VALUES ('tax', 'x', 'x');
+		INSERT INTO rules (root_id, dir, pattern, pattern_key, letters, policy_id, added_utc)
+			VALUES (1, 'bank', '*2024*', '*2024*', 4, (SELECT id FROM policies WHERE name = 'tax'), 'x')`); err != nil {
+		t.Fatal(err)
+	}
 	r, _, run, err := e.s.AddRule(e.ctx, e.root.ID, "bank", "*bank*", "banking", ruleToday, policyNow)
 	if err != nil {
 		t.Fatal(err)
@@ -191,5 +196,53 @@ func TestRuleDatingUnreadDirs(t *testing.T) {
 	if _, _, run, err = e.s.PreviewAddRule(e.ctx, e.root.ID, "bank", "", "bills", ruleToday, policyNow); err != nil ||
 		len(run.Dated) != 0 {
 		t.Errorf("the root unread: dated %d, %v; want none", len(run.Dated), err)
+	}
+}
+
+// TestScanAppliesRules covers scenarios B1, C2 and F2 in a scan: every scan sets the policy of the files in its scope
+// with no retention, stamped with that scan; ties and directories it could not read are left alone.
+func TestScanAppliesRules(t *testing.T) {
+	e := newReviewEnv(t)
+	e.addRule("bank", "", "bills")
+	e.addRule("bank", "*2024*", "tax")
+	e.addRule("bank", "*bank*", "banking")
+	scan := func(scope string, ch Changes) (int64, RuleRun) {
+		t.Helper()
+		id, run, err := e.s.ApplyScanRules(e.ctx, ScanRecord{RootID: e.root.ID, Scope: scope, Started: policyNow}, ch)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return id, run
+	}
+	id, run := scan("", Changes{
+		New:    []NewFile{f("bank/a.pdf", "h1"), f("bank/bank-2024.pdf", "h2"), f("bank/locked/b.pdf", "h3"), f("notes/c", "h4")},
+		Events: []Event{{Kind: "error", Path: "bank/locked", Detail: "open: permission denied"}},
+	})
+	if len(run.Dated) != 1 || run.Dated[0].Path != "bank/a.pdf" || run.Dated[0].Policy != "bills" {
+		t.Errorf("dated %+v, want bank/a.pdf on bills", run.Dated)
+	}
+	if len(run.Ties) != 1 || run.Ties[0].Path != "bank/bank-2024.pdf" {
+		t.Errorf("ties %+v, want bank/bank-2024.pdf", run.Ties)
+	}
+	if v := rawQueryString(t, e.db, `SELECT reviewed_after_scan FROM files WHERE rule_id IS NOT NULL`); v !=
+		strconv.FormatInt(id, 10) {
+		t.Errorf("set after scan %s, want this scan, %d", v, id)
+	}
+	if v := e.ruleColumns("bank/locked/b.pdf"); v != "- - - rule - never hash -" {
+		t.Errorf("a file under a directory this scan could not read: %q, want untouched", v)
+	}
+	// The next scan reads bank/locked: its file is given a policy, though it is not new; the tie stays a tie.
+	_, run = scan("bank", Changes{})
+	if len(run.Dated) != 1 || run.Dated[0].Path != "bank/locked/b.pdf" || len(run.Ties) != 1 {
+		t.Errorf("second scan: dated %+v, ties %+v; want bank/locked/b.pdf and the same tie", run.Dated, run.Ties)
+	}
+	// A scan of another directory sets no policy outside its scope.
+	e.addRule("notes", "", "bills")
+	if _, err := e.s.db.Exec(`UPDATE files SET rule_dated_utc = NULL, rule_id = NULL, policy_id = NULL WHERE id = ?`,
+		e.knownAll("notes/c")); err != nil {
+		t.Fatal(err)
+	}
+	if _, run = scan("bank", Changes{}); len(run.Dated) != 0 {
+		t.Errorf("a scan of bank set a policy on %+v", run.Dated)
 	}
 }

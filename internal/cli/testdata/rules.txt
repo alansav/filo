@@ -33,9 +33,6 @@ Next: filo policies set tax VALUE
 $ filo rules add <root>/bank *2024* tax
 Done   bank . *2024* -> tax . policy set on 0 files . <root>
 
-[!] Not applied   1 file matches 2 rules of bank equally (*2024*, *bank*)
-    bank/new-2024-bank.pdf
-
 $ filo rules add <root>/scans/old statements
 Done   scans/old . * -> statements (7y) . policy set on 0 files . <root>
 

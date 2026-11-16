@@ -42,9 +42,9 @@ func TestRulesGolden(t *testing.T) {
 	run(ExitOK, "add", rt.in("bank"), "*Statement*", "statements")
 	run(ExitOK, "add", rt.in("bank"), "*bank*", "banking")
 	run(ExitOK, "add", rt.in("bank/2024"), "tax")
+	run(ExitOK, "add", rt.in("bank"), "*2024*", "tax")
 	rt.write("bank/new-2024-bank.pdf", "new") // after the rules: *bank* and *2024* tie on it
 	rt.filo(ExitOK, "", false, "scan")
-	run(ExitOK, "add", rt.in("bank"), "*2024*", "tax")
 	if err := os.MkdirAll(rt.in("scans/old"), 0o755); err != nil {
 		t.Fatal(err)
 	}

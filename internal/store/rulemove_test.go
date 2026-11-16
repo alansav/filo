@@ -35,8 +35,13 @@ func TestMoveRules(t *testing.T) {
 		}
 	})
 	t.Run("E2 copy keeps the rules where they were, and dates the undated files there", func(t *testing.T) {
+		// The rules, then the files, then what the scan's rules set undone: the files as if they came first.
 		e := setup(t)
 		e.apply(Changes{New: []NewFile{f("bank/2025/x.pdf", "h1"), f("bank/2024/y.pdf", "h2")}})
+		if _, err := e.s.db.Exec(`UPDATE files SET rule_dated_utc = NULL, rule_id = NULL, policy_id = NULL,
+			keep_until = NULL, reviewed_hash = NULL, reviewed_utc = NULL, reviewed_after_scan = NULL`); err != nil {
+			t.Fatal(err)
+		}
 		m := RuleMove{FromRoot: e.root.ID, FromDir: "bank/2024", ToRoot: e.root.ID, ToDir: "bank/2025", Copy: true}
 		_, run, err := e.s.PreviewMoveRules(e.ctx, m, ruleToday, policyNow)
 		if err != nil || len(run.Dated) != 1 || run.Dated[0].Path != "bank/2025/x.pdf" || run.Dated[0].Policy != "tax" {
