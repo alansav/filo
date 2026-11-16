@@ -23,3 +23,5 @@ Scan   scan 3 . 11 files seen . <took> . <root>
 [!] Not applied   1 file matches 2 rules of bank equally (*2024*, *bank*)
     bank/new-2024-bank.pdf
 
+Next: filo report
+

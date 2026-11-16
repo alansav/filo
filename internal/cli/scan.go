@@ -251,9 +251,10 @@ func renderScan(v *view.Renderer, sum reconcile.Summary, took time.Duration) boo
 		v.Count(view.Neutral, report.Count(int64(set))+" given a policy by rules")
 	}
 	if ties > 0 {
-		v.Count(view.Attention, report.Count(int64(ties))+" not given a policy: "+tieWhy(sum.Rules.Ties))
+		v.Count(view.Attention, report.Count(int64(ties))+" not given a policy: "+report.TieWhy(sum.Rules.Ties))
 	}
 	renderRules(v, sum.Root, sum.Rules)
+	changes += ties // not a change, but a warning: it gets the next step too
 	if len(rows) > 0 {
 		v.Blank()
 		v.Section("Events", fmt.Sprintf("up to %d of each kind", reconcile.SampleSize))
@@ -266,17 +267,6 @@ func renderScan(v *view.Renderer, sum reconcile.Summary, took time.Duration) boo
 		}
 	}
 	return changes > 0
-}
-
-// tieWhy says why tied files got no policy: "two rules match it equally", "two or more rules match each equally".
-func tieWhy(ties []store.RuleTie) string {
-	if len(ties) == 1 && len(ties[0].Rules) == 2 {
-		return "two rules match it equally"
-	}
-	if len(ties) == 1 {
-		return report.Count(int64(len(ties[0].Rules))) + " rules match it equally"
-	}
-	return "two or more rules match each equally"
 }
 
 // renderRules shows what a scan's directory rules did: the policies they set, a line per rule with its directory,
