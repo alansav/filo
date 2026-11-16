@@ -4,6 +4,9 @@ Filo keeps a register of your files: what they are, where they live, how that ch
 should be kept. It is the start of a review-and-dispose workflow meant to stop files piling up forever ("keep it in
 case someone asks").
 
+**Filo manages files; it is not, and never will be, a backup tool.** `filo delete` deletes files permanently, so keep
+backups of your files, and of Filo's register and its snapshots (see [Register snapshots](docs/design.md#register-snapshots)).
+
 **Status: scan, lifespan, delete, duplicates and retention policies done.** You give every file a retention (how
 long to keep it, often through a named policy such as `bills = 7y`), and
 `filo delete` lists the files past theirs, asks, and deletes the ones you choose. For identical copies you decide

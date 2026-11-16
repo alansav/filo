@@ -11,16 +11,20 @@ Iterations 1 (scan, register, report), 2 (lifespan: retention through the retent
 chosen ones, each only after it is re-read and found unchanged) are done, as are register snapshots. The duplicates
 redesign (`docs/design.md`, Duplicates: `filo delete FILE.csv`, records, always, `filo duplicates`; schema 8) is done
 and merged. The terminal output is done (every command prints through `internal/view`, see "Terminal output"). Named
-retention policies (`docs/design.md`, Lifespan, Named retention policies; schema 9; `filo policies`) are built on
-branch `retention-policies`, all four slices, not yet merged. Next in `docs/design.md` section 5: folder rules.
+retention policies (`docs/design.md`, Lifespan, Named retention policies; schema 9; `filo policies`) are done and
+merged. Next in `docs/design.md` section 5: folder rules (design first: name patterns and empty folders are in Open
+questions), and the small change to replace an existing `-o` file after asking (section 5 item 11).
 **`internal/dispose` is the only code allowed to delete the user's files**, and only from `filo delete`; everything
-else stays read-only on them, and nothing overwrites an existing file. Stay inside the current piece of work.
+else stays read-only on them, and nothing overwrites an existing file without asking (only an `-o` output file,
+see the hard rules). Stay inside the current piece of work.
 
 ## Hard rules
 
-- Filo must not modify, move, rename or delete any file outside its own data directory (or the `--db` path given,
-  its companion files and its `<db>.snapshots/` directory) except through `filo delete`, or the later work that
-  calls for it. Anything destructive shows what it will do and asks first (or needs `-y`).
+- Filo must not modify, move, rename, delete or overwrite any file outside its own data directory (or the `--db` path
+  given, its companion files and its `<db>.snapshots/` directory) except through `filo delete`, or the later work
+  that calls for it, and the output file named with `-o`: if that file exists, Filo asks before replacing it (no
+  terminal: refused; `-y` does not answer it; see `docs/design.md`, Lifespan). Anything destructive shows what it
+  will do and asks first (or needs `-y`).
 - Treat file names and the register as untrusted input: delete only inside a root (`internal/dispose` checks), and
   print through `internal/view` (its Renderer escapes every text it is given with `view.Escape`, then adds only its
   own colour codes); stderr only through the CLI's `errorLine` (each line escaped, `filo: ` before it), and the
