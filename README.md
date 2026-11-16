@@ -509,8 +509,22 @@ The full design, settled decisions and open questions are in [docs/design.md](do
 The repository includes a Podman dev container (`.devcontainer/Containerfile`), driven by `scripts/dev.sh`:
 
 ```sh
-scripts/dev.sh run go test ./...        # run the tests in the container
-scripts/dev.sh shell                    # or work inside it
+scripts/dev.sh run go build -o bin/filo ./cmd/filo   # build in the container
+scripts/dev.sh run go test ./...                     # run the tests in the container
+scripts/dev.sh run go vet ./...                      # vet
+scripts/dev.sh shell                                 # or work inside it
+```
+
+The first call builds the image (Claude Code is installed only with `scripts/dev.sh build --claude`). The container
+mounts only the repo, so `scripts/dev.sh run bin/filo ...` sees the repo and the container's own home, never your
+files. To run Filo on your own files, build it static in the container and run it from the host. The SQLite driver
+is pure Go, so `CGO_ENABLED=0` gives a binary with no library dependencies that runs on any x86-64 Linux, including
+older CPUs (Go's default target is `GOAMD64=v1`). Without it, the binary links the container's C library and may not
+start on an older host:
+
+```sh
+scripts/dev.sh run env CGO_ENABLED=0 go build -o bin/filo ./cmd/filo
+bin/filo --db /tmp/f.db roots add ~/FiloTest           # on the host
 ```
 
 Inside the container (or with Go installed locally):

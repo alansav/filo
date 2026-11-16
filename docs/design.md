@@ -669,8 +669,24 @@ of this section.
   (byte order mark, formula guard, `-o` required, mode 0600, an existing file replaced only after asking). Columns: `id, export, group, copies,
   directory, name, size, modified, file_date, retention, keep_until, action`. `copies` is the group's size, so a
   filtered view shows when copies are hidden. The retention columns are display only. `export_rows` records each
-  row's hash, group and path. The `action` cell is blank, except `keep` on a copy that is one of a set of records (a
+  row's hash, group and path. **A scan first** (decided 2026-11-16, not built yet, section 5 item 12): the export
+  scans every root before it writes, so the CSV matches the files as they are now, not as of the last scan. Every
+  root, not only DIR, since a group's copies can be anywhere. Scans are incremental (only new or changed files are
+  hashed), so this is cheap after the first one. The `action` cell is blank, except `keep` on a copy that is one of a set of records (a
   new copy of records is exported with them: `delete` it, or `keep` it to join the set).
+- **Why the export reads the register, not the disk alone** (considered 2026-11-16: an export that only walks DIR
+  and hashes it, with no root or scan, so the CSV is never stale and no setup is needed; rejected, and the scan first
+  above fixes staleness instead):
+  - The check in `filo delete FILE.csv` compares each copy with what the export recorded (`export_rows`' hash, and
+    the register's inode, size and modification time). That is how it knows a file is still exactly the content
+    decided on without reading every file again. An export with no register would have to keep that state
+    somewhere else: a second register.
+  - Files are deleted only inside a root (`internal/dispose` checks it). A no-root export would break that rule or
+    need a second, weaker safety model.
+  - Excluded directories, contents always, sets of records and the retention rule across copies all come from the
+    register. A plain walk of a directory would bring back groups the person has already decided.
+  - Scans only hash new or changed files. An export that walks the disk alone would hash every file every time,
+    which is slow on a home directory.
 - **The `action` cell**: `delete` (`d`), `keep` (`k`) or `always` (`a`): the full word or its single letter, any case,
   spaces around it ignored. Anything else (`del`, `delete this`) refuses the group. Blank is no decision.
 - **Group rules.** Each group is decided on its own; a group whose rows are all blank is not decided and is skipped,
@@ -1770,6 +1786,7 @@ put first on 2026-11-15). Each is an open question below until it is designed.
 9. Synced roots, sharing decisions between devices, and getting snapshots to the backup machine.
 10. A summary for scheduled scans.
 11. Replacing an existing `-o` file after asking (decided 2026-11-16, see Lifespan; small, can go earlier).
+12. `filo export duplicates` scans every root first (decided 2026-11-16, see Duplicates; small, can go earlier).
 
 Later: the **UI** in place of the CSV, including viewing and editing the register in place, and notes, links and
 tasks (see Open questions). All of it hangs off the stable file ID, so none of it needs the register to change
