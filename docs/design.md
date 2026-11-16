@@ -21,7 +21,11 @@ change it here in the same commit.
 
 Files go into storage and never leave. Notes, documents and received PDFs pile up, which makes backups bigger and
 finding things harder, feeds a hoarding habit ("keep it in case someone asks"), and creates demand for the person
-who can find any old file. Filo is a register and review workflow that makes disposal a normal, safe, routine step.
+who can find any old file. Filo also helps with files under a retention rule: records that must be kept for a set
+period (financial documents), and records that should be disposed of after one (personal data held for a fixed time).
+It tracks each file's date and lists it when the date comes; it never deletes on its own, so it supports a retention
+policy, it does not enforce one. Filo is a register and review workflow that makes disposal a normal, safe, routine
+step.
 
 Principles. These are not negotiable:
 
@@ -45,7 +49,9 @@ Principles. These are not negotiable:
 ## 2. Settled decisions
 
 ### Language and environment
-- Go. The earlier C# prototype is a reference spec only.
+- Go. The earlier C# prototype is a reference spec only. Go was chosen for two reasons: most features need few
+  third-party packages (the SQLite driver is the only direct dependency), and the build is one self-contained binary
+  that needs no C toolchain (the driver is pure Go) and is much smaller than a self-contained .NET build.
 - Dev environment: a Podman container defined in the repo (`.devcontainer/Containerfile`), driven by
   `scripts/dev.sh` (`build`, `shell`, `run CMD...`, `clean`). Only the repo is mounted at `/workspace`. The container
   has its own home directory, so a scan of "home" inside it can never reach the real one. Git runs on the host.
@@ -75,14 +81,17 @@ Principles. These are not negotiable:
   place (with `--db` in a shared directory such as `/tmp`) is refused, not followed.
 - **The schema is not trusted** (2026-11-13): `PRAGMA trusted_schema = OFF` on every connection, so triggers and
   views stored in an altered or swapped database cannot call functions with side effects.
-- Filo creates a new database file with mode 0600; SQLite gives the WAL and SHM files the same mode. An existing
-  file's mode is never changed.
+- When the database does not exist yet, Filo creates it with mode 0600, and SQLite gives its WAL and SHM files the
+  same mode. An existing database keeps its mode: Filo never changes it.
 - The database, its WAL/SHM/journal files, the lock file and the snapshot directory are never scanned, wherever they
   are.
 
 ### Register snapshots
-Decided and implemented 2026-11-13. After a run of weekend dating the register holds thousands of decisions that
-exist nowhere else, and on the laptop it is outside every backup (Vorta runs on the desktop).
+Decided and implemented 2026-11-13. The register holds decisions (retentions, file dates) that exist nowhere else.
+A snapshot is taken at the end of every run that changed the register, and the recent ones are kept (see Rotation),
+so the register can be rolled back to an earlier state, by hand for now (see Restoring; a command may come later).
+They are a short-term safety net against Filo's own mistakes, such as a bad update, not a backup: they sit next to
+the database, on the same disk. Copying the register's snapshots to a separate physical location is the user's job.
 
 - **What.** A consistent copy of the database, written with SQLite's `VACUUM INTO` into `<db>.snapshots/` next to
   it (`~/.local/share/filo/filo.db.snapshots/`). `VACUUM INTO` writes one self-contained, compacted file from a read
@@ -122,8 +131,8 @@ exist nowhere else, and on the laptop it is outside every backup (Vorta runs on 
   snapshot is noticed when scans run from a timer.
 - **Restoring** is by hand: with no filo running, move `filo.db`, `filo.db-wal` and `filo.db-shm` aside and copy a
   snapshot to `filo.db`. A command can come later if wanted.
-- **Getting them off the machine** (to the desktop, where Vorta backs them up) is part of the synced-roots work: for
-  example a Syncthing share of the snapshot directory, laptop to desktop only. A snapshot is a finished file that
+- **Getting them off the machine** (to another machine or a backup) is part of the synced-roots work: for
+  example a one-way sync of the snapshot directory to a machine that is backed up. A snapshot is a finished file that
   nothing opens for writing, so unlike the live database it is safe to sync.
 
 ### Roots
@@ -138,7 +147,7 @@ exist nowhere else, and on the laptop it is outside every backup (Vorta runs on 
   the root, whole or partial, uses them, so a timer's `filo scan` and a manual scan always cover the same files.
   (Until then they were flags on each scan, and a scan without `--include-hidden` quietly left hidden files
   unchecked.)
-- `filo roots add` scans the new root straight away; `--no-scan` only registers it (for example to run the long first
+- `filo roots add` scans the new root straight away; `--no-scan` only registers it (for example to run the first
   scan later). Ctrl-C during that scan keeps the root and writes nothing from the scan.
 - **No aliases.** A new root is refused if it is the same directory as an existing root, by path or by identity
   (device and inode). This catches symlinks and bind mounts (`~` also mounted at `/mnt/home`). It cannot catch the same
@@ -215,19 +224,22 @@ exist nowhere else, and on the laptop it is outside every backup (Vorta runs on 
   the hash is discarded and the file is retried on the next scan. The stored size and mtime are the ones the file had
   while it was hashed.
 - **Unreadable files are flagged, not dropped.** A file that is listed but cannot be opened or read (permission denied,
-  I/O error, or any other unexpected error: the flag only ever holds a file back) gets `files.unreadable_since_scan`, the first scan in a row that failed to read it; it stays set across
-  later failing scans and is cleared by the first scan that hashes the file again. Its last good hash, size and mtime
-  are kept, so its identity and history survive, but the hash is stale while the flag is set. A file that vanished or
-  changed while it was read is not unreadable: it is retried as before and the flag is untouched. Losing read access
-  changes the file's ctime, so the next scan notices it (see above). Files under a directory that cannot be listed are
-  not flagged: Filo cannot tell what happened to them, so they are simply not covered by that scan and their "last
-  verified" time stops advancing (see section 3). Decided 2026-11-11.
+  I/O error, or any other unexpected error: the flag only ever holds a file back) gets `files.unreadable_since_scan`,
+  the first scan in a row that failed to read it; it stays set across later failing scans and is cleared by the first
+  scan that hashes the file again. Its last good hash, size and mtime are kept, so its identity and history survive,
+  but the hash is stale while the flag is set. A file that vanished or changed while it was read is not unreadable: it
+  is retried as before and the flag is untouched. Losing read access changes the file's ctime, so the next scan notices
+  it (see above). Files under a directory that cannot be listed are not flagged: Filo cannot tell what happened to them,
+  so they are simply not covered by that scan and their "last verified" time stops advancing (see section 3).
+  Decided 2026-11-11.
 
 ### Move detection
 - Hash match: a missing file and a new file with the same hash are one file that moved (or was renamed). A copy of a
   file that is still present is a new file; copies are separate identities with their own rows.
-- Empty files are never matched. Duplicates are never guessed: with several candidates, pair only when the file name is
-  unique on both sides, otherwise report as new plus missing.
+- Empty files are registered like any other file (they can be given a retention), but are never paired as moves and
+  never form a duplicate group: every empty file has the same hash, so the hash says nothing. Duplicates are never
+  guessed: with several candidates, pair only when the file name is unique on both sides, otherwise report as new
+  plus missing.
 - Same name, different content (edited then moved?) is reported as a **possible move** and never applied.
 - Pairing only happens inside a scan's scope. A file moved in from outside the scope appears as new, and its old path is
   marked missing by the next scan that covers it, so the history link is lost. (Possible improvement: stat the old path
@@ -260,10 +272,10 @@ retention CSV and `filo update` write only the register and the CSV file the use
   changes; `filo report` counts them so the pile stays visible, and typing a date over it later is how it ends. One
   word only, in any case (`Forever`): no aliases such as `indefinitely` or `never`.
 - **One date per file: `keep_until`**, worked out from the file's retention (see second shape). Keep the file until
-  then. On that date it becomes a deletion candidate, never
-  deleted automatically: `filo delete` lists the candidates, and deleting each is the person's call (see Disposal). A
-  recurring check on a file (an annual look at a seven-year record) is a task, a later iteration; this iteration
-  tracks lifespan only. Hard legal retention is a later retention or `forever` (holds were dropped on 2026-11-12).
+  then. On that date it becomes a deletion candidate, never deleted automatically: `filo delete` lists the candidates,
+  and deleting each is the person's call (see Disposal). A recurring check on a file (an annual look at a seven-year
+  record) is a task, a later iteration; this iteration tracks lifespan only. Hard legal retention is a later retention
+  or `forever` (holds were dropped on 2026-11-12).
 - **Status of a present file** (regular files and symlinks), the first that applies:
   1. *unreadable*: flagged unreadable and its date not set since the scan that flagged it; or flagged and past its
      date (its content cannot be checked);
@@ -302,9 +314,15 @@ retention CSV and `filo update` write only the register and the CSV file the use
   refused, never guessed; the message suggests formatting the column as text, since spreadsheets may rewrite dates in
   the locale's format. Past dates are accepted (see second shape). Periods counted from today (`+1y`) were dropped
   from the CSV on 2026-11-12: the same cell meant different dates on different days. A period counted from the row's
-  `file_date` (`7y`) replaced them.
-- **`-o FILE` is required**: the CSV is never written to the terminal. FILE is created with mode 0600 and never
-  overwritten.
+  `file_date` (`7y`) replaced them. Dates only: a time (`2026-12-31 15:00`) is refused, not cut off.
+- **`-o FILE` is required**: the CSV is never written to the terminal. FILE is created with mode 0600.
+- **An existing FILE is replaced only after asking** (decided 2026-11-16, not built yet: until then an existing FILE
+  is refused). Refusing made people delete the old CSV or invent `retention2.csv`. Filo asks `Replace
+  retention.csv? [y/N]`; with no terminal it refuses. `-y` does not answer it: a timer or script never replaces a
+  file silently. Only a regular file is replaced, never a directory, symlink or device. The new CSV is written to a
+  temporary file next to it (mode 0600) and renamed over it, so a crash never leaves half a CSV. If the old file is
+  a Filo export of the same kind with rows `filo update` has not applied, the question says so ("it has 12 rows not
+  yet applied"). The same for every `-o` file Filo writes.
 - **What the update does with each row**:
   - `file_date` and `retention` as exported: nothing, whatever happened since. Without a `file_date` column, the
     `file_date` exported is kept;
@@ -345,9 +363,12 @@ encoding, refusals, the clear prompt, "since" measured in scans) stays.
     - a period, `Ny`, `Nm`, `Nw` or `Nd` (years, months, weeks, days; any case, stored without leading zeros, so
       `07Y` is `7y`): keep until `file_date` plus that period. A
       month step that lands past a month's end stops on its last day. Unlike the dropped `+1y`, a period counts from
-      a date written in the same row, so the same row means the same date whichever day it is applied;
+      a date written in the same row, so the same row means the same date whichever day it is applied. Stored as
+      typed, apart from case and leading zeros: units are never converted (`7d` stays `7d`, `12m` stays `12m`);
     - `forever` (any case);
-    - a date, `YYYY-MM-DD`: a fixed end date.
+    - a date, `YYYY-MM-DD`: a fixed end date;
+    - a policy name (see Named retention policies): the file takes that policy's value, whatever it is now or later
+      becomes. `forever` is a reserved word, not a policy.
   - `keep_until`: **display only**. The export fills in the end date Filo worked out (or `forever`), so the
     spreadsheet can sort and filter by it. The update only checks it was left alone, comparing it as a date (so
     surrounding spaces or `FOREVER` do not count as a change): a row whose `keep_until` holds another date is refused,
@@ -378,7 +399,8 @@ encoding, refusals, the clear prompt, "since" measured in scans) stays.
   filled-in `file_date` is a suggestion shown in the spreadsheet. Left untouched, it is stored only when the row's
   retention is a period, which is when it is used and the person has had reason to look at it; with `forever`, a
   fixed date or no retention it is dropped, so a later period can never count from a guess nobody checked. (Found in
-  a code review on 2026-11-12: `scan 20190101 id.pdf` would otherwise keep 2019-01-01 as its file_date.) Dates from photos' EXIF data: later (needs a library).
+  a code review on 2026-11-12: `scan 20190101 id.pdf` would otherwise keep 2019-01-01 as its file_date.)
+  Dates from photos' EXIF data: later (needs a library).
 - **Register (schema version 5)**: `files.file_date` (YYYY-MM-DD, NULL = none), `files.retention` (the value as
   given: a period, `forever` or a date; NULL = none), and `files.keep_until`, now always worked out from those two
   (YYYY-MM-DD or `forever`). Statuses and `filo delete` keep using `keep_until` only. Migration: an existing
@@ -644,7 +666,7 @@ of this section.
 - **`filo export duplicates [DIR] -o FILE`** writes every group with at least one copy under DIR, and all of that
   group's copies, also those outside DIR (the copy to keep may live elsewhere), so exports of different directories
   can overlap. One row per copy, groups numbered in order of their first path. Same CSV rules as the retention CSV
-  (byte order mark, formula guard, `-o` required, mode 0600, never overwrite). Columns: `id, export, group, copies,
+  (byte order mark, formula guard, `-o` required, mode 0600, an existing file replaced only after asking). Columns: `id, export, group, copies,
   directory, name, size, modified, file_date, retention, keep_until, action`. `copies` is the group's size, so a
   filtered view shows when copies are hidden. The retention columns are display only. `export_rows` records each
   row's hash, group and path. The `action` cell is blank, except `keep` on a copy that is one of a set of records (a
@@ -752,12 +774,12 @@ of this section.
 ```
 $ filo duplicates
 
-Not counted as duplicates   1 excluded directory · 2 contents always · 1 set of records · ~
+Not counted as duplicates   1 excluded directory · 2 contents marked always · 1 set of identical files kept as separate files · ~
 
 Excluded directories
   ~/Backup                                               3,210 files · 4.1 GB
 
-Contents always
+Contents marked always
     LICENSE · 1 KB each · 5 copies
       projects/a/LICENSE
       projects/b/LICENSE
@@ -768,8 +790,8 @@ Contents always
       work/2025/template.docx
       work/template.docx
 
-Sets of records
-    terms.pdf · 2 MB each · 2 records
+Kept as separate files
+    terms.pdf · 2 MB each · 2 separate files
       insurance/2020/terms.pdf   until 2027-12-31
       insurance/2021/terms.pdf   until 2028-12-31
 
@@ -804,12 +826,12 @@ Next: filo export duplicates -o FILE to decide them
 $ filo duplicates include ~/projects/a/LICENSE
 
 Duplicate again   LICENSE · 1 KB each · 5 copies
-  · no longer always: 1 duplicate group more
+  · no longer marked always: 1 duplicate group more
 
 $ filo duplicates include ~/insurance/2020/terms.pdf
 
-Duplicates again   terms.pdf · 2 MB each · 2 records
-  · the set of 2 records is removed: 1 duplicate group more
+Duplicates again   terms.pdf · 2 MB each · 2 separate files
+  · no longer kept as separate files: 1 duplicate group more
 
 $ filo duplicates include ~/Backup/Documents
 
@@ -819,7 +841,7 @@ Not excluded itself   ~/Backup/Documents
 $ filo duplicates include ~/notes.txt
 
 Nothing to include   ~/notes.txt
-  · not excluded, always or a record: it already counts as a duplicate
+  · not excluded, marked always or kept as a separate file: it already counts as a duplicate
 ```
 
 ```
@@ -828,16 +850,22 @@ $ filo export duplicates ~/Documents -o /tmp/d.csv
 Duplicates export   export 13 · 12 groups · 31 copies · ~/Documents
 
   · in each group: keep for the copy to keep, delete for the rest; always on every row if the content belongs everywhere
-  · keep on two or more copies: they are records, each kept with its own retention
-  · 1 group has keep filled in: a new copy of a set of records; delete it, or keep it to join the set
-  · not counted: 1 excluded directory, 2 contents always, 1 set of records (filo duplicates)
+  · keep on two or more copies: they are kept as separate files, each with its own retention
+  · 1 group has keep filled in: a new copy of files you kept as separate files; delete it, or keep it as another separate file
+  · 1 excluded directory, 2 contents marked always and 1 set of identical files kept as separate files, these are not counted as duplicates (use "filo duplicates" to view)
 
 Next: edit the action column, then filo delete /tmp/d.csv
 ```
 
 - **The report** leaves out excluded directories, contents always and sets of records from its duplicate groups and
-  reclaimable space, with one line: "Not counted: 1 excluded directory, 2 contents always, 1 set of records (filo
-  duplicates)". The line "N copies marked for deletion" goes.
+  reclaimable space, with one line: "1 excluded directory, 2 contents marked always and 1 set of identical files
+  kept as separate files, these are not counted as duplicates (use "filo duplicates" to view)". Only the kinds there
+  are are named. The line "N copies marked for deletion" goes.
+- **The words people see** (2026-11-16). This design calls them *records* and *always*; the output, help and README
+  say "identical files kept as separate files" (a set's copies: "2 separate files") and "marked always". The report
+  line was "not counted: … 1 set of records (filo duplicates)", which did not say counted as what, and "records" was
+  never explained. The CSV's action words (`keep`, `delete`, `always`) and the code's names (`RecordSets`,
+  `duplicate_records`) are unchanged.
 - **The scenarios** (the test list): A a CSV run twice, B several CSVs, C editing the CSV, D files changing before the
   run, E inside one run, F new copies.
 
@@ -1062,8 +1090,8 @@ Will delete                                              9 copies in 6 groups ·
     … 4 more groups
 
 Will record
-  ◆ 1 content always (never a duplicate):  LICENSE (3 copies)
-  ◆ 1 set of 2 records:                     terms.pdf
+  ◆ kept as separate files: terms.pdf (2 copies)
+  ◆ content marked always (never a duplicate): LICENSE (3 copies)
 
 Won't touch
   ✗ group 3   line 12  IMG_2041.jpg   every copy is delete: no copy would be left
@@ -1741,6 +1769,7 @@ put first on 2026-11-15). Each is an open question below until it is designed.
 8. Backup awareness.
 9. Synced roots, sharing decisions between devices, and getting snapshots to the backup machine.
 10. A summary for scheduled scans.
+11. Replacing an existing `-o` file after asking (decided 2026-11-16, see Lifespan; small, can go earlier).
 
 Later: the **UI** in place of the CSV, including viewing and editing the register in place, and notes, links and
 tasks (see Open questions). All of it hangs off the stable file ID, so none of it needs the register to change
@@ -1801,6 +1830,15 @@ shape.
   everything and reports content that changed with nothing else changing. Sidecar hash files (`file.sha256`,
   `SHA256SUMS`) can be checked against the register's SHA-256 at no extra cost (MD5 or SHA-1 sidecars would need
   another read); a mismatch is reported (corruption, or a sidecar left from before an edit), never resolved.
+  Discussed 2026-11-16: the two checks catch different things. The re-hash finds rot that happened after Filo first
+  hashed a file (the register's hash is the reference, since a scan does not re-hash a file whose size, mtime, ctime
+  and inode are unchanged; an edit not yet scanned shows by its mtime, so it is told apart). It cannot find
+  corruption from before the first hash: that needs a reference from outside, a sidecar. So both stay, perhaps as
+  `scan --verify` (re-hash) and a separate `filo verify [DIR]` (sidecars against the register, no extra read).
+  Open: making references easy for files that are vital. Writing a sidecar next to each file was considered and is
+  not proposed: it would be a new kind of write into the scanned trees, and each sidecar would arrive at the next
+  scan as a new file needing a retention. Proposed instead: a "vital" flag on files and `filo export checksums -o
+  FILE`, one standard `SHA256SUMS` file (checkable with `sha256sum -c`) written where the person chooses.
 - **A summary for scheduled scans** (raised 2026-11-13; low priority). A short line ("4 files past retention, 2 need
   a decision") a timer can pass to a desktop notification, so candidates do not sit unnoticed. Filo still never
   deletes on its own.
@@ -1832,6 +1870,16 @@ shape.
   dates, history) and set or clear a date on a few files directly. Open: a command (for example
   `filo keep PATH... RETENTION`, taking the same retentions as the CSV), part of the UI, or both. Periods always count
   from `file_date`; a period counted from today (`+1y`) was closed on 2026-11-13.
+  - **A read-only query view first** (proposed 2026-11-16): `filo files [DIR] [--name GLOB] [--larger SIZE]
+    [--smaller SIZE] [--modified-before DATE] [--modified-after DATE] [--status S] [--empty] [--sort
+    size|modified|keep_until]`, cut at N rows in a terminal with "… N more", all rows when piped. It filters on what
+    the register holds: size, mtime, `file_date`, `keep_until`, status, and first seen (`first_seen_scan`, the
+    register's own date, which a copy or restore cannot reset). Not on creation time (many filesystems do not record
+    it, and a copy, restore or sync resets it; see Lifespan, Columns) or access time (not stored; `relatime` and
+    `noatime` mounts make it unreliable, and Filo reads with `O_NOATIME` so as not to disturb it).
+  - **Empty files** are shown through it (`--empty`). They are registered and can be given a retention like any
+    other file (see Move detection); until the query view exists, a count line in `filo report` would keep them
+    visible.
 - **Folder rules: a default retention policy on a directory** (second in line since 2026-11-13). Setting dates in the
   CSV is a one-off: a file added later arrives undated and needs a decision. A rule names a policy for a folder
   ("files under `personal/home/electric` get `bills`"). Proposed: a rule proposes and the person confirms in bulk
@@ -1840,6 +1888,21 @@ shape.
   trigger". About 60% of files have a `file_date` from their name; the rest need one typed before a period applies.
   Open: how rules on nested folders combine, whether a rule overrides a retention set by hand (it should not), and
   that a rule may never imply delete.
+  - **Name patterns** (raised 2026-11-16). A rule is a folder plus an optional pattern on the file name, naming a
+    policy: under `bank`, `*DailyStatement*` gets `daily-statements` and `*QuarterlyStatement*` gets `financial`.
+    Proposed: case-insensitive globs on the base name ("contains" is `*X*`); a rule names a policy only, never a
+    period or a date, so a change is made in one place (`policies add` first); the nearest folder's rules win, and a
+    file matching two patterns of the same folder is reported, not guessed. Open: whether a rule without a pattern in
+    the same folder is the fallback for files no pattern matched.
+  - **Empty folders** (raised 2026-11-16). Removing folders that hold no files is part of this feature, as its own
+    slice, since it is the only destructive part: it goes through `filo delete` and `internal/dispose` (for example
+    `filo delete --empty-folders [DIR]`). Proposed: a fresh walk finds the folders with no files at any depth (the
+    register does not store folders); the list is shown and Filo asks (or `-y`); each is removed bottom-up with the
+    call that refuses a non-empty folder; never a root, a mount point, a folder that could not be read, or one under
+    the ignore rules. Open: whether a folder holding only `.DS_Store`, `Thumbs.db` or `desktop.ini` counts as empty
+    (today it does not); and that some programs need their empty folders (a maildir's `cur`, `new`, `tmp`;
+    `.git/refs/tags`; project skeletons), which argues for listing them and letting the person choose, as
+    `filo delete` does.
 - UI technology.
 
 ## 7. Rejected or deferred

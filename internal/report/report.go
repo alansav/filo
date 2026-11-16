@@ -293,23 +293,29 @@ func SettingsParts(set store.Settings) []string {
 	return parts
 }
 
-// NotCountedLine says what is kept out of the duplicate groups on purpose: "not counted: 1 excluded directory, 2
-// contents always, 1 set of records (filo duplicates)", or "" when nothing is.
+// NotCountedLine says what is kept out of the duplicate groups on purpose: "1 excluded directory, 2 contents marked
+// always and 1 set of identical files kept as separate files, these are not counted as duplicates (use "filo
+// duplicates" to view)", or "" when nothing is.
 func NotCountedLine(n store.NotCounted) string {
 	var parts []string
 	if n.Dirs > 0 {
 		parts = append(parts, Plural(n.Dirs, "excluded directory", "excluded directories"))
 	}
 	if n.Always > 0 {
-		parts = append(parts, Plural(n.Always, "content always", "contents always"))
+		parts = append(parts, Plural(n.Always, "content marked always", "contents marked always"))
 	}
 	if n.RecordSets > 0 {
-		parts = append(parts, Plural(n.RecordSets, "set of records", "sets of records"))
+		parts = append(parts, Plural(n.RecordSets, "set of identical files kept as separate files",
+			"sets of identical files kept as separate files"))
 	}
 	if len(parts) == 0 {
 		return ""
 	}
-	return "not counted: " + strings.Join(parts, ", ") + " (filo duplicates)"
+	list := parts[len(parts)-1]
+	if len(parts) > 1 {
+		list = strings.Join(parts[:len(parts)-1], ", ") + " and " + list
+	}
+	return list + `, these are not counted as duplicates (use "filo duplicates" to view)`
 }
 
 // renderRetention writes the retention section: how many files need a retention (and where most of them are), how

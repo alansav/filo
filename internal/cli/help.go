@@ -33,7 +33,7 @@ var overview = struct {
 			Text: "carry out a duplicates CSV: delete the copies marked delete, after asking"},
 		{Name: "duplicates", Text: "list what is not counted as duplicates"},
 		{Name: "duplicates exclude DIR", Text: "never count the files under DIR as duplicates"},
-		{Name: "duplicates include PATH", Text: "undo an exclusion, a content always or a set of records"},
+		{Name: "duplicates include PATH", Text: "undo an exclusion, a content marked always or files kept as separate files"},
 		{Name: "policies", Text: "list the retention policies, and what needs attention"},
 		{Name: "policies add NAME [VALUE]", Text: "create a policy: a named retention such as bills = 7y"},
 		{Name: "policies set NAME VALUE", Text: "change a policy, and so every file using it"},
@@ -111,7 +111,7 @@ var commandHelps = map[string]commandHelp{
 				"one file are one copy) with a copy under DIR, with all its copies. Columns: id, export, group, " +
 				"copies, directory, name, size, modified, file_date, retention, keep_until, action. In each group " +
 				"you decide on, write keep for the copy to keep and delete for the rest (or k and d); keep on two or " +
-				"more copies makes them records, each kept with its own retention; always on every row means the " +
+				"more copies keeps them as separate files, each with its own retention; always on every row means the " +
 				"content belongs everywhere. A group left blank is left alone. filo delete FILE carries the CSV out.",
 		},
 		flags: []view.Term{
@@ -153,8 +153,8 @@ var commandHelps = map[string]commandHelp{
 				"2026-12-31 on. Nothing is deleted then; it is listed the next time filo delete runs.",
 			"filo delete FILE carries out a duplicates CSV (filo export duplicates). Each group is checked against " +
 				"the disk: a group any of whose files changed or moved since the export is skipped, and a copy gone " +
-				"since is ignored. It lists what it will delete, what it will record (contents always, sets of " +
-				"records) and what it won't touch, then asks: yes, select group by group, list, or no [y/s/l/N]. A " +
+				"since is ignored. It lists what it will delete, what it will record (contents marked always, " +
+				"files kept as separate files) and what it won't touch, then asks: yes, select group by group, list, or no [y/s/l/N]. A " +
 				"copy is deleted only while a copy kept is still there with the same content, and only if a copy " +
 				"kept lasts at least as long (its keep_until). A CSV can be edited further and run again: groups " +
 				"done are reported, and only what is still as exported is acted on. Exit code 1 if the CSV refuses " +
@@ -168,14 +168,14 @@ var commandHelps = map[string]commandHelp{
 			"filo duplicates include PATH",
 		},
 		before: []string{
-			"Lists what is not counted as duplicates: excluded directories, contents always and sets of records. " +
-				"Contents always and sets of records are made in a duplicates CSV (always on every row of a group, " +
+			"Lists what is not counted as duplicates: excluded directories, contents marked always and identical " +
+				"files kept as separate files. Both of the last two are made in a duplicates CSV (always on every row of a group, " +
 				"or keep on two or more copies) and carried out by filo delete FILE.",
 			"exclude makes the files under DIR, a directory inside a root, never count as duplicates, of each " +
 				"other or of files elsewhere. They are still scanned and their retentions are unchanged. It " +
 				"replaces the exclusions under DIR.",
-			"include undoes one of them: for a directory, its exclusion; for a file, its content always, or its " +
-				"whole set of records. PATH may be gone from the disk.",
+			"include undoes one of them: for a directory, its exclusion; for a file, its content marked always, or " +
+				"the whole set of identical files kept as separate files. PATH may be gone from the disk.",
 		},
 	},
 	"policies": {

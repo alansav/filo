@@ -137,11 +137,11 @@ func TestDuplicatesDeleteRunTwice(t *testing.T) {
 		d := newDupTest(t, contracts)
 		p := d.export("d.csv")
 		d.decide(p, map[string]string{"a/contract.pdf": "keep", "b/contract.pdf": "keep", "c/contract.pdf": "keep"})
-		d.contains("records", d.run(ExitOK, p), "set of 3 records")
+		d.contains("records", d.run(ExitOK, p), "kept as separate files: contract.pdf (3 copies)")
 		if n := d.groups(); n != 0 {
 			t.Errorf("groups after recording = %d, want 0", n)
 		}
-		d.contains("records again", d.run(ExitOK, p), "already done: the 3 copies are a set of records")
+		d.contains("records again", d.run(ExitOK, p), "already done: the 3 copies are kept as separate files")
 		d.decide(p, map[string]string{"c/contract.pdf": "delete"})
 		d.contains("then delete one", d.run(ExitOK, p), "deleted 1 copy")
 		d.there("second run", map[string]bool{"a/contract.pdf": true, "b/contract.pdf": true, "c/contract.pdf": false})
@@ -471,7 +471,7 @@ func TestDuplicatesDeleteReviewFindings(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Cleanup(func() { os.Chmod(d.in("b/LICENSE"), 0o644) })
-		d.contains("again", d.run(ExitOK, p), "already done: the content is always")
+		d.contains("again", d.run(ExitOK, p), "already done: the content is marked always")
 	})
 
 	t.Run("with two copies to keep, one readable is enough", func(t *testing.T) {

@@ -92,22 +92,23 @@ func TestDuplicatesInclude(t *testing.T) {
 		t.Fatalf("groups = %d, want 1 (notes.txt)", n)
 	}
 	out := d.filo(ExitOK, "", false, "duplicates").stdout
-	d.contains("list", out, "Not counted as duplicates   1 content always . 1 set of records", "Contents always",
-		"LICENSE . 3 B each . 2 copies", "a/LICENSE", "Sets of records", "terms.pdf . 5 B each . 2 records",
+	d.contains("list", out, "Not counted as duplicates   1 content marked always . 1 set of identical files kept as separate files",
+		"Contents marked always",
+		"LICENSE . 3 B each . 2 copies", "a/LICENSE", "Kept as separate files", "terms.pdf . 5 B each . 2 separate files",
 		"2020/terms.pdf")
 
 	out = d.filo(ExitOK, "", false, "duplicates", "include", d.in("a/LICENSE")).stdout
 	d.contains("always", out, "Duplicate again   LICENSE . 3 B each . 2 copies",
-		"no longer always: 1 duplicate group more")
+		"no longer marked always: 1 duplicate group more")
 	out = d.filo(ExitOK, "", false, "duplicates", "include", d.in("2021/terms.pdf")).stdout
-	d.contains("record", out, "Duplicates again   terms.pdf . 5 B each . 2 records",
-		"the set of 2 records is removed: 1 duplicate group more")
+	d.contains("record", out, "Duplicates again   terms.pdf . 5 B each . 2 separate files",
+		"no longer kept as separate files: 1 duplicate group more")
 	if n := d.groups(); n != 3 {
 		t.Errorf("groups = %d, want 3", n)
 	}
 	out = d.filo(ExitOK, "", false, "duplicates", "include", d.in("a/notes.txt")).stdout
 	d.contains("neither", out, "Nothing to include   "+d.in("a/notes.txt"),
-		"not excluded, always or a record: it already counts as a duplicate")
+		"not excluded, marked always or kept as a separate file: it already counts as a duplicate")
 	r := d.filo(ExitError, "", false, "duplicates", "include", d.in("nowhere.txt"))
 	d.contains("not in the register", r.stderr, "nowhere.txt")
 
@@ -203,7 +204,7 @@ func TestDuplicatesReviewFindings(t *testing.T) {
 			t.Fatal(err)
 		}
 		d.contains("include", d.filo(ExitOK, "", false, "duplicates", "include", d.in("2021/terms.pdf")).stdout,
-			"Duplicates again   terms.pdf", "the set of 2 records is removed")
+			"Duplicates again   terms.pdf", "no longer kept as separate files")
 	})
 
 	t.Run("a mistyped path says what it is not", func(t *testing.T) {
@@ -230,8 +231,8 @@ func TestDuplicatesReviewFindings(t *testing.T) {
 			t.Fatal(err)
 		}
 		out := d.filo(ExitOK, "", false, "duplicates").stdout
-		d.contains("always and records", out, "Not counted as duplicates   1 content always . ")
-		d.lacks("always and records", out, "Sets of records")
+		d.contains("always and records", out, "Not counted as duplicates   1 content marked always . ")
+		d.lacks("always and records", out, "Kept as separate files")
 
 		// A set with a new copy is a duplicate group again, so it is not listed; include still removes it.
 		d = records(t, terms, "2020/terms.pdf", "2021/terms.pdf")
@@ -239,7 +240,7 @@ func TestDuplicatesReviewFindings(t *testing.T) {
 		d.filo(ExitOK, "", false, "scan")
 		d.contains("a new copy", d.filo(ExitOK, "", false, "duplicates").stdout, "Not counted as duplicates   none")
 		d.contains("include", d.filo(ExitOK, "", false, "duplicates", "include", d.in("2020/terms.pdf")).stdout,
-			"the set of 2 records is removed")
+			"no longer kept as separate files")
 	})
 
 	t.Run("a hard link of a record is a record, and counts as the list does", func(t *testing.T) {
@@ -248,9 +249,9 @@ func TestDuplicatesReviewFindings(t *testing.T) {
 			t.Fatal(err)
 		}
 		d.filo(ExitOK, "", false, "scan")
-		d.contains("list", d.filo(ExitOK, "", false, "duplicates").stdout, "terms.pdf . 5 B each . 2 records")
+		d.contains("list", d.filo(ExitOK, "", false, "duplicates").stdout, "terms.pdf . 5 B each . 2 separate files")
 		d.contains("include", d.filo(ExitOK, "", false, "duplicates", "include", d.in("2020/z-link.pdf")).stdout,
-			"Duplicates again   z-link.pdf . 5 B each . 2 records", "the set of 2 records is removed")
+			"Duplicates again   z-link.pdf . 5 B each . 2 separate files", "no longer kept as separate files")
 	})
 
 	t.Run("include counts copies as the list does, leaving out excluded ones", func(t *testing.T) {

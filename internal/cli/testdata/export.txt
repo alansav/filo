@@ -14,7 +14,7 @@ $ filo export duplicates
 Duplicates export   export 2 . 1 group . 2 copies . <root>
 
   - in each group: keep for the copy to keep, delete for the rest; always on every row if the content belongs everywhere
-  - keep on two or more copies: they are records, each kept with its own retention
+  - keep on two or more copies: they are kept as separate files, each with its own retention
   - folders that are copies on purpose (backups) can be left out entirely: filo duplicates exclude DIR
 
 Next: edit the action column, then filo delete '<work>/my d.csv'

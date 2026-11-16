@@ -25,9 +25,10 @@ Flags
   filo delete FILE carries out a duplicates CSV (filo export duplicates). Each
   group is checked against the disk: a group any of whose files changed or moved
   since the export is skipped, and a copy gone since is ignored. It lists what
-  it will delete, what it will record (contents always, sets of records) and
-  what it won't touch, then asks: yes, select group by group, list, or no
-  [y/s/l/N]. A copy is deleted only while a copy kept is still there with the
-  same content, and only if a copy kept lasts at least as long (its keep_until).
-  A CSV can be edited further and run again: groups done are reported, and only
-  what is still as exported is acted on. Exit code 1 if the CSV refuses a group.
+  it will delete, what it will record (contents marked always, files kept as
+  separate files) and what it won't touch, then asks: yes, select group by
+  group, list, or no [y/s/l/N]. A copy is deleted only while a copy kept is
+  still there with the same content, and only if a copy kept lasts at least as
+  long (its keep_until). A CSV can be edited further and run again: groups done
+  are reported, and only what is still as exported is acted on. Exit code 1 if
+  the CSV refuses a group.
