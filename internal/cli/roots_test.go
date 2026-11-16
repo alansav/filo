@@ -60,7 +60,7 @@ func TestRootsGolden(t *testing.T) {
 
 	got := took.ReplaceAllString(out.String(), "<took>")
 	got = regexp.MustCompile(`\d{4}-\d\d-\d\d \d\d:\d\d`).ReplaceAllString(got, "<time>")
-	got = strings.ReplaceAll(got, ct.root, "<root>") // the root first: it is inside the work folder
+	got = strings.ReplaceAll(got, ct.root, "<root>") // the root first: it is inside the work directory
 	got = strings.ReplaceAll(got, ct.work, "<work>")
 	golden(t, "roots.txt", ct.root, got)
 }

@@ -572,19 +572,19 @@ func TestRootsAddAbsorbs(t *testing.T) {
 	}
 	if r := run(t, ctx, env, "roots", "set", in("Documents")); r.code != ExitError ||
 		!strings.Contains(r.stderr, "is not a root") {
-		t.Errorf("roots set on a folder inside a root: code %d\n%s", r.code, r.stderr)
+		t.Errorf("roots set on a directory inside a root: code %d\n%s", r.code, r.stderr)
 	}
 
-	// The reverse: a folder inside a root is not a new root.
+	// The reverse: a directory inside a root is not a new root.
 	r := run(t, ctx, env, "roots", "add", in("Documents"))
 	if r.code != ExitError || !strings.Contains(r.stderr, "is already inside root "+home+
 		"; scan just that directory with: filo scan "+in("Documents")) {
-		t.Errorf("adding a folder inside a root: code %d\n%s", r.code, r.stderr)
+		t.Errorf("adding a directory inside a root: code %d\n%s", r.code, r.stderr)
 	}
 }
 
 // TestReportGolden: filo report's whole plain output (docs/design.md, Terminal output), with times shown as <time>
-// and the work folder as <work>: every section, the empty ones as one line.
+// and the work directory as <work>: every section, the empty ones as one line.
 func TestReportGolden(t *testing.T) {
 	ct := newCLITest(t)
 	setNow(t, time.Date(2026, 11, 14, 12, 0, 0, 0, time.Local))
@@ -602,7 +602,7 @@ func TestReportGolden(t *testing.T) {
 	ct.filo(ExitOK, "", false, "roots", "add", ct.root)
 	out := ct.filo(ExitOK, "", false, "report").stdout
 	out = regexp.MustCompile(`\d{4}-\d\d-\d\d \d\d:\d\d`).ReplaceAllString(out, "<time>")
-	out = strings.ReplaceAll(out, ct.root, "<root>") // the root first: it is inside the work folder
+	out = strings.ReplaceAll(out, ct.root, "<root>") // the root first: it is inside the work directory
 	out = strings.ReplaceAll(out, ct.work, "<work>")
 	golden(t, "report.txt", ct.root, out)
 }

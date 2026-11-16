@@ -507,7 +507,7 @@ func EventRow(root string, e store.Event, cells ...string) view.FileRow {
 	word, from := EventParts(e)
 	rel := e.Path
 	if rel == "" {
-		rel = "." // an event on the root itself (an unreadable root folder)
+		rel = "." // an event on the root itself (an unreadable root directory)
 	}
 	fromRoot := ""
 	if _, other, ok := strings.Cut(e.Detail, store.EventFromRoot); ok && from != "" {

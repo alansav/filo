@@ -203,8 +203,8 @@ func renderAdded(v *view.Renderer, r store.Root, absorbed []store.Absorbed) (sug
 	return len(skipped) > 0
 }
 
-// unskip changes set so that a scan no longer skips the folder at prefix, if a setting skips it (a hidden folder, an
-// ignored name); it reports false if only a name filo always skips does (node_modules), which no setting changes.
+// unskip changes set so that a scan no longer skips the directory at prefix, if a setting skips it (a hidden directory,
+// an ignored name); it reports false if only a name filo always skips does (node_modules), which no setting changes.
 // It may change set either way: the caller passes a copy and keeps it only on true.
 func unskip(set *store.Settings, prefix string) bool {
 	for _, name := range strings.Split(prefix, "/") {

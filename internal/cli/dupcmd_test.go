@@ -11,7 +11,7 @@ import (
 // filo duplicates, exclude and include (docs/design.md, Duplicates, "filo duplicates" and Output): what is not
 // counted as duplicates, and undoing it.
 
-// backupTree is a tree with a backup folder: Documents/report.pdf and Documents/notes.txt are each copied once into
+// backupTree is a tree with a backup directory: Documents/report.pdf and Documents/notes.txt are each copied once into
 // Backup, and two copies of contract.pdf are outside it.
 var backupTree = map[string]string{
 	"Documents/report.pdf":        "report",
@@ -41,7 +41,7 @@ func TestDuplicatesExclude(t *testing.T) {
 	filo, contains := d.filo, d.contains
 
 	out := filo(ExitOK, "", false, "duplicates", "exclude", d.in("Backup/Documents")).stdout
-	contains("exclude a subfolder", out, "Excluded   "+d.in("Backup/Documents"),
+	contains("exclude a subdirectory", out, "Excluded   "+d.in("Backup/Documents"),
 		"2 files under it no longer count as duplicates (still scanned, retentions unchanged)",
 		"2 duplicate groups fewer: 1 left", "Next: filo duplicates include "+d.in("Backup/Documents")+" to undo it")
 	if n := d.groups(); n != 1 {
@@ -57,7 +57,7 @@ func TestDuplicatesExclude(t *testing.T) {
 	contains("already itself", filo(ExitOK, "", false, "duplicates", "exclude", d.in("Backup")).stdout,
 		"Already excluded   "+d.in("Backup"))
 
-	contains("include a subfolder", filo(ExitOK, "", false, "duplicates", "include", d.in("Backup/Documents")).stdout,
+	contains("include a subdirectory", filo(ExitOK, "", false, "duplicates", "include", d.in("Backup/Documents")).stdout,
 		"Not excluded itself   "+d.in("Backup/Documents"), d.in("Backup")+" is: filo duplicates include "+d.in("Backup")+
 			" counts all of it again")
 	out = filo(ExitOK, "", false, "duplicates", "include", d.in("Backup")).stdout
@@ -79,8 +79,8 @@ func TestDuplicatesExclude(t *testing.T) {
 }
 
 // TestDuplicatesInclude: a copy of an always content makes the content a duplicate again; a copy that is a record
-// removes its whole set; a file that is neither says so; a record under an excluded folder has its own kind undone
-// and says the folder is still excluded.
+// removes its whole set; a file that is neither says so; a record under an excluded directory has its own kind undone
+// and says the directory is still excluded.
 func TestDuplicatesInclude(t *testing.T) {
 	d := newDupTest(t, map[string]string{"a/LICENSE": "MIT", "b/LICENSE": "MIT", "2020/terms.pdf": "terms",
 		"2021/terms.pdf": "terms", "a/notes.txt": "notes", "b/notes.txt": "notes"})
@@ -112,7 +112,7 @@ func TestDuplicatesInclude(t *testing.T) {
 	r := d.filo(ExitError, "", false, "duplicates", "include", d.in("nowhere.txt"))
 	d.contains("not in the register", r.stderr, "nowhere.txt")
 
-	// A record under an excluded folder: the record goes, the folder stays excluded.
+	// A record under an excluded directory: the record goes, the directory stays excluded.
 	p = d.export("e.csv")
 	d.decide(p, map[string]string{"2020/terms.pdf": "keep", "2021/terms.pdf": "keep"})
 	d.run(ExitOK, p)
@@ -187,7 +187,7 @@ func TestDuplicatesReviewFindings(t *testing.T) {
 	}
 	terms := map[string]string{"2020/terms.pdf": "terms", "2021/terms.pdf": "terms"}
 
-	t.Run("the exclusion of a folder since deleted can be removed", func(t *testing.T) {
+	t.Run("the exclusion of a directory since deleted can be removed", func(t *testing.T) {
 		d := newDupTest(t, backupTree)
 		d.filo(ExitOK, "", false, "duplicates", "exclude", d.in("Backup"))
 		if err := os.RemoveAll(d.in("Backup")); err != nil {
@@ -198,7 +198,7 @@ func TestDuplicatesReviewFindings(t *testing.T) {
 		d.contains("list", d.filo(ExitOK, "", false, "duplicates").stdout, "Not counted as duplicates   none")
 	})
 
-	t.Run("a record whose folder went can be included", func(t *testing.T) {
+	t.Run("a record whose directory went can be included", func(t *testing.T) {
 		d := records(t, terms, "2020/terms.pdf", "2021/terms.pdf")
 		if err := os.RemoveAll(d.in("2021")); err != nil {
 			t.Fatal(err)
@@ -274,7 +274,7 @@ func TestDuplicatesReviewFindings(t *testing.T) {
 		}
 	})
 
-	t.Run("one file under a folder: the verb agrees", func(t *testing.T) {
+	t.Run("one file under a directory: the verb agrees", func(t *testing.T) {
 		d := newDupTest(t, backupTree)
 		d.contains("exclude", d.filo(ExitOK, "", false, "duplicates", "exclude", d.in("a")).stdout,
 			"1 file under it no longer counts as duplicates")

@@ -92,7 +92,7 @@ func (s *Store) AddRoot(ctx context.Context, path string) (Root, error) {
 
 // AddRootAbsorb registers a directory as a root. It refuses an alias of an existing root, and a directory inside an
 // existing root on the same filesystem (it is already covered). An existing root inside the new one on the same
-// filesystem is absorbed: its paths, scans and events move into the new root under its folder, in the same
+// filesystem is absorbed: its paths, scans and events move into the new root under its directory, in the same
 // transaction, so file identities, history and review decisions are kept. A root that cannot be checked now (not
 // reachable, or its disk not mounted) is never absorbed: the add is refused instead. The new root's settings apply to
 // everything it absorbs.
@@ -180,7 +180,7 @@ func absorb(ctx context.Context, tx *sql.Tx, old, into int64, prefix string) err
 		{`UPDATE paths SET root_id = ?, path = ? || '/' || path WHERE root_id = ?`, []any{into, prefix, old}},
 		{`UPDATE scans SET root_id = ?, scope = ` + under("scope") + ` WHERE root_id = ?`,
 			[]any{into, prefix, prefix, old}},
-		// An excluded directory follows its root ('' was the whole old root: it is now its folder).
+		// An excluded directory follows its root ('' was the whole old root: it is now its directory).
 		{`UPDATE excluded_dirs SET root_id = ?, path = ` + under("path") + ` WHERE root_id = ?`,
 			[]any{into, prefix, prefix, old}},
 		{`DELETE FROM roots WHERE id = ?`, []any{old}},
@@ -268,7 +268,7 @@ func (s *Store) Roots(ctx context.Context) ([]Root, error) {
 	return out, nil
 }
 
-// RootAt returns the root at path: the root itself, not a folder inside it.
+// RootAt returns the root at path: the root itself, not a directory inside it.
 func (s *Store) RootAt(ctx context.Context, path string) (Root, error) {
 	p, err := canonicalDir(path)
 	if err != nil {

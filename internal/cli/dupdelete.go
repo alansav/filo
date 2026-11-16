@@ -340,7 +340,7 @@ const (
 
 // checkCopy checks a copy against the disk and the register, without reading its content (that is done at the moment
 // of deleting): it must be at its exported path, the same file, with the size and modification time the register
-// has for the content exported. A file whose folder can be read and that is not in it is gone; one that cannot be
+// has for the content exported. A file whose directory can be read and that is not in it is gone; one that cannot be
 // checked never is.
 func checkCopy(c store.ExportedCopy, rootWhy func(int64) string) (copyState, string) {
 	if c.Deleted != "" {

@@ -143,7 +143,7 @@ func TestDelete(t *testing.T) {
 				t.Fatal(err)
 			}
 		}, failed: true, reason: "cannot be read: permission denied", rec: "unreadable"},
-		{name: "folder not writable", needUser: true, change: func(t *testing.T, p string) {
+		{name: "directory not writable", needUser: true, change: func(t *testing.T, p string) {
 			if err := os.Chmod(filepath.Dir(p), 0o555); err != nil {
 				t.Fatal(err)
 			}
@@ -304,7 +304,7 @@ func TestInside(t *testing.T) {
 }
 
 // TestDeleteOnlyInsideRoot checks that a register path pointing outside its root (an altered register) or through a
-// folder that is now a symlink is never deleted.
+// directory that is now a symlink is never deleted.
 func TestDeleteOnlyInsideRoot(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("symlinks need privileges on windows")
@@ -353,7 +353,7 @@ func TestDeleteOnlyInsideRoot(t *testing.T) {
 }
 
 // TestDeleteSymlinkAboveRoot: a symlink above the root (a home directory moved to another disk) does not block
-// deletion; only folders from the root down are checked.
+// deletion; only directories from the root down are checked.
 func TestDeleteSymlinkAboveRoot(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("symlinks need privileges on windows")
@@ -370,9 +370,9 @@ func TestDeleteSymlinkAboveRoot(t *testing.T) {
 	}
 }
 
-// TestDeleteFolderSwappedDuringCheck: a folder replaced by a symlink while the file is being checked (hashing a
+// TestDeleteDirSwappedDuringCheck: a directory replaced by a symlink while the file is being checked (hashing a
 // large file takes a while) stops the deletion at the last look.
-func TestDeleteFolderSwappedDuringCheck(t *testing.T) {
+func TestDeleteDirSwappedDuringCheck(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("symlinks need privileges on windows")
 	}
@@ -389,7 +389,7 @@ func TestDeleteFolderSwappedDuringCheck(t *testing.T) {
 		t.Errorf("Delete = %+v, %v; want skipped as changed", o, err)
 	}
 	if _, err := os.Stat(filepath.Join(root, "moved", "f")); err != nil {
-		t.Errorf("the file was deleted through the swapped folder: %v", err)
+		t.Errorf("the file was deleted through the swapped directory: %v", err)
 	}
 }
 

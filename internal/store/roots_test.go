@@ -479,7 +479,7 @@ func TestAbsorbKeepsHistoryAndReviews(t *testing.T) {
 		t.Fatalf("roots = %+v, want only the new one, with its settings", roots)
 	}
 
-	// Same files, same IDs, paths under their folders.
+	// Same files, same IDs, paths under their directories.
 	ks, err = s.Known(ctx, home.ID)
 	if err != nil {
 		t.Fatal(err)

@@ -270,7 +270,7 @@ func TestDuplicatesDeleteChangedFiles(t *testing.T) {
 		d.there("run", all)
 	})
 
-	t.Run("D4: a folder that cannot be read is never gone", func(t *testing.T) {
+	t.Run("D4: a directory that cannot be read is never gone", func(t *testing.T) {
 		d := newDupTest(t, contracts)
 		p := d.export("d.csv")
 		d.decide(p, decided)
@@ -336,7 +336,7 @@ func TestDuplicatesDeleteInsideARun(t *testing.T) {
 	})
 }
 
-// TestDuplicatesDeleteSameFile: a copy that is, on disk, the same file as the copy kept is never deleted: a folder
+// TestDuplicatesDeleteSameFile: a copy that is, on disk, the same file as the copy kept is never deleted: a directory
 // bind-mounted after the export (faked with the device and inode of the kept copy), and a hard link.
 func TestDuplicatesDeleteSameFile(t *testing.T) {
 	t.Run("a bind mount", func(t *testing.T) {

@@ -408,8 +408,8 @@ func TestOneMore(t *testing.T) {
 	}
 }
 
-// TestTildeFolder: a folder named ~ inside a root never reads as the home directory.
-func TestTildeFolder(t *testing.T) {
+// TestTildeDir: a directory named ~ inside a root never reads as the home directory.
+func TestTildeDir(t *testing.T) {
 	r, b := plainView()
 	r.Heading("H", Where{Roots: []string{"/data"}})
 	b.Reset()

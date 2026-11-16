@@ -208,7 +208,7 @@ func (e *env) duplicatesExclude(ctx context.Context, s *store.Store, arg string)
 
 // duplicatesInclude undoes whichever applies to PATH: a directory's exclusion, or, for a file, its content always
 // or its whole set of records. One command never undoes two things. PATH need not be on disk any more: an excluded
-// folder since deleted or unmounted, or a record whose folder went, is found by its path alone (store.Locate).
+// directory since deleted or unmounted, or a record whose directory went, is found by its path alone (store.Locate).
 func (e *env) duplicatesInclude(ctx context.Context, s *store.Store, arg string) error {
 	p, err := filepath.Abs(arg)
 	if err != nil {
@@ -225,7 +225,7 @@ func (e *env) duplicatesInclude(ctx context.Context, s *store.Store, arg string)
 	var root store.Root
 	var rel string
 	if statErr == nil {
-		// A file on disk: found through its folder, which resolves symlinks above it as a scan saw them.
+		// A file on disk: found through its directory, which resolves symlinks above it as a scan saw them.
 		var dir string
 		if root, dir, err = s.Resolve(ctx, filepath.Dir(p)); err != nil {
 			return err

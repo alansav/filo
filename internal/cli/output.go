@@ -49,7 +49,7 @@ func (e *env) askReplace(ctx context.Context, csvPath, dbPath string) (asked fs.
 
 // registerFile reports whether fi, found at csvPath, is the register at dbPath, one of its companion files (SQLite's
 // journal, WAL and shared memory, the lock) or a file in its snapshot directory. Compared as files, not names, so a
-// symlinked folder on either path is no way round it.
+// symlinked directory on either path is no way round it.
 func registerFile(fi fs.FileInfo, csvPath, dbPath string) bool {
 	for _, p := range []string{dbPath, dbPath + "-journal", dbPath + "-wal", dbPath + "-shm", dbPath + ".lock"} {
 		if other, err := os.Stat(p); err == nil && os.SameFile(fi, other) {
@@ -78,8 +78,8 @@ func writeExport(csvPath string, asked fs.FileInfo, record func(write func(int64
 				csvPath)
 		}
 	} else {
-		// CreateTemp makes the file with mode 0600, in the same folder so the rename stays on one filesystem. A short
-		// fixed name: one built from csvPath's could pass the longest name a folder allows.
+		// CreateTemp makes the file with mode 0600, in the same directory so the rename stays on one filesystem. A
+		// short fixed name: one built from csvPath's could pass the longest name a directory allows.
 		file, err = os.CreateTemp(filepath.Dir(csvPath), ".filo-export-*.tmp")
 	}
 	if err != nil {

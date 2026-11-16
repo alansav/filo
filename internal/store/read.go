@@ -53,7 +53,7 @@ type ScanInfo struct {
 }
 
 // LastScanCovering returns when the latest finished scan that covered all of scope in the root finished: a scan of
-// the whole root, of scope itself or of a folder above it ("" for the whole root). "" if there was none.
+// the whole root, of scope itself or of a directory above it ("" for the whole root). "" if there was none.
 func (s *Store) LastScanCovering(ctx context.Context, rootID int64, scope string) (string, error) {
 	var finished string
 	err := s.db.QueryRowContext(ctx, `SELECT finished_utc FROM scans

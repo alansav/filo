@@ -81,7 +81,7 @@ func TestUpdateRefusesDuplicatesCSV(t *testing.T) {
 	}
 }
 
-// TestExportMergesOneFileSeenTwice: a file seen at two paths (a folder bind-mounted into a second root, faked with
+// TestExportMergesOneFileSeenTwice: a file seen at two paths (a directory bind-mounted into a second root, faked with
 // the device and inode of the first) is one copy on disk, so it is no duplicate group, though the register holds it
 // as two files.
 func TestExportMergesOneFileSeenTwice(t *testing.T) {
