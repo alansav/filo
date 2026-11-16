@@ -622,3 +622,24 @@ func TestTermsNarrow(t *testing.T) {
 		}
 	}
 }
+
+// TestGroups: rows under their group names, the columns lined up across groups, and every attention note in one
+// column, the group's with its rows'.
+func TestGroups(t *testing.T) {
+	r, b := plainView()
+	r.Groups([]TableGroup{
+		{Name: "bank", Rows: []TableRow{{Name: "*DailyStatement*", Cells: []string{"daily", "7y", "212 files"}},
+			{Name: "*", Cells: []string{"financial", "7y", "1 file"}}}},
+		{Name: "scans/old ", Attention: "no such directory", Rows: []TableRow{{Name: "*",
+			Cells: []string{"bills", "no value", "38 files"}, Attention: "needs a retention"}}},
+	}, false, false, true)
+	want := "" +
+		"  bank\n" +
+		"    *DailyStatement*   daily       7y         212 files\n" +
+		"    *                  financial   7y            1 file\n" +
+		"  scans/old\\x20                                           [!] no such directory\n" +
+		"    *                  bills       no value    38 files   [!] needs a retention\n"
+	if b.String() != want {
+		t.Errorf("got\n%s\nwant\n%s", b.String(), want)
+	}
+}
