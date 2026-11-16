@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -39,7 +40,7 @@ func TestPoliciesAdd(t *testing.T) {
 	p.contains("add", p.filo(ExitOK, "", false, "policies", "add", "Payslips", "forever").stdout,
 		"Added   payslips . forever")
 	p.contains("add without a value", p.filo(ExitOK, "", false, "policies", "add", "tax").stdout,
-		"Added   tax . no value yet")
+		"Added   tax . no value")
 	p.contains("exists", p.filo(ExitError, "", false, "policies", "add", "BILLS", "10y").stderr,
 		"bills: a policy of that name exists already (filo policies set bills VALUE changes it)")
 	p.contains("forever", p.filo(ExitError, "", false, "policies", "add", "forever").stderr, "not forever")
@@ -180,4 +181,45 @@ func TestPoliciesGolden(t *testing.T) {
 	run("", false, "policies", "remove", "bils")
 	run("", false, "policies")
 	golden(t, "policies.txt", p.root, out)
+}
+
+// TestPoliciesReviewFindings: the cases found in the code review of slice 3 (2026-11-16).
+func TestPoliciesReviewFindings(t *testing.T) {
+	t.Run("a move onto the same policy is refused", func(t *testing.T) {
+		p := newPolicyTest(t)
+		p.contains("same", p.filo(ExitError, "", false, "policies", "move", "bills", "BILLS").stderr,
+			"bills and BILLS are the same policy")
+	})
+
+	t.Run("a cut list offers l before the question", func(t *testing.T) {
+		ct := newCLITest(t)
+		setNow(t, time.Date(2026, 11, 16, 12, 0, 0, 0, time.Local))
+		names := map[string]string{}
+		for m := 1; m <= 12; m++ {
+			name := fmt.Sprintf("2020-%02d.pdf", m)
+			ct.write("bills/"+name, name)
+			names[name] = "bills"
+		}
+		ct.filo(ExitOK, "", false, "roots", "add", ct.root)
+		ct.filo(ExitOK, "", false, "policies", "add", "bills", "7y")
+		csv := filepath.Join(ct.work, "r.csv")
+		ct.filo(ExitOK, "", false, "export", "retention", "-o", csv)
+		editCSV(t, csv, setRetention(names))
+		ct.filo(ExitOK, "", false, "update", csv)
+		out := ct.filo(ExitOK, "l\nn\n", true, "policies", "set", "bills", "1y").stdout
+		ct.contains("cut", out, "[!] 12 files would be past their retention:", "... 2 more files",
+			"Shorten bills for 12 files, putting 12 past their retention? [y/N/l]", "bills/2020-12.pdf",
+			"Nothing changed.")
+		if strings.Count(out, "bills/2020-12.pdf") != 1 || strings.Count(out, "bills/2020-01.pdf") != 2 {
+			t.Errorf("l should show the whole list once more:\n%s", out)
+		}
+	})
+
+	t.Run("a merge into a policy with no value says the files lose their keep_until", func(t *testing.T) {
+		p := newPolicyTest(t)
+		p.filo(ExitOK, "", false, "policies", "add", "tax")
+		out := p.filo(ExitOK, "y\n", true, "policies", "move", "bills", "tax").stdout
+		p.contains("merge", out, "[!] 2 files would lose their keep_until: tax has no value yet, so they would "+
+			"need a retention", "Move 2 files from bills to tax (no value)? [y/N]", "Done   moved 2 files to tax")
+	})
 }

@@ -230,6 +230,7 @@ type PolicyPreview struct {
 	Files      int          // present files whose keep_until is worked out again
 	Past       []PolicyFile // files the change puts past their date that were not already
 	NoFileDate []PolicyFile // files that would newly need a file_date: the new value is a period, the old was not
+	LoseDate   []PolicyFile // files that would lose their keep_until: moved to a policy with no value yet
 }
 
 // PreviewPolicy works out what setting the policy to value would do to its present files, today being YYYY-MM-DD.
@@ -285,8 +286,11 @@ func (s *Store) preview(ctx context.Context, from, to Policy, today string) (Pol
 		if past(keep) && !past(it.KeepUntil) {
 			out.Past = append(out.Past, pf)
 		}
-		if it.FileDate == "" && IsPeriod(to.Value) && !IsPeriod(from.Value) {
+		switch {
+		case it.FileDate == "" && IsPeriod(to.Value) && !IsPeriod(from.Value):
 			out.NoFileDate = append(out.NoFileDate, pf)
+		case to.Value == "" && it.KeepUntil != "":
+			out.LoseDate = append(out.LoseDate, pf)
 		}
 	}
 	return out, nil

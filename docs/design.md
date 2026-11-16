@@ -1715,7 +1715,12 @@ put first on 2026-11-15). Each is an open question below until it is designed.
    files is flagged too ("its files are past their retention"). The help page `filo help policies`; the overview
    waits for slice 4. Tests: `TestPoliciesAdd` (A4), `TestPoliciesList` (E1, E2's flag), `TestPoliciesSet`
    (C1-C4), `TestPoliciesMoveRemove` (D1, D2), `TestPoliciesShow`, `TestPoliciesUsage`, golden
-   `testdata/policies.txt` and `help-policies.txt`. Not yet reviewed.
+   `testdata/policies.txt` and `help-policies.txt`. Reviewed the same day: seven of eight findings fixed
+   (`TestPoliciesReviewFindings`); the eighth (hard links counted twice) does not apply, since a hard link is a file
+   row of its own. A move onto the same policy (`bills` to `BILLS`) is refused; a question after a cut list offers
+   `l` (`askYesNo`, now also behind `filo update`'s two questions; `confirmChange` for the policies ones); a merge
+   into a policy with no value lists the files that would lose their keep_until (`PolicyPreview.LoseDate`) and
+   asks; one wording for a policy with no value ("no value"); the list works out today once.
 4. Folder rules (default retention policies on directories).
 5. Progress in the report, and `export retention --needing-retention`.
 6. Duplicates: one decision for all copies (the duplicates review CSV was done first, see iteration 5).

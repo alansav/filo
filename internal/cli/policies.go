@@ -72,26 +72,32 @@ func policyValue(typed string) (string, error) {
 	return v, nil
 }
 
-// policyWhat words a policy's value: "7y from each file's file_date", "forever", "2030-12-31", "no value yet".
+// valueWord is a policy's value as shown, "no value" for none yet.
+func valueWord(v string) string {
+	if v == "" {
+		return "no value"
+	}
+	return v
+}
+
+// policyWhat words a policy's value in full: "7y from each file's file_date", "forever", "2030-12-31", "no value".
 func policyWhat(value string) string {
-	switch {
-	case value == "":
-		return "no value yet"
-	case store.IsPeriod(value):
+	if store.IsPeriod(value) {
 		return value + " from each file's file_date"
 	}
-	return value
+	return valueWord(value)
 }
 
 // policyAttention is what needs attention about a policy, "" if nothing: no value, a date passed, files with no
 // file_date under a period.
 func policyAttention(p store.Policy, today string) string {
+	dated := p.Value != "" && p.Value != store.Forever && !store.IsPeriod(p.Value)
 	switch {
 	case p.Value == "":
 		return "needs a retention"
-	case p.Value != store.Forever && !store.IsPeriod(p.Value) && p.Value <= today && p.Files == 0:
+	case dated && p.Value <= today && p.Files == 0:
 		return "passed: set a new date, or remove it"
-	case p.Value != store.Forever && !store.IsPeriod(p.Value) && p.Value <= today:
+	case dated && p.Value <= today:
 		return "passed: its files are past their retention (filo delete)"
 	case p.NoFileDate > 0:
 		return report.Count(p.NoFileDate) + " without a file_date"
@@ -111,19 +117,17 @@ func (e *env) policyList(ctx context.Context, s *store.Store) error {
 		r.Next("Next: filo policies add NAME VALUE, or type a policy name in a retention CSV")
 		return nil
 	}
+	day := today() // one date for the whole list
 	rows := make([]view.TableRow, len(ps))
 	attention := int64(0)
 	first := ""
 	for i, p := range ps {
-		value, detail := p.Value, ""
-		switch {
-		case value == "":
-			value = "no value"
-		case store.IsPeriod(value):
+		detail := ""
+		if store.IsPeriod(p.Value) {
 			detail = "from each file's file_date"
 		}
-		rows[i] = view.TableRow{Name: p.Name, Cells: []string{value, detail, report.Plural(p.Files, "file", "files")},
-			Attention: policyAttention(p, today())}
+		rows[i] = view.TableRow{Name: p.Name, Cells: []string{valueWord(p.Value), detail,
+			report.Plural(p.Files, "file", "files")}, Attention: policyAttention(p, day)}
 		if rows[i].Attention != "" {
 			attention++
 			if first == "" {
@@ -158,11 +162,7 @@ func (e *env) policyAdd(ctx context.Context, s *store.Store, name, value string)
 		return err
 	}
 	n, _ := store.PolicyName(name)
-	what := value
-	if what == "" {
-		what = "no value yet"
-	}
-	e.view.Outcome("Added", n, what)
+	e.view.Outcome("Added", n, valueWord(value))
 	return nil
 }
 
@@ -179,53 +179,49 @@ func policyRows(fs []store.PolicyFile) []view.FileRow {
 	return rows
 }
 
-// showPreview writes what a change of policy would do that needs a question: the files it puts past their date, and
-// those it leaves without a file_date to count from. It reports whether there is anything to ask about.
-func (e *env) showPreview(p store.PolicyPreview) bool {
+// needsAsking reports whether a change of policy needs a question: it puts files past their date, leaves files
+// without a file_date to count from, or takes their keep_until away.
+func needsAsking(p store.PolicyPreview) bool {
+	return len(p.Past) > 0 || len(p.NoFileDate) > 0 || len(p.LoseDate) > 0
+}
+
+// showPreview writes what a change of policy would do that needs a question, each list cut to max entries (0: all).
+// It reports whether a list was cut, so the question offers l.
+func (e *env) showPreview(p store.PolicyPreview, max int) (cut bool) {
 	r := e.view
 	cols := []view.Column{{Header: "file_date"}, {Header: "until"}}
+	list := func(fs []store.PolicyFile) {
+		r.Files(view.FileList{Columns: cols, Rows: policyRows(fs), Max: max, More: "files", MoreOne: "file"})
+		cut = cut || (max > 0 && len(fs) > max)
+	}
 	if n := len(p.Past); n > 0 {
 		r.Blank()
 		r.Note(view.Attention, report.Plural(int64(n), "file would be past its", "files would be past their")+
 			" retention:")
-		r.Files(view.FileList{Columns: cols, Rows: policyRows(p.Past), Max: r.Overview(), More: "files",
-			MoreOne: "file"})
+		list(p.Past)
 	}
 	if n := len(p.NoFileDate); n > 0 {
 		r.Blank()
 		r.Note(view.Attention, report.Plural(int64(n), "file has", "files have")+" no file_date to count "+
-			p.To.Value+" from: "+pick(n == 1, "it would need one", "they would need one"))
-		r.Files(view.FileList{Columns: cols, Rows: policyRows(p.NoFileDate), Max: r.Overview(),
-			More: "files", MoreOne: "file"})
+			p.To.Value+" from: "+pluralWord(n, "it would need one", "they would need one"))
+		list(p.NoFileDate)
 	}
-	return len(p.Past) > 0 || len(p.NoFileDate) > 0
+	if n := len(p.LoseDate); n > 0 {
+		r.Blank()
+		r.Note(view.Attention, report.Plural(int64(n), "file would lose its", "files would lose their")+
+			" keep_until: "+p.To.Name+" has no value yet, so "+pluralWord(n, "it", "they")+" would need a retention")
+		list(p.LoseDate)
+	}
+	return cut
 }
 
-// confirm asks question, unless yes says to go ahead. Without a terminal nothing is done, and one line says so. It
-// reports whether to go ahead.
-func (e *env) confirm(ctx context.Context, question string, yes bool) (bool, error) {
-	r := e.view
-	if yes {
-		return true, nil
+// askChange shows what a change of policy would do and asks question, offering l when a list was cut.
+func (e *env) askChange(ctx context.Context, p store.PolicyPreview, question string, yes bool) (bool, error) {
+	var relist func()
+	if e.showPreview(p, e.view.Overview()) {
+		relist = func() { e.showPreview(p, 0); e.view.Blank() }
 	}
-	r.Blank()
-	if !e.canPrompt() {
-		r.Next("Nothing changed: there is no terminal to ask in. Run it in a terminal, or pass -y.")
-		return false, nil
-	}
-	pr := newPrompter(e.stdin)
-	pr.end, pr.check = r.Blank, e.outputErr
-	defer pr.close()
-	key, err := e.askChoice(ctx, pr, question, []view.Choice{{Key: "y", Word: "yes"}, {Key: "n", Word: "no"}}, "n")
-	if err != nil {
-		return false, interrupted(err)
-	}
-	r.Blank()
-	if key != "y" {
-		r.Next("Nothing changed.")
-		return false, nil
-	}
-	return true, nil
+	return e.confirmChange(ctx, question, yes, relist)
 }
 
 func (e *env) policySet(ctx context.Context, s *store.Store, name, value string, yes bool) error {
@@ -238,22 +234,18 @@ func (e *env) policySet(ctx context.Context, s *store.Store, name, value string,
 		r.Outcome("Unchanged", p.From.Name+" is "+value+" already")
 		return nil
 	}
-	from := p.From.Value
-	if from == "" {
-		from = "no value"
-	}
-	if e.showPreviewHeading("Change", p, from+" -> "+value) {
-		var question string
-		switch {
-		case len(p.Past) > 0:
-			question = fmt.Sprintf("Shorten %s for %s, putting %s past %s retention?", p.From.Name,
-				report.Plural(int64(p.Files), "file", "files"), report.Count(int64(len(p.Past))),
-				pick(len(p.Past) == 1, "its", "their"))
-		default:
-			question = fmt.Sprintf("Change %s for %s, leaving %s without a file_date?", p.From.Name,
-				report.Plural(int64(p.Files), "file", "files"), report.Count(int64(len(p.NoFileDate))))
+	if needsAsking(p) {
+		verb, files := "Change", report.Plural(int64(p.Files), "file", "files")
+		question := fmt.Sprintf("Change %s for %s, leaving %s without a file_date?", p.From.Name, files,
+			report.Count(int64(len(p.NoFileDate))))
+		if len(p.Past) > 0 {
+			verb = "Shorten"
+			question = fmt.Sprintf("Shorten %s for %s, putting %s past %s retention?", p.From.Name, files,
+				report.Count(int64(len(p.Past))), pluralWord(len(p.Past), "its", "their"))
 		}
-		ok, err := e.confirm(ctx, question, yes)
+		r.Heading(verb+" "+p.From.Name, view.Where{Roots: previewRoots(p)}, valueWord(p.From.Value)+" -> "+value,
+			files)
+		ok, err := e.askChange(ctx, p, question, yes)
 		if err != nil || !ok {
 			return err
 		}
@@ -264,7 +256,7 @@ func (e *env) policySet(ctx context.Context, s *store.Store, name, value string,
 	}
 	facts := []string{p.From.Name + " is " + value, report.Plural(n, "file", "files") + " updated"}
 	if len(p.Past) > 0 {
-		facts = append(facts, report.Count(int64(len(p.Past)))+" past "+pick(len(p.Past) == 1, "its", "their")+
+		facts = append(facts, report.Count(int64(len(p.Past)))+" past "+pluralWord(len(p.Past), "its", "their")+
 			" retention")
 	}
 	if len(p.NoFileDate) > 0 {
@@ -278,34 +270,15 @@ func (e *env) policySet(ctx context.Context, s *store.Store, name, value string,
 	return nil
 }
 
-// showPreviewHeading writes a change's heading and, when it needs a question, what it would do; it reports whether
-// it needs one. The heading is only written then: a change with nothing to ask about is one Done line.
-func (e *env) showPreviewHeading(verb string, p store.PolicyPreview, change string) bool {
-	if len(p.Past) == 0 && len(p.NoFileDate) == 0 {
-		return false
-	}
-	if len(p.Past) > 0 && verb == "Change" {
-		verb = "Shorten"
-	}
-	e.view.Heading(verb+" "+p.From.Name, view.Where{Roots: previewRoots(p)}, change,
-		report.Plural(int64(p.Files), "file", "files"))
-	return e.showPreview(p)
-}
-
 // previewRoots are the roots of the files a preview lists, so the heading names them and paths show relative.
 func previewRoots(p store.PolicyPreview) []string {
 	var roots []string
-	for _, f := range append(append([]store.PolicyFile{}, p.Past...), p.NoFileDate...) {
-		roots = append(roots, f.RootPath)
+	for _, fs := range [][]store.PolicyFile{p.Past, p.NoFileDate, p.LoseDate} {
+		for _, f := range fs {
+			roots = append(roots, f.RootPath)
+		}
 	}
 	return roots
-}
-
-func pick(cond bool, a, b string) string {
-	if cond {
-		return a
-	}
-	return b
 }
 
 func (e *env) policyMove(ctx context.Context, s *store.Store, from, to string, yes bool) error {
@@ -313,20 +286,22 @@ func (e *env) policyMove(ctx context.Context, s *store.Store, from, to string, y
 	if err != nil {
 		return err
 	}
+	if p.To.ID == p.From.ID {
+		return fmt.Errorf("%s and %s are the same policy (names are compared in any case)", from, to)
+	}
 	r := e.view
 	rename := p.To.ID == 0
 	files := report.Plural(int64(p.Files), "file", "files")
-	var question string
+	var ok bool
 	if rename {
-		question = fmt.Sprintf("Rename %s to %s (%s)?", p.From.Name, p.To.Name, files)
 		r.Heading("Rename "+p.From.Name, view.Where{}, "to "+p.To.Name, files)
+		ok, err = e.confirmChange(ctx, fmt.Sprintf("Rename %s to %s (%s)?", p.From.Name, p.To.Name, files), yes, nil)
 	} else {
-		question = fmt.Sprintf("Move %s from %s to %s (%s)?", files, p.From.Name, p.To.Name, valueWord(p.To.Value))
-		r.Heading("Move "+p.From.Name, view.Where{Roots: previewRoots(p)}, "to "+p.To.Name+" ("+valueWord(p.To.Value)+")",
-			files)
-		e.showPreview(p)
+		r.Heading("Move "+p.From.Name, view.Where{Roots: previewRoots(p)},
+			"to "+p.To.Name+" ("+valueWord(p.To.Value)+")", files)
+		ok, err = e.askChange(ctx, p, fmt.Sprintf("Move %s from %s to %s (%s)?", files, p.From.Name, p.To.Name,
+			valueWord(p.To.Value)), yes)
 	}
-	ok, err := e.confirm(ctx, question, yes)
 	if err != nil || !ok {
 		return err
 	}
@@ -344,13 +319,6 @@ func (e *env) policyMove(ctx context.Context, s *store.Store, from, to string, y
 	return nil
 }
 
-func valueWord(v string) string {
-	if v == "" {
-		return "no value"
-	}
-	return v
-}
-
 func (e *env) policyRemove(ctx context.Context, s *store.Store, name string) error {
 	err := s.RemovePolicy(ctx, name, now())
 	if errors.Is(err, store.ErrPolicyInUse) {
@@ -359,7 +327,7 @@ func (e *env) policyRemove(ctx context.Context, s *store.Store, name string) err
 			return perr
 		}
 		return fmt.Errorf("%s is used by %s: move %s first (filo policies move %s NAME)", p.Name,
-			report.Plural(p.Files, "file", "files"), pick(p.Files == 1, "it", "them"), p.Name)
+			report.Plural(p.Files, "file", "files"), pluralWord(int(p.Files), "it", "them"), p.Name)
 	}
 	if err != nil {
 		return err

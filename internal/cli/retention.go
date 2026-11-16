@@ -435,18 +435,7 @@ func (e *env) confirmClears(ctx context.Context, pr *prompter, roots []string, c
 		question = fmt.Sprintf("Clear these %s retentions? The other rows are recorded either way.",
 			report.Count(int64(len(cs))))
 	}
-	for {
-		key, err := e.askChoice(ctx, pr, question, yesNoList, "n")
-		if err != nil {
-			return false, err
-		}
-		if key != "l" {
-			r.Blank()
-			return key == "y", nil
-		}
-		r.Blank()
-		list(0)
-	}
+	return e.askYesNo(ctx, pr, question, func() { list(0) })
 }
 
 // showNewPolicies lists the policies a CSV names that do not exist yet (docs/design.md, Named retention policies).
@@ -471,13 +460,7 @@ func (e *env) confirmPolicies(ctx context.Context, pr *prompter, ps []store.NewP
 	r := e.view
 	showNewPolicies(r, ps)
 	r.Blank()
-	question := "Create " + report.Plural(int64(len(ps)), "policy", "policies") + "?"
-	key, err := e.askChoice(ctx, pr, question, []view.Choice{{Key: "y", Word: "yes"}, {Key: "n", Word: "no"}}, "n")
-	if err != nil {
-		return false, err
-	}
-	r.Blank()
-	return key == "y", nil
+	return e.askYesNo(ctx, pr, "Create "+report.Plural(int64(len(ps)), "policy", "policies")+"?", nil)
 }
 
 // interruptedUpdate words a cancelled update: the transaction was not committed.
