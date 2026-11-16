@@ -1,13 +1,11 @@
 package cli
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"os"
 	"path"
 	"path/filepath"
@@ -83,8 +81,10 @@ func (e *env) export(ctx context.Context, dbBefore string, args []string) error 
 	if err != nil {
 		return err
 	}
-	if _, err := os.Lstat(csvPath); err == nil {
-		return fmt.Errorf("%s already exists; choose another name (filo never overwrites a file)", csvPath)
+	// Asked before anything else, so a no costs nothing (docs/design.md, Lifespan).
+	asked, ok, err := e.askReplace(ctx, csvPath)
+	if err != nil || !ok {
+		return err
 	}
 
 	s, err := e.open(ctx, *db)
@@ -97,7 +97,7 @@ func (e *env) export(ctx context.Context, dbBefore string, args []string) error 
 		return err
 	}
 	if kind == "duplicates" {
-		return e.exportDuplicates(ctx, s, f, where, csvPath)
+		return e.exportDuplicates(ctx, s, f, where, csvPath, asked)
 	}
 	items, err := s.Files(ctx, today(), f)
 	if err != nil {
@@ -122,7 +122,7 @@ func (e *env) export(ctx context.Context, dbBefore string, args []string) error 
 		return nil
 	}
 
-	id, err := writeExport(csvPath, func(write func(int64) error) (int64, error) {
+	id, err := writeExport(csvPath, asked, func(write func(int64) error) (int64, error) {
 		return s.RecordExport(ctx, csvPath, now(), items, write)
 	}, func(w io.Writer, id int64) error { return retention.WriteCSV(w, id, items, time.Local) })
 	if err != nil {
@@ -147,40 +147,6 @@ func (e *env) export(ctx context.Context, dbBefore string, args []string) error 
 	v.Blank()
 	v.Next("Next: fill in retention (7y, 18m, forever or a date), then filo update " + shellQuote(csvPath))
 	return nil
-}
-
-// writeExport creates csvPath (never over an existing file) and records the export: record stores it and calls the
-// function it is given with the export's ID, which writes the CSV through writeCSV. A failed write removes the file
-// and records nothing.
-func writeExport(csvPath string, record func(write func(int64) error) (int64, error),
-	writeCSV func(w io.Writer, id int64) error) (int64, error) {
-	// O_EXCL: an existing file is never overwritten, whatever it is.
-	file, err := os.OpenFile(csvPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	if errors.Is(err, fs.ErrExist) {
-		return 0, fmt.Errorf("%s already exists; choose another name (filo never overwrites a file)", csvPath)
-	}
-	if err != nil {
-		return 0, fmt.Errorf("create %s: %w", csvPath, err)
-	}
-	id, err := record(func(id int64) error {
-		bw := bufio.NewWriter(file)
-		if err := writeCSV(bw, id); err != nil {
-			return err
-		}
-		if err := bw.Flush(); err != nil {
-			return err
-		}
-		if err := file.Sync(); err != nil {
-			return err
-		}
-		return file.Close()
-	})
-	if err != nil {
-		file.Close()
-		os.Remove(csvPath) // created by this command a moment ago, and incomplete
-		return 0, fmt.Errorf("export to %s: %w", csvPath, err)
-	}
-	return id, nil
 }
 
 func (e *env) update(ctx context.Context, dbBefore string, args []string) error {

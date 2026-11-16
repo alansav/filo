@@ -1,6 +1,9 @@
 package cli
 
 import (
+	"errors"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -37,4 +40,139 @@ func TestExportGolden(t *testing.T) {
 	got := strings.ReplaceAll(out.String(), ct.root, "<root>") // the root first: it is inside the work folder
 	got = strings.ReplaceAll(got, ct.work, "<work>")
 	golden(t, "export.txt", ct.root, got)
+}
+
+// TestExportReplace: an existing -o file is replaced only after asking (docs/design.md, Lifespan, "An existing FILE
+// is replaced only after asking"): no terminal refuses, no or Enter keeps it, yes replaces it with mode 0600 and no
+// temporary file left; a directory, a symlink and a device are never replaced; -y is not a flag of export.
+func TestExportReplace(t *testing.T) {
+	ct := newCLITest(t)
+	setNow(t, time.Date(2026, 11, 16, 12, 0, 0, 0, time.Local))
+	write, filo, contains, lacks := ct.write, ct.filo, ct.contains, ct.lacks
+	write("a.txt", "a")
+	write("b.txt", "a") // a duplicate group, for the duplicates export
+	filo(ExitOK, "", false, "roots", "add", ct.root)
+	l := filepath.Join(ct.work, "l.csv")
+	old := []byte("my notes\n")
+	if err := os.WriteFile(l, old, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	same := func(when string) {
+		t.Helper()
+		if got := mustRead(t, l); string(got) != string(old) {
+			t.Errorf("%s: l.csv changed to %q", when, got)
+		}
+	}
+
+	r := filo(ExitError, "y\n", false, "export", "retention", "-o", l)
+	contains("no terminal", r.stderr, l+" already exists", "terminal")
+	same("no terminal")
+	filo(ExitUsage, "y\n", true, "export", "retention", "-y", "-o", l)
+	same("-y")
+	for _, answer := range []string{"n\n", "\n", ""} {
+		r = filo(ExitOK, answer, true, "export", "retention", "-o", l)
+		contains("declined", r.stdout, "Replace "+l+"? [y/N]", "Nothing exported.")
+		lacks("declined", r.stdout, "Retention export")
+		same(fmt.Sprintf("answer %q", answer))
+	}
+
+	r = filo(ExitOK, "y\n", true, "export", "retention", "-o", l)
+	contains("yes", r.stdout, "Replace "+l+"? [y/N]", "Retention export   export 1 . 2 files")
+	contains("CSV", string(mustRead(t, l)), "id,export,directory,name")
+	if fi, err := os.Stat(l); err != nil || fi.Mode().Perm() != 0o600 {
+		t.Errorf("l.csv after replacing: %v, %v; want mode 0600", fi, err)
+	}
+	d := filepath.Join(ct.work, "d.csv")
+	filo(ExitOK, "", false, "export", "duplicates", "-o", d)
+	contains("duplicates", filo(ExitOK, "yes\n", true, "export", "duplicates", "-o", d).stdout,
+		"Replace "+d+"? [y/N]", "Duplicates export   export 3")
+	entries, err := os.ReadDir(ct.work)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if strings.Contains(e.Name(), "tmp") {
+			t.Errorf("left behind: %s", e.Name())
+		}
+	}
+
+	// Never replaced, whatever the answer: a directory, a symlink (nor its target) and a device.
+	dir := filepath.Join(ct.work, "dir.csv")
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(ct.work, "link.csv")
+	if err := os.Symlink(l, link); err != nil {
+		t.Fatal(err)
+	}
+	before := mustRead(t, l)
+	for _, p := range []string{dir, link, os.DevNull} {
+		r = filo(ExitError, "y\n", true, "export", "retention", "-o", p)
+		contains(p, r.stderr, p+" is not a regular file")
+		lacks(p, r.stdout, "Replace")
+	}
+	if fi, err := os.Lstat(link); err != nil || fi.Mode()&os.ModeSymlink == 0 {
+		t.Errorf("link.csv is no longer a symlink: %v, %v", fi, err)
+	}
+	if got := mustRead(t, l); string(got) != string(before) {
+		t.Errorf("the symlink's target changed")
+	}
+}
+
+// TestWriteExportReplace: replacing writes a temporary file and renames it over the old one only once the CSV is
+// whole: a failed write, or an old file that is no longer the one asked about, leaves it as it was, with nothing
+// recorded and no temporary file left.
+func TestWriteExportReplace(t *testing.T) {
+	recordOK := func(write func(int64) error) (int64, error) { return 7, write(7) }
+	for _, tc := range []struct {
+		name    string
+		swap    bool // replace the old file with another after asking
+		failCSV bool
+		want    string // the file's content afterwards
+		wantErr string
+	}{
+		{name: "replaced", want: "new 7"},
+		{name: "write fails", failCSV: true, want: "old", wantErr: "disk full"},
+		{name: "changed since asked", swap: true, want: "other", wantErr: "changed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			p := filepath.Join(dir, "l.csv")
+			if err := os.WriteFile(p, []byte("old"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			asked, err := os.Lstat(p)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.swap {
+				q := filepath.Join(dir, "other")
+				if err := os.WriteFile(q, []byte("other"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Rename(q, p); err != nil {
+					t.Fatal(err)
+				}
+			}
+			id, err := writeExport(p, asked, recordOK, func(w io.Writer, id int64) error {
+				if tc.failCSV {
+					return errors.New("disk full")
+				}
+				_, err := fmt.Fprintf(w, "new %d", id)
+				return err
+			})
+			if tc.wantErr == "" && (err != nil || id != 7) {
+				t.Fatalf("writeExport: %d, %v", id, err)
+			}
+			if tc.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tc.wantErr)) {
+				t.Fatalf("writeExport: %v, want an error with %q", err, tc.wantErr)
+			}
+			if got := string(mustRead(t, p)); got != tc.want {
+				t.Errorf("l.csv is %q, want %q", got, tc.want)
+			}
+			if entries, _ := os.ReadDir(dir); len(entries) != 1 {
+				t.Errorf("files left: %v", entries)
+			}
+		})
+	}
 }

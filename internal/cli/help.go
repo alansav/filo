@@ -101,8 +101,8 @@ var commandHelps = map[string]commandHelp{
 			"filo export duplicates [DIR] -o FILE",
 		},
 		before: []string{
-			"Writes every file under DIR (inside a root), or under every root, as CSV (UTF-8) to FILE, which must " +
-				"not exist. Columns: id, export, directory, name, size, modified, file_date, retention, keep_until. " +
+			"Writes every file under DIR (inside a root), or under every root, as CSV (UTF-8) to FILE. If FILE " +
+				"exists, filo asks before replacing it (only a regular file, and only at a terminal). Columns: id, export, directory, name, size, modified, file_date, retention, keep_until. " +
 				"Fill in retention in a spreadsheet (a period such as 7y counted from file_date, a date, forever, or " +
 				"a policy name: filo help policies), then run filo update FILE. A blank file_date is filled in from " +
 				"the file name when the name holds one clear date (2023-03-14, 20230314, or 2023-03 for the month's " +
@@ -115,7 +115,7 @@ var commandHelps = map[string]commandHelp{
 				"content belongs everywhere. A group left blank is left alone. filo delete FILE carries the CSV out.",
 		},
 		flags: []view.Term{
-			{Name: "-o FILE", Text: "the CSV to write; it must not exist"},
+			{Name: "-o FILE", Text: "the CSV to write; an existing file is replaced only after asking"},
 		},
 	},
 	"update": {

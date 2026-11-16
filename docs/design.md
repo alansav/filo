@@ -338,13 +338,19 @@ retention CSV and `filo update` write only the register and the CSV file the use
   from the CSV on 2026-11-12: the same cell meant different dates on different days. A period counted from the row's
   `file_date` (`7y`) replaced them. Dates only: a time (`2026-12-31 15:00`) is refused, not cut off.
 - **`-o FILE` is required**: the CSV is never written to the terminal. FILE is created with mode 0600.
-- **An existing FILE is replaced only after asking** (decided 2026-11-16, not built yet: until then an existing FILE
-  is refused). Refusing made people delete the old CSV or invent `retention2.csv`. Filo asks `Replace
+- **An existing FILE is replaced only after asking** (decided and built 2026-11-16, section 5 item 11; until then an
+  existing FILE was refused). Refusing made people delete the old CSV or invent `retention2.csv`. Filo asks `Replace
   retention.csv? [y/N]`; with no terminal it refuses. `-y` does not answer it: a timer or script never replaces a
   file silently. Only a regular file is replaced, never a directory, symlink or device. The new CSV is written to a
-  temporary file next to it (mode 0600) and renamed over it, so a crash never leaves half a CSV. If the old file is
-  a Filo export of the same kind with rows `filo update` has not applied, the question says so ("it has 12 rows not
-  yet applied"). The same for every `-o` file Filo writes.
+  temporary file next to it (mode 0600) and renamed over it, so a crash never leaves half a CSV. The question is
+  asked first, before the scan, so a no costs nothing (`Nothing exported.`); if the file is no longer the one asked
+  about when the CSV is ready (replaced, or no longer a regular file), the export stops and nothing is recorded. The
+  same for every `-o` file Filo writes.
+  - **No "rows not yet applied" in the question** (considered 2026-11-16, dropped the same day): whether to replace
+    is the person's call, and a clean slate is a fair reason. Warning about unapplied rows steers people to a second
+    file and then to merging two CSVs by hand, which causes the problems the warning meant to prevent; and `filo
+    update` already refuses a row edited after a later export of its file. For a duplicates CSV it could not even be
+    counted: nothing records which rows `filo delete` carried out.
 - **What the update does with each row**:
   - `file_date` and `retention` as exported: nothing, whatever happened since. Without a `file_date` column, the
     `file_date` exported is kept;
@@ -1809,7 +1815,9 @@ put first on 2026-11-15). Each is an open question below until it is designed.
 8. Backup awareness.
 9. Synced roots, sharing decisions between devices, and getting snapshots to the backup machine.
 10. A summary for scheduled scans.
-11. Replacing an existing `-o` file after asking (decided 2026-11-16, see Lifespan; small, can go earlier).
+11. Replacing an existing `-o` file after asking (decided 2026-11-16, see Lifespan). Done on 2026-11-16:
+    `TestExportReplace` (no terminal, no, Enter, yes, a folder, a symlink, a device, `-y`) and
+    `TestWriteExportReplace` (a failed write and a file changed after asking leave the old file as it was).
 12. Every export scans first, `--no-scan` to skip it (decided 2026-11-16 for `export duplicates`, widened the same
     day to `export retention`; see Lifespan, "A scan first"; small, can go earlier).
 

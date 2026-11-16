@@ -120,7 +120,7 @@ func TestRetentionRoundTrip(t *testing.T) {
 	contains("report", filo(ExitOK, "", false, "report").stdout,
 		"[!] 4 need a retention (no retention 4)", "   docs\n", "filo export retention")
 
-	// Export: -o is required, and an existing file is never overwritten.
+	// Export: -o is required, and an existing file is not replaced without a terminal to ask in (TestExportReplace).
 	r1 := filepath.Join(work, "r1.csv")
 	filo(ExitUsage, "", false, "export", "retention")
 	filo(ExitUsage, "", false, "export", "-o", r1)
