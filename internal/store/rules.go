@@ -146,30 +146,58 @@ func insertRule(ctx context.Context, tx *sql.Tx, rootID int64, dir, pattern stri
 }
 
 // AddRule adds a rule naming policy for the files at dir and below in a root whose name matches pattern ("" for
-// every name). A policy that does not exist is created with no value; created says so. ErrRuleExists if the
-// directory has that pattern already.
-func (s *Store) AddRule(ctx context.Context, rootID int64, dir, pattern, policy string,
-	now time.Time) (r Rule, created bool, err error) {
-	p, err := rules.Pattern(pattern)
-	if err != nil {
-		return Rule{}, false, err
-	}
+// every name), and dates the files it decides now, in one transaction (the question before it is the CLI's, from
+// PreviewAddRule). A policy that does not exist is created with no value; created says so. ErrRuleExists if the
+// directory has that pattern already. today is the local date, YYYY-MM-DD.
+func (s *Store) AddRule(ctx context.Context, rootID int64, dir, pattern, policy, today string,
+	now time.Time) (Rule, bool, RuleRun, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return Rule{}, false, err
+		return Rule{}, false, RuleRun{}, err
 	}
 	defer tx.Rollback()
+	r, created, run, err := addRule(ctx, tx, rootID, dir, pattern, policy, today, now)
+	if err != nil {
+		return Rule{}, false, RuleRun{}, err
+	}
+	return r, created, run, s.commit(tx)
+}
+
+// PreviewAddRule works out what AddRule would do, and changes nothing.
+func (s *Store) PreviewAddRule(ctx context.Context, rootID int64, dir, pattern, policy, today string,
+	now time.Time) (Rule, bool, RuleRun, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return Rule{}, false, RuleRun{}, err
+	}
+	defer tx.Rollback() // never committed: the same work as AddRule, undone
+	return addRule(ctx, tx, rootID, dir, pattern, policy, today, now)
+}
+
+func addRule(ctx context.Context, tx *sql.Tx, rootID int64, dir, pattern, policy, today string,
+	now time.Time) (Rule, bool, RuleRun, error) {
+	p, err := rules.Pattern(pattern)
+	if err != nil {
+		return Rule{}, false, RuleRun{}, err
+	}
 	policyID, created, err := rulePolicy(ctx, tx, policy, now)
 	if err != nil {
-		return Rule{}, false, err
+		return Rule{}, false, RuleRun{}, err
 	}
-	if _, err := insertRule(ctx, tx, rootID, dir, p, policyID, now); err != nil {
-		return Rule{}, false, err
+	id, err := insertRule(ctx, tx, rootID, dir, p, policyID, now)
+	if err != nil {
+		return Rule{}, false, RuleRun{}, err
 	}
-	if r, err = findRule(ctx, tx, rootID, dir, p); err != nil {
-		return Rule{}, false, err
+	afterScan, err := latestScan(ctx, tx)
+	if err != nil {
+		return Rule{}, false, RuleRun{}, err
 	}
-	return r, created, s.commit(tx)
+	run, err := dateByRules(ctx, tx, rootID, map[int64]bool{id: true}, afterScan, today, "rules add", now)
+	if err != nil {
+		return Rule{}, false, RuleRun{}, err
+	}
+	r, err := findRule(ctx, tx, rootID, dir, p)
+	return r, created, run, err
 }
 
 // SetRule changes the policy of the rule with exactly pattern at dir in a root (ErrNoRule if there is none). Files it

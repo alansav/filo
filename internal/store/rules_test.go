@@ -12,6 +12,9 @@ import (
 
 // Directory rules (docs/design.md, Lifespan, Directory rules): the register and store, slice 1.
 
+// ruleToday is the local date the rule tests work out statuses on.
+const ruleToday = "2026-11-16"
+
 // TestMigrateFromV9 is scenario G1: the upgrade creates the rules table and the files' columns, and nothing else
 // changes.
 func TestMigrateFromV9(t *testing.T) {
@@ -64,7 +67,7 @@ func (e *reviewEnv) ruleList(rootID int64, dir string) []string {
 
 func (e *reviewEnv) addRule(dir, pattern, policy string) Rule {
 	e.t.Helper()
-	r, _, err := e.s.AddRule(e.ctx, e.root.ID, dir, pattern, policy, policyNow)
+	r, _, _, err := e.s.AddRule(e.ctx, e.root.ID, dir, pattern, policy, ruleToday, policyNow)
 	if err != nil {
 		e.t.Fatalf("add rule %s %s %s: %v", dir, pattern, policy, err)
 	}
@@ -78,14 +81,14 @@ func TestAddRule(t *testing.T) {
 	if err := e.s.AddPolicy(e.ctx, "statements", "7y", policyNow); err != nil {
 		t.Fatal(err)
 	}
-	r, created, err := e.s.AddRule(e.ctx, e.root.ID, "bank", "", "Bills", policyNow)
+	r, created, _, err := e.s.AddRule(e.ctx, e.root.ID, "bank", "", "Bills", ruleToday, policyNow)
 	if err != nil || !created || r.Pattern != "*" || r.Policy != "bills" || r.PolicyValue != "" || r.Dir != "bank" {
 		t.Fatalf("add rule with a new policy = %+v, created %v, %v", r, created, err)
 	}
 	if p, err := e.s.Policy(e.ctx, "bills"); err != nil || p.Value != "" {
 		t.Errorf("the policy created: %+v, %v", p, err)
 	}
-	if r, created, err = e.s.AddRule(e.ctx, e.root.ID, "bank", "*Statement*", "statements", policyNow); err != nil ||
+	if r, created, _, err = e.s.AddRule(e.ctx, e.root.ID, "bank", "*Statement*", "statements", ruleToday, policyNow); err != nil ||
 		created || r.PolicyValue != "7y" {
 		t.Errorf("add rule with an existing policy = %+v, created %v, %v", r, created, err)
 	}
@@ -105,7 +108,7 @@ func TestAddRule(t *testing.T) {
 		{"not a policy name", "bank", "*.pdf", "bills!", ErrPolicyName},
 		{"forever is not a policy", "bank", "*.pdf", "forever", ErrPolicyName},
 	} {
-		if _, _, err := e.s.AddRule(e.ctx, e.root.ID, tc.dir, tc.pattern, tc.policy, policyNow); !errors.Is(err,
+		if _, _, _, err := e.s.AddRule(e.ctx, e.root.ID, tc.dir, tc.pattern, tc.policy, ruleToday, policyNow); !errors.Is(err,
 			tc.want) {
 			t.Errorf("%s: err = %v, want %v", tc.name, err, tc.want)
 		}

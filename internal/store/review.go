@@ -61,6 +61,7 @@ type FileItem struct {
 	PolicyValue string // that policy's value: a period, Forever, YYYY-MM-DD, or "" for none yet
 	KeepUntil   string // worked out from the two: YYYY-MM-DD, Forever, or "" = none
 	ReviewedUTC string // when the current retention was set; "" = never
+	RuleDated   bool   // a directory rule dated it once: no rule dates it again
 	Status      Status
 
 	UnreadableSince    int64  // the scan that flagged it, 0 = not flagged
@@ -142,14 +143,19 @@ func classify(r fileRow, today string) Status {
 // Files returns every present file (regular files and symlinks) under the filter with its status, ordered by root
 // and path. today is the local date, YYYY-MM-DD.
 func (s *Store) Files(ctx context.Context, today string, f Filter) ([]FileItem, error) {
+	return files(ctx, s.db, today, f)
+}
+
+// files is Files through q: the store, or a transaction that acts on what it reads.
+func files(ctx context.Context, q querier, today string, f Filter) ([]FileItem, error) {
 	cond, args := f.scopeSQL()
 	// A possible move event names the old file; the new file is the one whose path opened at e.path in that scan.
-	out, err := queryAll(ctx, s.db, func(rows *sql.Rows) (FileItem, error) {
+	out, err := queryAll(ctx, q, func(rows *sql.Rows) (FileItem, error) {
 		var r fileRow
 		it := &r.item
 		var moveRoot, moveRel string
 		if err := rows.Scan(&it.FileID, &it.RootPath, &it.Path, &it.Kind, &it.Size, &it.MtimeNS, &it.Hash,
-			&it.FileDate, &it.Retention, &it.Policy, &it.PolicyValue, &it.KeepUntil, &it.ReviewedUTC, &r.reviewedAfter, &r.reviewedHash, &it.UnreadableSince,
+			&it.FileDate, &it.Retention, &it.Policy, &it.PolicyValue, &it.KeepUntil, &it.ReviewedUTC, &it.RuleDated, &r.reviewedAfter, &r.reviewedHash, &it.UnreadableSince,
 			&it.UnreadableSinceUTC, &r.possibleMoveIn, &moveRoot, &moveRel, &it.MoveDetail); err != nil {
 			return *it, err
 		}
@@ -168,7 +174,7 @@ func (s *Store) Files(ctx context.Context, today string, f Filter) ([]FileItem, 
 			GROUP BY np.file_id)
 		SELECT f.id, r.path, p.path, f.kind, f.size, f.mtime_ns, coalesce(f.hash, ''),
 		       coalesce(f.file_date, ''), `+retentionColumns+`, coalesce(f.keep_until, ''),
-		       coalesce(f.reviewed_utc, ''), coalesce(f.reviewed_after_scan, 0),
+		       coalesce(f.reviewed_utc, ''), f.rule_dated_utc IS NOT NULL, coalesce(f.reviewed_after_scan, 0),
 		       f.reviewed_hash, coalesce(f.unreadable_since_scan, 0), coalesce(us.finished_utc, us.started_utc, ''),
 		       coalesce(pe.scan_id, 0), coalesce(pr.path, ''), coalesce(pe.other_path, ''), coalesce(pe.detail, '')
 		FROM paths p

@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"strings"
@@ -82,19 +83,43 @@ func isAtOrUnder(rel, dir string) bool {
 }
 
 // MoveRules moves (or, with m.Copy, copies) the rules at m.FromDir and below it to the same places under m.ToDir,
-// in one transaction, and returns the rules as they are now at their new places. Refused, with nothing changed, if
-// m.ToDir is m.FromDir or inside it (ErrRuleInside), if there are no rules to move (ErrNoRulesToMove), or if m.ToDir
-// or a directory below it has rules (RulesThereError: they are never merged). Files dated by a moved rule keep their
-// policy and stay dated by it; a copy has dated none yet.
-func (s *Store) MoveRules(ctx context.Context, m RuleMove, now time.Time) ([]Rule, error) {
+// and dates the files they now decide there, in one transaction (the question before it is the CLI's, from
+// PreviewMoveRules). It returns the rules as they are at their new places. Refused, with nothing changed, if m.ToDir
+// is m.FromDir or inside it (ErrRuleInside), if there are no rules to move (ErrNoRulesToMove), or if m.ToDir or a
+// directory below it has rules (RulesThereError: they are never merged). Files dated by a moved rule keep their
+// policy and stay dated by it; a copy has dated none yet. today is the local date, YYYY-MM-DD.
+func (s *Store) MoveRules(ctx context.Context, m RuleMove, today string, now time.Time) ([]Rule, RuleRun, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return nil, err
+		return nil, RuleRun{}, err
 	}
 	defer tx.Rollback()
+	moved, run, err := moveRules(ctx, tx, m, today, now)
+	if err != nil {
+		return nil, RuleRun{}, err
+	}
+	return moved, run, s.commit(tx)
+}
+
+// PreviewMoveRules works out what MoveRules would do, and changes nothing.
+func (s *Store) PreviewMoveRules(ctx context.Context, m RuleMove, today string, now time.Time) ([]Rule, RuleRun,
+	error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, RuleRun{}, err
+	}
+	defer tx.Rollback() // never committed: the same work as MoveRules, undone
+	return moveRules(ctx, tx, m, today, now)
+}
+
+func moveRules(ctx context.Context, tx *sql.Tx, m RuleMove, today string, now time.Time) ([]Rule, RuleRun, error) {
 	from, err := checkMove(ctx, tx, m)
 	if err != nil {
-		return nil, err
+		return nil, RuleRun{}, err
+	}
+	command := "rules move"
+	if m.Copy {
+		command = "rules copy"
 	}
 	for _, r := range from {
 		dir := m.newDir(r.Dir)
@@ -102,18 +127,32 @@ func (s *Store) MoveRules(ctx context.Context, m RuleMove, now time.Time) ([]Rul
 			if _, err := tx.ExecContext(ctx, `INSERT INTO rules (root_id, dir, pattern, pattern_key, letters, policy_id,
 				added_utc) SELECT ?, ?, pattern, pattern_key, letters, policy_id, ? FROM rules WHERE id = ?`,
 				m.ToRoot, dir, utc(now), r.ID); err != nil {
-				return nil, fmt.Errorf("copy rules: %w", err)
+				return nil, RuleRun{}, fmt.Errorf("copy rules: %w", err)
 			}
 			continue
 		}
 		if _, err := tx.ExecContext(ctx, `UPDATE rules SET root_id = ?, dir = ? WHERE id = ?`, m.ToRoot, dir,
 			r.ID); err != nil {
-			return nil, fmt.Errorf("move rules: %w", err)
+			return nil, RuleRun{}, fmt.Errorf("move rules: %w", err)
 		}
 	}
 	moved, err := readRules(ctx, tx, m.ToRoot, m.ToDir)
 	if err != nil {
-		return nil, err
+		return nil, RuleRun{}, err
 	}
-	return moved, s.commit(tx)
+	only := map[int64]bool{}
+	for _, r := range moved {
+		only[r.ID] = true
+	}
+	afterScan, err := latestScan(ctx, tx)
+	if err != nil {
+		return nil, RuleRun{}, err
+	}
+	run, err := dateByRules(ctx, tx, m.ToRoot, only, afterScan, today, command, now)
+	if err != nil {
+		return nil, RuleRun{}, err
+	}
+	// Re-read: the rules' counts of files dated include what was just dated.
+	moved, err = readRules(ctx, tx, m.ToRoot, m.ToDir)
+	return moved, run, err
 }
