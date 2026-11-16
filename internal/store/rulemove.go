@@ -169,7 +169,7 @@ func moveRules(ctx context.Context, tx *sql.Tx, m RuleMove, today string, now ti
 	if err != nil {
 		return nil, RuleRun{}, err
 	}
-	run, err := dateByRules(ctx, tx, m.ToRoot, only, afterScan, today, command, now)
+	run, err := dateByRules(ctx, tx, m.ToRoot, m.ToDir, only, afterScan, today, command, now)
 	if err != nil {
 		return nil, RuleRun{}, err
 	}

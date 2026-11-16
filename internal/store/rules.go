@@ -233,7 +233,7 @@ func addRule(ctx context.Context, tx *sql.Tx, rootID int64, dir, pattern, policy
 	if err != nil {
 		return Rule{}, false, RuleRun{}, err
 	}
-	run, err := dateByRules(ctx, tx, rootID, map[int64]bool{id: true}, afterScan, today, "rules add", now)
+	run, err := dateByRules(ctx, tx, rootID, dir, map[int64]bool{id: true}, afterScan, today, "rules add", now)
 	if err != nil {
 		return Rule{}, false, RuleRun{}, err
 	}

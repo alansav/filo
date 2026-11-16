@@ -146,3 +146,77 @@ func TestRuleTies(t *testing.T) {
 		t.Errorf("the tied file: %q, want undated", v)
 	}
 }
+
+// TestRuleDatingHardLinks: a file with two present paths (hard links) is decided once, over both: dated if they agree
+// or only one is decided, a tie between the rules if they disagree, never dated by whichever path comes first.
+func TestRuleDatingHardLinks(t *testing.T) {
+	e := newReviewEnv(t)
+	e.apply(Changes{New: []NewFile{f("bank/same.pdf", "h1"), f("bank/split.pdf", "h2"), f("bank/one.pdf", "h3")}})
+	k := e.known()
+	e.addRule("personal", "", "private") // before the links: it has nothing to date yet
+	e.apply(Changes{Open: []OpenPath{{FileID: k["bank/same.pdf"].FileID, Path: "bank/old/same.pdf"},
+		{FileID: k["bank/split.pdf"].FileID, Path: "personal/split.pdf"},
+		{FileID: k["bank/one.pdf"].FileID, Path: "notes/one.pdf"}}})
+	r, _, run, err := e.s.AddRule(e.ctx, e.root.ID, "bank", "", "bills", ruleToday, policyNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var dated []string
+	for _, d := range run.Dated {
+		dated = append(dated, d.Path)
+	}
+	// Listed under the first of its paths: bank/old/same.pdf is bank/same.pdf.
+	if !slices.Equal(dated, []string{"bank/old/same.pdf", "bank/one.pdf"}) {
+		t.Errorf("dated %q, want same.pdf once (both paths agree) and bank/one.pdf (its other path has no rule)", dated)
+	}
+	if len(run.Ties) != 1 || run.Ties[0].Path != "bank/split.pdf" || len(run.Ties[0].Rules) != 2 ||
+		!slices.ContainsFunc(run.Ties[0].Rules, func(x Rule) bool { return x.ID == r.ID }) {
+		t.Errorf("ties = %+v, want bank/split.pdf between bills and private", run.Ties)
+	}
+	if v := rawQueryString(t, e.db, `SELECT count(*) FROM reviews`); v != "2" {
+		t.Errorf("%s history rows, want 2: each file dated once", v)
+	}
+	if v := e.ruleColumns("bank/split.pdf"); v != "- - - rule - never hash -" {
+		t.Errorf("bank/split.pdf: %q, want undated", v)
+	}
+}
+
+// TestRuleDatingUnreadDirs: a file under a directory the latest scan covering it could not read is not dated by a
+// rule (scenario F2); once a later scan covers that directory and reads it, it is.
+func TestRuleDatingUnreadDirs(t *testing.T) {
+	e := newReviewEnv(t)
+	e.apply(Changes{New: []NewFile{f("bank/locked/a.pdf", "h1"), f("bank/open.pdf", "h2"), f("bank/b.pdf", "h3")}})
+	e.apply(Changes{Events: []Event{{Kind: "error", Path: "bank/locked", Detail: "open: permission denied"},
+		{Kind: "error", Path: "bank/b.pdf", Detail: "hash: read: input/output error"}}})
+	// A later scan of another directory does not cover bank/locked.
+	if _, err := e.s.ApplyScan(e.ctx, ScanRecord{RootID: e.root.ID, Scope: "notes", Started: policyNow},
+		Changes{}); err != nil {
+		t.Fatal(err)
+	}
+	_, _, run, err := e.s.PreviewAddRule(e.ctx, e.root.ID, "bank", "", "bills", ruleToday, policyNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var dated []string
+	for _, d := range run.Dated {
+		dated = append(dated, d.Path)
+	}
+	if !slices.Equal(dated, []string{"bank/b.pdf", "bank/open.pdf"}) {
+		t.Errorf("dated %q, want all but bank/locked/a.pdf (a file that could not be hashed is not a directory)", dated)
+	}
+	// A scan of bank reads it now.
+	if _, err := e.s.ApplyScan(e.ctx, ScanRecord{RootID: e.root.ID, Scope: "bank", Started: policyNow},
+		Changes{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, run, err = e.s.PreviewAddRule(e.ctx, e.root.ID, "bank", "", "bills", ruleToday, policyNow); err != nil ||
+		len(run.Dated) != 3 {
+		t.Errorf("after bank was read again: dated %d, %v; want 3", len(run.Dated), err)
+	}
+	// The whole root unreadable in its latest scan: nothing is dated.
+	e.apply(Changes{Events: []Event{{Kind: "error", Path: "", Detail: "open: permission denied"}}})
+	if _, _, run, err = e.s.PreviewAddRule(e.ctx, e.root.ID, "bank", "", "bills", ruleToday, policyNow); err != nil ||
+		len(run.Dated) != 0 {
+		t.Errorf("the root unread: dated %d, %v; want none", len(run.Dated), err)
+	}
+}
