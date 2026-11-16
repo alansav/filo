@@ -618,3 +618,43 @@ func TestSetRetentionPolicy(t *testing.T) {
 		t.Error("KeepUntil of a policy name: no error")
 	}
 }
+
+// TestOldCSVAfterMove: a CSV exported before a move or rename never puts a file back on the old name: a row edited
+// since is refused, as for any retention changed after its export (code review of slice 4, 2026-11-16).
+func TestOldCSVAfterMove(t *testing.T) {
+	for _, rename := range []bool{false, true} {
+		e := newReviewEnv(t)
+		e.apply(Changes{New: []NewFile{f("a", "ha")}})
+		for _, p := range []string{"bils", "bills"} {
+			if err := e.s.AddPolicy(e.ctx, p, "7y", policyNow); err != nil {
+				t.Fatal(err)
+			}
+		}
+		e.onPolicy("a", "bils", "2020-01-01")
+		e.workOut("bils")
+		ex, _ := e.export("2026-11-16", policyNow)
+		target := "bills"
+		if rename {
+			if err := e.s.RemovePolicy(e.ctx, "bills", policyNow); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if _, err := e.s.MovePolicy(e.ctx, "bils", target, policyNow.Add(time.Minute)); err != nil {
+			t.Fatal(err)
+		}
+		res, err := e.s.UpdateRetentionWith(e.ctx, []RetentionRow{{Line: 2, ExportID: ex,
+			FileID: e.known()["a"].FileID, FileDate: "2021-01-01", HasFileDate: true, Retention: "bils"}},
+			policyNow.Add(2*time.Minute), "2026-11-16", "old.csv", UpdateOptions{
+				ConfirmPolicies: func([]NewPolicy) bool { return true }})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(res.Refusals) != 1 || res.Refusals[0].Reason != "its retention was changed after export "+
+			strconv.FormatInt(ex, 10)+"; export again" || res.PoliciesCreated != 0 {
+			t.Errorf("rename %v: %+v, want the row refused and no policy created", rename, res)
+		}
+		if a := e.files("2026-11-16")["a"]; a.Policy != "bills" {
+			t.Errorf("rename %v: a is on %q, want bills", rename, a.Policy)
+		}
+	}
+}

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -237,10 +238,56 @@ func TestReportPolicies(t *testing.T) {
 	out := p.filo(ExitOK, "", false, "report").stdout
 	p.contains("report", out, "(no file_date for their policy 1, no retention 2)",
 		"[!] 1 file needs a file_date: its policy counts from it (bills, 7y)",
-		"- 2 policies, 2 need attention (filo policies)")
+		"[!] 2 policies, 2 need attention (filo policies)")
 
 	ct := newCLITest(t)
 	ct.write("a.txt", "a")
 	ct.filo(ExitOK, "", false, "roots", "add", ct.root)
 	ct.lacks("no policies", ct.filo(ExitOK, "", false, "report").stdout, "polic")
+}
+
+// TestReportPoliciesReviewFindings: the cases found in the code review of slice 4 (2026-11-16).
+func TestReportPoliciesReviewFindings(t *testing.T) {
+	t.Run("the policies line with no files, marked by whether one needs attention", func(t *testing.T) {
+		ct := newCLITest(t)
+		ct.filo(ExitOK, "", false, "policies", "add", "bils")
+		ct.contains("no files", ct.filo(ExitOK, "", false, "report").stdout, "Retention   none",
+			"[!] 1 policy, 1 needs attention (filo policies)")
+		ct.filo(ExitOK, "", false, "policies", "set", "bils", "7y")
+		ct.contains("none needs attention", ct.filo(ExitOK, "", false, "report").stdout,
+			"- 1 policy (filo policies)")
+	})
+
+	t.Run("the policies named are those of the files counted", func(t *testing.T) {
+		p := newPolicyTest(t)
+		// undated.pdf on bills (forever, then 7y): needs a file_date. x.pdf on bils (7y): needs one too, but is
+		// made unreadable, so it counts as unreadable and bils is not named.
+		p.filo(ExitOK, "", false, "policies", "set", "bills", "forever", "-y")
+		csv := filepath.Join(p.work, "r2.csv")
+		p.filo(ExitOK, "", false, "export", "retention", "-o", csv)
+		editCSV(t, csv, setRetention(map[string]string{"undated.pdf": "bills"}))
+		p.filo(ExitOK, "", false, "update", csv)
+		p.filo(ExitOK, "", false, "policies", "set", "bills", "7y", "-y")
+		p.filo(ExitOK, "", false, "policies", "set", "bils", "7y", "-y")
+		if err := os.Chmod(p.in("bils/x.pdf"), 0); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { os.Chmod(p.in("bils/x.pdf"), 0o644) })
+		p.filo(ExitOK, "", false, "scan")
+		out := p.filo(ExitOK, "", false, "report").stdout
+		p.contains("report", out, "[!] 1 file needs a file_date: its policy counts from it (bills, 7y)")
+		p.lacks("report", out, "bils, 7y")
+	})
+
+	t.Run("a question names both what it puts past and what it leaves without a file_date", func(t *testing.T) {
+		p := newPolicyTest(t)
+		p.filo(ExitOK, "", false, "policies", "set", "bils", "2030-12-31")
+		csv := filepath.Join(p.work, "r2.csv")
+		p.filo(ExitOK, "", false, "export", "retention", "-o", csv)
+		editCSV(t, csv, setRetention(map[string]string{"2022-01.pdf": "bils"}))
+		p.filo(ExitOK, "", false, "update", csv)
+		// bils: x.pdf (no file_date) and 2022-01.pdf (2022-01-31); 1y puts 2022-01.pdf past and x.pdf without one.
+		p.contains("both", p.filo(ExitOK, "n\n", true, "policies", "set", "bils", "1y").stdout,
+			"Shorten bils for 2 files, putting 1 past its retention and leaving 1 without a file_date? [y/N]")
+	})
 }

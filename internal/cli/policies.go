@@ -223,8 +223,12 @@ func (e *env) policySet(ctx context.Context, s *store.Store, name, value string,
 			report.Count(int64(len(p.NoFileDate))))
 		if len(p.Past) > 0 {
 			verb = "Shorten"
-			question = fmt.Sprintf("Shorten %s for %s, putting %s past %s retention?", p.From.Name, files,
+			question = fmt.Sprintf("Shorten %s for %s, putting %s past %s retention", p.From.Name, files,
 				report.Count(int64(len(p.Past))), pluralWord(len(p.Past), "its", "their"))
+			if n := len(p.NoFileDate); n > 0 {
+				question += fmt.Sprintf(" and leaving %s without a file_date", report.Count(int64(n)))
+			}
+			question += "?"
 		}
 		r.Heading(verb+" "+p.From.Name, view.Where{Roots: previewRoots(p)}, valueWord(p.From.Value)+" -> "+value,
 			files)

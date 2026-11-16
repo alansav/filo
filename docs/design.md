@@ -478,8 +478,8 @@ Shorten bills for 212 files, putting 6 past their retention? [y/N]
   `Done   bills is 10y · 212 files updated`. `filo update` naming new policies: a `New policies   2 · bils, payslip`
   block with a line per policy and its rows, "they have no value yet: their files need a retention until filo
   policies set NAME VALUE", then `Create 2 policies? [y/N]`. `move` asks `Move 3 files from bils to bills (7y)?
-  [y/N]`; `add` is `Added   bills   7y`; the report's Register section gets `Policies   4 · 1 needs attention
-  (filo policies)` when there are policies.
+  [y/N]`; `add` is `Added   bills · 7y`; the report's Retention section ends with `! 4 policies, 1 needs
+  attention (filo policies)` when there are policies (`·` when none needs attention), even with no files.
 - **Register (schema version 9)**: `policies` (id, name lowercase unique, value: a period, a date, `forever` or NULL,
   added and changed times); `files.policy_id` (NULL for none; `files.retention` is NULL when it is set, and
   `keep_until` stays stored and worked out, so the statuses and `filo delete` read it as before); `policy_changes`
@@ -1727,8 +1727,13 @@ put first on 2026-11-15). Each is an open question below until it is designed.
    (`report.PolicyAttention`, shared with `filo policies`); the help overview lists the policies commands, `filo
    delete`'s page states the date rule, the export page names policy names; the README has a "Retention policies"
    section and the date rule. Test: `TestReportPolicies`; goldens `help.txt`, `help-delete.txt`, `help-export.txt`.
-   **Named retention policies are done**: every scenario in the table has a test. Next: a review of slice 4, then
-   merge; then folder rules (item 4).
+   Reviewed the same day (the whole branch), all nine findings fixed (`TestOldCSVAfterMove`,
+   `TestReportPoliciesReviewFindings`): a `move` or rename records a history row per file (`reviews`, batch
+   `policies`), so a row of a CSV exported before it and edited since is refused ("changed after export"), and an
+   old CSV never puts a file back on the old name; the report's policies line shows with no files too, marked `!`
+   when a policy needs attention, and names the policies of exactly the files it counts as needing a file_date; a
+   `set` question names both what it puts past and what it leaves without a file_date. **Named retention policies are
+   done**: every scenario in the table has a test. Next: merge; then folder rules (item 4).
 4. Folder rules (default retention policies on directories).
 5. Progress in the report, and `export retention --needing-retention`.
 6. Duplicates: one decision for all copies (the duplicates review CSV was done first, see iteration 5).

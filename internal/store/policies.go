@@ -380,6 +380,20 @@ func (s *Store) MovePolicy(ctx context.Context, from, to string, now time.Time) 
 	if err != nil && !errors.Is(err, ErrNoPolicy) {
 		return 0, err
 	}
+	if target.ID == p.ID {
+		return 0, nil
+	}
+	// The files moved (not those filo deleted), each recorded in the history below: a file's retention now reads as
+	// another name, so a CSV exported before this is refused for it ("changed after export"), and never moves it
+	// back onto the old name (docs/design.md, Named retention policies).
+	moved, err := queryAll(ctx, tx, func(rows *sql.Rows) (int64, error) {
+		var id int64
+		err := rows.Scan(&id)
+		return id, err
+	}, `SELECT id FROM files WHERE policy_id = ? AND deleted_utc IS NULL`, p.ID)
+	if err != nil {
+		return 0, fmt.Errorf("move policy %s: %w", p.Name, err)
+	}
 	switch {
 	case target.ID == 0: // a new name: a rename
 		if _, err := tx.ExecContext(ctx, `UPDATE policies SET name = ?, changed_utc = ? WHERE id = ?`, n, utc(now),
@@ -389,8 +403,6 @@ func (s *Store) MovePolicy(ctx context.Context, from, to string, now time.Time) 
 		if err := recordPolicyChange(ctx, tx, "rename", p.Name, "", n, p.Files, now); err != nil {
 			return 0, err
 		}
-	case target.ID == p.ID:
-		return 0, nil
 	default:
 		if _, err := tx.ExecContext(ctx, `UPDATE files SET policy_id = ? WHERE policy_id = ? AND deleted_utc IS NULL`,
 			target.ID, p.ID); err != nil {
@@ -401,6 +413,18 @@ func (s *Store) MovePolicy(ctx context.Context, from, to string, now time.Time) 
 		}
 		if err := recordPolicyChange(ctx, tx, "move", p.Name, "", target.Name, p.Files, now); err != nil {
 			return 0, err
+		}
+	}
+	if len(moved) > 0 {
+		batch, err := newBatch(ctx, tx, now, "policies", "move "+p.Name+" to "+n)
+		if err != nil {
+			return 0, err
+		}
+		for _, id := range moved {
+			if _, err := tx.ExecContext(ctx, `INSERT INTO reviews (batch_id, file_id, file_date, retention, keep_until,
+				hash) SELECT ?, id, file_date, ?, keep_until, hash FROM files WHERE id = ?`, batch, n, id); err != nil {
+				return 0, fmt.Errorf("move policy %s: %w", p.Name, err)
+			}
 		}
 	}
 	return p.Files, s.commit(tx)

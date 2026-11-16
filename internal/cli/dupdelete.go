@@ -548,7 +548,8 @@ func decide(j *dupJob, p duplicates.GroupPlan, group []store.ExportedCopy, rootW
 		return
 	}
 	// A copy on a period policy with no file_date has a retention whose end is not known yet, which no copy kept can
-	// be shown to outlast: it is not deleted until it has one (docs/design.md, Named retention policies). Likewise a copy on a policy with no value yet: its retention's length is not decided.
+	// be shown to outlast: it is not deleted until it has one (docs/design.md, Named retention policies). Likewise a
+	// copy on a policy with no value yet: its retention's length is not decided.
 	for _, c := range del {
 		switch {
 		case c.NeedsFileDate():

@@ -29,8 +29,9 @@ type Report struct {
 	UndecidedIn []DirGroup             // the directories holding most of them
 	Deleted     store.DeletedTotals    // what filo has deleted
 	Snapshots   store.SnapshotInfo     // copies of the register
-	Policies    []store.Policy         // the named retention policies
-	Today       string                 // the date the report was built for (YYYY-MM-DD)
+	Policies    int64                  // the named retention policies
+	PolicyAttn  int64                  // of those, the ones that need attention (PolicyAttention)
+	NeedDateIn  []string               // the policies of the files that need a file_date: "bills, 7y"
 }
 
 // DirDepth is how many levels below a root the report groups files needing a decision by.
@@ -78,7 +79,13 @@ func Build(ctx context.Context, s *store.Store, top int, today string) (Report, 
 		if it.Status.NeedsDecision() {
 			undecided = append(undecided, it)
 		}
+		// Named from the files the line counts, so a policy is named only for a file of that status.
+		if p := it.Policy + ", " + it.PolicyValue; it.Status == store.StatusNeedsFileDate &&
+			!slices.Contains(r.NeedDateIn, p) {
+			r.NeedDateIn = append(r.NeedDateIn, p)
+		}
 	}
+	slices.Sort(r.NeedDateIn)
 	r.Undecided = int64(len(undecided))
 	r.UndecidedIn = DirGroups(undecided, DirDepth, top)
 	if r.Largest, err = s.Largest(ctx, top); err != nil {
@@ -102,10 +109,16 @@ func Build(ctx context.Context, s *store.Store, top int, today string) (Report, 
 	if r.Snapshots, err = s.Snapshots(ctx, time.Now()); err != nil {
 		return r, err
 	}
-	if r.Policies, err = s.Policies(ctx); err != nil {
+	policies, err := s.Policies(ctx)
+	if err != nil {
 		return r, err
 	}
-	r.Today = today
+	r.Policies = int64(len(policies))
+	for _, p := range policies {
+		if PolicyAttention(p, today) != "" {
+			r.PolicyAttn++
+		}
+	}
 	return r, nil
 }
 
@@ -308,6 +321,7 @@ func (r Report) renderRetention(v *view.Renderer) {
 	}
 	if total == 0 {
 		v.Section("Retention", "none")
+		r.renderPolicies(v) // a policy can need attention before any file uses it
 		return
 	}
 	v.Section("Retention", Plural(total, "file or symlink", "files and symlinks"))
@@ -336,14 +350,8 @@ func (r Report) renderRetention(v *view.Renderer) {
 
 	// The files whose policy is a period and which have no file_date: the fix is named, with their policies.
 	if n := r.Status[store.StatusNeedsFileDate]; n > 0 {
-		var which []string
-		for _, p := range r.Policies {
-			if p.NoFileDate > 0 {
-				which = append(which, p.Name+", "+p.Value)
-			}
-		}
 		v.Count(view.Attention, Plural(n, "file needs a file_date: its policy counts", "files need a file_date: "+
-			"their policy counts")+" from it ("+strings.Join(which, "; ")+")")
+			"their policy counts")+" from it ("+strings.Join(r.NeedDateIn, "; ")+")")
 	}
 	if n := r.Status[store.StatusKept]; n > 0 {
 		v.Count(view.Neutral, Count(n)+" kept until a later date")
@@ -363,19 +371,20 @@ func (r Report) renderRetention(v *view.Renderer) {
 		v.Count(view.Neutral, fmt.Sprintf("deleted by filo: %s, %s freed%s", Plural(d.Files, "file", "files"),
 			Size(d.Bytes), last))
 	}
-	if len(r.Policies) > 0 {
-		var attention int64
-		for _, p := range r.Policies {
-			if PolicyAttention(p, r.Today) != "" {
-				attention++
-			}
-		}
-		line := Plural(int64(len(r.Policies)), "policy", "policies")
-		if attention > 0 {
-			line += ", " + Plural(attention, "needs attention", "need attention")
-		}
-		v.Count(view.Neutral, line+" (filo policies)")
+	r.renderPolicies(v)
+}
+
+// renderPolicies writes the policies line, when there are policies: how many, and how many need attention (marked
+// so when some do).
+func (r Report) renderPolicies(v *view.Renderer) {
+	if r.Policies == 0 {
+		return
 	}
+	line, mark := Plural(r.Policies, "policy", "policies"), view.Neutral
+	if r.PolicyAttn > 0 {
+		line, mark = line+", "+Plural(r.PolicyAttn, "needs attention", "need attention"), view.Attention
+	}
+	v.Count(mark, line+" (filo policies)")
 }
 
 // renderSnapshots shows the register's copies, and warns when they are missing or behind, which is how a failing

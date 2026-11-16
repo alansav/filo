@@ -569,11 +569,10 @@ func checkRow(ctx context.Context, tx *sql.Tx, r RetentionRow, ex exportInfo, po
 	}
 	var hash sql.NullString
 	var storedDate string
-	var storedPolicy, storedPolicyValue string
+	var unused string // the policy's name and value, which the stored retention already says
 	if err := tx.QueryRowContext(ctx, `SELECT f.hash, coalesce(f.file_date, ''), `+retentionColumns+`,
 		coalesce(f.keep_until, '') FROM files f`+policyJoin+`WHERE f.id = ?`, r.FileID).
-		Scan(&hash, &storedDate, &c.storedRetention, &storedPolicy, &storedPolicyValue,
-			&c.storedKeepUntil); err != nil {
+		Scan(&hash, &storedDate, &c.storedRetention, &unused, &unused, &c.storedKeepUntil); err != nil {
 		return c, fmt.Errorf("read file %d: %w", r.FileID, err)
 	}
 	if !present {
