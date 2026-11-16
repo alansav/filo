@@ -48,6 +48,33 @@ func (r *Renderer) Groups(groups []TableGroup, right ...bool) {
 	}
 }
 
+// HeadedTable writes rows as Table does, but indented by four, as a list under a section, below a dimmed line of
+// headers: the name column's first, then one per cell column (fewer headers leave the last columns without one).
+func (r *Renderer) HeadedTable(headers []string, rows []TableRow, right ...bool) {
+	l := newLayout(rows)
+	if len(headers) > 0 {
+		l.nameWidth = max(l.nameWidth, width(plain(headers[0])))
+	}
+	for i := range l.widths {
+		if i+1 < len(headers) {
+			l.widths[i] = max(l.widths[i], width(plain(headers[i+1])))
+		}
+	}
+	if len(headers) > 0 {
+		spans := []span{spaces(4), styled(headers[0], dim), spaces(l.nameWidth - width(plain(headers[0])))}
+		for i, h := range headers[1:] {
+			if i >= len(l.widths) {
+				break
+			}
+			spans = append(spans, spaces(3), styled(h, dim), spaces(l.widths[i]-width(plain(h))))
+		}
+		r.write(spans...)
+	}
+	for _, row := range rows {
+		r.row(l, 4, row, right)
+	}
+}
+
 // layout is the widths a table lines its columns up to.
 type layout struct {
 	nameWidth int
@@ -82,7 +109,13 @@ func (l layout) cellsWidth() int {
 // row writes one row of a table, indented by indent.
 func (r *Renderer) row(l layout, indent int, row TableRow, right []bool) {
 	spans := []span{spaces(indent), name(row.Name), spaces(l.nameWidth - width(name(row.Name)))}
-	for i := range l.widths {
+	cols := len(l.widths) // up to the last cell with text, unless a note comes after them: no trailing spaces
+	if row.Attention == "" {
+		for cols > 0 && (cols > len(row.Cells) || row.Cells[cols-1] == "") {
+			cols--
+		}
+	}
+	for i := range cols {
 		v := ""
 		if i < len(row.Cells) {
 			v = row.Cells[i]

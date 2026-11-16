@@ -643,3 +643,20 @@ func TestGroups(t *testing.T) {
 		t.Errorf("got\n%s\nwant\n%s", b.String(), want)
 	}
 }
+
+// TestHeadedTable: a table under a section, indented by four, below its dimmed headers, the columns lined up with
+// them; a column with no header has none.
+func TestHeadedTable(t *testing.T) {
+	r, b := plainView()
+	r.HeadedTable([]string{"directory", "pattern", "policy"}, []TableRow{
+		{Name: "bank", Cells: []string{"*DailyStatement*", "daily-statements", "2 files", "1 needs a file_date"}},
+		{Name: "personal/home/electric", Cells: []string{"*", "bills", "1 file"}},
+	}, false, false, true)
+	want := "" +
+		"    directory                pattern            policy\n" +
+		"    bank                     *DailyStatement*   daily-statements   2 files   1 needs a file_date\n" +
+		"    personal/home/electric   *                  bills               1 file\n"
+	if b.String() != want {
+		t.Errorf("got\n%s\nwant\n%s", b.String(), want)
+	}
+}
