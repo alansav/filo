@@ -7,7 +7,6 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/alansav/filo/internal/hasher"
 	"github.com/alansav/filo/internal/reconcile"
 	"github.com/alansav/filo/internal/report"
 	"github.com/alansav/filo/internal/store"
@@ -129,8 +128,8 @@ func (e *env) rootsAdd(ctx context.Context, dbBefore string, args []string) erro
 	if err := checkIgnores(*ignore); err != nil {
 		return err
 	}
-	if *workers < 1 || *workers > hasher.MaxWorkers {
-		return usageError{fmt.Sprintf("--workers must be between 1 and %d", hasher.MaxWorkers)}
+	if err := checkWorkers(fs, *workers, *noScan); err != nil {
+		return err
 	}
 	set := store.Settings{IncludeHidden: *include, Ignore: *ignore}
 	s, err := e.open(ctx, *db)

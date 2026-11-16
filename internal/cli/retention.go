@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -15,7 +14,6 @@ import (
 	"time"
 
 	"github.com/alansav/filo/internal/duplicates"
-	"github.com/alansav/filo/internal/hasher"
 	"github.com/alansav/filo/internal/reconcile"
 	"github.com/alansav/filo/internal/report"
 	"github.com/alansav/filo/internal/retention"
@@ -73,13 +71,8 @@ func (e *env) export(ctx context.Context, dbBefore string, args []string) error 
 	if len(pos) > 1 {
 		return usageError{"export " + kind + " takes at most one DIR"}
 	}
-	workersGiven := false
-	fl.Visit(func(f *flag.Flag) { workersGiven = workersGiven || f.Name == "workers" })
-	if workersGiven && *noScan {
-		return usageError{"--workers is for the scan, and --no-scan skips it; give one or the other"}
-	}
-	if *workers < 1 || *workers > hasher.MaxWorkers {
-		return usageError{fmt.Sprintf("--workers must be between 1 and %d", hasher.MaxWorkers)}
+	if err := checkWorkers(fl, *workers, *noScan); err != nil {
+		return err
 	}
 	if *out == "" {
 		return usageError{"export needs -o FILE: the CSV is written to a file, never to the terminal"}

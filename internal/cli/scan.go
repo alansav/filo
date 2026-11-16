@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -34,8 +35,8 @@ func (e *env) scan(ctx context.Context, dbBefore string, args []string) error {
 	if err := checkTildes("DIR", pos...); err != nil {
 		return err
 	}
-	if *workers < 1 || *workers > hasher.MaxWorkers {
-		return usageError{fmt.Sprintf("--workers must be between 1 and %d", hasher.MaxWorkers)}
+	if err := checkWorkers(fs, *workers, false); err != nil {
+		return err
 	}
 
 	s, err := e.open(ctx, *db)
@@ -49,6 +50,20 @@ func (e *env) scan(ctx context.Context, dbBefore string, args []string) error {
 		dir = pos[0]
 	}
 	return e.scanWhere(ctx, s, reconcile.Options{Workers: *workers, AllowEmpty: *allowEmpty}, dir, true)
+}
+
+// checkWorkers checks a command's --workers: 1 to hasher.MaxWorkers, and not given with --no-scan, which skips the
+// scan it is for (filo scan, roots add, export).
+func checkWorkers(fs *flag.FlagSet, workers int, noScan bool) error {
+	given := false
+	fs.Visit(func(f *flag.Flag) { given = given || f.Name == "workers" })
+	if given && noScan {
+		return usageError{"--workers is for the scan, and --no-scan skips it; give one or the other"}
+	}
+	if workers < 1 || workers > hasher.MaxWorkers {
+		return usageError{fmt.Sprintf("--workers must be between 1 and %d", hasher.MaxWorkers)}
+	}
+	return nil
 }
 
 // errNoRoots is scanWhere's error for a register with no roots to scan.

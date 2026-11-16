@@ -256,10 +256,15 @@ func TestExportScansFirst(t *testing.T) {
 	contains("failed root, --no-scan", r.stdout, "Duplicates export   export 4")
 
 	// --workers is the scan's: checked as filo scan checks it, and refused with --no-scan.
-	filo(ExitUsage, "", false, "export", "retention", "--workers", "0", "-o", csv("w.csv"))
-	filo(ExitUsage, "", false, "export", "retention", "--workers", "65", "-o", csv("w.csv"))
-	filo(ExitUsage, "", false, "export", "retention", "--workers", "-1", "-o", csv("w.csv"))
-	filo(ExitUsage, "", false, "export", "retention", "--workers", "2", "--no-scan", "-o", csv("w.csv"))
+	for _, n := range []string{"0", "65", "-1"} {
+		contains("--workers "+n, filo(ExitUsage, "", false, "export", "retention", "--workers", n, "-o",
+			csv("w.csv")).stderr, "--workers must be between 1 and 64")
+	}
+	for _, args := range [][]string{{"export", "retention", "-o", csv("w.csv")}, {"export", "duplicates", "-o",
+		csv("w.csv")}, {"roots", "add", ct.in("tax"), "--no-scan"}} {
+		contains("--workers with --no-scan", filo(ExitUsage, "", false, append(args, "--workers", "2",
+			"--no-scan")...).stderr, "give one or the other")
+	}
 	contains("--workers", filo(ExitOK, "", false, "export", "retention", ct.in("tax"), "--workers", "1", "-o",
 		csv("w.csv")).stdout, "Scan   scan ")
 

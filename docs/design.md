@@ -300,7 +300,8 @@ retention CSV and `filo update` write only the register and the CSV file the use
   they are in `filo report`. On a large system, export one directory at a time so a spreadsheet can open it.
 - **A scan first** (decided and built 2026-11-16, section 5 item 12): every export scans before it reads the
   register, so the CSV holds the files as they are now, not as of the last scan, and a file saved since is in it.
-  `--no-scan` skips it (nothing changed, or the scan is slow). What it scans:
+  `--no-scan` skips it (nothing changed, or the scan is slow); `--workers N` is passed to the scan, as for `filo scan`,
+  and refused with `--no-scan` (so is `roots add --no-scan --workers N`, since 2026-11-16). What it scans:
 
   | Export | Scans first |
   |---|---|
@@ -345,8 +346,8 @@ retention CSV and `filo update` write only the register and the CSV file the use
   temporary file next to it (mode 0600) and renamed over it, so a crash never leaves half a CSV. The question is
   asked first, before the scan, so a no costs nothing (`Nothing exported.`); if the file is no longer the one asked
   about when the CSV is ready (replaced, edited, or no longer a regular file), the export stops and the file is left
-  as it is. Two exports cannot race for one file: each holds the register's lock from start to end. What is left is
-  another program writing the file in the instant between Filo's last check and the rename; then that write is
+  as it is. Two exports of the same register cannot race for one file: each holds the register's lock from start to
+  end. What is left is two exports of different registers (`--db`) writing one file, or another program writing it in the instant between Filo's last check and the rename; then that write is
   lost, or, if it lands just before the last check, the export is recorded with no CSV (an export number is skipped).
   The same for every `-o` file Filo writes. Checking whether a spreadsheet has the file open (LibreOffice's
   `.~lock.NAME#`) was considered and left out (2026-11-16): an edge case, and a stale marker would block exports.
@@ -695,7 +696,7 @@ of this section.
   left out entirely: filo duplicates exclude DIR" (see Output, below; it first said "lists the exclusions" and
   "always ends with", changed on 2026-11-15: a list repeats `filo duplicates`, and a line on every run stops being
   read). Expected to be used rarely, mainly for backups.
-- **`filo export duplicates [DIR] -o FILE [--no-scan]`** writes every group with at least one copy under DIR, and all of that
+- **`filo export duplicates [DIR] -o FILE [--no-scan] [--workers N]`** writes every group with at least one copy under DIR, and all of that
   group's copies, also those outside DIR (the copy to keep may live elsewhere), so exports of different directories
   can overlap. One row per copy, groups numbered in order of their first path. Same CSV rules as the retention CSV
   (byte order mark, formula guard, `-o` required, mode 0600, an existing file replaced only after asking). Columns: `id, export, group, copies,
