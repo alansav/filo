@@ -593,11 +593,14 @@ retention: the file becomes a candidate at its date and is deleted only through 
   | a retention already (a date, `forever`, a policy, also one with no value) | nothing: the person's choice wins |
   | moved in from elsewhere with its retention | nothing: a move keeps the retention |
   | *unreadable*, or the new side of a *possible move* | nothing until resolved: no content to record, and a move may bring its own retention |
+  | under a directory the latest scan covering it could not read | nothing: what is there now is not known |
+  | hard links: one file with paths that different rules decide | nothing, reported as a tie between them (never guessed); dated if its paths agree or only one is decided |
   | dated by the rule, then its retention cleared in the CSV | stays undated |
   | dated by the rule, then the rule removed or changed | keeps its policy |
 
 - **Matching**: a pattern is a glob on the file's name (not its path), in any case: `*` is any run of characters, `?`
-  one character, "contains" is `*X*`. No pattern is `*`, everywhere. A rule covers the files at any depth below its
+  one character, "contains" is `*X*`. No pattern is `*`, everywhere, and a run of wildcards is kept in one form, its `?`
+  first and then one `*` (`**` is `*`, `*?` is `?*`), since two forms of it would tie on every name. A rule covers the files at any depth below its
   directory. For a file, Filo looks at the file's own directory, then each parent up to the root: **the first
   directory with a rule that matches decides**, so the result can be read off the path. Within a directory, rules are
   tried **longest pattern first, counting letters only**: wildcards are not counted, so `*` counts 0 and is always
@@ -647,7 +650,7 @@ retention: the file becomes a candidate at its date and is deleted only through 
     NEW (`bank/2024` goes to `banking/2024`); `move` removes them from OLD, `copy` keeps them (`copy bank/2024
     bank/2025` for a new year). They apply to the undated files under NEW, so they ask as `add` does. Refused, with
     nothing merged, if NEW or any directory below it already has rules (they are listed: remove them first, or add
-    the rules by hand); if NEW is OLD or inside it; if OLD has no rules at or below it. NEW may be in another root,
+    the rules by hand; a move up, `bank/2024` to `bank`, does not count the rules it moves, a copy does); if NEW is OLD or inside it; if OLD has no rules at or below it. NEW may be in another root,
     whose rules they then are. Files dated by a moved rule keep their policy and still count as dated by it.
   - No `show`: `l` and the list cover it.
 - **Directories that change**: a rule stores its root and its directory relative to the root, as files do.
@@ -655,6 +658,7 @@ retention: the file becomes a candidate at its date and is deleted only through 
     never followed (pairing a directory that went with one that came is a guess, principle 6). `filo rules move`
     fixes it.
   - A directory that cannot be read, or a root not mounted: nothing is applied there; the scan already reports it.
+    `add`, `move` and `copy` go by the latest scan covering each directory, and refuse a root that cannot be reached.
   - A root added above an existing one (Roots): the old root's rules get the same prefix as its files, in the same
     transaction.
   - A root removed (`filo roots remove`, when it comes): its rules go with it, and its confirmation says how many.
@@ -701,6 +705,7 @@ personal/home/electric
   | C1 two matching patterns of different letter counts; `*` with another match | the longer one; `*` last |
   | C2 two matching patterns of the same count | not applied, reported by the scan and `filo rules` |
   | C3 a rule in a parent directory; a nearer directory with a matching rule | applies at any depth; the nearer one wins |
+  | C4 hard links whose paths different rules decide; that agree | a tie, reported; dated once |
   | D1 `set`: files already dated | keep their policy; a line says so |
   | D2 `set` or `remove` with a pattern that is not stored (`*Statement` for `*Statement*`) | refused |
   | D3 `filo policies remove` of a policy a rule names; `filo policies move` (a rename, a merge) | refused; the rules follow |
@@ -1977,7 +1982,14 @@ put first on 2026-11-15). Each is an open question below until it is designed.
       `Rules`, `MoveRules` (move and copy), each of the three that apply rules with a preview that runs the same work
       in a transaction it rolls back (`PreviewAddRule`, `PreviewMoveRules`); dating in `store/ruledate.go`. Tests:
       `TestResolve`, `TestCompare`, `TestMatch`, `TestAddRule`, `TestSetAndRemoveRule`, `TestMoveRules`,
-      `TestPoliciesAndRules`, `TestRuleDating`, `TestRuleTies`, and the absorb test (F3).
+      `TestPoliciesAndRules`, `TestRuleDating`, `TestRuleTies`, and the absorb test (F3). Reviewed the same day,
+      nine of ten findings fixed: hard links decided once over all their paths, a tie if they disagree (C4,
+      `TestRuleDatingHardLinks`); files under a directory the latest scan covering it could not read left alone by
+      `add`, `move` and `copy` too (`TestRuleDatingUnreadDirs`); a rule's directory checked for the register's form
+      and its root for being registered; a move up allowed; `*?` stored as `?*`; a root's rules indexed once, and
+      `add` reading only its directory. The tenth (the duplicate check before the insert repeats the unique
+      constraint) kept: it gives the one-line error, with the same key. Slice 2 must refuse `add`, `move` and `copy`
+      in a root that cannot be reached (not mounted), which the store cannot see.
    2. *`filo rules`*: the list (`[DIR]`, the order tried, counts, flags), `add` (a policy created if needed,
       `[y/N/l]`), `set`, `remove`, with output mocked and agreed first, and the help page. Scenarios A, B4, D, F1.
    3. *Applied by every scan*: the scan's sections on what it dated and did not; `filo report` counts files dated by a
