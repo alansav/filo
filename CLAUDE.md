@@ -12,9 +12,10 @@ chosen ones, each only after it is re-read and found unchanged) are done, as are
 redesign (`docs/design.md`, Duplicates: `filo delete FILE.csv`, records, always, `filo duplicates`; schema 8) is done
 and merged. The terminal output is done (every command prints through `internal/view`, see "Terminal output"). Named
 retention policies (`docs/design.md`, Lifespan, Named retention policies; schema 9; `filo policies`) are done and
-merged. Replacing an existing `-o` file after asking (section 5 item 11) and every export scanning first, `--no-scan`
-to skip it (item 12), are done. Next in `docs/design.md` section 5: directory rules (design first: name patterns and
-empty directories are in Open questions).
+merged. Replacing an existing `-o` file after asking (section 5 item 11) and every export scanning first, `--no-scan` to
+skip it (item 12), are done. "Folder" is now "directory" everywhere. Next in `docs/design.md` section 5: directory rules
+(item 4, designed in Lifespan, Directory rules; schema 10), in four slices on branch `directory-rules` with one PR at
+the end; slice 1 (register and matching) first. Then removing empty directories (item 13, to be designed).
 **`internal/dispose` is the only code allowed to delete the user's files**, and only from `filo delete`; everything
 else stays read-only on them, and nothing overwrites an existing file without asking (only an `-o` output file,
 see the hard rules). Stay inside the current piece of work.
@@ -48,7 +49,7 @@ see the hard rules). Stay inside the current piece of work.
 - Before changing any file in the repo, check the branch with `git branch --show-current`. If it is `main`, stop and
   ask the user to check out a branch; do not create or switch branches yourself.
 - Command names stay plain and easy to remember: `roots`, `scan`, `report`, `export`, `update`, `delete`,
-  `duplicates`, `policies`, `revert`. No themed names.
+  `duplicates`, `policies`, `rules`, `revert`. No themed names.
 
 ## Commands
 
