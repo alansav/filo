@@ -72,8 +72,10 @@ Run `go vet` and the tests before saying a change is done.
 
 ## After writing code
 
-One section 5 item per branch (and so per PR). The user reads every commit on its own, so a piece of work is
-committed as a short series of small commits on the current branch, never on `main`:
+One section 5 item per branch (and so per PR), and each PR is a complete, working feature, never part of one: a
+large item is built in slices on the one branch, and the PR is opened only when the last slice is done. The user
+reads every commit on its own, so a piece of work is committed as a short series of small commits on the current
+branch, never on `main`:
 
 1. Commit as you go, lower layers first, each commit with its own tests: the `docs/design.md` change alone first,
    then the store and schema, then the internal package(s), then the `internal/view` output, then the `cmd/filo`
