@@ -28,6 +28,14 @@ Commands
   policies move OLD NEW    move a policy's files to another, or rename it
   policies remove NAME     delete a policy no file uses
   policies show NAME       a policy's value and its files
+  rules [DIR]              list the directory rules, at DIR and below
+  rules add DIR [PATTERN] POLICY
+                           give POLICY to the files under DIR that have no
+                           retention
+  rules set DIR [PATTERN] POLICY
+                           change the policy a rule gives new files
+  rules remove DIR [PATTERN]
+                           remove a rule; the files it dated keep their policy
   help [COMMAND]           this overview, or a command's flags and rules
 
 Every command accepts --db PATH (default: $FILO_DB, then the user data
