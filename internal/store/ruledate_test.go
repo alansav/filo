@@ -269,6 +269,16 @@ func TestRetentionByHandLeavesTheRule(t *testing.T) {
 	if rs, _ := e.s.Rules(e.ctx, e.root.ID, ""); len(rs) != 1 || rs[0].Dated != 1 {
 		t.Errorf("rules = %+v, want the rule counting 1 file", rs)
 	}
+	// The step a scan points to, a file_date filled in under the same policy, keeps the file on its rule.
+	exportID, _ = e.export(ruleToday, policyNow)
+	if res, err := e.s.UpdateRetention(e.ctx, []RetentionRow{{Line: 2, ExportID: exportID,
+		FileID: e.knownAll("bank/b.pdf"), FileDate: "2020-01-01", HasFileDate: true, Retention: "bills"}}, policyNow, ruleToday, "r.csv",
+		false, nil); err != nil || res.Set != 1 {
+		t.Fatalf("update with a file_date: %+v, %v", res, err)
+	}
+	if v := e.ruleColumns("bank/b.pdf"); v != "- bills - rule "+strconv.FormatInt(r.ID, 10)+" dated hash h2" {
+		t.Errorf("bank/b.pdf after its file_date was filled in: %q, want still on the rule", v)
+	}
 	e.apply(Changes{}) // a scan applies the rules: bank/a.pdf has a retention, so they leave it alone
 	if v := e.ruleColumns("bank/a.pdf"); !strings.HasPrefix(v, "2032-01-01 - ") {
 		t.Errorf("bank/a.pdf after a scan: %q, want its own date still", v)

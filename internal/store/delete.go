@@ -261,8 +261,8 @@ func (s *Store) SetRetention(ctx context.Context, fileID int64, retention string
 		own = sql.NullString{}
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE files SET retention = ?, policy_id = ?, keep_until = ?, reviewed_utc = ?,
-		reviewed_after_scan = ?, reviewed_hash = ?, rule_id = NULL WHERE id = ?`, own, policy, nullString(keep), utc(now),
-		nullInt(after), hash, fileID); err != nil {
+		reviewed_after_scan = ?, reviewed_hash = ?, rule_id = CASE WHEN policy_id IS ? THEN rule_id END WHERE id = ?`,
+		own, policy, nullString(keep), utc(now), nullInt(after), hash, policy, fileID); err != nil {
 		return "", fmt.Errorf("record retention: %w", err)
 	}
 	if err := s.commit(tx); err != nil {

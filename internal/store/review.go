@@ -459,6 +459,8 @@ func (s *Store) UpdateRetentionWith(ctx context.Context, rows []RetentionRow, no
 		}
 		// A file has a policy or a retention of its own, never both: a policy name goes in policy_id (the policy
 		// created above if it is new), anything else in retention, taking the file off its policy.
+		// The rule that set its policy stays only while that is still its policy (a file_date filled in keeps it;
+		// the old values are what CASE reads).
 		own, policy := nullString(c.retention), sql.NullInt64{}
 		if c.policy {
 			own, policy = sql.NullString{}, sql.NullInt64{Int64: c.policyID, Valid: true}
@@ -467,8 +469,9 @@ func (s *Store) UpdateRetentionWith(ctx context.Context, rows []RetentionRow, no
 			}
 		}
 		if _, err := tx.ExecContext(ctx, `UPDATE files SET file_date = ?, retention = ?, policy_id = ?,
-			keep_until = ?, reviewed_utc = ?, reviewed_after_scan = ?, reviewed_hash = ?, rule_id = NULL WHERE id = ?`,
-			nullString(c.fileDate), own, policy, nullString(c.keepUntil), utc(now), a.afterScan, c.exportHash,
+			keep_until = ?, reviewed_utc = ?, reviewed_after_scan = ?, reviewed_hash = ?,
+			rule_id = CASE WHEN policy_id IS ? THEN rule_id END WHERE id = ?`,
+			nullString(c.fileDate), own, policy, nullString(c.keepUntil), utc(now), a.afterScan, c.exportHash, policy,
 			r.FileID); err != nil {
 			return res, fmt.Errorf("record retention: %w", err)
 		}
