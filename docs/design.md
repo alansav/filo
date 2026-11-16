@@ -477,7 +477,8 @@ rules, the listing before the question and the check at the moment of deleting b
 group definition below, the report's "not counted" line; the first design's `filo update` of a duplicates CSV, its
 marks in `filo delete` and `--separate` are gone. Slice 2, the CSV, is done: the `action` column, `keep` filled in
 for records, and reading it into a plan per group (`duplicates.Plan`). Slice 3 is done: `filo delete FILE.csv`
-carries a duplicates CSV out. Slices 4 (`filo duplicates`, `exclude`, `include`) and 5 (README, help) are next. See "The first design, and why it changed" at the end
+carries a duplicates CSV out. Slice 4 is done: `filo duplicates`, `exclude` and `include`. Slice 5 (README, help)
+is next. See "The first design, and why it changed" at the end
 of this section.
 
 - **The principle** (2026-11-16). The duplicates process decides which copy to keep, never whether the content goes.
@@ -1507,9 +1508,25 @@ put first on 2026-11-15). Each is an open question below until it is designed.
    a directory is a CSV, so a mistyped name fails as "open FILE"; readability and hard links are checked only for a
    group with something to delete, and one readable copy to keep is enough; groups are matched in one pass; the
    "moved since the export (now X)" path is the first by root and path. The help for `filo delete` still names DIR only (slice 5).
-   **To resume (2026-11-16):** slice 4, `filo duplicates`, `exclude` and `include` (mockups
-   agreed, see Duplicates, Output). The branch's build may now be run on the real register, with care: it upgrades
-   it to schema 8 (the warning once) and a duplicates CSV can be carried out again.
+   Slice 4 done on 2026-11-16: `filo duplicates`, `exclude DIR` and `include PATH` (`internal/cli/dupcmd.go`,
+   `internal/store/notcounted.go`), as in the mockups under Duplicates, Output. The list shows the contents always
+   and the sets of records with two or more copies present, as the report's "not counted" line counts them (a set
+   or a content with one copy left keeps nothing out, so it is not listed; it stays stored). `include` on a file
+   that is both a record and always undoes the record and says the content is still always; a file not in the
+   register is an error ("run filo scan"); a directory that is not excluded but has exclusions under it says so.
+   Exclusions are matched by exact path prefix (never as LIKE patterns). Tests: `TestDuplicatesList`,
+   `TestDuplicatesExclude`, `TestDuplicatesInclude`, `TestDuplicatesUsage`, and the golden file
+   `testdata/duplicates.txt`. Reviewed the same day; nine of ten findings fixed (`TestDuplicatesReviewFindings`):
+   `include` finds a PATH no longer on disk by its path alone (`store.Locate`), so the exclusion of a folder since
+   deleted or unmounted can still be removed, and a record whose folder went still included; the list counts as the
+   report does (a content always is listed as always only; a set with a new copy is a group again, so not listed,
+   though `include` still removes it); `include` sees a file's copy as the list does (a hard link of a record is a
+   record; copies counted the same way, excluded ones left out); `filo duplicates` has its help page
+   (`testdata/help-duplicates.txt`); the "dir or under it" test is one SQL fragment (`atOrUnder`); `store.AbsPath`;
+   "1 file … counts". Not changed: `exclude` and `include` count the groups before and after (the design's sanity
+   check), and the list counts each exclusion on its own (they are few).
+   **To resume (2026-11-16):** slice 5: the README (the four kinds of keep and the rules), the help overview
+   (`filo duplicates` and `filo delete FILE.csv`; `filo delete`'s page), and the status.
 3. Named retention policies.
 4. Folder rules (default retention policies on directories).
 5. Progress in the report, and `export retention --needing-retention`.

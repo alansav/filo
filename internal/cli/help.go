@@ -139,6 +139,23 @@ var commandHelps = map[string]commandHelp{
 				"removed, up to the root. Exit code 1 if a file could not be read or deleted.",
 		},
 	},
+	"duplicates": {
+		usage: []string{
+			"filo duplicates",
+			"filo duplicates exclude DIR",
+			"filo duplicates include PATH",
+		},
+		before: []string{
+			"Lists what is not counted as duplicates: excluded directories, contents always and sets of records. " +
+				"Contents always and sets of records are made in a duplicates CSV (always on every row of a group, " +
+				"or keep on two or more copies) and carried out by filo delete FILE.",
+			"exclude makes the files under DIR, a directory inside a root, never count as duplicates, of each " +
+				"other or of files elsewhere. They are still scanned and their retentions are unchanged. It " +
+				"replaces the exclusions under DIR.",
+			"include undoes one of them: for a directory, its exclusion; for a file, its content always, or its " +
+				"whole set of records. PATH may be gone from the disk.",
+		},
+	},
 }
 
 // showOverview writes filo help.
