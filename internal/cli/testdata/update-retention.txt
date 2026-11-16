@@ -4,7 +4,7 @@ Retention update   r.csv . export 1 . 4 rows . <root>
   [refused] 2 rows refused
 
 Refused: fix these rows in the CSV and run filo update again
-  [refused] line 2    retention "2027-02-29" is not a retention: use a period such as 7y, 18m, 6w or 30d (counted from file_date), forever, or a date YYYY-MM-DD (a spreadsheet may have rewritten it; format the column as text)
+  [refused] line 2    retention "2027-02-29" is not a retention: use a period such as 7y, 18m, 6w or 30d (counted from file_date), forever, a date YYYY-MM-DD, or a policy name (letters, digits, - and _) (a spreadsheet may have rewritten it; format the column as text)
   [refused] line 3    notes/old draft.txt: retention 7y needs a file_date to count from
 
 [!] 1 file is now past its retention. Check for a typo, such as 7d for 7y:

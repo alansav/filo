@@ -12,6 +12,7 @@ import (
 	"path"
 	"path/filepath"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/alansav/filo/internal/duplicates"
@@ -250,9 +251,23 @@ func (e *env) update(ctx context.Context, dbBefore string, args []string) error 
 		ok, err := e.confirmClears(ctx, pr, roots, cs)
 		return ok && err == nil // a cancelled context also stops the update itself: nothing is recorded
 	}
-	res, err := s.UpdateRetention(ctx, parsed.Rows, now(), today(), path, *dry, confirm)
+	askedPolicies := false
+	confirmPolicies := func(ps []store.NewPolicy) bool {
+		if !asking {
+			return false
+		}
+		askedPolicies = true
+		ok, err := e.confirmPolicies(ctx, pr, ps)
+		return ok && err == nil // a cancelled context also stops the update itself: nothing is recorded
+	}
+	res, err := s.UpdateRetentionWith(ctx, parsed.Rows, now(), today(), path, store.UpdateOptions{DryRun: *dry,
+		ConfirmClears: confirm, ConfirmPolicies: confirmPolicies})
 	if err != nil {
 		return interruptedUpdate(err)
+	}
+	if *dry && len(res.NewPolicies) > 0 {
+		showNewPolicies(r, res.NewPolicies)
+		r.Blank()
 	}
 
 	would := func(done, dryRun string) string {
@@ -262,9 +277,25 @@ func (e *env) update(ctx context.Context, dbBefore string, args []string) error 
 		return done
 	}
 	refused := refusalProblems(roots, parsed.Problems, res.Refusals)
-	if res.Set > 0 {
-		r.Count(view.Done, report.Plural(int64(res.Set), "file", "files")+would(" given a retention",
+	if n := len(res.NewPolicies); *dry && n > 0 {
+		r.Count(view.Neutral, report.Plural(int64(n), "policy", "policies")+" would be created (filo update asks "+
+			"first)")
+	}
+	if res.PoliciesCreated > 0 {
+		names := make([]string, len(res.NewPolicies))
+		for i, p := range res.NewPolicies {
+			names[i] = p.Name
+		}
+		r.Count(view.Done, report.Plural(int64(res.PoliciesCreated), "policy", "policies")+" created: "+
+			strings.Join(names, ", "))
+	}
+	if n := res.Set - res.NoValue; n > 0 {
+		r.Count(view.Done, report.Plural(int64(n), "file", "files")+would(" given a retention",
 			" would be given a retention"))
+	}
+	if res.NoValue > 0 {
+		r.Count(view.Attention, report.Plural(int64(res.NoValue), "file", "files")+would(" put on", " would be put on")+
+			" a policy with no value yet: they need a retention until it has one (filo policies set NAME VALUE)")
 	}
 	if res.Cleared > 0 {
 		r.Count(view.Done, report.Plural(int64(res.Cleared), "retention", "retentions")+would(" cleared",
@@ -281,10 +312,18 @@ func (e *env) update(ctx context.Context, dbBefore string, args []string) error 
 		r.Count(view.Attention, report.Plural(int64(res.ClearsSkipped), "retention left as it was",
 			"retentions left as they were")+", though the cell is blank ("+why+")")
 	}
+	if res.PolicyRowsSkipped > 0 {
+		why := "not confirmed"
+		if !askedPolicies {
+			why = "there is no terminal to ask in; run filo update in a terminal to create them"
+		}
+		r.Count(view.Attention, report.Plural(int64(res.PolicyRowsSkipped), "row left as it was", "rows left as "+
+			"they were")+": they name policies not created ("+why+")")
+	}
 	if len(refused) > 0 {
 		r.Count(view.Refused, report.Plural(int64(len(refused)), "row", "rows")+" refused")
 	}
-	if res.Set+res.Cleared+res.Unchanged+res.ClearsSkipped+len(refused) == 0 {
+	if res.Set+res.Cleared+res.Unchanged+res.ClearsSkipped+res.PolicyRowsSkipped+len(refused) == 0 {
 		r.Count(view.Neutral, "nothing to change")
 	}
 	if len(refused) > 0 {
@@ -408,6 +447,37 @@ func (e *env) confirmClears(ctx context.Context, pr *prompter, roots []string, c
 		r.Blank()
 		list(0)
 	}
+}
+
+// showNewPolicies lists the policies a CSV names that do not exist yet (docs/design.md, Named retention policies).
+func showNewPolicies(r *view.Renderer, ps []store.NewPolicy) {
+	names := make([]string, len(ps))
+	width := 0
+	for i, p := range ps {
+		names[i] = p.Name
+		width = max(width, len(p.Name))
+	}
+	r.Section("New policies", report.Count(int64(len(ps))), strings.Join(names, ", "))
+	for _, p := range ps {
+		r.Count(view.Neutral, p.Name+strings.Repeat(" ", width-len(p.Name)+3)+report.Plural(int64(p.Rows), "row",
+			"rows"))
+	}
+	r.Count(view.Neutral, "they have no value yet: their files need a retention until filo policies set NAME VALUE")
+}
+
+// confirmPolicies lists the policies a CSV would create and asks once. Only a yes creates them; declined, the rows
+// naming them are left alone and the other rows are recorded either way.
+func (e *env) confirmPolicies(ctx context.Context, pr *prompter, ps []store.NewPolicy) (bool, error) {
+	r := e.view
+	showNewPolicies(r, ps)
+	r.Blank()
+	question := "Create " + report.Plural(int64(len(ps)), "policy", "policies") + "?"
+	key, err := e.askChoice(ctx, pr, question, []view.Choice{{Key: "y", Word: "yes"}, {Key: "n", Word: "no"}}, "n")
+	if err != nil {
+		return false, err
+	}
+	r.Blank()
+	return key == "y", nil
 }
 
 // interruptedUpdate words a cancelled update: the transaction was not committed.

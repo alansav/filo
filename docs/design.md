@@ -428,7 +428,9 @@ place: if the law moves financial records from 7 to 10 years, `filo policies set
   retention was set on, whatever the date.
 - **Needs a file_date**: a file whose policy is a period and which has no `file_date` has nothing to count from. It
   can only arise from a policy change (the CSV refuses such a row, and refuses clearing the `file_date` of a file
-  whose policy is a period). It is a status of its own (below *possible move*, before *undated*), so the fix is
+  whose policy is a period). In a duplicates CSV, such a copy marked `delete` refuses its group ("needs a file_date
+  first"): its retention's end is not known, so no copy kept can be shown to outlast it. The same for a copy on a
+  policy with no value yet ("its policy payslip has no value yet"). It is a status of its own (below *possible move*, before *undated*), so the fix is
   named: never a deletion candidate; counted in the report's decisions with the folders holding most of them (`! 3
   files need a file_date: their policy counts from it (bills, 7y)`); flagged by `filo policies`; listed first by
   `show`, with `Next: filo export retention DIR -o FILE, fill in file_date, then filo update FILE`.
@@ -1672,7 +1674,37 @@ put first on 2026-11-15). Each is an open question below until it is designed.
    `TestPolicyName`, `TestAddPolicy` (A4), `TestPolicyKeepUntil` (B3, F1, E2's status), `TestSetPolicy` (C1-C4 in the
    store), `TestMoveAndRemovePolicy` (D1, D2), `TestSetRetentionLeavesThePolicy` (B4 in the store),
    `TestMigrateFromV8` (G1); by hand, a register made by the `main` build upgraded by this one (schema 9, the
-   pre-upgrade snapshot). Not yet reviewed. Nothing uses policies yet: the CSV is slice 2.
+   pre-upgrade snapshot). Reviewed the same day; nine of ten findings fixed (`TestPolicyReviewFindings`,
+   `TestDuplicatesDeleteNeedsFileDate`), the tenth (a policy file's name in the CSV is refused by `filo update`) is
+   slice 2's: `filo update` setting a retention of its own takes a file off its policy too; `SetPolicy` and
+   `MovePolicy` count present files (as the previews do) and the history counts the dates changed; removing a period
+   policy gives a missing file with no file_date no retention, rather than a period with nothing to count from;
+   policies are read inside the transaction that changes them; a `Filter.PolicyID` replaces loading every file; one
+   SQL spelling of a file's retention (`retentionColumns`), so the duplicates code sees the policy's value; policy
+   names are checked in ASCII before lowering (no Kelvin sign as k); the preview leaves the status out. **In the
+   duplicates rules** (agreed 2026-11-16): a copy to delete that needs a file_date refuses its group ("needs a
+   file_date first"), since its retention's end is not known.
+   Slice 2 done on 2026-11-16: a policy name in the retention CSV (`retention.ParseRetention` returns it in lower
+   case; `store.IsPolicyRef` tells it from a period, a date and `forever`); `store.UpdateRetentionWith` puts the file
+   on the policy and works keep_until out from its value, lists the new policies (`NewPolicy`) and creates them only
+   if `ConfirmPolicies` says yes (declined, or no terminal: those rows are left alone; a dry run lists them); a row
+   naming a period policy with no file_date is refused, which also refuses clearing the file_date (E3); the stored
+   retention is read as the policy's name, so an export of a policy file updates untouched (the review's tenth
+   finding). `filo update` shows the "New policies" block and asks `Create 2 policies? [y/N]` before the clears.
+   `filo delete`'s new-retention prompt takes a policy name too: an existing policy puts the file on it, an unknown
+   one is refused there ("no such policy"), since that prompt does not create one; `KeepUntil` refuses a name, as a
+   safety net. Every policy name is a valid cell now, so a lone `y` or `indefinitely` would be a new policy: the
+   question catches them. Tests: `TestParseRetention`, `TestUpdateRetentionPolicies` (A1, A2, B1, B2, B4, B5, E3),
+   `TestSetRetentionPolicy`, `TestUpdatePolicies` (golden `testdata/update-policies.txt`). Reviewed the same day,
+   all ten findings fixed: a file_date suggested from the name is kept for a policy whose value is a period (the rule
+   looked at the name, so such rows could never apply); `filo update` counts the files put on a policy with no value
+   apart ("they need a retention until it has one"); filo delete's prompt says when a policy has no value yet, shows
+   policy names in its refusal, and treats only "no such policy" and "needs a file_date" (`NeedsFileDateError`) as
+   refusals, any other error ending the command; an update looks each policy up once (`policyCache`) and keeps its
+   ID for the write; `policyJoin` with `retentionColumns` is the one spelling, used by `filo update`'s check too.
+   **In the duplicates rules** (agreed 2026-11-16): a copy to delete on a policy with no value yet refuses its group
+   too ("its policy payslip has no value yet"). Tests: new cases in `TestUpdatePolicies`, `TestDeletePromptPolicies`,
+   `TestDuplicatesDeleteNeedsFileDate`.
 4. Folder rules (default retention policies on directories).
 5. Progress in the report, and `export retention --needing-retention`.
 6. Duplicates: one decision for all copies (the duplicates review CSV was done first, see iteration 5).

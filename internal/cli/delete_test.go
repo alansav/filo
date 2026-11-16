@@ -71,7 +71,7 @@ func TestDeleteRoundTrip(t *testing.T) {
 	contains("select", r.stdout, "Ready to delete   2 files . 2 B . "+root+", under keep/",
 		"[1/2]  past its retention . until 2026-11-01 . 1 B", "          "+in("keep/c.txt"),
 		"d delete . r new retention . s skip . q quit  > ", "[refused] retention 7y needs a file_date",
-		`[refused] "soon" is not a retention`, "[ok] kept until 2030-01-01", "Done   deleted 0 files . freed 0 B",
+		"[refused] soon: no such policy (filo policies lists them)", "[ok] kept until 2030-01-01", "Done   deleted 0 files . freed 0 B",
 		"Skipped 1: nothing was changed", "keep/d.txt: changed since its retention was set",
 		"  - 1 file given a new retention")
 	gone("select", map[string]bool{"keep/c.txt": false, "keep/d.txt": false})

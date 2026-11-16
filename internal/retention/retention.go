@@ -41,8 +41,9 @@ func ParseDate(s string) (string, error) {
 }
 
 // ParseRetention checks a typed retention: "" stays "" (a blank cell); forever (in any case) is store.Forever; a
-// period is N followed by y, m, w or d (years, months, weeks, days; N from 1 to 1000), returned in lower case; and a
-// date is YYYY-MM-DD, a real date. Anything else is refused.
+// period is N followed by y, m, w or d (years, months, weeks, days; N from 1 to 1000), returned in lower case; a
+// date is YYYY-MM-DD, a real date; and a policy name (store.PolicyName) is returned in lower case. Anything else is
+// refused.
 func ParseRetention(s string) (string, error) {
 	s = strings.TrimSpace(s)
 	if s == "" {
@@ -54,12 +55,14 @@ func ParseRetention(s string) (string, error) {
 	if p, ok := store.NormalPeriod(s); ok {
 		return p, nil
 	}
-	d, err := ParseDate(s)
-	if err != nil {
-		return "", fmt.Errorf("%q is not a retention: use a period such as 7y, 18m, 6w or 30d (counted from "+
-			"file_date), forever, or a date YYYY-MM-DD%s", s, formatHint)
+	if d, err := ParseDate(s); err == nil {
+		return d, nil
 	}
-	return d, nil
+	if name, err := store.PolicyName(s); err == nil {
+		return name, nil // a policy (docs/design.md, Named retention policies)
+	}
+	return "", fmt.Errorf("%q is not a retention: use a period such as 7y, 18m, 6w or 30d (counted from "+
+		"file_date), forever, a date YYYY-MM-DD, or a policy name (letters, digits, - and _)%s", s, formatHint)
 }
 
 // parseKeepUntil reads the display-only keep_until cell, so that a cell a spreadsheet merely reformatted compares

@@ -13,6 +13,33 @@ import (
 // so changing it changes every file using it. A file on a policy has files.policy_id set and no retention of its own;
 // its keep_until is worked out from the policy's value and stored, so the statuses and filo delete read it as before.
 
+// policyJoin and retentionColumns are the one spelling, in SQL, of a file's retention as read: its policy's name if
+// it is on one, else its own; then the policy's name and its value ("" for none). A query on alias f (files) adds
+// policyJoin to its FROM and reads the three columns into FileItem's Retention, Policy and PolicyValue.
+const (
+	policyJoin       = ` LEFT JOIN policies pol ON pol.id = f.policy_id `
+	retentionColumns = `coalesce(pol.name, f.retention, ''), coalesce(pol.name, ''), coalesce(pol.value, '')`
+)
+
+// NeedsFileDateError is a period policy given to a file with no file_date to count from.
+type NeedsFileDateError struct{ Policy, Value string }
+
+func (e NeedsFileDateError) Error() string {
+	return fmt.Sprintf("retention %s (%s) needs a file_date", e.Policy, e.Value)
+}
+
+// IsPolicyRef reports whether a retention, as checked, names a policy: not blank, forever, a period or a date. A
+// policy name starts with a letter and the others with a digit, so they are never mistaken for each other.
+func IsPolicyRef(retention string) bool {
+	return retention != "" && retention != Forever && retention[0] >= 'a' && retention[0] <= 'z'
+}
+
+// NeedsFileDate reports whether a file has a policy whose value is a period and no file_date to count from it: its
+// keep_until cannot be worked out, so it is never deleted (docs/design.md, Named retention policies).
+func (f FileItem) NeedsFileDate() bool {
+	return f.Policy != "" && f.FileDate == "" && IsPeriod(f.PolicyValue)
+}
+
 var (
 	// ErrPolicyName means a name that cannot be a policy's.
 	ErrPolicyName = errors.New("a policy name is letters, digits, - and _, starting with a letter, and not forever")
@@ -26,15 +53,19 @@ var (
 
 // PolicyName checks a typed policy name and returns it as stored, in lower case: letters, digits, - and _, starting
 // with a letter (so it is never mistaken for a period or a date), at most 64 characters, and not forever.
+// The characters are checked before lowering, in ASCII only, so no other character folds into a letter (the Kelvin
+// sign into k).
 func PolicyName(s string) (string, error) {
-	name := strings.ToLower(strings.TrimSpace(s))
-	if name == "" || len(name) > 64 || name == Forever || name[0] < 'a' || name[0] > 'z' {
-		return "", fmt.Errorf("%q: %w", s, ErrPolicyName)
-	}
-	for _, c := range name {
-		if !(c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '-' || c == '_') {
+	raw := strings.TrimSpace(s)
+	for i := 0; i < len(raw); i++ {
+		c := raw[i]
+		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-' || c == '_') {
 			return "", fmt.Errorf("%q: %w", s, ErrPolicyName)
 		}
+	}
+	name := strings.ToLower(raw) // ASCII only, so a byte-wise lowering
+	if name == "" || len(name) > 64 || name == Forever || name[0] < 'a' || name[0] > 'z' {
+		return "", fmt.Errorf("%q: %w", s, ErrPolicyName)
 	}
 	return name, nil
 }
@@ -92,11 +123,17 @@ func (s *Store) Policies(ctx context.Context) ([]Policy, error) {
 
 // Policy returns the policy of that name (any case), or ErrNoPolicy.
 func (s *Store) Policy(ctx context.Context, name string) (Policy, error) {
+	return readPolicy(ctx, s.db, name)
+}
+
+// readPolicy reads a policy through q: the store, or the transaction that acts on it, so what it checks (a policy in
+// use, a merge target's value) is what the change sees.
+func readPolicy(ctx context.Context, q querier, name string) (Policy, error) {
 	n, err := PolicyName(name)
 	if err != nil {
 		return Policy{}, err
 	}
-	ps, err := queryAll(ctx, s.db, scanPolicy, policiesQuery+` WHERE pol.name = ?`, n)
+	ps, err := queryAll(ctx, q, scanPolicy, policiesQuery+` WHERE pol.name = ?`, n)
 	if err != nil {
 		return Policy{}, fmt.Errorf("read policy %s: %w", n, err)
 	}
@@ -120,25 +157,55 @@ func (s *Store) AddPolicy(ctx context.Context, name, value string, now time.Time
 		return err
 	}
 	defer tx.Rollback()
-	if err := addPolicy(ctx, tx, n, value, now); err != nil {
+	if _, err := addPolicy(ctx, tx, n, value, now); err != nil {
 		return err
 	}
 	return s.commit(tx)
 }
 
-func addPolicy(ctx context.Context, tx *sql.Tx, name, value string, now time.Time) error {
+// addPolicy creates a policy in tx and returns its ID.
+func addPolicy(ctx context.Context, tx *sql.Tx, name, value string, now time.Time) (int64, error) {
 	var exists int
 	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM policies WHERE name = ?`, name).Scan(&exists); err != nil {
-		return fmt.Errorf("add policy %s: %w", name, err)
+		return 0, fmt.Errorf("add policy %s: %w", name, err)
 	}
 	if exists > 0 {
-		return fmt.Errorf("%s: %w", name, ErrPolicyExists)
+		return 0, fmt.Errorf("%s: %w", name, ErrPolicyExists)
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO policies (name, value, added_utc, changed_utc) VALUES (?, ?, ?, ?)`,
-		name, nullString(value), utc(now), utc(now)); err != nil {
-		return fmt.Errorf("add policy %s: %w", name, err)
+	res, err := tx.ExecContext(ctx, `INSERT INTO policies (name, value, added_utc, changed_utc) VALUES (?, ?, ?, ?)`,
+		name, nullString(value), utc(now), utc(now))
+	if err != nil {
+		return 0, fmt.Errorf("add policy %s: %w", name, err)
 	}
-	return recordPolicyChange(ctx, tx, "add", name, "", value, 0, now)
+	id, err := res.LastInsertId()
+	if err != nil {
+		return 0, err
+	}
+	return id, recordPolicyChange(ctx, tx, "add", name, "", value, 0, now)
+}
+
+// policyRef is a policy as an update needs it: its ID and value, looked up once per update (policyCache).
+type policyRef struct {
+	id    int64 // 0: no such policy yet
+	value string
+}
+
+// policyCache looks policies up by name through tx, each once.
+type policyCache map[string]policyRef
+
+func (pc policyCache) get(ctx context.Context, tx *sql.Tx, name string) (policyRef, error) {
+	if p, ok := pc[name]; ok {
+		return p, nil
+	}
+	var p policyRef
+	var value sql.NullString
+	err := tx.QueryRowContext(ctx, `SELECT id, value FROM policies WHERE name = ?`, name).Scan(&p.id, &value)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return p, fmt.Errorf("read policy %s: %w", name, err)
+	}
+	p.value = value.String
+	pc[name] = p
+	return p, nil
 }
 
 func recordPolicyChange(ctx context.Context, tx *sql.Tx, kind, policy, old, new string, files int64,
@@ -201,22 +268,20 @@ func (s *Store) PreviewMove(ctx context.Context, from, to, today string) (Policy
 	return s.preview(ctx, p, target, today)
 }
 
-// preview works out the new keep_until of from's present files under to's value.
+// preview works out the new keep_until of from's present files under to's value. A PolicyFile's Status is left empty:
+// the status a file would have is not worked out, only its date.
 func (s *Store) preview(ctx context.Context, from, to Policy, today string) (PolicyPreview, error) {
 	out := PolicyPreview{From: from, To: to}
-	files, err := s.Files(ctx, today, Filter{})
+	files, err := s.Files(ctx, today, Filter{PolicyID: from.ID})
 	if err != nil {
 		return out, err
 	}
 	past := func(k string) bool { return k != "" && k != Forever && k <= today }
 	for _, it := range files {
-		if it.Policy != from.Name {
-			continue
-		}
 		out.Files++
 		keep, _ := KeepUntil(it.FileDate, to.Value) // a period with no file_date has none
 		pf := PolicyFile{FileItem: it, OldKeepUntil: it.KeepUntil}
-		pf.KeepUntil = keep
+		pf.KeepUntil, pf.Status = keep, ""
 		if past(keep) && !past(it.KeepUntil) {
 			out.Past = append(out.Past, pf)
 		}
@@ -228,7 +293,7 @@ func (s *Store) preview(ctx context.Context, from, to Policy, today string) (Pol
 }
 
 // workOutFiles works out again the keep_until of every file on the policy (present or missing; not those filo
-// deleted, whose row is their history) from its value, and returns how many it changed.
+// deleted, whose row is their history) from its value, and returns how many keep_until values it changed.
 func workOutFiles(ctx context.Context, tx *sql.Tx, policyID int64, value string) (int64, error) {
 	type row struct {
 		id             int64
@@ -246,10 +311,10 @@ func workOutFiles(ctx context.Context, tx *sql.Tx, policyID int64, value string)
 	var n int64
 	for _, r := range rows {
 		keep, _ := KeepUntil(r.fileDate, value) // a period with no file_date has none: it needs a file_date
-		n++
 		if keep == r.keep {
 			continue
 		}
+		n++
 		if _, err := tx.ExecContext(ctx, `UPDATE files SET keep_until = ? WHERE id = ?`, nullString(keep),
 			r.id); err != nil {
 			return 0, err
@@ -259,12 +324,9 @@ func workOutFiles(ctx context.Context, tx *sql.Tx, policyID int64, value string)
 }
 
 // SetPolicy gives a policy a value, or changes it, and works out the keep_until of every file on it again. It returns
-// how many files are on it. The question before it is the CLI's (PreviewPolicy).
+// how many present files are on it, as PreviewPolicy counts them; policy_changes records how many keep_until values
+// changed. The question before it is the CLI's (PreviewPolicy).
 func (s *Store) SetPolicy(ctx context.Context, name, value string, now time.Time) (int64, error) {
-	p, err := s.Policy(ctx, name)
-	if err != nil {
-		return 0, err
-	}
 	if err := checkPolicyValue(value); err != nil {
 		return 0, err
 	}
@@ -273,36 +335,32 @@ func (s *Store) SetPolicy(ctx context.Context, name, value string, now time.Time
 		return 0, err
 	}
 	defer tx.Rollback()
+	p, err := readPolicy(ctx, tx, name)
+	if err != nil {
+		return 0, err
+	}
 	if _, err := tx.ExecContext(ctx, `UPDATE policies SET value = ?, changed_utc = ? WHERE id = ?`, nullString(value),
 		utc(now), p.ID); err != nil {
 		return 0, fmt.Errorf("set policy %s: %w", p.Name, err)
 	}
-	n, err := workOutFiles(ctx, tx, p.ID, value)
+	changed, err := workOutFiles(ctx, tx, p.ID, value)
 	if err != nil {
 		return 0, fmt.Errorf("set policy %s: %w", p.Name, err)
 	}
 	if value != p.Value {
-		if err := recordPolicyChange(ctx, tx, "set", p.Name, p.Value, value, n, now); err != nil {
+		if err := recordPolicyChange(ctx, tx, "set", p.Name, p.Value, value, changed, now); err != nil {
 			return 0, err
 		}
 	}
-	return n, s.commit(tx)
+	return p.Files, s.commit(tx)
 }
 
 // MovePolicy moves every file of policy from to policy to: into a new name it is a rename (the value goes with it),
 // into an existing policy a merge (the files take its value, and from stays, with no files). It returns how many
-// files moved.
+// present files moved, as PreviewMove counts them (missing files on it move too).
 func (s *Store) MovePolicy(ctx context.Context, from, to string, now time.Time) (int64, error) {
-	p, err := s.Policy(ctx, from)
-	if err != nil {
-		return 0, err
-	}
 	n, err := PolicyName(to)
 	if err != nil {
-		return 0, err
-	}
-	target, err := s.Policy(ctx, n)
-	if err != nil && !errors.Is(err, ErrNoPolicy) {
 		return 0, err
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -310,56 +368,60 @@ func (s *Store) MovePolicy(ctx context.Context, from, to string, now time.Time) 
 		return 0, err
 	}
 	defer tx.Rollback()
-	var moved int64
-	if target.ID == 0 { // a new name: a rename
+	p, err := readPolicy(ctx, tx, from)
+	if err != nil {
+		return 0, err
+	}
+	target, err := readPolicy(ctx, tx, n)
+	if err != nil && !errors.Is(err, ErrNoPolicy) {
+		return 0, err
+	}
+	switch {
+	case target.ID == 0: // a new name: a rename
 		if _, err := tx.ExecContext(ctx, `UPDATE policies SET name = ?, changed_utc = ? WHERE id = ?`, n, utc(now),
 			p.ID); err != nil {
 			return 0, fmt.Errorf("rename policy %s: %w", p.Name, err)
 		}
-		moved = p.Files
-		if err := recordPolicyChange(ctx, tx, "rename", p.Name, "", n, moved, now); err != nil {
+		if err := recordPolicyChange(ctx, tx, "rename", p.Name, "", n, p.Files, now); err != nil {
 			return 0, err
 		}
-		return moved, s.commit(tx)
-	}
-	if target.ID == p.ID {
+	case target.ID == p.ID:
 		return 0, nil
+	default:
+		if _, err := tx.ExecContext(ctx, `UPDATE files SET policy_id = ? WHERE policy_id = ? AND deleted_utc IS NULL`,
+			target.ID, p.ID); err != nil {
+			return 0, fmt.Errorf("move policy %s: %w", p.Name, err)
+		}
+		if _, err := workOutFiles(ctx, tx, target.ID, target.Value); err != nil {
+			return 0, fmt.Errorf("move policy %s: %w", p.Name, err)
+		}
+		if err := recordPolicyChange(ctx, tx, "move", p.Name, "", target.Name, p.Files, now); err != nil {
+			return 0, err
+		}
 	}
-	res, err := tx.ExecContext(ctx, `UPDATE files SET policy_id = ? WHERE policy_id = ? AND deleted_utc IS NULL`,
-		target.ID, p.ID)
-	if err != nil {
-		return 0, fmt.Errorf("move policy %s: %w", p.Name, err)
-	}
-	if moved, err = res.RowsAffected(); err != nil {
-		return 0, err
-	}
-	if _, err := workOutFiles(ctx, tx, target.ID, target.Value); err != nil {
-		return 0, fmt.Errorf("move policy %s: %w", p.Name, err)
-	}
-	if err := recordPolicyChange(ctx, tx, "move", p.Name, "", target.Name, moved, now); err != nil {
-		return 0, err
-	}
-	return moved, s.commit(tx)
+	return p.Files, s.commit(tx)
 }
 
 // RemovePolicy removes a policy that no present file uses (ErrPolicyInUse otherwise). Files filo deleted, and
-// missing files, that were on it keep their keep_until with the policy's value as a retention of their own, so a
-// missing file that comes back still has one.
+// missing files, that were on it keep their keep_until, with the policy's value as a retention of their own, so a
+// missing file that comes back still has one; except a period with no file_date to count from, which would be a
+// retention without a keep_until: those get none, and need a retention if they come back.
 func (s *Store) RemovePolicy(ctx context.Context, name string, now time.Time) error {
-	p, err := s.Policy(ctx, name)
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	p, err := readPolicy(ctx, tx, name)
 	if err != nil {
 		return err
 	}
 	if p.Files > 0 {
 		return fmt.Errorf("%s is used by %d files: %w", p.Name, p.Files, ErrPolicyInUse)
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, `UPDATE files SET retention = ?, policy_id = NULL WHERE policy_id = ?`,
-		nullString(p.Value), p.ID); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE files SET policy_id = NULL,
+		retention = CASE WHEN ? AND file_date IS NULL THEN NULL ELSE ? END WHERE policy_id = ?`,
+		IsPeriod(p.Value), nullString(p.Value), p.ID); err != nil {
 		return fmt.Errorf("remove policy %s: %w", p.Name, err)
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM policies WHERE id = ?`, p.ID); err != nil {
@@ -377,15 +439,5 @@ func (s *Store) PolicyFiles(ctx context.Context, name, today string) ([]FileItem
 	if err != nil {
 		return nil, err
 	}
-	files, err := s.Files(ctx, today, Filter{})
-	if err != nil {
-		return nil, err
-	}
-	var out []FileItem
-	for _, it := range files {
-		if it.Policy == p.Name {
-			out = append(out, it)
-		}
-	}
-	return out, nil
+	return s.Files(ctx, today, Filter{PolicyID: p.ID})
 }

@@ -547,6 +547,20 @@ func decide(j *dupJob, p duplicates.GroupPlan, group []store.ExportedCopy, rootW
 		skip(g.ExportedCopy, "no copy would be left: the copy to keep is gone ("+g.why+")")
 		return
 	}
+	// A copy on a period policy with no file_date has a retention whose end is not known yet, which no copy kept can
+	// be shown to outlast: it is not deleted until it has one (docs/design.md, Named retention policies). Likewise a copy on a policy with no value yet: its retention's length is not decided.
+	for _, c := range del {
+		switch {
+		case c.NeedsFileDate():
+			j.state, j.reason, j.root, j.rel = jobRefused, "needs a file_date first: its policy "+c.Policy+" ("+
+				c.PolicyValue+") counts from it", c.RootPath, c.Path
+			return
+		case c.Policy != "" && c.PolicyValue == "":
+			j.state, j.reason, j.root, j.rel = jobRefused, "its policy "+c.Policy+" has no value yet: give it one "+
+				"first (filo policies set "+c.Policy+" VALUE)", c.RootPath, c.Path
+			return
+		}
+	}
 	// The retention rule: a copy can be deleted only if a kept copy lasts at least as long.
 	best := keep[0]
 	for _, c := range keep[1:] {

@@ -65,6 +65,8 @@ func TestPolicyName(t *testing.T) {
 		{"my bills", "", false},
 		{"-bills", "", false},
 		{"", "", false},
+		{"\u212Aills", "", false}, // the Kelvin sign, which Unicode lowers to k
+		{"bïlls", "", false},
 	}
 	for _, tc := range tests {
 		got, err := PolicyName(tc.in)
@@ -218,7 +220,7 @@ func TestSetPolicy(t *testing.T) {
 		t.Errorf("shorten, none newly past: past %v", paths(p.Past))
 	}
 	if p := preview("3y"); !slices.Equal(paths(p.Past), []string{"new"}) || p.Past[0].KeepUntil != "2025-01-01" ||
-		p.Past[0].OldKeepUntil != "2029-01-01" {
+		p.Past[0].OldKeepUntil != "2029-01-01" || p.Past[0].Status != "" {
 		t.Errorf("shorten, one newly past: %+v", p.Past)
 	}
 	if p := preview(Forever); len(p.Past) != 0 || len(p.NoFileDate) != 0 {
@@ -372,5 +374,247 @@ func TestMigrateFromV8(t *testing.T) {
 	}
 	if notes := s.UpgradeNotes(); len(notes) != 0 {
 		t.Errorf("UpgradeNotes = %q, want none", notes)
+	}
+}
+
+// TestPolicyReviewFindings: the cases found in the code review of slice 1 (2026-11-16).
+func TestPolicyReviewFindings(t *testing.T) {
+	t.Run("counts are of present files; the history counts the dates changed", func(t *testing.T) {
+		e := newReviewEnv(t)
+		e.apply(Changes{New: []NewFile{f("a", "ha"), f("gone", "hg"), f("c", "hc")}})
+		if err := e.s.AddPolicy(e.ctx, "bills", "7y", policyNow); err != nil {
+			t.Fatal(err)
+		}
+		e.onPolicy("a", "bills", "2020-01-01")
+		e.onPolicy("gone", "bills", "")
+		e.onPolicy("c", "bills", "2021-01-01")
+		e.workOut("bills")
+		e.apply(Changes{Close: []int64{e.known()["gone"].PathID}}) // missing now
+		if _, err := e.s.SetRetention(e.ctx, e.known()["c"].FileID, "2030-01-01", policyNow); err != nil {
+			t.Fatal(err)
+		}
+		// One present file (a); gone, missing and without a file_date, keeps no keep_until either way.
+		if n, err := e.s.SetPolicy(e.ctx, "bills", "10y", policyNow); err != nil || n != 1 {
+			t.Errorf("SetPolicy: %d, %v; want 1 present file", n, err)
+		}
+		if n, err := e.s.MovePolicy(e.ctx, "bills", "invoices", policyNow); err != nil || n != 1 {
+			t.Errorf("rename: %d, %v; want 1", n, err)
+		}
+		if err := e.s.AddPolicy(e.ctx, "tax", "5y", policyNow); err != nil {
+			t.Fatal(err)
+		}
+		if n, err := e.s.MovePolicy(e.ctx, "invoices", "tax", policyNow); err != nil || n != 1 {
+			t.Errorf("merge: %d, %v; want 1, as the rename counts", n, err)
+		}
+		want := []string{"add bills  7y 0", "set bills 7y 10y 1", "rename bills  invoices 1", "add tax  5y 0",
+			"move invoices  tax 1"}
+		if got := e.policyChanges(); !slices.Equal(got, want) {
+			t.Errorf("policy_changes = %q, want %q", got, want)
+		}
+
+		// Removing tax once a has a retention of its own: gone, missing with no file_date, gets no retention
+		// rather than 5y with nothing to count from.
+		if _, err := e.s.SetRetention(e.ctx, e.known()["a"].FileID, "2031-01-01", policyNow); err != nil {
+			t.Fatal(err)
+		}
+		if err := e.s.RemovePolicy(e.ctx, "tax", policyNow); err != nil {
+			t.Fatal(err)
+		}
+		var retention, policy *string
+		if err := e.s.db.QueryRow(`SELECT retention, policy_id FROM files WHERE id = ?`,
+			e.knownAll("gone")).Scan(&retention, &policy); err != nil || retention != nil || policy != nil {
+			t.Errorf("gone after the removal: retention %v, policy %v (%v); want neither", retention, policy, err)
+		}
+	})
+
+	t.Run("a retention of its own through the CSV takes the file off its policy", func(t *testing.T) {
+		e := newReviewEnv(t)
+		e.apply(Changes{New: []NewFile{f("a", "ha")}})
+		if err := e.s.AddPolicy(e.ctx, "bills", "7y", policyNow); err != nil {
+			t.Fatal(err)
+		}
+		e.onPolicy("a", "bills", "2019-03-14")
+		e.workOut("bills")
+		ex, _ := e.export("2026-11-16", policyNow)
+		res, err := e.s.UpdateRetention(e.ctx, []RetentionRow{{Line: 2, ExportID: ex, FileID: e.known()["a"].FileID,
+			FileDate: "2019-03-14", HasFileDate: true, Retention: "2030-01-01"}}, policyNow, "2026-11-16", "r.csv",
+			false, nil)
+		if err != nil || len(res.Refusals) != 0 || res.Set != 1 {
+			t.Fatalf("UpdateRetention: %+v, %v", res, err)
+		}
+		if got := e.files("2026-11-16")["a"]; got.Policy != "" || got.Retention != "2030-01-01" ||
+			got.KeepUntil != "2030-01-01" {
+			t.Errorf("a: policy %q, retention %q, until %q; want its own 2030-01-01", got.Policy, got.Retention,
+				got.KeepUntil)
+		}
+	})
+}
+
+// knownAll returns the file ID of path, present or not.
+func (e *reviewEnv) knownAll(path string) int64 {
+	e.t.Helper()
+	var id int64
+	if err := e.s.db.QueryRow(`SELECT file_id FROM paths WHERE path = ? ORDER BY id DESC LIMIT 1`, path).
+		Scan(&id); err != nil {
+		e.t.Fatal(err)
+	}
+	return id
+}
+
+// TestUpdateRetentionPolicies: policy names in the retention CSV (slice 2): A1, A2, B1, B2, B4, B5 and E3 in the
+// store.
+func TestUpdateRetentionPolicies(t *testing.T) {
+	const today = "2026-11-16"
+	setup := func(t *testing.T) (*reviewEnv, int64) {
+		e := newReviewEnv(t)
+		e.apply(Changes{New: []NewFile{f("a", "ha"), f("b", "hb"), f("c", "hc"), f("d", "hd")}})
+		if err := e.s.AddPolicy(e.ctx, "bills", "7y", policyNow); err != nil {
+			t.Fatal(err)
+		}
+		ex, _ := e.export(today, policyNow)
+		return e, ex
+	}
+	row := func(e *reviewEnv, ex int64, path, date, ret string) RetentionRow {
+		return RetentionRow{Line: 2, ExportID: ex, FileID: e.known()[path].FileID, FileDate: date, HasFileDate: true,
+			Retention: ret}
+	}
+	update := func(e *reviewEnv, rows []RetentionRow, confirm func([]NewPolicy) bool) UpdateResult {
+		e.t.Helper()
+		res, err := e.s.UpdateRetentionWith(e.ctx, rows, policyNow, today, "r.csv", UpdateOptions{
+			ConfirmPolicies: confirm})
+		if err != nil {
+			e.t.Fatal(err)
+		}
+		return res
+	}
+	yes := func([]NewPolicy) bool { return true }
+
+	t.Run("B1, B2: an existing policy; a period with no file_date refuses the row", func(t *testing.T) {
+		e, ex := setup(t)
+		res := update(e, []RetentionRow{row(e, ex, "a", "2019-03-14", "bills"), row(e, ex, "b", "", "bills")}, nil)
+		if res.Set != 1 || len(res.Refusals) != 1 || res.Refusals[0].Reason != "retention bills (7y) needs a file_date" {
+			t.Fatalf("result = %+v", res)
+		}
+		a := e.files(today)["a"]
+		if a.Policy != "bills" || a.KeepUntil != "2026-03-14" || a.Retention != "bills" {
+			t.Errorf("a = %+v", a)
+		}
+		var own *string
+		if err := e.s.db.QueryRow(`SELECT retention FROM files WHERE id = ?`, a.FileID).Scan(&own); err != nil ||
+			own != nil {
+			t.Errorf("a's own retention = %v (%v), want none while it is on a policy", own, err)
+		}
+	})
+
+	t.Run("A1, A2: new policies are created only once confirmed", func(t *testing.T) {
+		e, ex := setup(t)
+		rows := []RetentionRow{row(e, ex, "a", "", "bils"), row(e, ex, "b", "", "Payslip"),
+			row(e, ex, "c", "", "bils"), row(e, ex, "d", "2020-01-01", "bills")}
+		rows[1].Retention = "payslip" // as the CSV reader gives it
+		var asked []NewPolicy
+		res := update(e, rows, func(ps []NewPolicy) bool { asked = ps; return false })
+		if want := []NewPolicy{{"bils", 2}, {"payslip", 1}}; !slices.Equal(asked, want) {
+			t.Errorf("asked about %v, want %v", asked, want)
+		}
+		if res.Set != 1 || res.PolicyRowsSkipped != 3 || res.PoliciesCreated != 0 {
+			t.Errorf("declined: %+v, want d set and 3 rows left alone", res)
+		}
+		if _, err := e.s.Policy(e.ctx, "bils"); !errors.Is(err, ErrNoPolicy) {
+			t.Errorf("bils after declining: %v", err)
+		}
+		// No terminal: confirm is nil, the same as declining.
+		if res := update(e, rows[:1], nil); res.PolicyRowsSkipped != 1 {
+			t.Errorf("no terminal: %+v", res)
+		}
+		res = update(e, rows[:3], yes)
+		if res.PoliciesCreated != 2 || res.Set != 3 {
+			t.Errorf("confirmed: %+v", res)
+		}
+		got := e.files(today)
+		if got["a"].Policy != "bils" || got["a"].Status != StatusUndated || got["b"].Policy != "payslip" {
+			t.Errorf("after creating: a %+v, b %+v", got["a"], got["b"])
+		}
+		if p, err := e.s.Policy(e.ctx, "bils"); err != nil || p.Value != "" || p.Files != 2 {
+			t.Errorf("bils = %+v, %v; want no value, 2 files", p, err)
+		}
+	})
+
+	t.Run("a dry run lists the new policies and creates nothing", func(t *testing.T) {
+		e, ex := setup(t)
+		res, err := e.s.UpdateRetentionWith(e.ctx, []RetentionRow{row(e, ex, "a", "", "bils")}, policyNow, today,
+			"r.csv", UpdateOptions{DryRun: true, ConfirmPolicies: yes})
+		if err != nil || !slices.Equal(res.NewPolicies, []NewPolicy{{"bils", 1}}) || res.Set != 1 {
+			t.Fatalf("dry run: %+v, %v", res, err)
+		}
+		if _, err := e.s.Policy(e.ctx, "bils"); !errors.Is(err, ErrNoPolicy) {
+			t.Errorf("bils after a dry run: %v", err)
+		}
+	})
+
+	t.Run("B4, B5, E3: to a retention of its own and back; untouched rows; clearing the file_date", func(t *testing.T) {
+		e, ex := setup(t)
+		update(e, []RetentionRow{row(e, ex, "a", "2019-03-14", "bills")}, nil)
+		ex2, _ := e.export(today, policyNow.Add(time.Minute))
+		// B5: the export shows the policy's name; the row untouched is unchanged, not refused.
+		res := update(e, []RetentionRow{row(e, ex2, "a", "2019-03-14", "bills")}, nil)
+		if res.Unchanged != 1 || len(res.Refusals) != 0 {
+			t.Errorf("untouched policy row: %+v", res)
+		}
+		// E3: clearing the file_date of a file on a period policy is refused.
+		res = update(e, []RetentionRow{row(e, ex2, "a", "", "bills")}, nil)
+		if len(res.Refusals) != 1 || res.Refusals[0].Reason != "retention bills (7y) needs a file_date" {
+			t.Errorf("clearing file_date: %+v", res)
+		}
+		// B4: a retention of its own, then back to the policy.
+		update(e, []RetentionRow{row(e, ex2, "a", "2019-03-14", "2030-01-01")}, nil)
+		if a := e.files(today)["a"]; a.Policy != "" || a.Retention != "2030-01-01" {
+			t.Errorf("own retention: %+v", a)
+		}
+		ex3, _ := e.export(today, policyNow.Add(2*time.Minute))
+		update(e, []RetentionRow{row(e, ex3, "a", "2019-03-14", "bills")}, nil)
+		if a := e.files(today)["a"]; a.Policy != "bills" || a.KeepUntil != "2026-03-14" {
+			t.Errorf("back on bills: %+v", a)
+		}
+		// A blank retention clears the policy, once confirmed.
+		res, err := e.s.UpdateRetentionWith(e.ctx, []RetentionRow{row(e, ex3, "a", "2019-03-14", "")}, policyNow,
+			today, "r.csv", UpdateOptions{ConfirmClears: func(cs []Clear) bool {
+				return len(cs) == 1 && cs[0].Retention == "bills"
+			}})
+		if err != nil || res.Cleared != 1 {
+			t.Fatalf("clear: %+v, %v", res, err)
+		}
+		if a := e.files(today)["a"]; a.Policy != "" || a.Retention != "" || a.Status != StatusUndated {
+			t.Errorf("cleared: %+v", a)
+		}
+	})
+}
+
+// TestSetRetentionPolicy: filo delete's prompt takes a policy name too: an existing policy puts the file on it; an
+// unknown one is refused (that prompt cannot ask to create it); a period policy needs a file_date.
+func TestSetRetentionPolicy(t *testing.T) {
+	e := newReviewEnv(t)
+	e.apply(Changes{New: []NewFile{f("a", "ha"), f("b", "hb")}})
+	if err := e.s.AddPolicy(e.ctx, "bills", "7y", policyNow); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.s.db.Exec(`UPDATE files SET file_date = '2019-03-14' WHERE id = ?`, e.known()["a"].FileID); err != nil {
+		t.Fatal(err)
+	}
+	keep, err := e.s.SetRetention(e.ctx, e.known()["a"].FileID, "bills", policyNow)
+	if err != nil || keep != "2026-03-14" {
+		t.Fatalf("SetRetention bills: %q, %v", keep, err)
+	}
+	if a := e.files("2026-11-16")["a"]; a.Policy != "bills" || a.Retention != "bills" {
+		t.Errorf("a = %+v, want on bills", a)
+	}
+	if _, err := e.s.SetRetention(e.ctx, e.known()["a"].FileID, "bils", policyNow); !errors.Is(err, ErrNoPolicy) {
+		t.Errorf("an unknown policy: %v, want ErrNoPolicy", err)
+	}
+	if _, err := e.s.SetRetention(e.ctx, e.known()["b"].FileID, "bills", policyNow); err == nil ||
+		err.Error() != "retention bills (7y) needs a file_date" {
+		t.Errorf("no file_date: %v", err)
+	}
+	if _, err := KeepUntil("2020-01-01", "bills"); err == nil {
+		t.Error("KeepUntil of a policy name: no error")
 	}
 }

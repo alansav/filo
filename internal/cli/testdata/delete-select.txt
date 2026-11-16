@@ -14,7 +14,7 @@ Delete all 3, select one by one, list them all, or none? [a/s/l/N]
 
 [2/3]  past its retention . until 2024-12-31 . 10 B
           <root>/tax/2017 return.pdf
-        d delete . r new retention . s skip . q quit  >         new retention: forever or YYYY-MM-DD (a period needs a file_date, which this file has not got); blank to go back  >         [ok] kept until 2030-01-01
+        d delete . r new retention . s skip . q quit  >         new retention: forever, YYYY-MM-DD or a policy (a period needs a file_date, which this file has not got); blank to go back  >         [ok] kept until 2030-01-01
 
 [3/3]  past its retention . until 2025-09-01 . 5 B
           <root>/video/2015/summer holiday in the south of France with the whole family, day 3.mp4

@@ -1,0 +1,12 @@
+Retention update   r.csv . export 1 . 4 rows . <root>
+
+New policies                                                  2 . bils, payslip
+  - bils      2 rows
+  - payslip   1 row
+  - they have no value yet: their files need a retention until filo policies set NAME VALUE
+
+Create 2 policies? [y/N] 
+  [ok] 2 policies created: bils, payslip
+  [ok] 1 file given a retention
+  [!] 3 files put on a policy with no value yet: they need a retention until it has one (filo policies set NAME VALUE)
+

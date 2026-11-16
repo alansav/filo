@@ -66,12 +66,16 @@ func TestParseRetention(t *testing.T) {
 		{"+7y", "", true},
 		{"7", "", true},
 		{"7x", "", true},
-		{"y", "", true},
+		{"y", "y", false}, // a policy name: filo update asks before creating one, so a typo for 7y is caught there
 		{"7 y", "", true},
 		{"-1y", "", true},
 		{"2027-02-29", "", true},
 		{"14/03/2030", "", true},
-		{"indefinitely", "", true},
+		{"indefinitely", "indefinitely", false}, // a policy name (slice 2 of named retention policies)
+		{"Bills", "bills", false},
+		{" end-of-the-year ", "end-of-the-year", false},
+		{"bills!", "", true},
+		{"my bills", "", true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.in, func(t *testing.T) {

@@ -57,6 +57,9 @@ func NormalPeriod(s string) (string, bool) {
 // counts from fileDate (an error if there is none), forever stays forever, and a date is itself. "" gives "". A month
 // step that lands past the end of a month stops on its last day.
 func KeepUntil(fileDate, retention string) (string, error) {
+	if IsPolicyRef(retention) { // never a date: its policy's value is worked out instead
+		return "", fmt.Errorf("retention %s is a policy: work it out from the policy's value", retention)
+	}
 	n, unit, ok := period(retention)
 	if !ok {
 		return retention, nil
