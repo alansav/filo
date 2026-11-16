@@ -23,9 +23,10 @@ var ErrPattern = errors.New("a pattern is a file name with * and ?, without /")
 // maxPattern is the longest pattern, in bytes: the longest file name most filesystems allow.
 const maxPattern = 255
 
-// Pattern checks a typed pattern and returns it as stored: "" is Any, and a run of * is one * (they match the same
-// names, and as two patterns of one directory with no letters they would always tie). The rest is kept as typed; the
-// case is ignored when matching and comparing.
+// Pattern checks a typed pattern and returns it as stored: "" is Any, and each run of wildcards in one form, its ?
+// first and then one * if it has any (`**` is `*`, `*?` and `?*` are `?*`): they match the same names, and as two
+// patterns of one directory with as many letters they would always tie. The rest is kept as typed; the case is
+// ignored when matching and comparing.
 func Pattern(p string) (string, error) {
 	if p == "" {
 		return Any, nil
@@ -33,10 +34,28 @@ func Pattern(p string) (string, error) {
 	if strings.ContainsAny(p, "/\x00") || !utf8.ValidString(p) || len(p) > maxPattern {
 		return "", ErrPattern
 	}
-	for strings.Contains(p, "**") {
-		p = strings.ReplaceAll(p, "**", "*")
+	var b strings.Builder
+	q, star := 0, false // the run of wildcards being read: how many ?, and whether it has a *
+	flush := func() {
+		b.WriteString(strings.Repeat("?", q))
+		if star {
+			b.WriteByte('*')
+		}
+		q, star = 0, false
 	}
-	return p, nil
+	for _, r := range p {
+		switch r {
+		case '?':
+			q++
+		case '*':
+			star = true
+		default:
+			flush()
+			b.WriteRune(r)
+		}
+	}
+	flush()
+	return b.String(), nil
 }
 
 // Key is a pattern as compared: in lower case, so `*statement*` and `*Statement*` are the same pattern.
@@ -56,7 +75,11 @@ func Letters(p string) int {
 // Match reports whether name matches pattern, in any case: * is any run of characters, ? one character, and every
 // other character only itself (a [ in a name is a [, not a class).
 func Match(pattern, name string) bool {
-	p, s := []rune(Key(pattern)), []rune(strings.ToLower(name))
+	return match([]rune(Key(pattern)), []rune(strings.ToLower(name)))
+}
+
+// match is Match on a pattern and a name already in lower case, as runes.
+func match(p, s []rune) bool {
 	pi, si := 0, 0
 	star, mark := -1, 0 // the last * seen, and where in s it started matching
 	for si < len(s) {
@@ -115,15 +138,37 @@ type Result struct {
 	Found bool
 }
 
-// Resolve works out the rule for the file at rel ('/'-separated, relative to the root) from the rules of its root.
-func Resolve(rs []Rule, rel string) Result {
-	byDir := map[string][]Rule{}
+// Set is the rules of one root, indexed by directory with their patterns prepared, to resolve many files against.
+type Set struct {
+	byDir map[string][]prepared
+}
+
+// prepared is a rule with its pattern in lower case, as runes, and its letter count, worked out once.
+type prepared struct {
+	rule    Rule
+	pattern []rune
+	letters int
+}
+
+// NewSet indexes the rules of one root.
+func NewSet(rs []Rule) Set {
+	s := Set{byDir: map[string][]prepared{}}
 	for _, r := range rs {
-		byDir[r.Dir] = append(byDir[r.Dir], r)
+		s.byDir[r.Dir] = append(s.byDir[r.Dir], prepared{rule: r, pattern: []rune(Key(r.Pattern)),
+			letters: Letters(r.Pattern)})
 	}
-	name := path.Base(rel)
+	return s
+}
+
+// Resolve works out the rule for the file at rel ('/'-separated, relative to the root) from the rules of its root.
+// To resolve many files, build a Set once and use its Resolve.
+func Resolve(rs []Rule, rel string) Result { return NewSet(rs).Resolve(rel) }
+
+// Resolve works out the rule for the file at rel ('/'-separated, relative to the root).
+func (s Set) Resolve(rel string) Result {
+	name := []rune(strings.ToLower(path.Base(rel)))
 	for dir := parent(rel); ; dir = parent(dir) {
-		if res := resolveIn(byDir[dir], name); res.Found {
+		if res := resolveIn(s.byDir[dir], name); res.Found {
 			return res
 		}
 		if dir == "" {
@@ -132,15 +177,16 @@ func Resolve(rs []Rule, rel string) Result {
 	}
 }
 
-// resolveIn matches name against one directory's rules.
-func resolveIn(rs []Rule, name string) Result {
+// resolveIn matches name, in lower case, against one directory's rules.
+func resolveIn(ps []prepared, name []rune) Result {
 	best := -1
 	var matched []Rule
-	for _, r := range rs {
-		if !Match(r.Pattern, name) {
+	for _, p := range ps {
+		if !match(p.pattern, name) {
 			continue
 		}
-		switch n := Letters(r.Pattern); {
+		r := p.rule
+		switch n := p.letters; {
 		case n > best:
 			best, matched = n, []Rule{r}
 		case n == best:
