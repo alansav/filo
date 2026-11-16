@@ -600,15 +600,15 @@ retention: the file becomes a candidate at its date and is deleted only through 
 
 - **Matching**: a pattern is a glob on the file's name (not its path), in any case: `*` is any run of characters, `?`
   one character, "contains" is `*X*`. No pattern is `*`, everywhere, and a run of wildcards is kept in one form, its `?`
-  first and then one `*` (`**` is `*`, `*?` is `?*`), since two forms of it would tie on every name. A rule covers the files at any depth below its
-  directory. For a file, Filo looks at the file's own directory, then each parent up to the root: **the first
-  directory with a rule that matches decides**, so the result can be read off the path. Within a directory, rules are
-  tried **longest pattern first, counting letters only**: wildcards are not counted, so `*` counts 0 and is always
-  tried last (the fallback for files no other pattern matched), and a pattern `a` counts 1. Two matching patterns
-  with the same count are reported, not guessed, and the file stays undated. A directory's patterns are unique, in
-  any case (`*statement*` is `*Statement*`). Longer is not always more specific (`Daily*`, 5, loses to `*Statement*`,
-  9, on `DailyStatement.pdf`); the fix is the longer pattern meant (`*DailyStatement*`), and `filo rules add` shows
-  the files before it applies.
+  first and then one `*` (`**` is `*`, `*?` is `?*`), since two forms of it would tie on every name. A rule covers the
+  files at any depth below its directory. For a file, Filo looks at the file's own directory, then each parent up to the
+  root: **the first directory with a rule that matches decides**, so the result can be read off the path. Within a
+  directory, rules are tried **longest pattern first, counting letters only**: wildcards are not counted, so `*` counts
+  0 and is always tried last (the fallback for files no other pattern matched), and a pattern `a` counts 1. Two matching
+  patterns with the same count are reported, not guessed, and the file stays undated. A directory's patterns are unique,
+  in any case (`*statement*` is `*Statement*`). Longer is not always more specific (`Daily*`, 5, loses to `*Statement*`,
+  9, on `DailyStatement.pdf`); the fix is the longer pattern meant (`*DailyStatement*`), and `filo rules add` shows the
+  files before it applies.
 
   With rules on `bank` (`*DailyStatement*` 14 → `daily-statements`, `*Statement*` 9 → `statements`, `*2024*` 4 →
   `tax-2024`, `*bank*` 4 → `banking`, `*` 0 → `financial`) and on `bank/2024` (`*` → `tax-2024`):
@@ -646,12 +646,13 @@ retention: the file becomes a candidate at its date and is deleted only through 
     case, never matched as a glob, so `*Statement*` never picks `*DailyStatement*`); a new POLICY is created as for
     `add`. A pattern is never changed: remove the rule and add a new one.
   - `remove DIR [PATTERN]` removes the rule with exactly that pattern.
-  - `move OLD NEW` and `copy OLD NEW` put the rules at OLD and at the directories below it in the same places under
-    NEW (`bank/2024` goes to `banking/2024`); `move` removes them from OLD, `copy` keeps them (`copy bank/2024
-    bank/2025` for a new year). They apply to the undated files under NEW, so they ask as `add` does. Refused, with
-    nothing merged, if NEW or any directory below it already has rules (they are listed: remove them first, or add
-    the rules by hand; a move up, `bank/2024` to `bank`, does not count the rules it moves, a copy does); if NEW is OLD or inside it; if OLD has no rules at or below it. NEW may be in another root,
-    whose rules they then are. Files dated by a moved rule keep their policy and still count as dated by it.
+  - `move OLD NEW` and `copy OLD NEW` put the rules at OLD and at the directories below it in the same places under NEW
+    (`bank/2024` goes to `banking/2024`); `move` removes them from OLD, `copy` keeps them (`copy bank/2024 bank/2025`
+    for a new year). They apply to the undated files under NEW, so they ask as `add` does. Refused, with nothing merged,
+    if NEW or any directory below it already has rules (they are listed: remove them first, or add the rules by hand; a
+    move up, `bank/2024` to `bank`, does not count the rules it moves, a copy does); if NEW is OLD or inside it; if OLD
+    has no rules at or below it. NEW may be in another root, whose rules they then are. Files dated by a moved rule keep
+    their policy and still count as dated by it.
   - No `show`: `l` and the list cover it.
 - **Directories that change**: a rule stores its root and its directory relative to the root, as files do.
   - A directory renamed or removed on disk: its files are moves or missing, as before; the rule stays and is flagged,
