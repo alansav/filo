@@ -145,8 +145,8 @@ func TestRuleTies(t *testing.T) {
 	if v := e.ruleColumns("bank/bank-2024.pdf"); v != "- - - rule - never hash -" {
 		t.Errorf("the tied file: %q, want undated", v)
 	}
-	ties, err := e.s.RuleTies(e.ctx, e.root.ID, ruleToday)
-	if err != nil || len(ties) != 1 || ties[0].Path != "bank/bank-2024.pdf" {
+	ties, err := e.s.RuleTies(e.ctx, e.root.ID, ruleToday, policyNow)
+	if err != nil || len(ties) != 1 || ties[0].Path != "bank/bank-2024.pdf" || ties[0].HardLinks {
 		t.Errorf("RuleTies = %+v, %v; want bank-2024.pdf", ties, err)
 	}
 	if v := rawQueryString(t, e.db, `SELECT count(*) FROM reviews`); v != "1" {
@@ -177,6 +177,7 @@ func TestRuleDatingHardLinks(t *testing.T) {
 		t.Errorf("dated %q, want same.pdf once (both paths agree) and bank/one.pdf (its other path has no rule)", dated)
 	}
 	if len(run.Ties) != 1 || run.Ties[0].Path != "bank/split.pdf" || len(run.Ties[0].Rules) != 2 ||
+		!run.Ties[0].HardLinks ||
 		!slices.ContainsFunc(run.Ties[0].Rules, func(x Rule) bool { return x.ID == r.ID }) {
 		t.Errorf("ties = %+v, want bank/split.pdf between bills and private", run.Ties)
 	}

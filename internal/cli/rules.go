@@ -384,7 +384,7 @@ func (e *env) ruleList(ctx context.Context, s *store.Store, pos []string) error 
 			r.Entry(0, sec.root.Path)
 		}
 		r.Groups(sec.groups, false, false, true)
-		ts, err := s.RuleTies(ctx, sec.root.ID, day)
+		ts, err := s.RuleTies(ctx, sec.root.ID, day, now())
 		if err != nil {
 			return err
 		}

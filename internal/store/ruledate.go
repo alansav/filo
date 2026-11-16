@@ -24,6 +24,9 @@ type RuleDated struct {
 type RuleTie struct {
 	FileItem
 	Rules []Rule
+	// HardLinks: the file's paths (hard links) are decided by different rules, not one path by rules that match it
+	// equally.
+	HardLinks bool
 }
 
 // RuleRun is what the rules did (or would do) in one root.
@@ -42,7 +45,8 @@ func datable(it FileItem) bool {
 // dateByRules dates, in tx, the datable files at scope and below in a root ("" for all of it) by the rules, and
 // returns what it did. With only, it dates just the files the rules in only decide, and reports just the ties those
 // rules are in: what adding, moving or copying them does. afterScan stamps the dates (the scan they were set after,
-// as for a CSV); command names the run in the history ("rules add", "scan").
+// as for a CSV); command names the run in the history ("rules add", "scan"), and "" only works out what would be
+// done, writing nothing: no write lock for a listing.
 //
 // A file is decided once, over every present path it has (hard links are one file with several paths): if its
 // paths are decided by different rules, it is a tie between them, never dated by one of them. A file at or under a
@@ -84,13 +88,14 @@ func dateByRules(ctx context.Context, tx *sql.Tx, rootID int64, scope string, on
 		if err != nil {
 			return run, err
 		}
-		if len(decided) > 1 { // its paths say different things: a tie between them
+		linked := len(decided) > 1
+		if linked { // its paths say different things: a tie between them
 			ties = append(ties, decided...)
 			decided = nil
 		}
 		switch {
 		case len(ties) > 0:
-			tie := RuleTie{FileItem: it, Rules: uniqueRules(ties)}
+			tie := RuleTie{FileItem: it, Rules: uniqueRules(ties), HardLinks: linked}
 			in := only == nil
 			for _, r := range tie.Rules {
 				in = in || only[r.ID]
@@ -108,7 +113,7 @@ func dateByRules(ctx context.Context, tx *sql.Tx, rootID int64, scope string, on
 			run.Dated = append(run.Dated, RuleDated{FileItem: it, Rule: r})
 		}
 	}
-	if len(run.Dated) == 0 {
+	if len(run.Dated) == 0 || command == "" {
 		return run, nil
 	}
 	batch, err := newBatch(ctx, tx, now, command, "")
@@ -275,17 +280,17 @@ func dateByRule(ctx context.Context, tx *sql.Tx, d RuleDated, batch, afterScan i
 }
 
 // RuleTies returns the present files of a root that two or more rules match equally, so no rule dates them, for the
-// list of rules. It works them out as dating would, in a transaction it rolls back. today is YYYY-MM-DD.
-func (s *Store) RuleTies(ctx context.Context, rootID int64, today string) ([]RuleTie, error) {
+// list of rules. It works them out as dating would, writing nothing. today is YYYY-MM-DD.
+func (s *Store) RuleTies(ctx context.Context, rootID int64, today string, now time.Time) ([]RuleTie, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback() // never committed: only the ties are wanted
+	defer tx.Rollback() // read only: dateByRules writes nothing without a command
 	afterScan, err := latestScan(ctx, tx)
 	if err != nil {
 		return nil, err
 	}
-	run, err := dateByRules(ctx, tx, rootID, "", nil, afterScan, today, "rules", time.Now())
+	run, err := dateByRules(ctx, tx, rootID, "", nil, afterScan, today, "", now)
 	return run.Ties, err
 }
