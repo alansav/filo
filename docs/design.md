@@ -596,7 +596,7 @@ retention: the file becomes a candidate at its date and is deleted only through 
   | moved in from elsewhere with its retention | nothing: a move keeps the retention |
   | *unreadable*, or the new side of a *possible move* | nothing until resolved: no content to record, and a move may bring its own retention |
   | under a directory the latest scan covering it could not read | nothing: what is there now is not known |
-  | hard links: one file with paths that different rules decide | nothing, reported as a tie between them (never guessed); dated if its paths agree or only one is decided |
+  | a hard link (Filo keeps each as a file of its own, see Move detection) | the rule of its own directory, as any file; its other links follow theirs (decided 2026-11-16) |
   | dated by the rule, then its retention cleared in the CSV | stays undated |
   | dated by the rule, then the rule removed or changed | keeps its policy |
 
@@ -750,7 +750,7 @@ Removed   bank · *Statement* → statements
   | C1 two matching patterns of different letter counts; `*` with another match | the longer one; `*` last |
   | C2 two matching patterns of the same count | not applied, reported by the scan and `filo rules` |
   | C3 a rule in a parent directory; a nearer directory with a matching rule | applies at any depth; the nearer one wins |
-  | C4 hard links whose paths different rules decide; that agree | a tie, reported; dated once |
+  | C4 two hard links in directories with different rules | each dated by its own directory's rule |
   | D1 `set`: files already dated | keep their policy; a line says so |
   | D2 `set` or `remove` with a pattern that is not stored (`*Statement` for `*Statement*`) | refused |
   | D3 `filo policies remove` of a policy a rule names; `filo policies move` (a rename, a merge) | refused; the rules follow |
@@ -2020,21 +2020,22 @@ put first on 2026-11-15). Each is an open question below until it is designed.
    it brings a complete feature. Scenario tests first in each slice.
    1. *Register and matching*: schema 10; matching in a new package `internal/rules` (globs on the name in any case,
       letter count, nearest directory first, ties reported); the store adds, changes, removes, moves and copies rules
-      and dates files by them; rules get a root's prefix when a root is added above it; `filo policies` remove and
-      move take rules into account. Nothing calls the rules yet. Scenarios C1-C3, D3, G1, F3.
-      Done on 2026-11-16: `internal/rules` (`Pattern`, `Letters`, `Match`, `Resolve`, `Compare`; a `[` or `\` in a
-      pattern is itself, and `**` is `*`); schema 10 (`TestMigrateFromV9`); `store.AddRule`, `SetRule`, `RemoveRule`,
-      `Rules`, `MoveRules` (move and copy), each of the three that apply rules with a preview that runs the same work
-      in a transaction it rolls back (`PreviewAddRule`, `PreviewMoveRules`); dating in `store/ruledate.go`. Tests:
-      `TestResolve`, `TestCompare`, `TestMatch`, `TestAddRule`, `TestSetAndRemoveRule`, `TestMoveRules`,
-      `TestPoliciesAndRules`, `TestRuleDating`, `TestRuleTies`, and the absorb test (F3). Reviewed the same day,
-      nine of ten findings fixed: hard links decided once over all their paths, a tie if they disagree (C4,
-      `TestRuleDatingHardLinks`); files under a directory the latest scan covering it could not read left alone by
-      `add`, `move` and `copy` too (`TestRuleDatingUnreadDirs`); a rule's directory checked for the register's form
-      and its root for being registered; a move up allowed; `*?` stored as `?*`; a root's rules indexed once, and
-      `add` reading only its directory. The tenth (the duplicate check before the insert repeats the unique
-      constraint) kept: it gives the one-line error, with the same key. Slice 2 must refuse `add`, `move` and `copy`
-      in a root that cannot be reached (not mounted), which the store cannot see.
+      and dates files by them; rules get a root's prefix when a root is added above it; `filo policies` remove and move
+      take rules into account. Nothing calls the rules yet. Scenarios C1-C3, D3, G1, F3. Done on 2026-11-16:
+      `internal/rules` (`Pattern`, `Letters`, `Match`, `Resolve`, `Compare`; a `[` or `\` in a pattern is itself, and
+      `**` is `*`); schema 10 (`TestMigrateFromV9`); `store.AddRule`, `SetRule`, `RemoveRule`, `Rules`, `MoveRules`
+      (move and copy), each of the three that apply rules with a preview that runs the same work in a transaction it
+      rolls back (`PreviewAddRule`, `PreviewMoveRules`); dating in `store/ruledate.go`. Tests: `TestResolve`,
+      `TestCompare`, `TestMatch`, `TestAddRule`, `TestSetAndRemoveRule`, `TestMoveRules`, `TestPoliciesAndRules`,
+      `TestRuleDating`, `TestRuleTies`, and the absorb test (F3). Reviewed the same day, nine of ten findings fixed (one
+      of them, hard links, undone the same day: it took a hard link for one file with two paths, while Filo keeps each
+      link as a file of its own; the person chose each link dated by its own directory's rule, C4); files under a
+      directory the latest scan covering it could not read left alone by `add`, `move` and `copy` too
+      (`TestRuleDatingUnreadDirs`); a rule's directory checked for the register's form and its root for being
+      registered; a move up allowed; `*?` stored as `?*`; a root's rules indexed once, and `add` reading only its
+      directory. The tenth (the duplicate check before the insert repeats the unique constraint) kept: it gives the
+      one-line error, with the same key. Slice 2 must refuse `add`, `move` and `copy` in a root that cannot be reached
+      (not mounted), which the store cannot see.
    2. *`filo rules`*: the list (`[DIR]`, the order tried, counts, flags), `add` (a policy created if needed,
       `--dry-run`), `set`, `remove`, as mocked (agreed 2026-11-16), and the help page; refused in a root that cannot be
       reached. Scenarios A, B4, D, F1.
