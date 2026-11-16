@@ -243,7 +243,8 @@ func (s *Store) SetRetention(ctx context.Context, fileID int64, retention string
 		hash); err != nil {
 		return "", fmt.Errorf("record retention: %w", err)
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE files SET retention = ?, keep_until = ?, reviewed_utc = ?,
+	// A retention of its own takes the file off its policy, if it had one.
+	if _, err := tx.ExecContext(ctx, `UPDATE files SET retention = ?, policy_id = NULL, keep_until = ?, reviewed_utc = ?,
 		reviewed_after_scan = ?, reviewed_hash = ? WHERE id = ?`, nullString(retention), nullString(keep), utc(now),
 		nullInt(after), hash, fileID); err != nil {
 		return "", fmt.Errorf("record retention: %w", err)

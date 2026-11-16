@@ -18,7 +18,10 @@ const (
 	StatusUnreadable Status = "unreadable"
 	// StatusPossibleMove: the new side of a possible move recorded after its last decision.
 	StatusPossibleMove Status = "possible_move"
-	// StatusUndated: it has no keep_until.
+	// StatusNeedsFileDate: its policy is a period, and it has no file_date to count from (docs/design.md, Named
+	// retention policies). Never a deletion candidate.
+	StatusNeedsFileDate Status = "needs_file_date"
+	// StatusUndated: it has no keep_until (a policy with no value included).
 	StatusUndated Status = "undated"
 	// StatusChanged: past its keep_until, but its content is not the content the date was set on (or the date was
 	// set without one), so it needs a new decision.
@@ -32,12 +35,13 @@ const (
 )
 
 // Statuses lists every status in priority order.
-var Statuses = []Status{StatusUnreadable, StatusPossibleMove, StatusUndated, StatusForever, StatusChanged,
-	StatusExpired, StatusKept}
+var Statuses = []Status{StatusUnreadable, StatusPossibleMove, StatusNeedsFileDate, StatusUndated, StatusForever,
+	StatusChanged, StatusExpired, StatusKept}
 
 // NeedsDecision reports whether a file with this status needs a keep_until decision.
 func (s Status) NeedsDecision() bool {
-	return s == StatusUnreadable || s == StatusPossibleMove || s == StatusUndated || s == StatusChanged
+	return s == StatusUnreadable || s == StatusPossibleMove || s == StatusNeedsFileDate || s == StatusUndated ||
+		s == StatusChanged
 }
 
 // FileItem is one present file with its retention.
@@ -50,7 +54,9 @@ type FileItem struct {
 	MtimeNS     int64
 	Hash        string // "" = none
 	FileDate    string // YYYY-MM-DD the retention counts from, "" = none
-	Retention   string // as given: a period (7y), Forever or YYYY-MM-DD; "" = none
+	Retention   string // as given: a period (7y), Forever or YYYY-MM-DD, or its policy's name; "" = none
+	Policy      string // its retention policy's name, "" = none (then Retention is its own)
+	PolicyValue string // that policy's value: a period, Forever, YYYY-MM-DD, or "" for none yet
 	KeepUntil   string // worked out from the two: YYYY-MM-DD, Forever, or "" = none
 	ReviewedUTC string // when the current retention was set; "" = never
 	Status      Status
@@ -100,6 +106,9 @@ func classify(r fileRow, today string) Status {
 	if r.possibleMoveIn != 0 && r.reviewedAfter < r.possibleMoveIn {
 		return StatusPossibleMove
 	}
+	if it.Policy != "" && it.FileDate == "" && IsPeriod(it.PolicyValue) {
+		return StatusNeedsFileDate
+	}
 	if it.KeepUntil == "" {
 		return StatusUndated
 	}
@@ -131,7 +140,7 @@ func (s *Store) Files(ctx context.Context, today string, f Filter) ([]FileItem, 
 		it := &r.item
 		var moveRoot, moveRel string
 		if err := rows.Scan(&it.FileID, &it.RootPath, &it.Path, &it.Kind, &it.Size, &it.MtimeNS, &it.Hash,
-			&it.FileDate, &it.Retention, &it.KeepUntil, &it.ReviewedUTC, &r.reviewedAfter, &r.reviewedHash, &it.UnreadableSince,
+			&it.FileDate, &it.Retention, &it.Policy, &it.PolicyValue, &it.KeepUntil, &it.ReviewedUTC, &r.reviewedAfter, &r.reviewedHash, &it.UnreadableSince,
 			&it.UnreadableSinceUTC, &r.possibleMoveIn, &moveRoot, &moveRel, &it.MoveDetail); err != nil {
 			return *it, err
 		}
@@ -149,13 +158,15 @@ func (s *Store) Files(ctx context.Context, today string, f Filter) ([]FileItem, 
 			WHERE e.kind = 'possible_move'
 			GROUP BY np.file_id)
 		SELECT f.id, r.path, p.path, f.kind, f.size, f.mtime_ns, coalesce(f.hash, ''),
-		       coalesce(f.file_date, ''), coalesce(f.retention, ''), coalesce(f.keep_until, ''),
+		       coalesce(f.file_date, ''), coalesce(pol.name, f.retention, ''), coalesce(pol.name, ''),
+		       coalesce(pol.value, ''), coalesce(f.keep_until, ''),
 		       coalesce(f.reviewed_utc, ''), coalesce(f.reviewed_after_scan, 0),
 		       f.reviewed_hash, coalesce(f.unreadable_since_scan, 0), coalesce(us.finished_utc, us.started_utc, ''),
 		       coalesce(pe.scan_id, 0), coalesce(pr.path, ''), coalesce(pe.other_path, ''), coalesce(pe.detail, '')
 		FROM paths p
 		JOIN files f ON f.id = p.file_id
 		JOIN roots r ON r.id = p.root_id
+		LEFT JOIN policies pol ON pol.id = f.policy_id
 		LEFT JOIN scans us ON us.id = f.unreadable_since_scan
 		LEFT JOIN pm ON pm.file_id = f.id
 		LEFT JOIN events pe ON pe.id = pm.event_id

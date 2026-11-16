@@ -60,7 +60,7 @@ func (s *Store) ExportedCopies(ctx context.Context, exportIDs []int64) (map[int6
 	}, `
 		SELECT er.export_id, er.dup_group, f.id, r.id, r.path, p.id, p.path, p.valid_to_scan IS NULL, f.kind,
 		       coalesce(f.size, 0), coalesce(f.mtime_ns, 0), coalesce(f.ctime_ns, 0), coalesce(f.hash, ''),
-		       coalesce(f.inode, 0), coalesce(f.file_date, ''), coalesce(f.retention, ''),
+		       coalesce(f.inode, 0), coalesce(f.file_date, ''), coalesce((SELECT name FROM policies WHERE id = f.policy_id), f.retention, ''),
 		       coalesce(f.keep_until, ''), coalesce(er.hash, ''), coalesce(f.deleted_utc, ''),
 		       f.unreadable_since_scan IS NOT NULL, coalesce(dr.set_id, 0), ah.hash IS NOT NULL,
 		       coalesce((SELECT r2.path `+other+`), ''), coalesce((SELECT p2.path `+other+`), '')

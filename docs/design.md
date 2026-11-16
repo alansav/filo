@@ -269,14 +269,15 @@ retention CSV and `filo update` write only the register and the CSV file the use
      date (its content cannot be checked);
   2. *possible move*: the new side of a possible move recorded after its date was last set. The event names the old
      file; the new one is the file whose path opened at the event's path in that scan;
-  3. *undated*: no `keep_until`;
-  4. *forever*: `keep_until` is `forever`;
-  5. *kept*: `keep_until` after today (local date);
-  6. *changed*: past its date, but a regular file whose hash is not the one the date was set on (or the date was set
+  3. *needs a file_date* (schema 9, see Named retention policies): its policy is a period and it has no `file_date`;
+  4. *undated*: no `keep_until` (a policy with no value included);
+  5. *forever*: `keep_until` is `forever`;
+  6. *kept*: `keep_until` after today (local date);
+  7. *changed*: past its date, but a regular file whose hash is not the one the date was set on (or the date was set
      without a hash, or it has none now). A change before the date does not matter; at the date it needs a new one;
-  7. *expired*: past its date and unchanged: a deletion candidate.
-  *Unreadable*, *possible move*, *undated* and *changed* need a decision; `filo report` counts them and shows the directories
-  holding most of them.
+  8. *expired*: past its date and unchanged: a deletion candidate.
+  *Unreadable*, *possible move*, *needs a file_date*, *undated* and *changed* need a decision; `filo report` counts
+  them and shows the directories holding most of them.
 - **"Since" is measured in scans**, not clock times. Each export records the latest finished scan
   (`exports.after_scan`); a date set from it is stamped with that scan (`files.reviewed_after_scan`), the content it
   was exported with (`reviewed_hash`) and when (`reviewed_utc`). A file flagged unreadable, or recorded as a possible
@@ -383,6 +384,130 @@ encoding, refusals, the clear prompt, "since" measured in scans) stays.
   (YYYY-MM-DD or `forever`). Statuses and `filo delete` keep using `keep_until` only. Migration: an existing
   `keep_until` becomes `retention` (its date, or `forever`) with the same `keep_until`. `export_rows` and `reviews`
   gain the same two columns, so an untouched cell is still recognised and the history shows what was typed.
+
+### Named retention policies (designed 2026-11-16, being built)
+A retention schedule written once and named, so the same rule is typed as a word in the CSV and changed in one
+place: if the law moves financial records from 7 to 10 years, `filo policies set bills 10y` changes every file using
+`bills`. Settled with the person one topic at a time on 2026-11-16 (it had been a proposal in Open questions since
+2026-11-13). Being built on branch `retention-policies`, see section 5.
+
+- **What a policy is**: a name for a retention: a period (`bills = 7y`, counted from each file's own `file_date`), a
+  date (`project-x = 2030-12-31`: every file of it ends that day), or `forever`. Names are letters, digits, `-` and
+  `_`, starting with a letter, so a name is never mistaken for a period or a date; any case (`Bills` is `bills`,
+  stored lowercase); `forever` is reserved. In the retention cell, `7y`, `2030-12-31` and `forever` keep their
+  meaning and anything else that is a valid name is a policy. A file has either a policy or a retention of its own,
+  never both.
+- **Dates (unchanged, and to be said plainly in the README and help)**: a file kept until 2026-12-31 is a deletion
+  candidate on 2026-12-31, since *kept* means the date is still to come; the same for a policy as for a date typed
+  per file. Nothing is deleted on that day: the file is listed by the next `filo delete`, which asks.
+- **Creating a policy** (the person's choice over creating them by command only: a policy created ahead may never be
+  used): a name in the CSV that is not a policy yet creates one **with no value**. `filo update` lists the policies it
+  is about to create, with how many rows name each, and asks once (`Create 2 policies? [y/N]`). Declined, or no
+  terminal, the rows naming them are left alone and the summary says how many; `--dry-run` lists them. Its files
+  need a retention until the policy gets a value. A policy made in error (`bils`) is fixed with `filo policies move
+  bils bills`, then `remove bils`.
+- **`filo policies`** (a new command name):
+  - `filo policies` lists each policy with its value and how many files use it, and flags what needs attention: no
+    value (`! needs a retention`), a date that has passed (`! passed · 0 files: set a new date, or remove it`), files
+    without a `file_date` under a period (`! 3 without a file_date`). Nothing is ever cleared up automatically: a
+    passed policy may be reused (set to next year's date).
+  - `add NAME [VALUE]` creates one (refused if it exists, or the name is `forever` or not a valid name).
+  - `set NAME VALUE` gives it a value or changes it (see Changing a policy).
+  - `move OLD NEW` moves every file from OLD to NEW: into a new name it is a rename (the value goes with it), into an
+    existing policy a merge (the files take NEW's value). It asks first, as `set` does.
+  - `remove NAME` deletes the policy, refused while files use it ("12 files use bils: move them first"). It is
+    `remove`, not `delete`: `filo delete` deletes files.
+  - `show NAME` shows its value and every file using it (file_date, until, path), the files that need a `file_date`
+    first; cut at 10 in a terminal with "… N more", all when piped.
+- **Changing a policy** (`set`, and `move` into an existing one): each file's `keep_until` is worked out again.
+  Longer or later: done, with a count line. Shorter or earlier: if any file ends up past its date, those are listed
+  (the first ten, then a count) and it asks once (`Shorten bills for 212 files, putting 6 past their retention?
+  [y/N]`); if none does, a count line and no question. To a period, files without a `file_date` are listed and it
+  asks; on yes they get the status *needs a file_date*. `-y` answers yes; no terminal, or no answer, changes nothing.
+  A change never touches what `filo delete` checks: a file is deleted only if its content is the content its
+  retention was set on, whatever the date.
+- **Needs a file_date**: a file whose policy is a period and which has no `file_date` has nothing to count from. It
+  can only arise from a policy change (the CSV refuses such a row, and refuses clearing the `file_date` of a file
+  whose policy is a period). It is a status of its own (below *possible move*, before *undated*), so the fix is
+  named: never a deletion candidate; counted in the report's decisions with the folders holding most of them (`! 3
+  files need a file_date: their policy counts from it (bills, 7y)`); flagged by `filo policies`; listed first by
+  `show`, with `Next: filo export retention DIR -o FILE, fill in file_date, then filo update FILE`.
+- **The retention CSV**: the `retention` cell holds the policy name; `keep_until` shows the date worked out, as
+  today. A policy whose value is a period, on a row with no `file_date`, refuses the row ("retention bills (7y) needs
+  a file_date"); a policy with no value is accepted. An untouched cell is recognised by what was exported (`bils`),
+  so an old CSV does nothing after a `move` or `set`.
+- **Output** (mocked 2026-11-16, under the Terminal output rules):
+
+```
+$ filo policies
+
+Policies   4 · 1 needs attention
+
+  bills          7y           from each file's file_date   212 files
+  payslips       forever                                    48 files
+  project-x      2030-12-31                                 17 files
+  bils           no value     ! needs a retention            3 files
+
+Next: filo policies set bils VALUE, or filo policies move bils bills
+
+$ filo policies show bills
+
+Policy bills   7y from each file's file_date · 212 files · ~
+
+    file_date    until        path
+    2019-03-14   2026-03-14   Documents/bills/electric/2019-03.pdf
+    … 211 more files
+
+Next: filo policies set bills VALUE to change it for all of them
+
+$ filo policies set bills 5y
+
+Shorten bills   7y → 5y · 212 files
+
+! 6 files would be past their retention:
+       file_date    until
+       2019-03-14   2024-03-14   Documents/bills/electric/2019-03.pdf
+       …
+
+Shorten bills for 212 files, putting 6 past their retention? [y/N]
+```
+
+  After yes: `Done   bills is 5y · 212 files updated · 6 past their retention`, `Next: filo delete`. Lengthening:
+  `Done   bills is 10y · 212 files updated`. `filo update` naming new policies: a `New policies   2 · bils, payslip`
+  block with a line per policy and its rows, "they have no value yet: their files need a retention until filo
+  policies set NAME VALUE", then `Create 2 policies? [y/N]`. `move` asks `Move 3 files from bils to bills (7y)?
+  [y/N]`; `add` is `Added   bills   7y`; the report's Register section gets `Policies   4 · 1 needs attention
+  (filo policies)` when there are policies.
+- **Register (schema version 9)**: `policies` (id, name lowercase unique, value: a period, a date, `forever` or NULL,
+  added and changed times); `files.policy_id` (NULL for none; `files.retention` is NULL when it is set, and
+  `keep_until` stays stored and worked out, so the statuses and `filo delete` read it as before); `policy_changes`
+  (policy, old value, new value, when, how many files changed), since a file's `keep_until` can now change without
+  the file or its row in a CSV being touched. `export_rows.retention` and `reviews.retention` keep what was typed
+  (`bills`). The upgrade only creates the tables and the column.
+- **The scenarios** (the test list):
+
+  | scenario | outcome |
+  |---|---|
+  | A1 a CSV names a new policy, confirmed | created with no value; its files need a retention |
+  | A2 declined, or no terminal | those rows left alone, counted in the summary |
+  | A3 `Bills`, `7y`, `forever`, `2030-12-31`, `bills!` in the cell | the policy bills; a period; forever; a date; the row refused |
+  | A4 `policies add` an existing name, or `forever` | refused |
+  | B1 `bills` (7y) on a row with a file_date | keep_until is file_date plus 7 years |
+  | B2 `bills` (7y) on a row without a file_date | the row refused (needs a file_date) |
+  | B3 a date policy; a forever policy | the policy's date; never a candidate |
+  | B4 a file moved from a policy to its own retention, and back | policy and retention swap |
+  | B5 an old CSV with `bils` untouched after `move bils bills` | nothing happens |
+  | C1 lengthen | no question; files updated; a policy_changes row |
+  | C2 shorten, no file past its date | no question |
+  | C3 shorten, some past: yes, no, no terminal, -y | listed and asked; changed only on yes or -y |
+  | C4 set to a period, files without a file_date | listed and asked; they need a file_date |
+  | D1 `move bils bills`, bills new or existing | a rename, or a merge with keep_until worked out again |
+  | D2 `remove` a policy in use, or unused | refused, or removed |
+  | E1 a policy with no value; a passed date with 0 files | flagged by `filo policies` |
+  | E2 files that need a file_date | the report, `filo policies` and `show` say so; a file_date in the CSV fixes it |
+  | E3 clearing the file_date of a file on a period policy | the row refused |
+  | F1 a file on a date policy reaching its date | a candidate that day; `filo delete` checks its content as before |
+  | G1 the upgrade from schema 8 | tables created, nothing else changes; the pre-upgrade snapshot kept |
 
 ### Disposal (iteration 3)
 Decided 2026-11-12, implemented 2026-11-13 (package `internal/dispose`, the only code that deletes the user's
@@ -1530,7 +1655,24 @@ put first on 2026-11-15). Each is an open question below until it is designed.
    (golden files `help.txt`, `help-delete.txt`, `help-export.txt`). The redesign is done: every scenario in its
    table has a test (A-F: slices 1-3; the plan's C2, C3, C5 in `internal/duplicates`). Still to do: run it on the
    real register (back up first; the upgrade to schema 8 warns once), then merge the branch.
-3. Named retention policies.
+3. Named retention policies (designed 2026-11-16, see Lifespan, Named retention policies), on branch
+   `retention-policies`, in four slices, each with its scenario tests written first: (1) the register and store,
+   schema 9 (the tables, policies worked out into `keep_until`, the status *needs a file_date*, `policy_changes`;
+   G1, B3, F1, E2's status); (2) the retention CSV (policy names in the cell, `filo update`'s create question, the
+   refusals, the export; A1-A3, B1, B2, B4, B5, E3); (3) `filo policies` (list, add, set, move, remove, show and
+   their questions; A4, C1-C4, D1, D2, E1, E2); (4) the report's line and count, the README (with the date rule),
+   the help. Done when every scenario has a test.
+   Slice 1 done on 2026-11-16 (`internal/store/policies.go`, schema 9): `PolicyName`, `AddPolicy`, `Policies`,
+   `Policy`, `PreviewPolicy` and `SetPolicy`, `PreviewMove` and `MovePolicy`, `RemovePolicy`, `PolicyFiles`; a file
+   on a policy reads with the policy's name as its retention (`FileItem.Policy`, `PolicyValue`), also in the
+   duplicates CSV; the status *needs a file_date*; `SetRetention` (filo delete's prompt) takes a file off its policy.
+   `RemovePolicy` gives the deleted and missing files still on the policy its value as a retention of their own, so a
+   missing file that comes back keeps its keep_until. `files.policy_id` is not declared a foreign key (ALTER TABLE
+   cannot drop such a column, which the upgrade tests need); the store keeps it pointing at a policy. Tests:
+   `TestPolicyName`, `TestAddPolicy` (A4), `TestPolicyKeepUntil` (B3, F1, E2's status), `TestSetPolicy` (C1-C4 in the
+   store), `TestMoveAndRemovePolicy` (D1, D2), `TestSetRetentionLeavesThePolicy` (B4 in the store),
+   `TestMigrateFromV8` (G1); by hand, a register made by the `main` build upgraded by this one (schema 9, the
+   pre-upgrade snapshot). Not yet reviewed. Nothing uses policies yet: the CSV is slice 2.
 4. Folder rules (default retention policies on directories).
 5. Progress in the report, and `export retention --needing-retention`.
 6. Duplicates: one decision for all copies (the duplicates review CSV was done first, see iteration 5).
@@ -1545,16 +1687,6 @@ shape.
 
 ## 6. Open questions
 
-- **Named retention policies** (raised 2026-11-13; next after the terminal output and the duplicates redesign). A
-  retention schedule written once, `bills = 7y`, `payslips = forever`, and the policy name typed in the CSV (and later
-  in folder rules) in place of a period. If the law changes ("financial records: 10 years"), changing the policy changes
-  every file using it. Proposed shape: a name that is not a policy yet creates one with no period, and its files stay
-  "needing a retention" until it has one (fail safe); `filo update` lists the policies it created and asks once, so a
-  typo (`bils`) does not quietly make a new one; `forever` becomes a built-in policy; periods still count from
-  `file_date`; fixed dates per file stay possible. Changing a policy works out `keep_until` again for its files;
-  lengthening is harmless, shortening lists the files it makes past their date and asks. A command lists policies,
-  flagging those without a period. Worth having before the real home directory is dated, though setting `file_date`s
-  does not depend on it.
 - **Notes, links and tasks** (raised 2026-11-13; merges asset links, the long-term "projects and tasks linked to
   files", and notes on files). Notes on a file; links to an asset or project (modelled at that level, not per
   file); tasks, some with files and some without; possibly a productivity system built on the register. That is a

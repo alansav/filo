@@ -41,6 +41,8 @@ func StatusLabel(s store.Status) string {
 		return "unreadable"
 	case store.StatusPossibleMove:
 		return "possible moves"
+	case store.StatusNeedsFileDate:
+		return "need a file_date for their policy"
 	case store.StatusUndated:
 		return "no retention"
 	case store.StatusChanged:

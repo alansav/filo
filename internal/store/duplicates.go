@@ -81,7 +81,7 @@ func loadContents(ctx context.Context, q querier, hashes string, args ...any) ([
 		return r, err
 	}, `
 		SELECT f.id, p.root_id, r.path, p.id, p.path, f.size, f.mtime_ns, f.ctime_ns, f.hash, coalesce(f.inode, 0),
-		       coalesce(f.file_date, ''), coalesce(f.retention, ''), coalesce(f.keep_until, ''),
+		       coalesce(f.file_date, ''), coalesce((SELECT name FROM policies WHERE id = f.policy_id), f.retention, ''), coalesce(f.keep_until, ''),
 		       coalesce(f.reviewed_utc, ''), coalesce(f.reviewed_hash, ''), f.unreadable_since_scan IS NOT NULL,
 		       coalesce(dr.set_id, 0), ah.hash IS NOT NULL
 		FROM paths p
