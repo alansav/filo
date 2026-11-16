@@ -43,7 +43,7 @@ var overview = struct {
 		{Name: "rules [DIR]", Text: "list the directory rules, at DIR and below"},
 		{Name: "rules add DIR [PATTERN] POLICY", Text: "give POLICY to the files under DIR that have no retention"},
 		{Name: "rules set DIR [PATTERN] POLICY", Text: "change the policy a rule gives new files"},
-		{Name: "rules remove DIR [PATTERN]", Text: "remove a rule; the files it dated keep their policy"},
+		{Name: "rules remove DIR [PATTERN]", Text: "remove a rule; the files it set a policy on keep it"},
 		{Name: "help [COMMAND]", Text: "this overview, or a command's flags and rules"},
 	},
 	after: "Every command accepts --db PATH (default: $FILO_DB, then the user data directory).",
@@ -224,18 +224,19 @@ var commandHelps = map[string]commandHelp{
 			"A rule names a policy for the files under a directory, at any depth, or only those whose name " +
 				"matches PATTERN: * is any run of characters, ? one character, in any case. Without a pattern it is " +
 				"*. Quote a pattern with * or spaces ('*Statement*'), or the shell replaces it with file names.",
-			"A rule dates a file only if it has no retention at all, and only once: a file with a date, forever " +
-				"or a policy (even one with no value) is never touched, nor one whose retention you cleared after " +
+			"A rule sets the policy of a file only if it has no retention at all, and only once: a file with a " +
+				"date, forever or a policy (even one with no value) is never touched, nor one whose retention you cleared after " +
 				"a rule set it. For a file, the rules of its own directory are tried first, then those of each " +
 				"directory above it: the first directory with a matching rule decides. In a directory, the pattern " +
 				"with the most letters wins (* and ? are not counted); two with as many are reported, not guessed.",
-			"filo rules lists them in the order they are tried, with how many files each dated, and flags a " +
-				"directory that is gone and a policy with no value. add adds a rule and dates the files it decides " +
-				"now, and says how many; a policy that does not exist is created with no value. set changes the " +
-				"policy a rule gives from now on: the files it dated keep theirs. remove removes a rule: the files " +
-				"it dated keep their policy. set and remove name the pattern exactly as the rule has it.",
+			"filo rules lists them in the order they are tried, with how many files each set a policy on, and " +
+				"flags a directory that is gone and a policy with no value. add adds a rule and sets the policy of " +
+				"the files it decides now, and says how many; a policy that does not exist is created with no value. set changes the " +
+				"policy a rule gives from now on: the files it set one on keep theirs. remove removes a rule: the " +
+				"files it set a policy on keep it. set and remove name the pattern exactly as the rule has it.",
 		},
-		flags: []view.Term{{Name: "--dry-run", Text: "add: show the files it would date, and change nothing"}},
+		flags: []view.Term{{Name: "--dry-run",
+			Text: "add: show the files it would set a policy on, and change nothing"}},
 		after: []string{
 			"Nothing is asked: a rule only sets a retention. Nothing is deleted except by filo delete, which asks.",
 		},

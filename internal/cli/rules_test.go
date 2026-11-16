@@ -67,14 +67,14 @@ func TestRulesAdd(t *testing.T) {
 
 	// A1: a dry run changes nothing and shows the files; add dates them and says how many, terminal or not.
 	dry := rt.filo(ExitOK, "", false, "rules", "add", bank, "*Statement*", "statements", "--dry-run").stdout
-	rt.contains("dry run", dry, "Dry run   bank . *Statement* -> statements (7y) . 3 files would be dated . 3 need a "+
+	rt.contains("dry run", dry, "Dry run   bank . *Statement* -> statements (7y) . policy would be set on 3 files . 3 need a "+
 		"file_date", "needs a file_date   bank/QuarterlyStatement-Q1.pdf", "Dry run: nothing was changed.")
 	rt.contains("nothing added", rt.filo(ExitOK, "", false, "rules").stdout, "Rules   none yet")
 	rt.contains("add in a terminal", rt.filo(ExitOK, "", true, "rules", "add", bank, "*Statement*",
-		"statements").stdout, "3 files dated", "3 need a file_date",
+		"statements").stdout, "policy set on 3 files", "3 need a file_date",
 		"Next: filo export retention "+bank+" -o FILE, fill in file_date, then filo update FILE")
 	rt.contains("add, not a terminal", rt.filo(ExitOK, "", false, "rules", "add", rt.in("personal"), "bills").stdout,
-		"Done   personal . * -> bills . 1 file dated")
+		"Done   personal . * -> bills . policy set on 1 file")
 
 	// A2: a policy that does not exist is created with no value, and said so.
 	rt.contains("new policy", rt.filo(ExitOK, "", false, "policies").stdout, "bills", "no value")
@@ -111,7 +111,7 @@ func TestRulesSetRemove(t *testing.T) {
 		"Unchanged   bank . * -> statements already")
 	rt.contains("set", rt.filo(ExitOK, "", false, "rules", "set", bank, "*", "Financial").stdout,
 		"Done   bank . * -> financial (was statements)",
-		"- 5 files it dated keep their policy: the change is for new files",
+		"- 5 files keep the policy it set: the change is for new files",
 		"- policy financial was created with no value", "Next: filo policies set financial VALUE")
 	// D2: set and remove name the pattern exactly.
 	for _, sub := range []string{"set", "remove"} {
@@ -123,7 +123,7 @@ func TestRulesSetRemove(t *testing.T) {
 			"filo: bank: no rule *.pdf there (filo rules lists them)")
 	}
 	rt.contains("remove", rt.filo(ExitOK, "", false, "rules", "remove", bank).stdout,
-		"Removed   bank . * -> financial", "- 5 files it dated keep their policy")
+		"Removed   bank . * -> financial", "- 5 files keep the policy it set")
 
 	// F1: a rule whose directory went is flagged, and can still be listed, changed and removed by its path.
 	if err := os.MkdirAll(rt.in("old/scans"), 0o755); err != nil {
@@ -197,9 +197,9 @@ func TestRulesReviewFindings(t *testing.T) {
 	}
 	rt.filo(ExitOK, "", false, "scan")
 	rt.contains("first link", rt.filo(ExitOK, "", false, "rules", "add", rt.in("docs"), "statements").stdout,
-		"1 file dated")
+		"policy set on 1 file")
 	rt.contains("other link", rt.filo(ExitOK, "", false, "rules", "add", rt.in("private"), "private").stdout,
-		"1 file dated")
+		"policy set on 1 file")
 	rt.contains("each on its own policy", rt.filo(ExitOK, "", false, "rules").stdout,
 		"  docs\n    *   statements", "  private\n    *   private")
 

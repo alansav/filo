@@ -4,7 +4,7 @@ Rules   none yet
 Next: filo rules add DIR [PATTERN] POLICY
 
 $ filo rules add <root>/bank *Statement* statements --dry-run
-Dry run   bank . *Statement* -> statements (7y) . 3 files would be dated . 3 need a file_date . <root>
+Dry run   bank . *Statement* -> statements (7y) . policy would be set on 3 files . 3 need a file_date . <root>
 
     file_date   until
                 needs a file_date   bank/2024/DailyStatement-01.pdf
@@ -14,30 +14,30 @@ Dry run   bank . *Statement* -> statements (7y) . 3 files would be dated . 3 nee
 Dry run: nothing was changed.
 
 $ filo rules add <root>/bank *Statement* statements
-Done   bank . *Statement* -> statements (7y) . 3 files dated . 3 need a file_date . <root>
+Done   bank . *Statement* -> statements (7y) . policy set on 3 files . 3 need a file_date . <root>
 
 Next: filo export retention <root>/bank -o FILE, fill in file_date, then filo update FILE
 
 $ filo rules add <root>/bank *bank* banking
-Done   bank . *bank* -> banking . 1 file dated . <root>
+Done   bank . *bank* -> banking . policy set on 1 file . <root>
   - policy banking was created with no value: its files need a retention until it has one
 
 Next: filo policies set banking VALUE
 
 $ filo rules add <root>/bank/2024 tax
-Done   bank/2024 . * -> tax . 0 files dated . <root>
+Done   bank/2024 . * -> tax . policy set on 0 files . <root>
   - policy tax was created with no value: its files need a retention until it has one
 
 Next: filo policies set tax VALUE
 
 $ filo rules add <root>/bank *2024* tax
-Done   bank . *2024* -> tax . 0 files dated . <root>
+Done   bank . *2024* -> tax . policy set on 0 files . <root>
 
 [!] Not applied   1 file matches 2 rules of bank equally (*2024*, *bank*)
     bank/new-2024-bank.pdf
 
 $ filo rules add <root>/scans/old statements
-Done   scans/old . * -> statements (7y) . 0 files dated . <root>
+Done   scans/old . * -> statements (7y) . policy set on 0 files . <root>
 
 $ filo rules 
 Rules   5 . 3 directories . 4 need attention . <root>
@@ -58,14 +58,14 @@ Next: filo rules add DIR [PATTERN] POLICY, filo rules remove DIR [PATTERN]
 
 $ filo rules set <root>/bank *statement* financial
 Done   bank . *Statement* -> financial (was statements)
-  - 3 files it dated keep their policy: the change is for new files
+  - 3 files keep the policy it set: the change is for new files
   - policy financial was created with no value: its files need a retention until it has one
 
 Next: filo policies set financial VALUE
 
 $ filo rules remove <root>/bank *bank*
 Removed   bank . *bank* -> banking
-  - 1 file it dated keeps its policy
+  - 1 file keeps the policy it set
 
 $ filo rules remove <root>/scans/old
 Removed   scans/old . * -> statements

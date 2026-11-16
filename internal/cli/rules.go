@@ -150,12 +150,12 @@ func (e *env) ruleAdd(ctx context.Context, s *store.Store, arg, pattern, policy 
 			needs++
 		}
 	}
-	title, dated := "Done", " dated"
+	title, set := "Done", "policy set on "
 	if dry {
-		title, dated = "Dry run", " would be dated"
+		title, set = "Dry run", "policy would be set on "
 	}
 	facts := []string{where, ruleTo(rule.Pattern, rule.Policy, rule.PolicyValue),
-		report.Plural(int64(len(run.Dated)), "file", "files") + dated}
+		set + report.Plural(int64(len(run.Dated)), "file", "files")}
 	if needs > 0 {
 		facts = append(facts, report.Plural(int64(needs), "needs a file_date", "need a file_date"))
 	}
@@ -270,8 +270,8 @@ func (e *env) ruleSet(ctx context.Context, s *store.Store, arg, pattern, policy 
 	r.Outcome("Done", where, ruleTo(old.Pattern, name, "")+" (was "+old.Policy+")")
 	if old.Dated > 0 {
 		// Not the rule's policy by name: a rule set before may have dated them with another.
-		r.Count(view.Neutral, report.Plural(old.Dated, "file", "files")+" it dated "+verb(old.Dated, "keeps its",
-			"keep their")+" policy: the change is for new files")
+		r.Count(view.Neutral, report.Plural(old.Dated, "file", "files")+" "+verb(old.Dated, "keeps", "keep")+
+			" the policy it set: the change is for new files")
 	}
 	if created {
 		r.Count(view.Neutral, "policy "+name+" was created with no value: its files need a retention until it has one")
@@ -294,8 +294,8 @@ func (e *env) ruleRemove(ctx context.Context, s *store.Store, arg, pattern strin
 	r := e.view
 	r.Outcome("Removed", where, ruleTo(old.Pattern, old.Policy, ""))
 	if old.Dated > 0 {
-		r.Count(view.Neutral, report.Plural(old.Dated, "file", "files")+" it dated "+verb(old.Dated, "keeps its",
-			"keep their")+" policy")
+		r.Count(view.Neutral, report.Plural(old.Dated, "file", "files")+" "+verb(old.Dated, "keeps", "keep")+
+			" the policy it set")
 	}
 	return nil
 }
