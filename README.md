@@ -171,8 +171,8 @@ shows the files still to decide.
   set.
 - A blank `retention` where one was set clears it, so the file needs a decision again. Filo lists those files and
   asks first; without a terminal it leaves them alone.
-- A row is refused, with one line saying why, if the file changed since the export or its retention was changed from
-  a later export. The other rows are still applied. `--dry-run` checks everything and writes nothing.
+- A row is refused, with one line saying why, if the file changed since the export or its retention was changed
+  after it (from a later export, or by `filo policies move`). The other rows are still applied. `--dry-run` checks everything and writes nothing.
 - On a large system, export one directory at a time, so the spreadsheet stays fast.
 
 Nothing is deleted because a date passed: `filo delete` lists the candidates and asks (see [Deleting](#deleting)).
@@ -202,7 +202,9 @@ filo policies                     # list them, with what needs attention
   `file_date` to count from; those then **need a file_date**, which `filo report`, `filo policies` and `filo
   policies show` point out. They are never deleted until they have one.
 - **A typo or a duplicate**: `filo policies move bils bills` moves every file from one policy to another (into a new
-  name it's a rename), then `filo policies remove bils`. A policy in use can't be removed.
+  name it's a rename), then `filo policies remove bils`. A policy in use can't be removed. A CSV exported before the
+  move never puts a file back on the old name: rows left as they were do nothing, and a row edited since is refused
+  ("export again").
 - **A policy whose date has passed** is flagged by `filo policies`, never removed automatically: set a new date (next
   year's, say) or remove it.
 - A file has a policy or a retention of its own, never both; typing a period or a date over a policy name takes it
