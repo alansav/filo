@@ -63,10 +63,7 @@ func (e *env) confirmChange(ctx context.Context, question string, yes bool, reli
 		r.Next("Nothing changed: there is no terminal to ask in. Run it in a terminal, or pass -y.")
 		return false, nil
 	}
-	pr := newPrompter(e.stdin)
-	pr.end, pr.check = r.Blank, e.outputErr
-	defer pr.close()
-	ok, err := e.askYesNo(ctx, pr, question, relist)
+	ok, err := e.askOne(ctx, question, relist)
 	if err != nil {
 		return false, interrupted(err)
 	}
@@ -74,6 +71,15 @@ func (e *env) confirmChange(ctx context.Context, question string, yes bool, reli
 		r.Next("Nothing changed.")
 	}
 	return ok, nil
+}
+
+// askOne asks one yes/no question at the terminal (the caller has checked canPrompt), Enter being no; relist is as
+// for askYesNo.
+func (e *env) askOne(ctx context.Context, question string, relist func()) (bool, error) {
+	pr := newPrompter(e.stdin)
+	pr.end, pr.check = e.view.Blank, e.outputErr
+	defer pr.close()
+	return e.askYesNo(ctx, pr, question, relist)
 }
 
 // yesNoList are the answers to a confirmation that covers a list cut to its first entries.

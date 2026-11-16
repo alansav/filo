@@ -117,6 +117,21 @@ func TestExportReplace(t *testing.T) {
 	if got := mustRead(t, l); string(got) != string(before) {
 		t.Errorf("the symlink's target changed")
 	}
+
+	// The register and its own files are never offered, whatever the answer.
+	snaps, err := filepath.Glob(ct.db + ".snapshots/*")
+	if err != nil || len(snaps) == 0 {
+		t.Fatalf("no snapshot to test with: %v", err)
+	}
+	for _, p := range []string{ct.db, ct.db + ".lock", snaps[0]} {
+		r = filo(ExitError, "y\n", true, "export", "retention", "-o", p)
+		contains(p, r.stderr, "is filo's register or one of its files")
+		lacks(p, r.stdout, "Replace")
+	}
+
+	// A command that cannot run asks nothing: a DIR outside every root.
+	r = filo(ExitError, "y\n", true, "export", "retention", ct.work, "-o", l)
+	lacks("DIR outside the roots", r.stdout, "Replace")
 }
 
 // TestWriteExportReplace: replacing writes a temporary file and renames it over the old one only once the CSV is
@@ -127,6 +142,7 @@ func TestWriteExportReplace(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
 		swap    bool // replace the old file with another after asking
+		edit    bool // save into the old file after asking
 		failCSV bool
 		want    string // the file's content afterwards
 		wantErr string
@@ -134,6 +150,7 @@ func TestWriteExportReplace(t *testing.T) {
 		{name: "replaced", want: "new 7"},
 		{name: "write fails", failCSV: true, want: "old", wantErr: "disk full"},
 		{name: "changed since asked", swap: true, want: "other", wantErr: "changed"},
+		{name: "edited in place since asked", edit: true, want: "old and more", wantErr: "changed"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
@@ -151,6 +168,11 @@ func TestWriteExportReplace(t *testing.T) {
 					t.Fatal(err)
 				}
 				if err := os.Rename(q, p); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tc.edit {
+				if err := os.WriteFile(p, []byte("old and more"), 0o644); err != nil { // the same file, written into
 					t.Fatal(err)
 				}
 			}

@@ -81,12 +81,6 @@ func (e *env) export(ctx context.Context, dbBefore string, args []string) error 
 	if err != nil {
 		return err
 	}
-	// Asked before anything else, so a no costs nothing (docs/design.md, Lifespan).
-	asked, ok, err := e.askReplace(ctx, csvPath)
-	if err != nil || !ok {
-		return err
-	}
-
 	s, err := e.open(ctx, *db)
 	if err != nil {
 		return err
@@ -94,6 +88,12 @@ func (e *env) export(ctx context.Context, dbBefore string, args []string) error 
 	defer e.closeStore(s)
 	f, where, err := filterFor(ctx, s, pos)
 	if err != nil {
+		return err
+	}
+	// Asked once the command is known to be able to run, and before any work, so a no costs nothing (docs/design.md,
+	// Lifespan).
+	asked, ok, err := e.askReplace(ctx, csvPath, s.DBPath())
+	if err != nil || !ok {
 		return err
 	}
 	if kind == "duplicates" {
