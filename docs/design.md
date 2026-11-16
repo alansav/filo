@@ -689,7 +689,7 @@ Rules   6 · 4 directories · 2 need attention · ~/Documents
 Next: filo rules add DIR [PATTERN] POLICY, filo rules remove DIR [PATTERN]
 
 $ filo rules add bank '*DailyStatement*' daily-statements
-Done   bank · *DailyStatement* → daily-statements (7y) · 212 files dated · 3 need a file_date
+Done   bank · *DailyStatement* → daily-statements (7y) · policy set on 212 files · 3 need a file_date
 
 ! 1 file matches *DailyStatement* and *Daily* equally: not dated
     bank/Daily-DailyStatement.pdf
@@ -697,13 +697,13 @@ Done   bank · *DailyStatement* → daily-statements (7y) · 212 files dated · 
 Next: filo export retention bank -o FILE, fill in file_date, then filo update FILE
 
 $ filo rules add personal/home/electric bills
-Done   personal/home/electric · * → bills · 38 files dated
+Done   personal/home/electric · * → bills · policy set on 38 files
   - policy bills created with no value: its files need a retention until it has one
 
 Next: filo policies set bills VALUE
 
 $ filo rules add bank '*DailyStatement*' daily-statements --dry-run
-Dry run   bank · *DailyStatement* → daily-statements (7y) · 212 files would be dated · 3 need a file_date
+Dry run   bank · *DailyStatement* → daily-statements (7y) · policy would be set on 212 files · 3 need a file_date
 
     file_date    until
     2019-03-14   2026-03-14   bank/DailyStatement-2019-03.pdf
@@ -724,12 +724,48 @@ Removed   bank · *Statement* → statements
   *Statement*`, `~/Media is not reachable (not mounted?): rules are not applied while its files cannot be checked`,
   `/tmp/x is not inside any root`, and for the wrong number of arguments the usage, with "quote a pattern with * or
   spaces". The `--dry-run` list is cut at ten in a terminal ("… N more"), all of it when piped, as elsewhere. `move`
-  and `copy` (slice 4) say what they did the same way: `Done   moved 3 rules from bank to banking · 5 files dated`.
+  and `copy` (slice 4) say what they did the same way:
+  `Done   moved 3 rules from bank to banking · policy set on 5 files`.
 
-  A scan that dated files adds a section with a line per rule (`bank, *DailyStatement* → daily-statements   3 files
-  (1 needs a file_date)`), and one for files not applied (`! Not applied   1 file matches two rules of bank: …`).
-  `filo report` counts the files dated by a rule, and where it lists the directories holding most undated files it
-  adds `Next: filo rules add DIR POLICY`.
+  **The words** (decided 2026-11-16): a rule does not date a file, it sets the file's policy, and the date follows
+  from the policy. Output says "policy set on 212 files", "given a policy by rules", "not given a policy"; never
+  "dated by a rule". **A scan** (every scan: `filo scan`, the scan before an export, `roots add`) applies the rules to
+  every file in its scope with no retention, not only the new ones, so a file is given its policy once its directory
+  can be read again or a tie is fixed. Its summary counts what the rules did and did not do; a section lists each
+  rule that set a policy, with the directory, pattern and policy lined up; every tie is listed, every scan, with its
+  files and the rules that match them equally, as `filo rules` lists them. A scan the rules did nothing in shows
+  none of it:
+
+```
+$ filo scan
+Scan   scan 7 · 5 files seen · 2s · ~/Documents
+
+  · 3 new
+  · 3 given a policy by rules
+  ! 1 not given a policy: two rules match it equally
+
+Policies set by rules
+    directory                pattern            policy
+    bank                     *DailyStatement*   daily-statements   2 files   1 needs a file_date
+    personal/home/electric   *                  bills              1 file
+
+! Not applied   1 file matches 2 rules of bank equally (*2024*, *bank*)
+    bank/new-2024-bank.pdf
+```
+
+  **`filo report`**, in its Retention section: how many present files have a policy set by rules, the files no rule
+  could give one (each with the rules that tie on it), and `filo rules add DIR POLICY` in the next step:
+
+```
+Retention   250 files and symlinks
+  · 212 with a policy set by directory rules (filo rules)
+  [!] 7 need a retention (no retention 7)
+  [!] 1 not given a policy: two rules match it equally
+      bank/new-2024-bank.pdf   *2024*, *bank*
+    Where most need one (to depth 2)
+    …
+    Next: filo export retention [DIR] -o FILE, then filo update FILE, or filo rules add DIR POLICY
+```
 - **Register (schema version 10)**: `rules` (id, root, directory relative to the root, empty for the root itself,
   pattern as typed, its letter count, policy, when added; the root, directory and lowercased pattern unique);
   `files.rule_id` (the rule that dated the file, NULL once that rule is removed) and `files.rule_dated_utc` (when;
@@ -2045,8 +2081,8 @@ put first on 2026-11-15). Each is an open question below until it is designed.
       them with different ones. `add`'s line ends with the root, as every heading does. Tests: `TestRulesGolden`
       (`testdata/rules.txt`), `TestRulesAdd`, `TestRulesSetRemove`, `TestRulesListScope`. Not tested: refusing a
       root that is not mounted (it is `store.Resolve`'s, and needs a real mount).
-   3. *Applied by every scan*: the scan's sections on what it dated and did not; `filo report` counts files dated by a
-      rule and suggests `filo rules add`. Scenarios B, C2, F2.
+   3. *Applied by every scan*: the scan's sections on what it set and did not (as mocked, agreed 2026-11-16); `filo
+      report` counts files dated by a rule and suggests `filo rules add`. Scenarios B, C2, F2.
    4. *`move` and `copy`*, then the README (a "Directory rules" section, quoting patterns) and the help overview.
       Scenarios E.
 5. Progress in the report, and `export retention --needing-retention`.
