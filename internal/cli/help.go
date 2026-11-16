@@ -41,7 +41,8 @@ var overview = struct {
 		{Name: "policies remove NAME", Text: "delete a policy no file uses"},
 		{Name: "policies show NAME", Text: "a policy's value and its files"},
 		{Name: "rules [DIR]", Text: "list the directory rules, at DIR and below"},
-		{Name: "rules add DIR [PATTERN] POLICY", Text: "give POLICY to the files under DIR that have no retention"},
+		{Name: "rules add DIR [PATTERN] POLICY",
+			Text: "give POLICY to the files under DIR with no retention, now and as they arrive"},
 		{Name: "rules set DIR [PATTERN] POLICY", Text: "change the policy a rule gives new files"},
 		{Name: "rules remove DIR [PATTERN]", Text: "remove a rule; the files it set a policy on keep it"},
 		{Name: "help [COMMAND]", Text: "this overview, or a command's flags and rules"},
@@ -238,6 +239,8 @@ var commandHelps = map[string]commandHelp{
 		flags: []view.Term{{Name: "--dry-run",
 			Text: "add: show the files it would set a policy on, and change nothing"}},
 		after: []string{
+			"Every scan applies the rules to the files it sees with no retention, and says what they did; filo " +
+				"report counts the files with a policy set by rules.",
 			"Nothing is asked: a rule only sets a retention. Nothing is deleted except by filo delete, which asks.",
 		},
 	},

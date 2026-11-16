@@ -28,5 +28,8 @@ Flags
   --dry-run                add: show the files it would set a policy on, and
                            change nothing
 
+  Every scan applies the rules to the files it sees with no retention, and says
+  what they did; filo report counts the files with a policy set by rules.
+
   Nothing is asked: a rule only sets a retention. Nothing is deleted except by
   filo delete, which asks.

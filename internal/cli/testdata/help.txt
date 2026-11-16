@@ -30,8 +30,8 @@ Commands
   policies show NAME       a policy's value and its files
   rules [DIR]              list the directory rules, at DIR and below
   rules add DIR [PATTERN] POLICY
-                           give POLICY to the files under DIR that have no
-                           retention
+                           give POLICY to the files under DIR with no retention,
+                           now and as they arrive
   rules set DIR [PATTERN] POLICY
                            change the policy a rule gives new files
   rules remove DIR [PATTERN]
