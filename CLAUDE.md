@@ -11,8 +11,8 @@ Iterations 1 (scan, register, report), 2 (lifespan: retention through the retent
 chosen ones, each only after it is re-read and found unchanged) are done, as are register snapshots. The duplicates
 redesign (`docs/design.md`, Duplicates: `filo delete FILE.csv`, records, always, `filo duplicates`; schema 8) is done
 and merged. The terminal output is done (every command prints through `internal/view`, see "Terminal output"). Named
-retention policies (`docs/design.md`, Lifespan, Named retention policies; schema 9; `filo policies`) are designed and
-being built on branch `retention-policies` in four slices (section 5 item 3); none is built yet.
+retention policies (`docs/design.md`, Lifespan, Named retention policies; schema 9; `filo policies`) are built on
+branch `retention-policies`, all four slices, not yet merged. Next in `docs/design.md` section 5: folder rules.
 **`internal/dispose` is the only code allowed to delete the user's files**, and only from `filo delete`; everything
 else stays read-only on them, and nothing overwrites an existing file. Stay inside the current piece of work.
 

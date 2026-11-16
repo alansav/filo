@@ -29,6 +29,8 @@ type Report struct {
 	UndecidedIn []DirGroup             // the directories holding most of them
 	Deleted     store.DeletedTotals    // what filo has deleted
 	Snapshots   store.SnapshotInfo     // copies of the register
+	Policies    []store.Policy         // the named retention policies
+	Today       string                 // the date the report was built for (YYYY-MM-DD)
 }
 
 // DirDepth is how many levels below a root the report groups files needing a decision by.
@@ -42,7 +44,7 @@ func StatusLabel(s store.Status) string {
 	case store.StatusPossibleMove:
 		return "possible moves"
 	case store.StatusNeedsFileDate:
-		return "need a file_date for their policy"
+		return "no file_date for their policy"
 	case store.StatusUndated:
 		return "no retention"
 	case store.StatusChanged:
@@ -100,7 +102,28 @@ func Build(ctx context.Context, s *store.Store, top int, today string) (Report, 
 	if r.Snapshots, err = s.Snapshots(ctx, time.Now()); err != nil {
 		return r, err
 	}
+	if r.Policies, err = s.Policies(ctx); err != nil {
+		return r, err
+	}
+	r.Today = today
 	return r, nil
+}
+
+// PolicyAttention is what needs attention about a policy, "" if nothing: no value, a date passed, files with no
+// file_date under a period (docs/design.md, Named retention policies). today is YYYY-MM-DD.
+func PolicyAttention(p store.Policy, today string) string {
+	dated := p.Value != "" && p.Value != store.Forever && !store.IsPeriod(p.Value)
+	switch {
+	case p.Value == "":
+		return "needs a retention"
+	case dated && p.Value <= today && p.Files == 0:
+		return "passed: set a new date, or remove it"
+	case dated && p.Value <= today:
+		return "passed: its files are past their retention (filo delete)"
+	case p.NoFileDate > 0:
+		return Count(p.NoFileDate) + " without a file_date"
+	}
+	return ""
 }
 
 // Render writes the report through the terminal output components (docs/design.md, Terminal output). Every section
@@ -311,6 +334,17 @@ func (r Report) renderRetention(v *view.Renderer) {
 		v.Detail(4, "Next: filo export retention [DIR] -o FILE, then filo update FILE")
 	}
 
+	// The files whose policy is a period and which have no file_date: the fix is named, with their policies.
+	if n := r.Status[store.StatusNeedsFileDate]; n > 0 {
+		var which []string
+		for _, p := range r.Policies {
+			if p.NoFileDate > 0 {
+				which = append(which, p.Name+", "+p.Value)
+			}
+		}
+		v.Count(view.Attention, Plural(n, "file needs a file_date: its policy counts", "files need a file_date: "+
+			"their policy counts")+" from it ("+strings.Join(which, "; ")+")")
+	}
 	if n := r.Status[store.StatusKept]; n > 0 {
 		v.Count(view.Neutral, Count(n)+" kept until a later date")
 	}
@@ -328,6 +362,19 @@ func (r Report) renderRetention(v *view.Renderer) {
 		}
 		v.Count(view.Neutral, fmt.Sprintf("deleted by filo: %s, %s freed%s", Plural(d.Files, "file", "files"),
 			Size(d.Bytes), last))
+	}
+	if len(r.Policies) > 0 {
+		var attention int64
+		for _, p := range r.Policies {
+			if PolicyAttention(p, r.Today) != "" {
+				attention++
+			}
+		}
+		line := Plural(int64(len(r.Policies)), "policy", "policies")
+		if attention > 0 {
+			line += ", " + Plural(attention, "needs attention", "need attention")
+		}
+		v.Count(view.Neutral, line+" (filo policies)")
 	}
 }
 

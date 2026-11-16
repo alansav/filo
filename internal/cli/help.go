@@ -34,6 +34,12 @@ var overview = struct {
 		{Name: "duplicates", Text: "list what is not counted as duplicates"},
 		{Name: "duplicates exclude DIR", Text: "never count the files under DIR as duplicates"},
 		{Name: "duplicates include PATH", Text: "undo an exclusion, a content always or a set of records"},
+		{Name: "policies", Text: "list the retention policies, and what needs attention"},
+		{Name: "policies add NAME [VALUE]", Text: "create a policy: a named retention such as bills = 7y"},
+		{Name: "policies set NAME VALUE", Text: "change a policy, and so every file using it"},
+		{Name: "policies move OLD NEW", Text: "move a policy's files to another, or rename it"},
+		{Name: "policies remove NAME", Text: "delete a policy no file uses"},
+		{Name: "policies show NAME", Text: "a policy's value and its files"},
 		{Name: "help [COMMAND]", Text: "this overview, or a command's flags and rules"},
 	},
 	after: "Every command accepts --db PATH (default: $FILO_DB, then the user data directory).",
@@ -97,7 +103,8 @@ var commandHelps = map[string]commandHelp{
 		before: []string{
 			"Writes every file under DIR (inside a root), or under every root, as CSV (UTF-8) to FILE, which must " +
 				"not exist. Columns: id, export, directory, name, size, modified, file_date, retention, keep_until. " +
-				"Fill in retention in a spreadsheet, then run filo update FILE. A blank file_date is filled in from " +
+				"Fill in retention in a spreadsheet (a period such as 7y counted from file_date, a date, forever, or " +
+				"a policy name: filo help policies), then run filo update FILE. A blank file_date is filled in from " +
 				"the file name when the name holds one clear date (2023-03-14, 20230314, or 2023-03 for the month's " +
 				"last day); check it. On a large system, export one directory at a time.",
 			"export duplicates writes each duplicate group (two or more copies of the same content; hard links to " +
@@ -142,6 +149,8 @@ var commandHelps = map[string]commandHelp{
 				"same file and its content is still the content its retention was set on; otherwise it is skipped " +
 				"with one line saying why. A file that cannot be read is never deleted. Folders the run emptied are " +
 				"removed, up to the root. Exit code 1 if a file could not be read or deleted.",
+			"A file kept until a date is past its retention on that date: kept until 2026-12-31, it is listed from " +
+				"2026-12-31 on. Nothing is deleted then; it is listed the next time filo delete runs.",
 			"filo delete FILE carries out a duplicates CSV (filo export duplicates). Each group is checked against " +
 				"the disk: a group any of whose files changed or moved since the export is skipped, and a copy gone " +
 				"since is ignored. It lists what it will delete, what it will record (contents always, sets of " +

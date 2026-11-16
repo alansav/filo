@@ -385,11 +385,11 @@ encoding, refusals, the clear prompt, "since" measured in scans) stays.
   `keep_until` becomes `retention` (its date, or `forever`) with the same `keep_until`. `export_rows` and `reviews`
   gain the same two columns, so an untouched cell is still recognised and the history shows what was typed.
 
-### Named retention policies (designed 2026-11-16, being built)
+### Named retention policies (designed and built 2026-11-16)
 A retention schedule written once and named, so the same rule is typed as a word in the CSV and changed in one
 place: if the law moves financial records from 7 to 10 years, `filo policies set bills 10y` changes every file using
 `bills`. Settled with the person one topic at a time on 2026-11-16 (it had been a proposal in Open questions since
-2026-11-13). Being built on branch `retention-policies`, see section 5.
+2026-11-13). Built on branch `retention-policies` in four slices, see section 5.
 
 - **What a policy is**: a name for a retention: a period (`bills = 7y`, counted from each file's own `file_date`), a
   date (`project-x = 2030-12-31`: every file of it ends that day), or `forever`. Names are letters, digits, `-` and
@@ -1721,6 +1721,14 @@ put first on 2026-11-15). Each is an open question below until it is designed.
    `l` (`askYesNo`, now also behind `filo update`'s two questions; `confirmChange` for the policies ones); a merge
    into a policy with no value lists the files that would lose their keep_until (`PolicyPreview.LoseDate`) and
    asks; one wording for a policy with no value ("no value"); the list works out today once.
+   Slice 4 done on 2026-11-16: the report's Retention section names the policies whose files need a file_date (`! 1
+   file needs a file_date: its policy counts from it (bills, 7y)`; the status reads "no file_date for their policy"
+   in the needs-a-retention count) and ends with `N policies, M need attention (filo policies)` when there are any
+   (`report.PolicyAttention`, shared with `filo policies`); the help overview lists the policies commands, `filo
+   delete`'s page states the date rule, the export page names policy names; the README has a "Retention policies"
+   section and the date rule. Test: `TestReportPolicies`; goldens `help.txt`, `help-delete.txt`, `help-export.txt`.
+   **Named retention policies are done**: every scenario in the table has a test. Next: a review of slice 4, then
+   merge; then folder rules (item 4).
 4. Folder rules (default retention policies on directories).
 5. Progress in the report, and `export retention --needing-retention`.
 6. Duplicates: one decision for all copies (the duplicates review CSV was done first, see iteration 5).

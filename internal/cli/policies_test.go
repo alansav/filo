@@ -223,3 +223,24 @@ func TestPoliciesReviewFindings(t *testing.T) {
 			"need a retention", "Move 2 files from bills to tax (no value)? [y/N]", "Done   moved 2 files to tax")
 	})
 }
+
+// TestReportPolicies: the report says how many policies there are and how many need attention, and which policies'
+// files need a file_date (slice 4). With no policies it says nothing about them.
+func TestReportPolicies(t *testing.T) {
+	p := newPolicyTest(t)
+	p.filo(ExitOK, "", false, "policies", "set", "bills", "forever", "-y")
+	csv := filepath.Join(p.work, "r2.csv")
+	p.filo(ExitOK, "", false, "export", "retention", "-o", csv)
+	editCSV(t, csv, setRetention(map[string]string{"undated.pdf": "bills"}))
+	p.filo(ExitOK, "", false, "update", csv)
+	p.filo(ExitOK, "", false, "policies", "set", "bills", "7y", "-y")
+	out := p.filo(ExitOK, "", false, "report").stdout
+	p.contains("report", out, "(no file_date for their policy 1, no retention 2)",
+		"[!] 1 file needs a file_date: its policy counts from it (bills, 7y)",
+		"- 2 policies, 2 need attention (filo policies)")
+
+	ct := newCLITest(t)
+	ct.write("a.txt", "a")
+	ct.filo(ExitOK, "", false, "roots", "add", ct.root)
+	ct.lacks("no policies", ct.filo(ExitOK, "", false, "report").stdout, "polic")
+}

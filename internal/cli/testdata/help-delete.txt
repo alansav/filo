@@ -18,6 +18,10 @@ Flags
   that cannot be read is never deleted. Folders the run emptied are removed, up
   to the root. Exit code 1 if a file could not be read or deleted.
 
+  A file kept until a date is past its retention on that date: kept until
+  2026-12-31, it is listed from 2026-12-31 on. Nothing is deleted then; it is
+  listed the next time filo delete runs.
+
   filo delete FILE carries out a duplicates CSV (filo export duplicates). Each
   group is checked against the disk: a group any of whose files changed or moved
   since the export is skipped, and a copy gone since is ignored. It lists what

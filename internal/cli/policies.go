@@ -88,23 +88,6 @@ func policyWhat(value string) string {
 	return valueWord(value)
 }
 
-// policyAttention is what needs attention about a policy, "" if nothing: no value, a date passed, files with no
-// file_date under a period.
-func policyAttention(p store.Policy, today string) string {
-	dated := p.Value != "" && p.Value != store.Forever && !store.IsPeriod(p.Value)
-	switch {
-	case p.Value == "":
-		return "needs a retention"
-	case dated && p.Value <= today && p.Files == 0:
-		return "passed: set a new date, or remove it"
-	case dated && p.Value <= today:
-		return "passed: its files are past their retention (filo delete)"
-	case p.NoFileDate > 0:
-		return report.Count(p.NoFileDate) + " without a file_date"
-	}
-	return ""
-}
-
 func (e *env) policyList(ctx context.Context, s *store.Store) error {
 	ps, err := s.Policies(ctx)
 	if err != nil {
@@ -127,7 +110,7 @@ func (e *env) policyList(ctx context.Context, s *store.Store) error {
 			detail = "from each file's file_date"
 		}
 		rows[i] = view.TableRow{Name: p.Name, Cells: []string{valueWord(p.Value), detail,
-			report.Plural(p.Files, "file", "files")}, Attention: policyAttention(p, day)}
+			report.Plural(p.Files, "file", "files")}, Attention: report.PolicyAttention(p, day)}
 		if rows[i].Attention != "" {
 			attention++
 			if first == "" {
