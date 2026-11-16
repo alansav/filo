@@ -6,6 +6,7 @@
 package duplicates
 
 import (
+	"cmp"
 	"encoding/csv"
 	"errors"
 	"fmt"
@@ -231,7 +232,11 @@ func Plan(p Parsed, exported map[int64]map[int64]int64) ([]GroupPlan, []Problem)
 		}
 	}
 	type fileKey struct{ export, file int64 }
-	seen := map[fileKey]int{} // the line each file was first listed on
+	type listing struct {
+		line  int
+		group int64
+	}
+	seen := map[fileKey]listing{} // where each file was first listed
 	rowsOf := map[GroupKey][]Row{}
 	for _, r := range p.Rows {
 		g := get(r.Key)
@@ -248,13 +253,19 @@ func Plan(p Parsed, exported map[int64]map[int64]int64) ([]GroupPlan, []Problem)
 			continue
 		}
 		fk := fileKey{r.Key.Export, r.FileID}
+		want, in := files[r.FileID]
 		if first, dup := seen[fk]; dup {
-			refuse(r.Key, fmt.Sprintf("%sfile %d is listed more than once (first on line %d): export again", at,
-				r.FileID, first))
+			// Every group the file is listed in, and its own, whichever row comes first: sorting must not matter.
+			why := fmt.Sprintf("%sfile %d is listed more than once (first on line %d): export again", at,
+				r.FileID, first.line)
+			refuse(r.Key, why)
+			refuse(GroupKey{r.Key.Export, first.group}, why)
+			if in {
+				refuse(GroupKey{r.Key.Export, want}, why)
+			}
 			continue
 		}
-		seen[fk] = r.Line
-		want, in := files[r.FileID]
+		seen[fk] = listing{r.Line, r.Key.Group}
 		switch {
 		case !in:
 			refuse(r.Key, fmt.Sprintf("%sfile %d is not in export %d (added, or pasted from another export): "+
@@ -268,6 +279,34 @@ func Plan(p Parsed, exported map[int64]map[int64]int64) ([]GroupPlan, []Problem)
 			continue
 		}
 		rowsOf[r.Key] = append(rowsOf[r.Key], r)
+	}
+	// A file in groups of two exports (overlapping exports, B3) with different actions: refuse each such group, so
+	// what happens never depends on which group is carried out first. Blank is no decision, so never a conflict.
+	type decision struct {
+		key    GroupKey
+		action Action
+		line   int
+	}
+	decided := map[int64][]decision{}
+	for k, rows := range rowsOf {
+		for _, r := range rows {
+			if r.Action != None {
+				decided[r.FileID] = append(decided[r.FileID], decision{k, r.Action, r.Line})
+			}
+		}
+	}
+	for file, ds := range decided {
+		slices.SortFunc(ds, func(a, b decision) int { return cmp.Compare(a.line, b.line) })
+		for _, d := range ds[1:] {
+			if d.action != ds[0].action {
+				why := fmt.Sprintf("file %d is %s on line %d but %s on line %d (exports %d and %d): give it one "+
+					"action", file, ds[0].action, ds[0].line, d.action, d.line, ds[0].key.Export, d.key.Export)
+				for _, x := range ds {
+					refuse(x.key, why)
+				}
+				break
+			}
+		}
 	}
 	// The copies exported in each group the CSV mentions, but with no row in it.
 	for k, g := range plans {
@@ -288,10 +327,7 @@ func Plan(p Parsed, exported map[int64]map[int64]int64) ([]GroupPlan, []Problem)
 		out = append(out, *g)
 	}
 	slices.SortFunc(out, func(a, b GroupPlan) int {
-		if a.Key.Export != b.Key.Export {
-			return int(a.Key.Export - b.Key.Export)
-		}
-		return int(a.Key.Group - b.Key.Group)
+		return cmp.Or(cmp.Compare(a.Key.Export, b.Key.Export), cmp.Compare(a.Key.Group, b.Key.Group))
 	})
 	return out, p.Problems
 }

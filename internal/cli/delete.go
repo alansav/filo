@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -27,16 +28,38 @@ func (e *env) delete(ctx context.Context, dbBefore string, args []string) error 
 		return err
 	}
 	if len(pos) > 1 {
-		return usageError{"delete takes at most one DIR"}
+		return usageError{"delete takes at most one DIR or FILE"}
 	}
-	if err := checkTildes("DIR", pos...); err != nil {
+	// A directory limits the retention list; anything else is a duplicates CSV to carry out (docs/design.md,
+	// Duplicates), so a mistyped file name fails as a file that cannot be opened, not as a directory.
+	csvPath := ""
+	if len(pos) == 1 {
+		if fi, err := os.Stat(pos[0]); err != nil || !fi.IsDir() {
+			if csvPath, err = filepath.Abs(pos[0]); err != nil {
+				return err
+			}
+		}
+	}
+	what := "DIR"
+	if csvPath != "" {
+		what = "FILE"
+	}
+	if err := checkTildes(what, pos...); err != nil {
 		return err
+	}
+	if csvPath != "" {
+		if _, err := os.Stat(csvPath); err != nil {
+			return fmt.Errorf("open %s: %w", csvPath, errors.Unwrap(err))
+		}
 	}
 	s, err := e.open(ctx, *db)
 	if err != nil {
 		return err
 	}
 	defer e.closeStore(s)
+	if csvPath != "" {
+		return e.deleteDuplicates(ctx, s, csvPath, *yes)
+	}
 	f, where, err := filterFor(ctx, s, pos)
 	if err != nil {
 		return err

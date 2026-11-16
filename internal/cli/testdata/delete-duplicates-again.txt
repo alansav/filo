@@ -1,0 +1,10 @@
+Duplicates   d.csv . export 1 . 5 groups . <root>
+
+Won't touch
+  [refused] group 5   line 12   report.pdf: every copy is delete: no copy would be left; to remove this content entirely, give it a past retention
+  - group 1   terms.pdf: already done: the 2 copies are a set of records
+  - group 2   LICENSE: already done: the content is always
+  - group 3   contract.pdf: already done: the copies to delete are gone (deleted by filo)
+  - 1 group not decided (blank)
+
+Nothing to do.

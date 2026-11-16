@@ -10,11 +10,11 @@ Iterations 1 (scan, register, report), 2 (lifespan: retention through the retent
 `filo update`) and 3 (delete: `filo delete [DIR] [-y]` lists the files past their retention, asks, and deletes the
 chosen ones, each only after it is re-read and found unchanged) are done, as are register snapshots. The duplicates
 redesign is being built on branch `duplicates-redesign` in five slices (`docs/design.md` section 5 item 2): slices 1
-(schema 8, the group definition, the first design's marks gone) and 2 (the CSV's action column, read into a plan per
-group) are done; until slice 3 lands, a duplicates CSV can be exported and edited but not carried out. The terminal output is done (every command prints through `internal/view`, see
-"Terminal output"). The order of the next work is in `docs/design.md` section 5: the rest of the duplicates redesign
-(see "Duplicates": the `action` column, `filo delete FILE.csv` with no stored decisions to delete, records, always and
-`filo duplicates`), then named retention policies.
+(schema 8, the group definition, the first design's marks gone), 2 (the CSV's action column, read into a plan per
+group) and 3 (`filo delete FILE.csv` carries a duplicates CSV out) are done. The terminal output is done (every command prints
+through `internal/view`, see "Terminal output"). The order of the next work is in `docs/design.md` section 5: the rest
+of the duplicates redesign (slice 4, `filo duplicates` with `exclude` and `include`; slice 5, README and help), then
+named retention policies.
 **`internal/dispose` is the only code allowed to delete the user's files**, and only from `filo delete`; everything
 else stays read-only on them, and nothing overwrites an existing file. Stay inside the current piece of work.
 

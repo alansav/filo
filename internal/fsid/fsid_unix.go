@@ -31,3 +31,12 @@ func FromFileInfo(fi fs.FileInfo) (ID, bool) {
 	}
 	return ID{Dev: uint64(st.Dev), Ino: uint64(st.Ino)}, true // Dev and Ino types vary by OS
 }
+
+// Links returns how many hard links the file has, 0 if not known.
+func Links(fi fs.FileInfo) uint64 {
+	st, ok := fi.Sys().(*syscall.Stat_t)
+	if !ok {
+		return 0
+	}
+	return uint64(st.Nlink) // Nlink's type varies by OS
+}

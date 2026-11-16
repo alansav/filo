@@ -81,6 +81,7 @@ func TestReadCSVRefusesOtherCSVs(t *testing.T) {
 var exported = map[int64]map[int64]int64{
 	7: {1: 1, 2: 1, 3: 1, 4: 2, 5: 2, 6: 3, 7: 3},
 	8: {9: 1},
+	9: {1: 1, 2: 1, 3: 1}, // overlaps export 7's group 1 (B3)
 }
 
 // plan reads the CSV and plans it against exported, returning each group's outcome as "group: what" and the
@@ -169,6 +170,14 @@ func TestPlanStructure(t *testing.T) {
 			append([][4]string{{"7", "1", "1", "keep"}, {"7", "1", "2", "delete"}, {"7", "1", "3", "delete"},
 				{"7", "1", "3", "delete"}}, decided2...),
 			[]GroupKey{{7, 1}}, "listed more than once"},
+		{"C2: a row duplicated into another group, the original first",
+			append([][4]string{{"7", "1", "1", "keep"}, {"7", "1", "2", "delete"}, {"7", "1", "3", "delete"},
+				{"7", "3", "6", "keep"}, {"7", "3", "7", "delete"}, {"7", "3", "3", "keep"}}, decided2...),
+			[]GroupKey{{7, 1}, {7, 3}}, "export again"},
+		{"C2: a row duplicated into another group, the copy first",
+			append([][4]string{{"7", "3", "3", "keep"}, {"7", "1", "1", "keep"}, {"7", "1", "2", "delete"},
+				{"7", "1", "3", "delete"}, {"7", "3", "6", "keep"}, {"7", "3", "7", "delete"}}, decided2...),
+			[]GroupKey{{7, 1}, {7, 3}}, "export again"},
 		{"C2: an export this register does not have",
 			append([][4]string{{"12", "1", "1", "keep"}, {"12", "1", "2", "delete"}}, decided2...),
 			[]GroupKey{{12, 1}}, "export 12 is not a duplicates export of this register"},
@@ -194,6 +203,35 @@ func TestPlanStructure(t *testing.T) {
 		})
 	}
 
+	t.Run("B3: a file with different actions in two exports refuses both groups", func(t *testing.T) {
+		plans, _ := plan(t, csvOf([4]string{"7", "1", "1", "keep"}, [4]string{"7", "1", "2", "delete"},
+			[4]string{"7", "1", "3", "delete"}, [4]string{"9", "1", "1", "delete"}, [4]string{"9", "1", "2", "keep"},
+			[4]string{"9", "1", "3", "delete"}))
+		for _, k := range []GroupKey{{7, 1}, {9, 1}} {
+			if g := plans[k]; g.Status != Refused || !strings.Contains(g.Reason, "give it one action") {
+				t.Errorf("group %v = %+v, want refused for its conflicting actions", k, g)
+			}
+		}
+	})
+	t.Run("B3: the same actions in two exports, or one export left blank, are fine", func(t *testing.T) {
+		for _, tc := range []struct {
+			actions [3]string // export 9's rows for files 1, 2, 3
+			want    Status    // export 9's group
+		}{
+			{[3]string{"keep", "delete", "delete"}, Decided},
+			{[3]string{"", "", ""}, NotDecided},
+		} {
+			plans, _ := plan(t, csvOf([4]string{"7", "1", "1", "keep"}, [4]string{"7", "1", "2", "delete"},
+				[4]string{"7", "1", "3", "delete"}, [4]string{"9", "1", "1", tc.actions[0]},
+				[4]string{"9", "1", "2", tc.actions[1]}, [4]string{"9", "1", "3", tc.actions[2]}))
+			if g := plans[GroupKey{7, 1}]; g.Status != Decided {
+				t.Errorf("export 9 %q: group 7/1 = %+v, want decided", tc.actions, g)
+			}
+			if g := plans[GroupKey{9, 1}]; g.Status != tc.want {
+				t.Errorf("export 9 %q: group 9/1 = %+v, want status %d", tc.actions, g, tc.want)
+			}
+		}
+	})
 	t.Run("a partial CSV: groups deleted from it are not planned, a blank one is left alone", func(t *testing.T) {
 		plans, problems := plan(t, csvOf([4]string{"7", "2", "4", "keep"}, [4]string{"7", "2", "5", "delete"},
 			[4]string{"7", "3", "6", ""}, [4]string{"7", "3", "7", ""}))

@@ -42,6 +42,9 @@ func editCSV(t *testing.T, path string, edit func(row map[string]string)) {
 			row[h] = rec[i]
 		}
 		edit(row)
+		if row[dropRow] != "" {
+			continue
+		}
 		out := make([]string, len(head))
 		for i, h := range head {
 			out[i] = row[h]
@@ -53,6 +56,9 @@ func editCSV(t *testing.T, path string, edit func(row map[string]string)) {
 		t.Fatal(err)
 	}
 }
+
+// dropRow, set to anything by an edit, leaves the row out of the CSV.
+const dropRow = "\x00drop"
 
 // setRetention returns a CSV edit that sets retention on the rows whose name is a key.
 func setRetention(values map[string]string) func(map[string]string) {

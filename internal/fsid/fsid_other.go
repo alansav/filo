@@ -15,3 +15,6 @@ func lstatID(string) (ID, error) {
 
 // FromFileInfo is not implemented on this OS yet: the identity is unknown.
 func FromFileInfo(fs.FileInfo) (ID, bool) { return ID{}, false }
+
+// Links is not implemented on this OS yet: 0, not known.
+func Links(fs.FileInfo) uint64 { return 0 }
