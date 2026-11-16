@@ -270,7 +270,8 @@ func (d *Disposer) PruneDirs() (removed []string, problems []error) {
 			if err := removeDir(dir); err != nil {
 				// Something appeared in it, or it cannot be removed: either way it stays.
 				if !errors.Is(err, fs.ErrExist) && !isNotEmpty(err) {
-					problems = append(problems, fmt.Errorf("could not remove the empty directory %s: %s", dir, store.ErrDetail(err)))
+					problems = append(problems,
+						fmt.Errorf("could not remove the empty directory %s: %s", dir, store.ErrDetail(err)))
 				}
 				continue
 			}

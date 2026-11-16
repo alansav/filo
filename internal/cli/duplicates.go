@@ -63,8 +63,8 @@ func (e *env) exportDuplicates(ctx context.Context, s *store.Store, f store.Filt
 		v.Count(view.Neutral, line)
 	}
 	if nc.Dirs == 0 { // once a directory is excluded, the feature is known
-		v.Count(view.Neutral, "directories that are copies on purpose (backups) can be left out entirely: filo duplicates "+
-			"exclude DIR")
+		v.Count(view.Neutral, "directories that are copies on purpose (backups) can be left out entirely: "+
+			"filo duplicates exclude DIR")
 	}
 	notScannedLine(v, notScanned)
 	v.Blank()

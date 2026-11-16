@@ -329,8 +329,8 @@ func TestDeleteOnlyInsideRoot(t *testing.T) {
 		{"escapes the root", candidate(t, root, "../outside.txt"), true, "not inside its root",
 			filepath.Join(base, "outside.txt")},
 		{"root path not clean", unclean, true, "not inside its root", filepath.Join(root, "keep")},
-		{"through a symlinked directory", candidate(t, root, "link/f"), false, "a directory on its path is now a symlink",
-			filepath.Join(base, "elsewhere", "f")},
+		{"through a symlinked directory", candidate(t, root, "link/f"), false,
+			"a directory on its path is now a symlink", filepath.Join(base, "elsewhere", "f")},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
