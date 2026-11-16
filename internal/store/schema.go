@@ -63,7 +63,8 @@ CREATE TABLE files (
     reviewed_hash TEXT,
     deleted_utc TEXT,                   -- when filo deleted it; its path is closed. NULL = not deleted by filo
     policy_id INTEGER,                  -- its retention policy (policies.id; then retention is NULL), NULL = none
-    rule_id INTEGER,                    -- the directory rule that dated it (rules.id), NULL = none or since removed
+    rule_id INTEGER,                    -- the rule that set its policy (rules.id); NULL = none, the rule removed, or
+                                        -- its retention since set by hand
     rule_dated_utc TEXT                 -- when a rule dated it; once set, no rule dates it again
 );
 

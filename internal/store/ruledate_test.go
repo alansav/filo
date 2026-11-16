@@ -3,6 +3,7 @@ package store
 import (
 	"slices"
 	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -244,5 +245,32 @@ func TestScanAppliesRules(t *testing.T) {
 	}
 	if _, run = scan("bank", Changes{}); len(run.Dated) != 0 {
 		t.Errorf("a scan of bank set a policy on %+v", run.Dated)
+	}
+}
+
+// TestRetentionByHandLeavesTheRule: a retention set in the CSV takes a file off the rule that set its policy (it no
+// longer counts as set by it), and no rule sets its policy again (scenario B5).
+func TestRetentionByHandLeavesTheRule(t *testing.T) {
+	e := newReviewEnv(t)
+	e.apply(Changes{New: []NewFile{f("bank/a.pdf", "h1"), f("bank/b.pdf", "h2")}})
+	r := e.addRule("bank", "", "bills")
+	if r.Dated != 2 {
+		t.Fatalf("rule set a policy on %d files, want 2", r.Dated)
+	}
+	exportID, _ := e.export(ruleToday, policyNow)
+	if res, err := e.s.UpdateRetention(e.ctx, []RetentionRow{{Line: 2, ExportID: exportID,
+		FileID: e.knownAll("bank/a.pdf"), Retention: "2032-01-01"}}, policyNow, ruleToday, "r.csv", false,
+		nil); err != nil || res.Set != 1 {
+		t.Fatalf("update: %+v, %v", res, err)
+	}
+	if v := e.ruleColumns("bank/a.pdf"); v != "2032-01-01 - 2032-01-01 rule - dated hash h1" {
+		t.Errorf("bank/a.pdf after the CSV: %q, want its own date, no rule, still marked", v)
+	}
+	if rs, _ := e.s.Rules(e.ctx, e.root.ID, ""); len(rs) != 1 || rs[0].Dated != 1 {
+		t.Errorf("rules = %+v, want the rule counting 1 file", rs)
+	}
+	e.apply(Changes{}) // a scan applies the rules: bank/a.pdf has a retention, so they leave it alone
+	if v := e.ruleColumns("bank/a.pdf"); !strings.HasPrefix(v, "2032-01-01 - ") {
+		t.Errorf("bank/a.pdf after a scan: %q, want its own date still", v)
 	}
 }

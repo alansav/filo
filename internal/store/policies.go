@@ -460,7 +460,7 @@ func (s *Store) RemovePolicy(ctx context.Context, name string, now time.Time) er
 		return fmt.Errorf("%s is used by %d %s (filo rules lists them): %w", p.Name, n, plural(n, "rule", "rules"),
 			ErrPolicyInUse)
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE files SET policy_id = NULL,
+	if _, err := tx.ExecContext(ctx, `UPDATE files SET policy_id = NULL, rule_id = NULL,
 		retention = CASE WHEN ? AND file_date IS NULL THEN NULL ELSE ? END WHERE policy_id = ?`,
 		IsPeriod(p.Value), nullString(p.Value), p.ID); err != nil {
 		return fmt.Errorf("remove policy %s: %w", p.Name, err)

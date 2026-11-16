@@ -465,7 +465,7 @@ func (s *Store) UpdateRetentionWith(ctx context.Context, rows []RetentionRow, no
 			}
 		}
 		if _, err := tx.ExecContext(ctx, `UPDATE files SET file_date = ?, retention = ?, policy_id = ?,
-			keep_until = ?, reviewed_utc = ?, reviewed_after_scan = ?, reviewed_hash = ? WHERE id = ?`,
+			keep_until = ?, reviewed_utc = ?, reviewed_after_scan = ?, reviewed_hash = ?, rule_id = NULL WHERE id = ?`,
 			nullString(c.fileDate), own, policy, nullString(c.keepUntil), utc(now), a.afterScan, c.exportHash,
 			r.FileID); err != nil {
 			return res, fmt.Errorf("record retention: %w", err)
