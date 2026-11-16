@@ -262,7 +262,7 @@ func TestExportScansFirst(t *testing.T) {
 	real := runScan
 	runScan = func(ctx context.Context, s *store.Store, o reconcile.Options) (reconcile.Summary, error) {
 		cancel()
-		return reconcile.Summary{}, ctx.Err()
+		return reconcile.Summary{}, errors.New("interrupted (9)") // as SQLite reports it: not context.Canceled
 	}
 	t.Cleanup(func() { runScan = real })
 	r = filo(ExitError, "", false, "export", "retention", ct.in("tax"), "-o", csv("c.csv"))
@@ -270,4 +270,38 @@ func TestExportScansFirst(t *testing.T) {
 	if _, err := os.Lstat(csv("c.csv")); err == nil {
 		t.Error("c.csv was written after Ctrl-C")
 	}
+}
+
+// TestExportNoScanLine: --no-scan names the last scan that covered what the CSV holds. A scan of a folder inside a
+// root covers only that folder, and a duplicates export holds every root. An empty register shows no scan and no
+// stray blank line.
+func TestExportNoScanLine(t *testing.T) {
+	ct := newCLITest(t)
+	write, filo, contains := ct.write, ct.filo, ct.contains
+	csv := func(name string) string { return filepath.Join(ct.work, name) }
+
+	r := filo(ExitOK, "", false, "export", "retention", "-o", csv("0.csv"))
+	if !strings.HasPrefix(r.stdout, "Retention export   no files") {
+		t.Errorf("empty register:\n%s", r.stdout)
+	}
+
+	write("tax/a.txt", "a")
+	write("photos/a.jpg", "a")
+	filo(ExitOK, "", false, "roots", "add", ct.root, "--no-scan")
+	filo(ExitOK, "", false, "scan", ct.in("tax"))
+	contains("DIR scanned", filo(ExitOK, "", false, "export", "retention", ct.in("tax"), "--no-scan", "-o",
+		csv("1.csv")).stdout, "  - not scanned first: as of the last scan, ")
+	contains("root not scanned whole", filo(ExitOK, "", false, "export", "retention", "--no-scan", "-o",
+		csv("2.csv")).stdout, "  - not scanned first, and "+ct.root+" has never been scanned whole")
+
+	filo(ExitOK, "", false, "scan")
+	second := filepath.Join(ct.work, "second")
+	if err := os.MkdirAll(second, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	filo(ExitOK, "", false, "roots", "add", second, "--no-scan")
+	contains("duplicates hold every root", filo(ExitOK, "", false, "export", "duplicates", ct.in("tax"), "--no-scan",
+		"-o", csv("d.csv")).stdout, "has never been scanned whole")
+	contains("retention holds its root", filo(ExitOK, "", false, "export", "retention", ct.in("tax"), "--no-scan",
+		"-o", csv("3.csv")).stdout, "  - not scanned first: as of the last scan, ")
 }

@@ -44,21 +44,35 @@ func (e *env) scan(ctx context.Context, dbBefore string, args []string) error {
 	}
 	defer e.closeStore(s)
 
-	opt := reconcile.Options{Workers: *workers, AllowEmpty: *allowEmpty}
+	dir := ""
 	if len(pos) == 1 {
-		if opt.Target, err = filepath.Abs(pos[0]); err != nil {
+		dir = pos[0]
+	}
+	return e.scanWhere(ctx, s, reconcile.Options{Workers: *workers, AllowEmpty: *allowEmpty}, dir, true)
+}
+
+// errNoRoots is scanWhere's error for a register with no roots to scan.
+var errNoRoots = errors.New("no roots yet; add one with: filo roots add DIR")
+
+// scanWhere scans dir (inside a root) if it is not "", otherwise every root: filo scan, and the scan before an export.
+// next is as for scanAll.
+func (e *env) scanWhere(ctx context.Context, s *store.Store, opt reconcile.Options, dir string, next bool) error {
+	if dir != "" {
+		target, err := filepath.Abs(dir)
+		if err != nil {
 			return err
 		}
-		return e.scanTarget(ctx, s, opt, true)
+		opt.Target = target
+		return e.scanTarget(ctx, s, opt, next)
 	}
 	roots, err := s.Roots(ctx)
 	if err != nil {
 		return err
 	}
 	if len(roots) == 0 {
-		return errors.New("no roots yet; add one with: filo roots add DIR")
+		return errNoRoots
 	}
-	return e.scanAll(ctx, s, opt, roots, true)
+	return e.scanAll(ctx, s, opt, roots, next)
 }
 
 // runScan is reconcile.Scan; tests replace it to interrupt a scan at a chosen point.

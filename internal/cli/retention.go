@@ -101,14 +101,17 @@ func (e *env) export(ctx context.Context, dbBefore string, args []string) error 
 	// A scan first, so the CSV holds the files as they are now (docs/design.md, Lifespan, "A scan first").
 	var notScanned string
 	if *noScan {
-		if notScanned, err = lastScanLine(ctx, s, where.Roots); err != nil {
+		if notScanned, err = lastScanLine(ctx, s, kind, f); err != nil {
 			return err
 		}
 	} else {
-		if err := e.scanFirst(ctx, s, kind, pos); err != nil {
+		scanned, err := e.scanFirst(ctx, s, kind, pos)
+		if err != nil {
 			return err
 		}
-		e.view.Blank()
+		if scanned {
+			e.view.Blank()
+		}
 	}
 	if kind == "duplicates" {
 		return e.exportDuplicates(ctx, s, f, where, csvPath, asked, notScanned)
@@ -168,55 +171,54 @@ func (e *env) export(ctx context.Context, dbBefore string, args []string) error 
 // scanFirst is an export's scan (docs/design.md, Lifespan, "A scan first"): a retention export of DIR scans DIR;
 // any other export scans every root, since a duplicate group's copies can be anywhere. Its output is filo scan's,
 // without the scan's own next step. A root that fails to scan stops the export, so a missing disk never gives a CSV
-// that looks complete.
-func (e *env) scanFirst(ctx context.Context, s *store.Store, kind string, pos []string) error {
-	opt := reconcile.Options{Workers: reconcile.DefaultWorkers}
+// that looks complete. scanned is false when there was nothing to scan (no roots), so nothing was shown.
+func (e *env) scanFirst(ctx context.Context, s *store.Store, kind string, pos []string) (scanned bool, err error) {
+	dir := ""
 	if kind == "retention" && len(pos) == 1 {
-		target, err := filepath.Abs(pos[0])
-		if err != nil {
-			return err
-		}
-		opt.Target = target
-		return scanStopped(e.scanTarget(ctx, s, opt, false))
+		dir = pos[0]
 	}
-	roots, err := s.Roots(ctx)
-	if err != nil || len(roots) == 0 {
-		return err
-	}
-	return scanStopped(e.scanAll(ctx, s, opt, roots, false))
-}
-
-// scanStopped says that a failed or interrupted scan stopped the export.
-func scanStopped(err error) error {
+	err = e.scanWhere(ctx, s, reconcile.Options{Workers: reconcile.DefaultWorkers}, dir, false)
 	switch {
+	case errors.Is(err, errNoRoots):
+		return false, nil
 	case err == nil:
-		return nil
-	case errors.Is(err, context.Canceled):
-		return errors.New("interrupted; nothing was exported")
+		return true, nil
+	case ctx.Err() != nil: // whatever error the interrupted scan returned (SQLite has its own)
+		return false, errors.New("interrupted; nothing was exported")
 	case errors.Is(err, errReported): // the failed roots are on stdout, and named on stderr by scanAll
-		return fmt.Errorf("nothing exported: a root could not be scanned; fix it, or export with --no-scan from the " +
-			"register as it is")
+		return false, errors.New("nothing exported: a root could not be scanned; fix it, or export with --no-scan " +
+			"from the register as it is")
 	}
-	return fmt.Errorf("nothing exported: %w", err)
+	return false, fmt.Errorf("nothing exported: %w", err)
 }
 
-// lastScanLine is the line an export with --no-scan shows: the CSV is as of the last scan of the roots it covers (the
-// oldest, when there are several), or of none if one was never scanned.
-func lastScanLine(ctx context.Context, s *store.Store, roots []string) (string, error) {
-	totals, err := s.RootTotals(ctx)
+// lastScanLine is the line an export with --no-scan shows: the CSV is as of the last scan that covered what it holds
+// (the oldest of them, when it holds several roots), or says that one was never scanned. A retention export of DIR
+// holds DIR; any other export holds every root (a duplicate group's copies can be anywhere). A scan of a folder
+// inside a root covers only that folder.
+func lastScanLine(ctx context.Context, s *store.Store, kind string, f store.Filter) (string, error) {
+	roots, err := s.Roots(ctx)
 	if err != nil {
 		return "", err
 	}
 	oldest := ""
-	for _, t := range totals {
-		if !slices.Contains(roots, t.Root.Path) {
-			continue
+	for _, r := range roots {
+		scope := ""
+		if kind == "retention" && f.RootID != 0 {
+			if r.ID != f.RootID {
+				continue
+			}
+			scope = f.Scope
 		}
-		if t.LastScan == nil {
-			return "not scanned first, and " + t.Root.Path + " has never been scanned", nil
+		finished, err := s.LastScanCovering(ctx, r.ID, scope)
+		if err != nil {
+			return "", err
 		}
-		if oldest == "" || t.LastScan.FinishedUTC < oldest {
-			oldest = t.LastScan.FinishedUTC
+		if finished == "" {
+			return "not scanned first, and " + r.Path + " has never been scanned whole", nil
+		}
+		if oldest == "" || report.Time(finished) < report.Time(oldest) {
+			oldest = finished
 		}
 	}
 	if oldest == "" {
