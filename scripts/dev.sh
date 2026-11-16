@@ -29,8 +29,32 @@ build() {
     "$repo/.devcontainer"
 }
 
+# The container cannot see your ~/.gitconfig, so commits made inside it use the repo's own git config.
+# If user.name or user.email is missing there, ask for it (suggesting your global value) and store it in
+# the repo's .git/config. Values already set are never changed. Without a terminal, only warn.
+git_identity() {
+  git -C "$repo" rev-parse --git-dir >/dev/null 2>&1 || return 0
+  local key value suggested
+  for key in user.name user.email; do
+    git -C "$repo" config --local "$key" >/dev/null && continue
+    if ! [ -t 0 ]; then
+      echo "dev.sh: $key is not set in this repo's git config; commits made in the container will fail" >&2
+      continue
+    fi
+    suggested="$(git config --global "$key" || true)"
+    read -r -p "git $key for commits made in the container${suggested:+ [$suggested]}: " value
+    value="${value:-$suggested}"
+    if [ -n "$value" ]; then
+      git -C "$repo" config --local "$key" "$value"
+    else
+      echo "dev.sh: $key left unset" >&2
+    fi
+  done
+}
+
 run() {
   podman image inspect "$image" >/dev/null 2>&1 || build
+  git_identity
 
   local tty=()
   if [ -t 0 ] && [ -t 1 ]; then tty=(-it); fi

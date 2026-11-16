@@ -137,7 +137,7 @@ Recent events                                                                non
 ## Setting retentions
 
 ```sh
-filo export retention ~/Documents -o docs.csv    # every file under ~/Documents, with its retention
+filo export retention ~/Documents -o docs.csv    # scan ~/Documents, then every file under it, with its retention
 # open docs.csv in a spreadsheet, fill in retention, save it as CSV
 filo update docs.csv                            # apply what you changed
 filo delete                                     # list the files past their retention, ask, delete
@@ -370,8 +370,8 @@ Next: filo duplicates include /home/you/Backup to undo it
 | `filo roots set DIR` | Replace a root's settings. |
 | `filo scan [DIR]` | Scan `DIR` (a directory inside a root: a partial scan), or every root if omitted. |
 | `filo report [--top N]` | Show the overview; `--top` sets how many entries each list shows (default 10). |
-| `filo export retention [DIR] -o FILE` | Write every file under `DIR` (or every root) with its retention, as CSV. |
-| `filo export duplicates [DIR] -o FILE` | Write the duplicate groups with a copy under `DIR` as CSV, to decide which copies to keep. See [Duplicates](#duplicates). |
+| `filo export retention [DIR] -o FILE [--no-scan] [--workers N]` | Scan `DIR` (or every root), then write every file under it with its retention, as CSV. |
+| `filo export duplicates [DIR] -o FILE [--no-scan] [--workers N]` | Scan every root, then write the duplicate groups with a copy under `DIR` as CSV, to decide which copies to keep. See [Duplicates](#duplicates). |
 | `filo update FILE [--dry-run]` | Apply the retentions edited in an exported retention CSV. |
 | `filo delete [DIR] [-y]` | List the files past their retention, ask, and delete the ones you choose. See [Deleting](#deleting). |
 | `filo delete FILE [-y]` | Carry out a duplicates CSV: check it against the disk, list, ask, and delete the copies marked `delete`. |
@@ -509,8 +509,22 @@ The full design, settled decisions and open questions are in [docs/design.md](do
 The repository includes a Podman dev container (`.devcontainer/Containerfile`), driven by `scripts/dev.sh`:
 
 ```sh
-scripts/dev.sh run go test ./...        # run the tests in the container
-scripts/dev.sh shell                    # or work inside it
+scripts/dev.sh run go build -o bin/filo ./cmd/filo   # build in the container
+scripts/dev.sh run go test ./...                     # run the tests in the container
+scripts/dev.sh run go vet ./...                      # vet
+scripts/dev.sh shell                                 # or work inside it
+```
+
+The first call builds the image (Claude Code is installed only with `scripts/dev.sh build --claude`). The container
+mounts only the repo, so `scripts/dev.sh run bin/filo ...` sees the repo and the container's own home, never your
+files. To run Filo on your own files, build it static in the container and run it from the host. The SQLite driver
+is pure Go, so `CGO_ENABLED=0` gives a binary with no library dependencies that runs on any x86-64 Linux, including
+older CPUs (Go's default target is `GOAMD64=v1`). Without it, the binary links the container's C library and may not
+start on an older host:
+
+```sh
+scripts/dev.sh run env CGO_ENABLED=0 go build -o bin/filo ./cmd/filo
+bin/filo --db /tmp/f.db roots add ~/FiloTest           # on the host
 ```
 
 Inside the container (or with Go installed locally):

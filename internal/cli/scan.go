@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -34,8 +35,8 @@ func (e *env) scan(ctx context.Context, dbBefore string, args []string) error {
 	if err := checkTildes("DIR", pos...); err != nil {
 		return err
 	}
-	if *workers < 1 || *workers > hasher.MaxWorkers {
-		return usageError{fmt.Sprintf("--workers must be between 1 and %d", hasher.MaxWorkers)}
+	if err := checkWorkers(fs, *workers, false); err != nil {
+		return err
 	}
 
 	s, err := e.open(ctx, *db)
@@ -44,11 +45,38 @@ func (e *env) scan(ctx context.Context, dbBefore string, args []string) error {
 	}
 	defer e.closeStore(s)
 
-	opt := reconcile.Options{Workers: *workers, AllowEmpty: *allowEmpty}
+	dir := ""
 	if len(pos) == 1 {
-		if opt.Target, err = filepath.Abs(pos[0]); err != nil {
+		dir = pos[0]
+	}
+	return e.scanWhere(ctx, s, reconcile.Options{Workers: *workers, AllowEmpty: *allowEmpty}, dir)
+}
+
+// checkWorkers checks a command's --workers: 1 to hasher.MaxWorkers, and not given with --no-scan, which skips the
+// scan it is for (filo scan, roots add, export).
+func checkWorkers(fs *flag.FlagSet, workers int, noScan bool) error {
+	given := false
+	fs.Visit(func(f *flag.Flag) { given = given || f.Name == "workers" })
+	if given && noScan {
+		return usageError{"--workers is for the scan, and --no-scan skips it; give one or the other"}
+	}
+	if workers < 1 || workers > hasher.MaxWorkers {
+		return usageError{fmt.Sprintf("--workers must be between 1 and %d", hasher.MaxWorkers)}
+	}
+	return nil
+}
+
+// errNoRoots is scanWhere's error for a register with no roots to scan.
+var errNoRoots = errors.New("no roots yet; add one with: filo roots add DIR")
+
+// scanWhere scans dir (inside a root) if it is not "", otherwise every root: filo scan, and the scan before an export.
+func (e *env) scanWhere(ctx context.Context, s *store.Store, opt reconcile.Options, dir string) error {
+	if dir != "" {
+		target, err := filepath.Abs(dir)
+		if err != nil {
 			return err
 		}
+		opt.Target = target
 		return e.scanTarget(ctx, s, opt)
 	}
 	roots, err := s.Roots(ctx)
@@ -56,7 +84,7 @@ func (e *env) scan(ctx context.Context, dbBefore string, args []string) error {
 		return err
 	}
 	if len(roots) == 0 {
-		return errors.New("no roots yet; add one with: filo roots add DIR")
+		return errNoRoots
 	}
 	return e.scanAll(ctx, s, opt, roots)
 }

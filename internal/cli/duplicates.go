@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"io/fs"
 	"slices"
 	"time"
 
@@ -16,7 +17,7 @@ import (
 
 // exportDuplicates writes the duplicate groups with a copy under the filter to csvPath.
 func (e *env) exportDuplicates(ctx context.Context, s *store.Store, f store.Filter, where view.Where,
-	csvPath string) error {
+	csvPath string, asked fs.FileInfo, notScanned string) error {
 	groups, err := s.DuplicateGroups(ctx, f)
 	if err != nil {
 		return err
@@ -26,10 +27,11 @@ func (e *env) exportDuplicates(ctx context.Context, s *store.Store, f store.Filt
 	v := e.view
 	if len(groups) == 0 {
 		v.Heading("Duplicates export", where, "no groups")
+		notScannedLine(v, notScanned)
 		v.Next("Nothing exported.")
 		return nil
 	}
-	id, err := writeExport(csvPath, func(write func(int64) error) (int64, error) {
+	id, err := writeExport(csvPath, asked, func(write func(int64) error) (int64, error) {
 		return s.RecordDuplicatesExport(ctx, csvPath, now(), groups, write)
 	}, func(w io.Writer, id int64) error { return duplicates.WriteCSV(w, id, groups, time.Local) })
 	if err != nil {
@@ -64,6 +66,7 @@ func (e *env) exportDuplicates(ctx context.Context, s *store.Store, f store.Filt
 		v.Count(view.Neutral, "folders that are copies on purpose (backups) can be left out entirely: filo duplicates "+
 			"exclude DIR")
 	}
+	notScannedLine(v, notScanned)
 	v.Blank()
 	v.Next("Next: edit the action column, then filo delete " + shellQuote(csvPath))
 	return nil

@@ -1,13 +1,11 @@
 package cli
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"os"
 	"path"
 	"path/filepath"
@@ -16,6 +14,7 @@ import (
 	"time"
 
 	"github.com/alansav/filo/internal/duplicates"
+	"github.com/alansav/filo/internal/reconcile"
 	"github.com/alansav/filo/internal/report"
 	"github.com/alansav/filo/internal/retention"
 	"github.com/alansav/filo/internal/store"
@@ -55,6 +54,8 @@ func (e *env) export(ctx context.Context, dbBefore string, args []string) error 
 	fl := e.flags("export")
 	db := dbFlag(fl, dbBefore)
 	out := fl.String("o", "", "")
+	noScan := fl.Bool("no-scan", false, "")
+	workers := fl.Int("workers", reconcile.DefaultWorkers, "")
 	pos, err := e.parse(fl, "export", args)
 	if err != nil {
 		return err
@@ -70,6 +71,9 @@ func (e *env) export(ctx context.Context, dbBefore string, args []string) error 
 	if len(pos) > 1 {
 		return usageError{"export " + kind + " takes at most one DIR"}
 	}
+	if err := checkWorkers(fl, *workers, *noScan); err != nil {
+		return err
+	}
 	if *out == "" {
 		return usageError{"export needs -o FILE: the CSV is written to a file, never to the terminal"}
 	}
@@ -83,10 +87,6 @@ func (e *env) export(ctx context.Context, dbBefore string, args []string) error 
 	if err != nil {
 		return err
 	}
-	if _, err := os.Lstat(csvPath); err == nil {
-		return fmt.Errorf("%s already exists; choose another name (filo never overwrites a file)", csvPath)
-	}
-
 	s, err := e.open(ctx, *db)
 	if err != nil {
 		return err
@@ -96,8 +96,29 @@ func (e *env) export(ctx context.Context, dbBefore string, args []string) error 
 	if err != nil {
 		return err
 	}
+	// Asked once the command is known to be able to run, and before any work, so a no costs nothing (docs/design.md,
+	// Lifespan).
+	asked, ok, err := e.askReplace(ctx, csvPath, s.DBPath())
+	if err != nil || !ok {
+		return err
+	}
+	// A scan first, so the CSV holds the files as they are now (docs/design.md, Lifespan, "A scan first").
+	var notScanned string
+	if *noScan {
+		if notScanned, err = lastScanLine(ctx, s, kind, f); err != nil {
+			return err
+		}
+	} else {
+		scanned, err := e.scanFirst(ctx, s, kind, pos, *workers)
+		if err != nil {
+			return err
+		}
+		if scanned {
+			e.view.Blank()
+		}
+	}
 	if kind == "duplicates" {
-		return e.exportDuplicates(ctx, s, f, where, csvPath)
+		return e.exportDuplicates(ctx, s, f, where, csvPath, asked, notScanned)
 	}
 	items, err := s.Files(ctx, today(), f)
 	if err != nil {
@@ -118,11 +139,12 @@ func (e *env) export(ctx context.Context, dbBefore string, args []string) error 
 	v := e.view
 	if len(items) == 0 {
 		v.Heading("Retention export", where, "no files")
+		notScannedLine(v, notScanned)
 		v.Next("Nothing exported.")
 		return nil
 	}
 
-	id, err := writeExport(csvPath, func(write func(int64) error) (int64, error) {
+	id, err := writeExport(csvPath, asked, func(write func(int64) error) (int64, error) {
 		return s.RecordExport(ctx, csvPath, now(), items, write)
 	}, func(w io.Writer, id int64) error { return retention.WriteCSV(w, id, items, time.Local) })
 	if err != nil {
@@ -144,43 +166,77 @@ func (e *env) export(ctx context.Context, dbBefore string, args []string) error 
 			" filled in from the file name: check "+pluralWord(suggested, "it", "them")+" before counting from "+
 			pluralWord(suggested, "it", "them"))
 	}
+	notScannedLine(v, notScanned)
 	v.Blank()
 	v.Next("Next: fill in retention (7y, 18m, forever or a date), then filo update " + shellQuote(csvPath))
 	return nil
 }
 
-// writeExport creates csvPath (never over an existing file) and records the export: record stores it and calls the
-// function it is given with the export's ID, which writes the CSV through writeCSV. A failed write removes the file
-// and records nothing.
-func writeExport(csvPath string, record func(write func(int64) error) (int64, error),
-	writeCSV func(w io.Writer, id int64) error) (int64, error) {
-	// O_EXCL: an existing file is never overwritten, whatever it is.
-	file, err := os.OpenFile(csvPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	if errors.Is(err, fs.ErrExist) {
-		return 0, fmt.Errorf("%s already exists; choose another name (filo never overwrites a file)", csvPath)
+// scanFirst is an export's scan (docs/design.md, Lifespan, "A scan first"): a retention export of DIR scans DIR;
+// any other export scans every root, since a duplicate group's copies can be anywhere. Its output is exactly filo
+// scan's, Next: filo report included when it found something, so nothing it found is hidden. A root that fails to
+// scan stops the export, so a missing disk never gives a CSV that looks complete. scanned is false when there was nothing to scan (no roots), so nothing was shown.
+func (e *env) scanFirst(ctx context.Context, s *store.Store, kind string, pos []string, workers int) (scanned bool,
+	err error) {
+	dir := ""
+	if kind == "retention" && len(pos) == 1 {
+		dir = pos[0]
 	}
+	err = e.scanWhere(ctx, s, reconcile.Options{Workers: workers}, dir)
+	switch {
+	case errors.Is(err, errNoRoots):
+		return false, nil
+	case err == nil:
+		return true, nil
+	case ctx.Err() != nil: // whatever error the interrupted scan returned (SQLite has its own)
+		return false, errors.New("interrupted; nothing was exported")
+	case errors.Is(err, errReported): // the failed roots are on stdout, and named on stderr by scanAll
+		return false, errors.New("nothing exported: a root could not be scanned; fix it, or export with --no-scan " +
+			"from the register as it is")
+	}
+	return false, fmt.Errorf("nothing exported: %w", err)
+}
+
+// lastScanLine is the line an export with --no-scan shows: the CSV is as of the last scan that covered what it holds
+// (the oldest of them, when it holds several roots), or says that one was never scanned. A retention export of DIR
+// holds DIR; any other export holds every root (a duplicate group's copies can be anywhere). A scan of a folder
+// inside a root covers only that folder.
+func lastScanLine(ctx context.Context, s *store.Store, kind string, f store.Filter) (string, error) {
+	roots, err := s.Roots(ctx)
 	if err != nil {
-		return 0, fmt.Errorf("create %s: %w", csvPath, err)
+		return "", err
 	}
-	id, err := record(func(id int64) error {
-		bw := bufio.NewWriter(file)
-		if err := writeCSV(bw, id); err != nil {
-			return err
+	oldest := ""
+	for _, r := range roots {
+		scope := ""
+		if kind == "retention" && f.RootID != 0 {
+			if r.ID != f.RootID {
+				continue
+			}
+			scope = f.Scope
 		}
-		if err := bw.Flush(); err != nil {
-			return err
+		finished, err := s.LastScanCovering(ctx, r.ID, scope)
+		if err != nil {
+			return "", err
 		}
-		if err := file.Sync(); err != nil {
-			return err
+		if finished == "" {
+			return "not scanned first, and " + r.Path + " has never been scanned whole", nil
 		}
-		return file.Close()
-	})
-	if err != nil {
-		file.Close()
-		os.Remove(csvPath) // created by this command a moment ago, and incomplete
-		return 0, fmt.Errorf("export to %s: %w", csvPath, err)
+		if oldest == "" || report.Time(finished) < report.Time(oldest) {
+			oldest = finished
+		}
 	}
-	return id, nil
+	if oldest == "" {
+		return "", nil
+	}
+	return "not scanned first: as of the last scan, " + report.Time(oldest), nil
+}
+
+// notScannedLine shows lastScanLine's line, if there is one.
+func notScannedLine(v *view.Renderer, line string) {
+	if line != "" {
+		v.Count(view.Neutral, line)
+	}
 }
 
 func (e *env) update(ctx context.Context, dbBefore string, args []string) error {

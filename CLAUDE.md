@@ -12,8 +12,9 @@ chosen ones, each only after it is re-read and found unchanged) are done, as are
 redesign (`docs/design.md`, Duplicates: `filo delete FILE.csv`, records, always, `filo duplicates`; schema 8) is done
 and merged. The terminal output is done (every command prints through `internal/view`, see "Terminal output"). Named
 retention policies (`docs/design.md`, Lifespan, Named retention policies; schema 9; `filo policies`) are done and
-merged. Next in `docs/design.md` section 5: folder rules (design first: name patterns and empty folders are in Open
-questions), and the small change to replace an existing `-o` file after asking (section 5 item 11).
+merged. Replacing an existing `-o` file after asking (section 5 item 11) and every export scanning first, `--no-scan`
+to skip it (item 12), are done. Next in `docs/design.md` section 5: folder rules (design first: name patterns and
+empty folders are in Open questions).
 **`internal/dispose` is the only code allowed to delete the user's files**, and only from `filo delete`; everything
 else stays read-only on them, and nothing overwrites an existing file without asking (only an `-o` output file,
 see the hard rules). Stay inside the current piece of work.
@@ -42,7 +43,8 @@ see the hard rules). Stay inside the current piece of work.
   tree. Always pass `--db`, and only add roots inside the repo or a throwaway test tree.
 - Say clearly when code is untested. Check current library versions and docs instead of relying on memory.
 - Do not add a dependency without asking first.
-- Do not run `git commit` or `git push`, and do not set a git identity. The user commits from the host.
+- Commit only as described in "After writing code" below. Never `git push`, amend, rebase, reset or force anything,
+  and do not set a git identity. The user reviews the commits and pushes from the host.
 - Before changing any file in the repo, check the branch with `git branch --show-current`. If it is `main`, stop and
   ask the user to check out a branch; do not create or switch branches yourself.
 - Command names stay plain and easy to remember: `roots`, `scan`, `report`, `export`, `update`, `delete`,
@@ -67,6 +69,18 @@ prefix.)
   `delete` really deletes: run it only with a throwaway `--db` whose roots are a throwaway tree
 
 Run `go vet` and the tests before saying a change is done.
+
+## After writing code
+
+When a piece of work is written, and `gofmt`, `go vet`, `staticcheck` and `go test ./...` all pass:
+
+1. Commit it (code, tests and the `docs/design.md` update together) on the current branch, never on `main`.
+2. Run one code review of that commit (the `code-review` skill, level `medium`), fix what it finds, run the checks
+   again, and commit the fixes as a separate commit, so the review's changes can be read on their own.
+3. Stop and report both commits. One review round only: do not review the fixes again.
+
+Stop and ask instead of committing if a check fails and the fix is not obvious, if a finding needs a design decision
+or a change to `docs/design.md`, if a finding looks wrong or out of scope, or if anything else is unclear.
 
 ## Layout
 
