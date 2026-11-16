@@ -577,9 +577,11 @@ retention: the file becomes a candidate at its date and is deleted only through 
 1). Built on branch `directory-rules` in four slices, one PR for all of them (see section 5).
 
 - **Applied automatically** (the person's choice over confirming each time): every scan, also a scheduled one and the
-  scan before an export, applies the rules in its own transaction, so the run's snapshot covers it, and says what it
-  set (see Output). Adding a rule is the one place Filo asks (see `filo rules`), since it is the moment to catch a
-  pattern that matches nothing or too much.
+  scan before an export, applies the rules in its own transaction, so the run's snapshot covers it, and says what it set
+  (see Output). No `filo rules` command asks either (decided 2026-11-16, replacing a question on `add`): whether 0 or
+  1000 files dated is what the person meant, Filo cannot know, so it says how many and does it; `--dry-run` shows what
+  it would do first. Dating sets a retention only: nothing is deleted without `filo delete`, which asks, and the run's
+  snapshot holds the register as it was.
 - **Which files a rule dates**: a file with no retention at all (no date, no `forever`, no policy, not even a policy
   with no value), and each file only once. The file records the rule that dated it; after that no rule touches it
   again, even if its retention is later cleared in the CSV (the rule never undoes what the person did) or the rule is
@@ -607,8 +609,8 @@ retention: the file becomes a candidate at its date and is deleted only through 
   0 and is always tried last (the fallback for files no other pattern matched), and a pattern `a` counts 1. Two matching
   patterns with the same count are reported, not guessed, and the file stays undated. A directory's patterns are unique,
   in any case (`*statement*` is `*Statement*`). Longer is not always more specific (`Daily*`, 5, loses to `*Statement*`,
-  9, on `DailyStatement.pdf`); the fix is the longer pattern meant (`*DailyStatement*`), and `filo rules add` shows the
-  files before it applies.
+  9, on `DailyStatement.pdf`); the fix is the longer pattern meant (`*DailyStatement*`), and `filo rules add --dry-run`
+  shows the files it would date.
 
   With rules on `bank` (`*DailyStatement*` 14 → `daily-statements`, `*Statement*` 9 → `statements`, `*2024*` 4 →
   `tax-2024`, `*bank*` 4 → `banking`, `*` 0 → `financial`) and on `bank/2024` (`*` → `tax-2024`):
@@ -628,32 +630,31 @@ retention: the file becomes a candidate at its date and is deleted only through 
   filo rules lists them"), as it is while files use it. `filo policies move` takes the rules with the files: a rename
   keeps them, and a merge points them at the policy moved to.
 - **`filo rules`** (a new command name). DIR is read as in every command (relative to the current directory, `~`
-  expanded) and must be a root or inside one. PATTERN may be left out, meaning `*`. A pattern with wildcards or
-  spaces is quoted (`'*Statement*'` or `"*Statement*"`), since the shell expands an unquoted one; the wrong number of
-  arguments is refused, and every question shows the pattern as received, so a file name the shell put in its place
-  shows (it would usually date no files).
+  expanded) and must be a root or inside one. PATTERN may be left out, meaning `*`. A pattern with wildcards or spaces
+  is quoted (`'*Statement*'` or `"*Statement*"`), since the shell expands an unquoted one; the wrong number of arguments
+  is refused, and every result line shows the pattern as received, so a file name the shell put in its place shows (it
+  would usually date no files). `add`, `move` and `copy` take `--dry-run`: they show what they would date (the files,
+  cut at ten in a terminal) and change nothing. No command asks, so there is no `-y`.
   - `filo rules [DIR]` lists the rules at DIR and below it, or every rule: by root, by directory (a parent before the
     directories inside it), and within a directory **in the order they are tried**, each with its policy and how many
     files it has dated. It flags a rule whose directory is not on disk (`! bank: no such directory`; the register
     stores no directories, so an empty directory is still one) or cannot be checked (its root not reachable), and the
     files that two rules match equally.
-  - `add DIR [PATTERN] POLICY` shows what the rule would date now (the count, how many need a `file_date`, the first
-    ten files) and asks `[y/N/l]`: `l` lists them all and asks again. `-y` answers yes; no terminal, or no answer,
-    adds nothing. A POLICY that does not exist is created with no value, as the CSV does, and both the question
-    ("bills is not a policy yet: it will be created with no value") and the result (`Created policy bills (no value:
-    filo policies set bills VALUE)`) say so. Refused if the directory already has that pattern.
+  - `add DIR [PATTERN] POLICY` adds the rule and dates the files it decides now, and says how many (and how many need
+    a `file_date`, and any file it ties on). A POLICY that does not exist is created with no value, as the CSV does,
+    and the result says so. Refused if the directory already has that pattern.
   - `set DIR [PATTERN] POLICY` changes the policy of the rule with exactly that pattern (compared as text, in any
     case, never matched as a glob, so `*Statement*` never picks `*DailyStatement*`); a new POLICY is created as for
     `add`. A pattern is never changed: remove the rule and add a new one.
   - `remove DIR [PATTERN]` removes the rule with exactly that pattern.
   - `move OLD NEW` and `copy OLD NEW` put the rules at OLD and at the directories below it in the same places under NEW
     (`bank/2024` goes to `banking/2024`); `move` removes them from OLD, `copy` keeps them (`copy bank/2024 bank/2025`
-    for a new year). They apply to the undated files under NEW, so they ask as `add` does. Refused, with nothing merged,
+    for a new year). They date the undated files under NEW they now decide, as `add` does. Refused, with nothing merged,
     if NEW or any directory below it already has rules (they are listed: remove them first, or add the rules by hand; a
     move up, `bank/2024` to `bank`, does not count the rules it moves, a copy does); if NEW is OLD or inside it; if OLD
     has no rules at or below it. NEW may be in another root, whose rules they then are. Files dated by a moved rule keep
     their policy and still count as dated by it.
-  - No `show`: `l` and the list cover it.
+  - No `show`: `--dry-run` and the list cover it.
 - **Directories that change**: a rule stores its root and its directory relative to the root, as files do.
   - A directory renamed or removed on disk: its files are moves or missing, as before; the rule stays and is flagged,
     never followed (pairing a directory that went with one that came is a guess, principle 6). `filo rules move`
@@ -663,24 +664,67 @@ retention: the file becomes a candidate at its date and is deleted only through 
   - A root added above an existing one (Roots): the old root's rules get the same prefix as its files, in the same
     transaction.
   - A root removed (`filo roots remove`, when it comes): its rules go with it, and its confirmation says how many.
-- **Output** (the list is a proposal, to be mocked before slice 2, under the Terminal output rules):
+- **Output** (mocked and agreed 2026-11-16, under the Terminal output rules). The list: one root in the heading, or a
+  sub-heading per root; each rule with its policy's value, so a policy with no value shows; the flags on the right.
 
 ```
 $ filo rules
-Rules   5 rules · 3 directories · ~/Documents
 
-bank
-  *DailyStatement*   daily-statements   212 files
-  *Statement*        statements          40 files
-  *                  financial           12 files
-bank/2024
-  *                  tax-2024             8 files
-personal/home/electric
-  *                  bills               38 files
+Rules   6 · 4 directories · 2 need attention · ~/Documents
+
+  bank
+    *DailyStatement*   daily-statements   7y           212 files
+    *Statement*        statements         10y           40 files
+    *                  financial          7y            12 files
+  bank/2024
+    *                  tax-2024           2031-12-31     8 files
+  personal/home/electric
+    *                  bills              no value      38 files   ! needs a retention
+  scans/old                                                        ! no such directory
+    *                  financial          7y             0 files
 
 ! Not applied   1 file matches two rules of bank equally (*2024*, *bank*)
     bank/bank-2024.pdf
+
+Next: filo rules add DIR [PATTERN] POLICY, filo rules remove DIR [PATTERN]
+
+$ filo rules add bank '*DailyStatement*' daily-statements
+Done   bank · *DailyStatement* → daily-statements (7y) · 212 files dated · 3 need a file_date
+
+! 1 file matches *DailyStatement* and *Daily* equally: not dated
+    bank/Daily-DailyStatement.pdf
+
+Next: filo export retention bank -o FILE, fill in file_date, then filo update FILE
+
+$ filo rules add personal/home/electric bills
+Done   personal/home/electric · * → bills · 38 files dated
+  - policy bills created with no value: its files need a retention until it has one
+
+Next: filo policies set bills VALUE
+
+$ filo rules add bank '*DailyStatement*' daily-statements --dry-run
+Dry run   bank · *DailyStatement* → daily-statements (7y) · 212 files would be dated · 3 need a file_date
+
+    file_date    until
+    2019-03-14   2026-03-14   bank/DailyStatement-2019-03.pdf
+    …
+
+Nothing was changed.
+
+$ filo rules set bank '*Statement*' financial
+Done   bank · *Statement* → financial (was statements)
+  - 40 files it dated keep statements: the change is for new files
+
+$ filo rules remove bank '*Statement*'
+Removed   bank · *Statement* → statements
+  - 40 files it dated keep statements
 ```
+
+  Refusals are one line each: `bank: no rule *Statment* there (filo rules lists them)`, `bank: already has the rule
+  *Statement*`, `~/Media is not reachable (not mounted?): rules are not applied while its files cannot be checked`,
+  `/tmp/x is not inside any root`, and for the wrong number of arguments the usage, with "quote a pattern with * or
+  spaces". The `--dry-run` list is cut at ten in a terminal ("… N more"), all of it when piped, as elsewhere. `move`
+  and `copy` (slice 4) say what they did the same way: `Done   moved 3 rules from bank to banking · 5 files dated`.
 
   A scan that dated files adds a section with a line per rule (`bank, *DailyStatement* → daily-statements   3 files
   (1 needs a file_date)`), and one for files not applied (`! Not applied   1 file matches two rules of bank: …`).
@@ -694,7 +738,7 @@ personal/home/electric
 
   | scenario | outcome |
   |---|---|
-  | A1 `add` with undated files under DIR: yes, no, `l`, `-y`, no terminal | listed and asked; added and applied only on yes or `-y` |
+  | A1 `add` with undated files under DIR; with `--dry-run`; in a terminal or not | added and dated, the count said; nothing changed, the files listed; the same either way |
   | A2 `add` naming a policy that does not exist | created with no value, and said so |
   | A3 `add` a pattern the directory has (`*statement*` after `*Statement*`) | refused |
   | A4 the wrong number of arguments; DIR outside every root | refused |
@@ -711,7 +755,7 @@ personal/home/electric
   | D2 `set` or `remove` with a pattern that is not stored (`*Statement` for `*Statement*`) | refused |
   | D3 `filo policies remove` of a policy a rule names; `filo policies move` (a rename, a merge) | refused; the rules follow |
   | E1 `move` after a rename, with a rule in a subdirectory | both moved; the flag gone |
-  | E2 `copy` to a new directory with undated files | asked; OLD keeps its rules |
+  | E2 `copy` to a new directory with undated files | dated, the count said; OLD keeps its rules |
   | E3 NEW or a directory below it has rules; NEW inside OLD; OLD without rules | refused, nothing changed |
   | F1 a rule's directory gone from disk | flagged by `filo rules`, never followed |
   | F2 an unreadable directory under a rule | nothing applied there |
@@ -1992,7 +2036,8 @@ put first on 2026-11-15). Each is an open question below until it is designed.
       constraint) kept: it gives the one-line error, with the same key. Slice 2 must refuse `add`, `move` and `copy`
       in a root that cannot be reached (not mounted), which the store cannot see.
    2. *`filo rules`*: the list (`[DIR]`, the order tried, counts, flags), `add` (a policy created if needed,
-      `[y/N/l]`), `set`, `remove`, with output mocked and agreed first, and the help page. Scenarios A, B4, D, F1.
+      `--dry-run`), `set`, `remove`, as mocked (agreed 2026-11-16), and the help page; refused in a root that cannot be
+      reached. Scenarios A, B4, D, F1.
    3. *Applied by every scan*: the scan's sections on what it dated and did not; `filo report` counts files dated by a
       rule and suggests `filo rules add`. Scenarios B, C2, F2.
    4. *`move` and `copy`*, then the README (a "Directory rules" section, quoting patterns) and the help overview.
