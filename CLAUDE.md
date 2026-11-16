@@ -2,7 +2,7 @@
 
 Go CLI that keeps a SQLite register of files, tracks where they live, and drives a review-and-dispose workflow so
 files do not pile up forever. The full design is in `docs/design.md`. Read it before changing behaviour, and update it
-in the same commit when a design decision changes.
+on the same branch when a design decision changes (in its own commit, first in the series; see "After writing code").
 
 ## Current state
 
@@ -72,12 +72,19 @@ Run `go vet` and the tests before saying a change is done.
 
 ## After writing code
 
-When a piece of work is written, and `gofmt`, `go vet`, `staticcheck` and `go test ./...` all pass:
+One section 5 item per branch (and so per PR). The user reads every commit on its own, so a piece of work is
+committed as a short series of small commits on the current branch, never on `main`:
 
-1. Commit it (code, tests and the `docs/design.md` update together) on the current branch, never on `main`.
-2. Run one code review of that commit (the `code-review` skill, level `medium`), fix what it finds, run the checks
-   again, and commit the fixes as a separate commit, so the review's changes can be read on their own.
-3. Stop and report both commits. One review round only: do not review the fixes again.
+1. Commit as you go, lower layers first, each commit with its own tests: the `docs/design.md` change alone first,
+   then the store and schema, then the internal package(s), then the `internal/view` output, then the `cmd/filo`
+   wiring and end-to-end tests. Before each commit, `gofmt`, `go vet`, `staticcheck` and `go test ./...` must all
+   pass, so every commit builds and is green on its own. Aim for about 100 changed lines of non-test code per
+   commit; a small change stays one commit. Each message says what the commit adds and, if part of the work is
+   still to come, what (for example "not called by any command yet").
+2. When the series is done, run one code review over all of it (the `code-review` skill, level `medium`, on
+   `main..HEAD`), fix what it finds, run the checks again, and commit the fixes as separate commits, one
+   "Review fixes for <subject>" commit per commit they belong to, so each can be read next to what it fixes.
+3. Stop and report the commits, each with a one-line summary. One review round only: do not review the fixes again.
 
 Stop and ask instead of committing if a check fails and the fix is not obvious, if a finding needs a design decision
 or a change to `docs/design.md`, if a finding looks wrong or out of scope, or if anything else is unclear.
