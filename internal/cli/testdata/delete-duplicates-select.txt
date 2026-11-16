@@ -9,8 +9,8 @@ Will delete                                         2 copies in 2 groups . 11 B
       delete   c/report.pdf
 
 Won't touch
-  - group 1   terms.pdf: already done: the 2 copies are a set of records
-  - group 2   LICENSE: already done: the content is always
+  - group 1   terms.pdf: already done: the 2 copies are kept as separate files
+  - group 2   LICENSE: already done: the content is marked always
   - group 3   contract.pdf: already done: the copies to delete are gone (deleted by filo)
 
 Delete 2 copies? [y/s/l/N] 

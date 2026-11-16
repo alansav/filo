@@ -157,7 +157,8 @@ func TestRenderDuplicatesAndEvents(t *testing.T) {
 		Events:     []store.EventRow{{Event: store.Event{Kind: "error", Detail: "permission denied"}, ScanID: 4, RootPath: "/r"}},
 	}.Render(view.New(view.Options{Out: &b}))
 	for _, want := range []string{"Duplicates   no groups\n",
-		"  [kept] not counted: 1 excluded directory, 2 contents always, 1 set of records (filo duplicates)\n",
+		"  [kept] 1 excluded directory, 2 contents marked always and 1 set of identical files kept as separate files, " +
+			"these are not counted as duplicates (use \"filo duplicates\" to view)\n",
 		"    scan 4   error   .   permission denied\n"} {
 		if !strings.Contains(b.String(), want) {
 			t.Errorf("lacks %q:\n%s", want, b.String())
@@ -172,8 +173,15 @@ func TestNotCountedLine(t *testing.T) {
 		want string
 	}{
 		{store.NotCounted{}, ""},
-		{store.NotCounted{Always: 1}, "not counted: 1 content always (filo duplicates)"},
-		{store.NotCounted{Dirs: 2, RecordSets: 3}, "not counted: 2 excluded directories, 3 sets of records (filo duplicates)"},
+		{store.NotCounted{Always: 1},
+			`1 content marked always, these are not counted as duplicates (use "filo duplicates" to view)`},
+		{store.NotCounted{RecordSets: 6}, `6 sets of identical files kept as separate files, these are not counted ` +
+			`as duplicates (use "filo duplicates" to view)`},
+		{store.NotCounted{Dirs: 2, RecordSets: 3}, `2 excluded directories and 3 sets of identical files kept as ` +
+			`separate files, these are not counted as duplicates (use "filo duplicates" to view)`},
+		{store.NotCounted{Dirs: 1, Always: 2, RecordSets: 1}, `1 excluded directory, 2 contents marked always and 1 ` +
+			`set of identical files kept as separate files, these are not counted as duplicates (use "filo ` +
+			`duplicates" to view)`},
 	}
 	for _, tc := range tests {
 		if got := NotCountedLine(tc.n); got != tc.want {

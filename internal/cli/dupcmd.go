@@ -85,10 +85,11 @@ func (e *env) duplicatesList(ctx context.Context, dbBefore string, args []string
 		facts = append(facts, report.Plural(int64(len(dirs)), "excluded directory", "excluded directories"))
 	}
 	if len(always) > 0 {
-		facts = append(facts, report.Plural(int64(len(always)), "content always", "contents always"))
+		facts = append(facts, report.Plural(int64(len(always)), "content marked always", "contents marked always"))
 	}
 	if len(records) > 0 {
-		facts = append(facts, report.Plural(int64(len(records)), "set of records", "sets of records"))
+		facts = append(facts, report.Plural(int64(len(records)), "set of identical files kept as separate files",
+			"sets of identical files kept as separate files"))
 	}
 	if len(facts) == 0 {
 		r.Heading("Not counted as duplicates", view.Where{Roots: roots}, "none")
@@ -106,7 +107,7 @@ func (e *env) duplicatesList(ctx context.Context, dbBefore string, args []string
 	}
 	if len(always) > 0 {
 		r.Blank()
-		r.Section("Contents always")
+		r.Section("Contents marked always")
 		for _, c := range always {
 			g := view.DupGroup{Name: path.Base(c.Copies[0].Path), Each: report.Size(c.Size),
 				Facts: []string{report.Plural(int64(len(c.Copies)), "copy", "copies")}}
@@ -121,10 +122,10 @@ func (e *env) duplicatesList(ctx context.Context, dbBefore string, args []string
 	}
 	if len(records) > 0 {
 		r.Blank()
-		r.Section("Sets of records")
+		r.Section("Kept as separate files")
 		for _, set := range records {
 			g := view.DupGroup{Name: path.Base(set.Copies[0].Path), Each: report.Size(set.Size),
-				Facts: []string{report.Plural(int64(len(set.Copies)), "record", "records")}}
+				Facts: []string{report.Plural(int64(len(set.Copies)), "separate file", "separate files")}}
 			for _, cp := range set.Copies { // a set is about those exact files
 				g.Copies = append(g.Copies, view.Copy{Root: cp.RootPath, Rel: cp.Path, Note: keepNote(cp.Candidate)})
 			}
@@ -260,13 +261,13 @@ func (e *env) duplicatesInclude(ctx context.Context, s *store.Store, arg string)
 		if err := s.RemoveRecordSet(ctx, f.RecordSet); err != nil {
 			return err
 		}
-		heading, facts = "Duplicates again", report.Plural(f.SetSize, "record", "records")
-		what = "the set of " + report.Plural(f.SetSize, "record", "records") + " is removed"
+		heading, facts = "Duplicates again", report.Plural(f.SetSize, "separate file", "separate files")
+		what = "no longer kept as separate files"
 	case f.Always:
 		if err := s.RemoveAlways(ctx, f.Hash); err != nil {
 			return err
 		}
-		heading, facts, what = "Duplicate again", report.Plural(f.Copies, "copy", "copies"), "no longer always"
+		heading, facts, what = "Duplicate again", report.Plural(f.Copies, "copy", "copies"), "no longer marked always"
 	default:
 		excluded, ok, err := s.Exclusion(ctx, root.ID, rel)
 		if err != nil {
@@ -274,11 +275,11 @@ func (e *env) duplicatesInclude(ctx context.Context, s *store.Store, arg string)
 		}
 		r.Heading("Nothing to include", view.Where{Roots: []string{abs}})
 		if ok {
-			r.CountName(view.Neutral, "not always or a record; ", store.AbsPath(root.Path, excluded),
+			r.CountName(view.Neutral, "not marked always or kept as a separate file; ", store.AbsPath(root.Path, excluded),
 				" is excluded: filo duplicates include "+shellQuote(store.AbsPath(root.Path, excluded))+" counts it again")
 			return nil
 		}
-		r.Count(view.Neutral, "not excluded, always or a record: it already counts as a duplicate")
+		r.Count(view.Neutral, "not excluded, marked always or kept as a separate file: it already counts as a duplicate")
 		return nil
 	}
 	after, err := s.GroupCount(ctx)

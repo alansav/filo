@@ -52,10 +52,10 @@ func (e *env) exportDuplicates(ctx context.Context, s *store.Store, f store.Filt
 	// docs/design.md, Duplicates, Output.
 	v.Count(view.Neutral, "in each group: keep for the copy to keep, delete for the rest; always on every row if the "+
 		"content belongs everywhere")
-	v.Count(view.Neutral, "keep on two or more copies: they are records, each kept with its own retention")
+	v.Count(view.Neutral, "keep on two or more copies: they are kept as separate files, each with its own retention")
 	if keepFilled > 0 {
-		v.Count(view.Neutral, report.Plural(keepFilled, "group has", "groups have")+" keep filled in: a new copy of a "+
-			"set of records; delete it, or keep it to join the set")
+		v.Count(view.Neutral, report.Plural(keepFilled, "group has", "groups have")+" keep filled in: a new copy of files "+
+			"you kept as separate files; delete it, or keep it as another separate file")
 	}
 	if line := report.NotCountedLine(nc); line != "" {
 		v.Count(view.Neutral, line)

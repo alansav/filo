@@ -752,12 +752,12 @@ of this section.
 ```
 $ filo duplicates
 
-Not counted as duplicates   1 excluded directory · 2 contents always · 1 set of records · ~
+Not counted as duplicates   1 excluded directory · 2 contents marked always · 1 set of identical files kept as separate files · ~
 
 Excluded directories
   ~/Backup                                               3,210 files · 4.1 GB
 
-Contents always
+Contents marked always
     LICENSE · 1 KB each · 5 copies
       projects/a/LICENSE
       projects/b/LICENSE
@@ -768,8 +768,8 @@ Contents always
       work/2025/template.docx
       work/template.docx
 
-Sets of records
-    terms.pdf · 2 MB each · 2 records
+Kept as separate files
+    terms.pdf · 2 MB each · 2 separate files
       insurance/2020/terms.pdf   until 2027-12-31
       insurance/2021/terms.pdf   until 2028-12-31
 
@@ -804,12 +804,12 @@ Next: filo export duplicates -o FILE to decide them
 $ filo duplicates include ~/projects/a/LICENSE
 
 Duplicate again   LICENSE · 1 KB each · 5 copies
-  · no longer always: 1 duplicate group more
+  · no longer marked always: 1 duplicate group more
 
 $ filo duplicates include ~/insurance/2020/terms.pdf
 
-Duplicates again   terms.pdf · 2 MB each · 2 records
-  · the set of 2 records is removed: 1 duplicate group more
+Duplicates again   terms.pdf · 2 MB each · 2 separate files
+  · no longer kept as separate files: 1 duplicate group more
 
 $ filo duplicates include ~/Backup/Documents
 
@@ -819,7 +819,7 @@ Not excluded itself   ~/Backup/Documents
 $ filo duplicates include ~/notes.txt
 
 Nothing to include   ~/notes.txt
-  · not excluded, always or a record: it already counts as a duplicate
+  · not excluded, marked always or kept as a separate file: it already counts as a duplicate
 ```
 
 ```
@@ -828,16 +828,22 @@ $ filo export duplicates ~/Documents -o /tmp/d.csv
 Duplicates export   export 13 · 12 groups · 31 copies · ~/Documents
 
   · in each group: keep for the copy to keep, delete for the rest; always on every row if the content belongs everywhere
-  · keep on two or more copies: they are records, each kept with its own retention
-  · 1 group has keep filled in: a new copy of a set of records; delete it, or keep it to join the set
-  · not counted: 1 excluded directory, 2 contents always, 1 set of records (filo duplicates)
+  · keep on two or more copies: they are kept as separate files, each with its own retention
+  · 1 group has keep filled in: a new copy of files you kept as separate files; delete it, or keep it as another separate file
+  · 1 excluded directory, 2 contents marked always and 1 set of identical files kept as separate files, these are not counted as duplicates (use "filo duplicates" to view)
 
 Next: edit the action column, then filo delete /tmp/d.csv
 ```
 
 - **The report** leaves out excluded directories, contents always and sets of records from its duplicate groups and
-  reclaimable space, with one line: "Not counted: 1 excluded directory, 2 contents always, 1 set of records (filo
-  duplicates)". The line "N copies marked for deletion" goes.
+  reclaimable space, with one line: "1 excluded directory, 2 contents marked always and 1 set of identical files
+  kept as separate files, these are not counted as duplicates (use "filo duplicates" to view)". Only the kinds there
+  are are named. The line "N copies marked for deletion" goes.
+- **The words people see** (2026-11-16). This design calls them *records* and *always*; the output, help and README
+  say "identical files kept as separate files" (a set's copies: "2 separate files") and "marked always". The report
+  line was "not counted: … 1 set of records (filo duplicates)", which did not say counted as what, and "records" was
+  never explained. The CSV's action words (`keep`, `delete`, `always`) and the code's names (`RecordSets`,
+  `duplicate_records`) are unchanged.
 - **The scenarios** (the test list): A a CSV run twice, B several CSVs, C editing the CSV, D files changing before the
   run, E inside one run, F new copies.
 
@@ -1062,8 +1068,8 @@ Will delete                                              9 copies in 6 groups ·
     … 4 more groups
 
 Will record
-  ◆ 1 content always (never a duplicate):  LICENSE (3 copies)
-  ◆ 1 set of 2 records:                     terms.pdf
+  ◆ kept as separate files: terms.pdf (2 copies)
+  ◆ content marked always (never a duplicate): LICENSE (3 copies)
 
 Won't touch
   ✗ group 3   line 12  IMG_2041.jpg   every copy is delete: no copy would be left

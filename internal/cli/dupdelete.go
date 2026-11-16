@@ -528,7 +528,7 @@ func decide(j *dupJob, p duplicates.GroupPlan, group []store.ExportedCopy, rootW
 		case len(keep) == 0:
 			j.state, j.reason = jobDone, "every copy is gone ("+goneWhy(nil)+")"
 		case keep[0].Always:
-			j.state, j.reason = jobDone, "already done: the content is always"
+			j.state, j.reason = jobDone, "already done: the content is marked always"
 		default:
 			j.state = jobRecord
 		}
@@ -587,7 +587,7 @@ func decide(j *dupJob, p duplicates.GroupPlan, group []store.ExportedCopy, rootW
 		j.state, j.reason = jobDone, "one copy to keep is left, the others gone ("+goneWhy(toKeep)+
 			"): nothing to record"
 	case len(j.gone) == 0:
-		j.state, j.reason = jobDone, "already done: the "+strconv.Itoa(len(keep))+" copies are a set of records"
+		j.state, j.reason = jobDone, "already done: the "+strconv.Itoa(len(keep))+" copies are kept as separate files"
 	default:
 		j.state, j.reason = jobDone, "already done: the copies to delete are gone ("+goneWhy(toDelete)+")"
 	}
@@ -738,10 +738,11 @@ func (l *dupList) draw(r *view.Renderer, max int) (cut bool) {
 	for _, j := range l.jobs {
 		switch {
 		case j.state == jobRecord && j.always:
-			records = append(records, "content always (never a duplicate): "+j.name+" ("+
+			records = append(records, "content marked always (never a duplicate): "+j.name+" ("+
 				report.Plural(int64(len(j.keep)), "copy", "copies")+")")
 		case (j.state == jobRecord || j.state == jobDelete) && j.records:
-			records = append(records, "set of "+strconv.Itoa(len(j.keep))+" records: "+j.name)
+			records = append(records, "kept as separate files: "+j.name+" ("+
+				report.Plural(int64(len(j.keep)), "copy", "copies")+")")
 		}
 	}
 	if len(records) > 0 {

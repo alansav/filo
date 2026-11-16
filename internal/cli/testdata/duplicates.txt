@@ -22,20 +22,20 @@ Already excluded   <root>/Backup/Documents
 
 $ filo duplicates
 
-Not counted as duplicates   1 excluded directory . 1 content always . 1 set of records . <root>
+Not counted as duplicates   1 excluded directory . 1 content marked always . 1 set of identical files kept as separate files . <root>
 
 Excluded directories
   <root>/Backup   3 files . 16 B
 
-Contents always
+Contents marked always
     LICENSE . 3 B each . 5 copies
       projects/a/LICENSE
       projects/b/LICENSE
       projects/c/LICENSE
     ... 2 more copies
 
-Sets of records
-    terms.pdf . 5 B each . 2 records
+Kept as separate files
+    terms.pdf . 5 B each . 2 separate files
       2020/terms.pdf   until 2027-12-31
       2021/terms.pdf   until 2028-12-31
 
@@ -57,17 +57,17 @@ Next: filo export duplicates -o FILE to decide them
 $ filo duplicates include <root>/projects/a/LICENSE
 
 Duplicate again   LICENSE . 3 B each . 5 copies
-  - no longer always: 1 duplicate group more: 4
+  - no longer marked always: 1 duplicate group more: 4
 
 $ filo duplicates include <root>/2020/terms.pdf
 
-Duplicates again   terms.pdf . 5 B each . 2 records
-  - the set of 2 records is removed: 1 duplicate group more: 5
+Duplicates again   terms.pdf . 5 B each . 2 separate files
+  - no longer kept as separate files: 1 duplicate group more: 5
 
 $ filo duplicates include <root>/Documents/notes.txt
 
 Nothing to include   <root>/Documents/notes.txt
-  - not excluded, always or a record: it already counts as a duplicate
+  - not excluded, marked always or kept as a separate file: it already counts as a duplicate
 
 $ filo duplicates
 

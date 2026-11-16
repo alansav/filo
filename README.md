@@ -285,7 +285,7 @@ Identical files exist for four reasons, and each has its own kind of keep:
 | why the copies exist | example | what you do |
 |---|---|---|
 | a copy made by accident | a download saved twice | `keep` one copy, `delete` the rest |
-| copies that are each a record | insurance terms received in 2020 and again in 2021, each with its own retention | `keep` on two or more: they are kept as a **set of records** |
+| copies that are each a record | insurance terms received in 2020 and again in 2021, each with its own retention | `keep` on two or more: they are **kept as separate files** |
 | a content that belongs everywhere | `LICENSE`, `__init__.py`, a template in each project | `always` on every row: the content is never a duplicate again |
 | a deliberate copy of a folder | a backup, an old laptop's files | `filo duplicates exclude DIR`: nothing under it counts as a duplicate |
 
@@ -296,8 +296,8 @@ The `action` cell takes `delete`, `keep` or `always` (or `d`, `k`, `a`, any case
 | all blank | not decided: left alone, so you can work through a CSV and run it several times |
 | some blank, some filled | refused: every copy needs a value |
 | one `keep`, the rest `delete` | the `delete` copies are deleted |
-| two or more `keep`, the rest `delete` or none | the `delete` copies are deleted; the copies kept become a set of records |
-| every row `always` | the content is recorded as always; nothing is deleted |
+| two or more `keep`, the rest `delete` or none | the `delete` copies are deleted; the copies kept are kept as separate files |
+| every row `always` | the content is marked always; nothing is deleted |
 | `always` mixed with anything else | refused: `always` is about the content, so it goes on every row |
 | every row `delete` | refused: no copy would be left. To remove a content entirely, give it a past retention |
 
@@ -320,8 +320,8 @@ Will delete                                              9 copies in 6 groups ·
     … 5 more groups
 
 Will record
-  ◆ set of 2 records: terms.pdf
-  ◆ content always (never a duplicate): LICENSE (3 copies)
+  ◆ kept as separate files: terms.pdf (2 copies)
+  ◆ content marked always (never a duplicate): LICENSE (3 copies)
 
 Won't touch
   ✗ group 3   line 12   IMG_2041.jpg: every copy is delete: no copy would be left
@@ -346,7 +346,7 @@ Delete 9 copies and record 2 decisions? [y/s/l/N]
   `n` does nothing. Without a terminal it only lists; `-y` does it all without asking.
 
 `filo duplicates` lists what is not counted as duplicates, and `filo duplicates include PATH` undoes one: a
-directory's exclusion, a content always, or a whole set of records.
+directory's exclusion, a content marked always, or a whole set of identical files kept as separate files.
 
 ```
 $ filo duplicates exclude ~/Backup
@@ -372,9 +372,9 @@ Next: filo duplicates include /home/you/Backup to undo it
 | `filo update FILE [--dry-run]` | Apply the retentions edited in an exported retention CSV. |
 | `filo delete [DIR] [-y]` | List the files past their retention, ask, and delete the ones you choose. See [Deleting](#deleting). |
 | `filo delete FILE [-y]` | Carry out a duplicates CSV: check it against the disk, list, ask, and delete the copies marked `delete`. |
-| `filo duplicates` | List what is not counted as duplicates: excluded directories, contents always, sets of records. |
+| `filo duplicates` | List what is not counted as duplicates: excluded directories, contents marked always, identical files kept as separate files. |
 | `filo duplicates exclude DIR` | Never count the files under `DIR` as duplicates (a backup folder). |
-| `filo duplicates include PATH` | Undo one: a directory's exclusion, a file's content always, or its set of records. |
+| `filo duplicates include PATH` | Undo one: a directory's exclusion, a file's content marked always, or its set of identical files kept as separate files. |
 | `filo policies` | List the retention policies, with what needs attention. See [Retention policies](#retention-policies). |
 | `filo policies add NAME [VALUE]` | Create a policy, with a period, a date or `forever`, or no value yet. |
 | `filo policies set NAME VALUE [-y]` | Change a policy, and so every file using it; asks first if files would be put past their retention or left without a `file_date`. |
@@ -486,8 +486,8 @@ Enable it with `systemctl --user enable --now filo-scan.timer`.
 2. **Lifespan**: a retention for every file, set through a CSV. Done.
 3. **Delete**: `filo delete` lists, asks, and deletes, with checks at the moment of deleting. Done.
 4. **Clearer terminal output** for every command. Done.
-5. **Duplicates**: decide in a CSV which copies to keep, carried out by `filo delete`; records, always and excluded
-   directories. Done.
+5. **Duplicates**: decide in a CSV which copies to keep, carried out by `filo delete`; files kept as separate files,
+   contents marked always and excluded directories. Done.
 6. **Retention policies**: a named retention typed in the CSV, changed in one place. Done.
 7. **Next**: folder rules (a default policy on a directory). The order is in [docs/design.md](docs/design.md),
    section 5.

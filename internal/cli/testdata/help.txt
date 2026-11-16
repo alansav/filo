@@ -19,8 +19,8 @@ Commands
                            delete, after asking
   duplicates               list what is not counted as duplicates
   duplicates exclude DIR   never count the files under DIR as duplicates
-  duplicates include PATH  undo an exclusion, a content always or a set of
-                           records
+  duplicates include PATH  undo an exclusion, a content marked always or files
+                           kept as separate files
   policies                 list the retention policies, and what needs attention
   policies add NAME [VALUE]
                            create a policy: a named retention such as bills = 7y
