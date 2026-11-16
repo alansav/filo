@@ -11,8 +11,8 @@ reconcile rules were carried over. The second shape of the retention CSV (`file_
 the database next to it) were added on 2026-11-13. The order of the next work was agreed the same day (section 5).
 The duplicates CSV was designed on 2026-11-13/14 and taken ahead of that order (schema version 7); a gap found on
 2026-11-14 (a second export shows decided groups blank) led to a redesign on 2026-11-16 (Duplicates: `filo delete
-FILE.csv`, no stored decisions to delete, four kinds of keep), not built yet. The terminal output was designed on
-2026-11-15 and is built first (Terminal output). Last updated: 2026-11-16.
+FILE.csv`, no stored decisions to delete, four kinds of keep), built on 2026-11-15/16 in five slices (schema version
+8). The terminal output was designed on 2026-11-15 and built first (Terminal output). Last updated: 2026-11-16.
 
 This file records settled decisions, the planned data model and the open questions. When a decision changes,
 change it here in the same commit.
@@ -466,19 +466,18 @@ files). Replaces the earlier plan of a quarantine, holds and several checks at t
   - *Prompts* are read in the background, so Ctrl-C ends a wait for an answer; nothing is deleted after it.
 - Scheduled runs only ever scan; Filo never schedules a deletion.
 
-### Duplicates (designed 2026-11-13/14; redesigned 2026-11-16, not built yet)
+### Duplicates (designed 2026-11-13/14; redesigned 2026-11-16, built 2026-11-15/16)
 The report finds duplicate groups (297 groups, 605 files on the real home directory). The duplicates CSV lets the
 person act on them: export the groups, decide per copy in a spreadsheet, then run `filo delete` on the CSV, which
 checks every group against the disk, lists what it will and will not do, asks, and does it. It brushes against the
 rule that a delete column in a spreadsheet is unsafe (a sort or a fill-down puts it on the wrong rows), hence the group
 rules, the listing before the question and the check at the moment of deleting below.
 
-**Being built** (on branch `duplicates-redesign`, see section 5). Slice 1, the register, is done: schema 8, the
+**Built** (on branch `duplicates-redesign`, in five slices, see section 5). Slice 1, the register: schema 8, the
 group definition below, the report's "not counted" line; the first design's `filo update` of a duplicates CSV, its
-marks in `filo delete` and `--separate` are gone. Slice 2, the CSV, is done: the `action` column, `keep` filled in
-for records, and reading it into a plan per group (`duplicates.Plan`). Slice 3 is done: `filo delete FILE.csv`
-carries a duplicates CSV out. Slice 4 is done: `filo duplicates`, `exclude` and `include`. Slice 5 (README, help)
-is next. See "The first design, and why it changed" at the end
+marks in `filo delete` and `--separate` are gone. Slice 2, the CSV: the `action` column, `keep` filled in
+for records, and reading it into a plan per group (`duplicates.Plan`). Slice 3: `filo delete FILE.csv` carries a
+duplicates CSV out. Slice 4: `filo duplicates`, `exclude` and `include`. Slice 5: the README and the help. See "The first design, and why it changed" at the end
 of this section.
 
 - **The principle** (2026-11-16). The duplicates process decides which copy to keep, never whether the content goes.
@@ -801,10 +800,10 @@ Next: edit the action column, then filo delete /tmp/d.csv
 - `filo export retention [DIR] -o FILE` and `filo update FILE [--dry-run]`: see Lifespan. The word after `export`
   names the CSV, so a later CSV is a new word, not a new command; `update` tells the kind from the CSV's header.
 - `filo delete [DIR] [-y]`: lists the files past their keep-until date and deletes the ones chosen (see Disposal).
-  Until the duplicates redesign is built, it also lists and deletes the duplicate copies marked by `filo update`.
-- `filo delete FILE.csv [-y]` (redesign, not built yet): carries out a duplicates CSV (see Duplicates).
-- `filo export duplicates [DIR] -o FILE`: see Duplicates (`--separate` goes with the redesign).
-- `filo duplicates`, `filo duplicates exclude DIR`, `filo duplicates include PATH` (redesign, not built yet): what is
+- `filo delete FILE.csv [-y]`: carries out a duplicates CSV (see Duplicates). An argument that is a directory is
+  DIR; anything else is a CSV.
+- `filo export duplicates [DIR] -o FILE`: see Duplicates.
+- `filo duplicates`, `filo duplicates exclude DIR`, `filo duplicates include PATH`: what is
   not counted as duplicates (excluded directories, contents always, sets of records), and undoing it.
 - `--db PATH` is accepted before or after any command; `FILO_DB` is the fallback, then the default location. Flags may
   come before or after PATH. Built on the standard library's `flag` package (no CLI framework).
@@ -1454,7 +1453,7 @@ put first on 2026-11-15). Each is an open question below until it is designed.
    errors done on 2026-11-15 (golden files `testdata/help*.txt`, one per page, wrapped at 80 columns; usage errors
    one line with their help in `TestUsageAndHelp`; `TestErrorLine`; `TestOutputGoesThroughTheRenderer`). Nothing
    prints outside the components now, and `safeText` is retired: the terminal output is done.
-2. Duplicates redesign (2026-11-16, see Duplicates): `filo delete FILE.csv` carries out a duplicates CSV with no
+2. Duplicates redesign (2026-11-16, see Duplicates). Done on 2026-11-16: `filo delete FILE.csv` carries out a duplicates CSV with no
    stored decisions to delete; the `action` column (`delete`, `keep`, `always`); records and always; `filo
    duplicates` with excluded directories; schema version 8. Done when every scenario in its table has a test, and the
    README explains the four kinds of keep and the rules. After item 1, so its output uses the components.
@@ -1525,8 +1524,12 @@ put first on 2026-11-15). Each is an open question below until it is designed.
    (`testdata/help-duplicates.txt`); the "dir or under it" test is one SQL fragment (`atOrUnder`); `store.AbsPath`;
    "1 file … counts". Not changed: `exclude` and `include` count the groups before and after (the design's sanity
    check), and the list counts each exclusion on its own (they are few).
-   **To resume (2026-11-16):** slice 5: the README (the four kinds of keep and the rules), the help overview
-   (`filo duplicates` and `filo delete FILE.csv`; `filo delete`'s page), and the status.
+   Slice 5 done on 2026-11-16: the README's Duplicates section (the rule, the four kinds of keep, the group rules,
+   retentions across copies, the list and its checks, `filo duplicates`), its status, commands, exit codes and
+   roadmap; the help overview lists `delete FILE` and `duplicates`, `filo delete`'s page covers a duplicates CSV
+   (golden files `help.txt`, `help-delete.txt`, `help-export.txt`). The redesign is done: every scenario in its
+   table has a test (A-F: slices 1-3; the plan's C2, C3, C5 in `internal/duplicates`). Still to do: run it on the
+   real register (back up first; the upgrade to schema 8 warns once), then merge the branch.
 3. Named retention policies.
 4. Folder rules (default retention policies on directories).
 5. Progress in the report, and `export retention --needing-retention`.

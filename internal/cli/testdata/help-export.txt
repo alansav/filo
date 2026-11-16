@@ -16,7 +16,7 @@ filo export duplicates [DIR] -o FILE
   on, write keep for the copy to keep and delete for the rest (or k and d); keep
   on two or more copies makes them records, each kept with its own retention;
   always on every row means the content belongs everywhere. A group left blank
-  is left alone. filo delete FILE will carry the CSV out.
+  is left alone. filo delete FILE carries the CSV out.
 
 Flags
   -o FILE                  the CSV to write; it must not exist

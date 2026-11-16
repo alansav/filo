@@ -29,6 +29,11 @@ var overview = struct {
 			Text: "record the retentions edited in an exported CSV"},
 		{Name: "delete [DIR] [-y]",
 			Text: "delete the files past their retention, after asking"},
+		{Name: "delete FILE [-y]",
+			Text: "carry out a duplicates CSV: delete the copies marked delete, after asking"},
+		{Name: "duplicates", Text: "list what is not counted as duplicates"},
+		{Name: "duplicates exclude DIR", Text: "never count the files under DIR as duplicates"},
+		{Name: "duplicates include PATH", Text: "undo an exclusion, a content always or a set of records"},
 		{Name: "help [COMMAND]", Text: "this overview, or a command's flags and rules"},
 	},
 	after: "Every command accepts --db PATH (default: $FILO_DB, then the user data directory).",
@@ -100,7 +105,7 @@ var commandHelps = map[string]commandHelp{
 				"copies, directory, name, size, modified, file_date, retention, keep_until, action. In each group " +
 				"you decide on, write keep for the copy to keep and delete for the rest (or k and d); keep on two or " +
 				"more copies makes them records, each kept with its own retention; always on every row means the " +
-				"content belongs everywhere. A group left blank is left alone. filo delete FILE will carry the CSV out.",
+				"content belongs everywhere. A group left blank is left alone. filo delete FILE carries the CSV out.",
 		},
 		flags: []view.Term{
 			{Name: "-o FILE", Text: "the CSV to write; it must not exist"},
@@ -123,7 +128,7 @@ var commandHelps = map[string]commandHelp{
 		flags: []view.Term{{Name: "--dry-run", Text: "check everything and write nothing"}},
 	},
 	"delete": {
-		usage: []string{"filo delete [DIR] [-y]"},
+		usage: []string{"filo delete [DIR] [-y]", "filo delete FILE [-y]"},
 		before: []string{
 			"Lists the files past their retention under DIR (inside a root), or under every root, whose content " +
 				"has not changed since the retention was set, then asks: all, select one by one, list them all, or " +
@@ -131,12 +136,20 @@ var commandHelps = map[string]commandHelp{
 				"file: d delete, r new retention, s skip or q quit. Enter, or an answer filo does not know, never deletes anything. Without a terminal it only " +
 				"lists. Deletion is permanent: there is no recycle bin, so keep backups.",
 		},
-		flags: []view.Term{{Name: "-y", Text: "delete them all without asking"}},
+		flags: []view.Term{{Name: "-y", Text: "delete them all (or do all of the CSV) without asking"}},
 		after: []string{
 			"Just before deleting, each file is read again. It is deleted only if it is still at its path as the " +
 				"same file and its content is still the content its retention was set on; otherwise it is skipped " +
 				"with one line saying why. A file that cannot be read is never deleted. Folders the run emptied are " +
 				"removed, up to the root. Exit code 1 if a file could not be read or deleted.",
+			"filo delete FILE carries out a duplicates CSV (filo export duplicates). Each group is checked against " +
+				"the disk: a group any of whose files changed or moved since the export is skipped, and a copy gone " +
+				"since is ignored. It lists what it will delete, what it will record (contents always, sets of " +
+				"records) and what it won't touch, then asks: yes, select group by group, list, or no [y/s/l/N]. A " +
+				"copy is deleted only while a copy kept is still there with the same content, and only if a copy " +
+				"kept lasts at least as long (its keep_until). A CSV can be edited further and run again: groups " +
+				"done are reported, and only what is still as exported is acted on. Exit code 1 if the CSV refuses " +
+				"a group.",
 		},
 	},
 	"duplicates": {

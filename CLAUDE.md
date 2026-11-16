@@ -9,13 +9,10 @@ in the same commit when a design decision changes.
 Iterations 1 (scan, register, report), 2 (lifespan: retention through the retention CSV, `filo export retention` then
 `filo update`) and 3 (delete: `filo delete [DIR] [-y]` lists the files past their retention, asks, and deletes the
 chosen ones, each only after it is re-read and found unchanged) are done, as are register snapshots. The duplicates
-redesign is being built on branch `duplicates-redesign` in five slices (`docs/design.md` section 5 item 2): slices 1
-(schema 8, the group definition, the first design's marks gone), 2 (the CSV's action column, read into a plan per
-group), 3 (`filo delete FILE.csv` carries a duplicates CSV out) and 4 (`filo duplicates`, `exclude`, `include`)
-are done. The terminal output is done (every command prints
-through `internal/view`, see "Terminal output"). The order of the next work is in `docs/design.md` section 5: the rest
-of the duplicates redesign (slice 5, README and help), then
-named retention policies.
+redesign (`docs/design.md`, Duplicates: `filo delete FILE.csv`, records, always, `filo duplicates`; schema 8) is done
+on branch `duplicates-redesign`, all five slices, not yet merged or run on the real register. The terminal output is
+done (every command prints through `internal/view`, see "Terminal output"). The order of the next work is in
+`docs/design.md` section 5: named retention policies next.
 **`internal/dispose` is the only code allowed to delete the user's files**, and only from `filo delete`; everything
 else stays read-only on them, and nothing overwrites an existing file. Stay inside the current piece of work.
 
