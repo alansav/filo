@@ -1705,6 +1705,17 @@ put first on 2026-11-15). Each is an open question below until it is designed.
    **In the duplicates rules** (agreed 2026-11-16): a copy to delete on a policy with no value yet refuses its group
    too ("its policy payslip has no value yet"). Tests: new cases in `TestUpdatePolicies`, `TestDeletePromptPolicies`,
    `TestDuplicatesDeleteNeedsFileDate`.
+   Slice 3 done on 2026-11-16: `filo policies` (`internal/cli/policies.go`), as mocked: the list (a `view.Table`:
+   name, value, "from each file's file_date" for a period, files, and a `!` note: needs a retention, passed, N without
+   a file_date; the heading counts those needing attention), `add`, `set` (a change with nothing to ask about is one
+   `Done` line; shortening that puts files past their date, or a period leaving files without a file_date, shows them
+   and asks; `-y`; no terminal changes nothing), `move` (asks for a rename too: `Rename bils to bilz (1 file)?`; a
+   merge shows what it would do to dates and ends `Next: filo policies remove OLD`), `remove` (refused in one line
+   while in use), `show` (files needing a file_date first, with the `Next:` to fix them). A passed date policy with
+   files is flagged too ("its files are past their retention"). The help page `filo help policies`; the overview
+   waits for slice 4. Tests: `TestPoliciesAdd` (A4), `TestPoliciesList` (E1, E2's flag), `TestPoliciesSet`
+   (C1-C4), `TestPoliciesMoveRemove` (D1, D2), `TestPoliciesShow`, `TestPoliciesUsage`, golden
+   `testdata/policies.txt` and `help-policies.txt`. Not yet reviewed.
 4. Folder rules (default retention policies on directories).
 5. Progress in the report, and `export retention --needing-retention`.
 6. Duplicates: one decision for all copies (the duplicates review CSV was done first, see iteration 5).

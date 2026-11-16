@@ -169,6 +169,32 @@ var commandHelps = map[string]commandHelp{
 				"whole set of records. PATH may be gone from the disk.",
 		},
 	},
+	"policies": {
+		usage: []string{
+			"filo policies",
+			"filo policies add NAME [VALUE]",
+			"filo policies set NAME VALUE [-y]",
+			"filo policies move OLD NEW [-y]",
+			"filo policies remove NAME",
+			"filo policies show NAME",
+		},
+		before: []string{
+			"A policy is a named retention, written once and typed in the retention column of a retention CSV in " +
+				"place of a period: bills = 7y. Changing it changes every file using it. Its value is a period " +
+				"(counted from each file's own file_date), a date, or forever; a name typed in a CSV that is not a " +
+				"policy yet creates one with no value, after filo update asks.",
+			"filo policies lists them, with what needs attention: no value, a date passed, files without a " +
+				"file_date. add creates one; set gives it a value or changes it (it asks first if files would be " +
+				"put past their retention, or left without a file_date to count from); move moves every file to " +
+				"another policy (into a new name it is a rename); remove deletes a policy no file uses; show lists " +
+				"its files.",
+		},
+		flags: []view.Term{{Name: "-y", Text: "set and move: go ahead without asking"}},
+		after: []string{
+			"A file kept until 2026-12-31 is past its retention on 2026-12-31: it is listed by the next filo " +
+				"delete, which asks before deleting anything.",
+		},
+	},
 }
 
 // showOverview writes filo help.
