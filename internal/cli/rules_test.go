@@ -240,6 +240,6 @@ func TestReportRules(t *testing.T) {
 	rt.filo(ExitOK, "", false, "scan")
 	out := strings.ReplaceAll(rt.filo(ExitOK, "", false, "report").stdout, rt.root, "<root>")
 	rt.contains("report", out, "  - 4 with a policy set by directory rules (filo rules)",
-		"  [!] 1 not given a policy: two rules match it equally\n    bank/new-2024-bank.pdf   *2024*, *bank*",
+		"  [!] 1 not given a policy: two rules match it equally\n    bank/new-2024-bank.pdf   rules of bank: *2024*, *bank*",
 		"Next: filo export retention [DIR] -o FILE, then filo update FILE, or filo rules add DIR POLICY")
 }

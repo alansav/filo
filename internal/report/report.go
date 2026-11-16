@@ -370,18 +370,18 @@ func (r Report) renderRetention(v *view.Renderer) {
 	}
 	// The files no rule gives a policy, each with the rules that match it equally (they are among those above).
 	if n := int64(len(r.RuleTies)); n > 0 {
-		why := "two rules match it equally"
-		if n > 1 || len(r.RuleTies[0].Rules) > 2 {
-			why = "two or more rules match each equally"
-		}
-		v.Count(view.Attention, Count(n)+" not given a policy: "+why)
+		v.Count(view.Attention, Count(n)+" not given a policy: "+TieWhy(r.RuleTies))
 		rows := make([]view.FileRow, len(r.RuleTies))
 		for i, t := range r.RuleTies {
 			var ps []string
 			for _, x := range t.Rules {
 				ps = append(ps, x.Pattern)
 			}
-			rows[i] = view.FileRow{Root: t.RootPath, Rel: t.Path, Note: strings.Join(ps, ", ")}
+			dir := t.Rules[0].Dir // the rules of one directory tie
+			if dir == "" {
+				dir = "the root"
+			}
+			rows[i] = view.FileRow{Root: t.RootPath, Rel: t.Path, Note: "rules of " + dir + ": " + strings.Join(ps, ", ")}
 		}
 		v.Files(view.FileList{Rows: rows, Max: v.Overview(), More: "files", MoreOne: "file"})
 	}
@@ -410,6 +410,18 @@ func (r Report) renderRetention(v *view.Renderer) {
 			Size(d.Bytes), last))
 	}
 	r.renderPolicies(v)
+}
+
+// TieWhy says why tied files got no policy, for the scan and the report alike: "two rules match it equally",
+// "3 rules match it equally", "two or more rules match each equally".
+func TieWhy(ties []store.RuleTie) string {
+	switch {
+	case len(ties) == 1 && len(ties[0].Rules) == 2:
+		return "two rules match it equally"
+	case len(ties) == 1:
+		return Count(int64(len(ties[0].Rules))) + " rules match it equally"
+	}
+	return "two or more rules match each equally"
 }
 
 // renderPolicies writes the policies line, when there are policies: how many, and how many need attention (marked
