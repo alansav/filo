@@ -2082,7 +2082,16 @@ put first on 2026-11-15). Each is an open question below until it is designed.
       (`testdata/rules.txt`), `TestRulesAdd`, `TestRulesSetRemove`, `TestRulesListScope`. Not tested: refusing a
       root that is not mounted (it is `store.Resolve`'s, and needs a real mount).
    3. *Applied by every scan*: the scan's sections on what it set and did not (as mocked, agreed 2026-11-16); `filo
-      report` counts files dated by a rule and suggests `filo rules add`. Scenarios B, C2, F2.
+      report` counts the files with a policy set by rules, lists the ties and suggests `filo rules add`. Scenarios B,
+      C2, F2.
+      Done on 2026-11-16: `store.ApplyScanRules` applies the rules in the scan's transaction, after its changes, to
+      every file in its scope with no retention, stamped with the scan (`ApplyScan` does the same, returning the scan
+      ID only); `reconcile.Summary.Rules`; the scan's count lines, "Policies set by rules" (`view.HeadedTable`) and
+      the ties; the report's count, ties and next step; a retention set by hand (CSV, `filo delete`, a removed
+      policy's value) takes a file off its rule (`files.rule_id` cleared, the mark kept); `FileItem.RuleID`. In the
+      report the tie line comes after "Where most need one", which stays right under the line it explains. Tests:
+      `TestScanAppliesRules`, `TestRetentionByHandLeavesTheRule`, `TestScanSummaryRules`, `TestHeadedTable`,
+      `TestScanRulesGolden` (`testdata/scan-rules.txt`), `TestReportRules`.
    4. *`move` and `copy`*, then the README (a "Directory rules" section, quoting patterns) and the help overview.
       Scenarios E.
 5. Progress in the report, and `export retention --needing-retention`.
