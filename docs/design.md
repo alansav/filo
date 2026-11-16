@@ -344,8 +344,12 @@ retention CSV and `filo update` write only the register and the CSV file the use
   file silently. Only a regular file is replaced, never a directory, symlink or device. The new CSV is written to a
   temporary file next to it (mode 0600) and renamed over it, so a crash never leaves half a CSV. The question is
   asked first, before the scan, so a no costs nothing (`Nothing exported.`); if the file is no longer the one asked
-  about when the CSV is ready (replaced, or no longer a regular file), the export stops and nothing is recorded. The
-  same for every `-o` file Filo writes.
+  about when the CSV is ready (replaced, edited, or no longer a regular file), the export stops and the file is left
+  as it is. Two exports cannot race for one file: each holds the register's lock from start to end. What is left is
+  another program writing the file in the instant between Filo's last check and the rename; then that write is
+  lost, or, if it lands just before the last check, the export is recorded with no CSV (an export number is skipped).
+  The same for every `-o` file Filo writes. Checking whether a spreadsheet has the file open (LibreOffice's
+  `.~lock.NAME#`) was considered and left out (2026-11-16): an edge case, and a stale marker would block exports.
   - **No "rows not yet applied" in the question** (considered 2026-11-16, dropped the same day): whether to replace
     is the person's call, and a clean slate is a fair reason. Warning about unapplied rows steers people to a second
     file and then to merging two CSVs by hand, which causes the problems the warning meant to prevent; and `filo
@@ -994,8 +998,9 @@ Next: edit the action column, then filo delete /tmp/d.csv
   unmounted) is reported in its place on stdout (see Terminal output, Scan and roots) and the others are still
   scanned. `--workers` is 1–64, default 4.
 - `filo report [--top N]`: see section 4.
-- `filo export retention [DIR] -o FILE [--no-scan]` and `filo update FILE [--dry-run]`: see Lifespan. Every export
-  scans first unless `--no-scan` is given (see Lifespan, "A scan first"). The word after `export`
+- `filo export retention [DIR] -o FILE [--no-scan] [--workers N]` and `filo update FILE [--dry-run]`: see Lifespan. Every export
+  scans first unless `--no-scan` is given (see Lifespan, "A scan first"), with `--workers` as for `filo scan`
+  (refused with `--no-scan`). The word after `export`
   names the CSV, so a later CSV is a new word, not a new command; `update` tells the kind from the CSV's header.
 - `filo delete [DIR] [-y]`: lists the files past their keep-until date and deletes the ones chosen (see Disposal).
 - `filo delete FILE.csv [-y]`: carries out a duplicates CSV (see Duplicates). An argument that is a directory is

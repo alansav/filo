@@ -370,8 +370,8 @@ Next: filo duplicates include /home/you/Backup to undo it
 | `filo roots set DIR` | Replace a root's settings. |
 | `filo scan [DIR]` | Scan `DIR` (a directory inside a root: a partial scan), or every root if omitted. |
 | `filo report [--top N]` | Show the overview; `--top` sets how many entries each list shows (default 10). |
-| `filo export retention [DIR] -o FILE [--no-scan]` | Scan `DIR` (or every root), then write every file under it with its retention, as CSV. |
-| `filo export duplicates [DIR] -o FILE [--no-scan]` | Scan every root, then write the duplicate groups with a copy under `DIR` as CSV, to decide which copies to keep. See [Duplicates](#duplicates). |
+| `filo export retention [DIR] -o FILE [--no-scan] [--workers N]` | Scan `DIR` (or every root), then write every file under it with its retention, as CSV. |
+| `filo export duplicates [DIR] -o FILE [--no-scan] [--workers N]` | Scan every root, then write the duplicate groups with a copy under `DIR` as CSV, to decide which copies to keep. See [Duplicates](#duplicates). |
 | `filo update FILE [--dry-run]` | Apply the retentions edited in an exported retention CSV. |
 | `filo delete [DIR] [-y]` | List the files past their retention, ask, and delete the ones you choose. See [Deleting](#deleting). |
 | `filo delete FILE [-y]` | Carry out a duplicates CSV: check it against the disk, list, ask, and delete the copies marked `delete`. |

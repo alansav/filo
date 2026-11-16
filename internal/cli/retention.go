@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"github.com/alansav/filo/internal/duplicates"
+	"github.com/alansav/filo/internal/hasher"
 	"github.com/alansav/filo/internal/reconcile"
 	"github.com/alansav/filo/internal/report"
 	"github.com/alansav/filo/internal/retention"
@@ -55,6 +57,7 @@ func (e *env) export(ctx context.Context, dbBefore string, args []string) error 
 	db := dbFlag(fl, dbBefore)
 	out := fl.String("o", "", "")
 	noScan := fl.Bool("no-scan", false, "")
+	workers := fl.Int("workers", reconcile.DefaultWorkers, "")
 	pos, err := e.parse(fl, "export", args)
 	if err != nil {
 		return err
@@ -69,6 +72,14 @@ func (e *env) export(ctx context.Context, dbBefore string, args []string) error 
 	pos = pos[1:]
 	if len(pos) > 1 {
 		return usageError{"export " + kind + " takes at most one DIR"}
+	}
+	workersGiven := false
+	fl.Visit(func(f *flag.Flag) { workersGiven = workersGiven || f.Name == "workers" })
+	if workersGiven && *noScan {
+		return usageError{"--workers is for the scan, and --no-scan skips it; give one or the other"}
+	}
+	if *workers < 1 || *workers > hasher.MaxWorkers {
+		return usageError{fmt.Sprintf("--workers must be between 1 and %d", hasher.MaxWorkers)}
 	}
 	if *out == "" {
 		return usageError{"export needs -o FILE: the CSV is written to a file, never to the terminal"}
@@ -105,7 +116,7 @@ func (e *env) export(ctx context.Context, dbBefore string, args []string) error 
 			return err
 		}
 	} else {
-		scanned, err := e.scanFirst(ctx, s, kind, pos)
+		scanned, err := e.scanFirst(ctx, s, kind, pos, *workers)
 		if err != nil {
 			return err
 		}
@@ -172,12 +183,13 @@ func (e *env) export(ctx context.Context, dbBefore string, args []string) error 
 // any other export scans every root, since a duplicate group's copies can be anywhere. Its output is filo scan's,
 // without the scan's own next step. A root that fails to scan stops the export, so a missing disk never gives a CSV
 // that looks complete. scanned is false when there was nothing to scan (no roots), so nothing was shown.
-func (e *env) scanFirst(ctx context.Context, s *store.Store, kind string, pos []string) (scanned bool, err error) {
+func (e *env) scanFirst(ctx context.Context, s *store.Store, kind string, pos []string, workers int) (scanned bool,
+	err error) {
 	dir := ""
 	if kind == "retention" && len(pos) == 1 {
 		dir = pos[0]
 	}
-	err = e.scanWhere(ctx, s, reconcile.Options{Workers: reconcile.DefaultWorkers}, dir, false)
+	err = e.scanWhere(ctx, s, reconcile.Options{Workers: workers}, dir, false)
 	switch {
 	case errors.Is(err, errNoRoots):
 		return false, nil

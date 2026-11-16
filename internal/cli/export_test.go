@@ -255,6 +255,14 @@ func TestExportScansFirst(t *testing.T) {
 	r = filo(ExitOK, "", false, "export", "duplicates", "--no-scan", "-o", csv("x.csv"))
 	contains("failed root, --no-scan", r.stdout, "Duplicates export   export 4")
 
+	// --workers is the scan's: checked as filo scan checks it, and refused with --no-scan.
+	filo(ExitUsage, "", false, "export", "retention", "--workers", "0", "-o", csv("w.csv"))
+	filo(ExitUsage, "", false, "export", "retention", "--workers", "65", "-o", csv("w.csv"))
+	filo(ExitUsage, "", false, "export", "retention", "--workers", "-1", "-o", csv("w.csv"))
+	filo(ExitUsage, "", false, "export", "retention", "--workers", "2", "--no-scan", "-o", csv("w.csv"))
+	contains("--workers", filo(ExitOK, "", false, "export", "retention", ct.in("tax"), "--workers", "1", "-o",
+		csv("w.csv")).stdout, "Scan   scan ")
+
 	// Ctrl-C during the scan: nothing exported.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

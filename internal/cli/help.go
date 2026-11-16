@@ -97,8 +97,8 @@ var commandHelps = map[string]commandHelp{
 	},
 	"export": {
 		usage: []string{
-			"filo export retention [DIR] -o FILE [--no-scan]",
-			"filo export duplicates [DIR] -o FILE [--no-scan]",
+			"filo export retention [DIR] -o FILE [--no-scan] [--workers N]",
+			"filo export duplicates [DIR] -o FILE [--no-scan] [--workers N]",
 		},
 		before: []string{
 			"Scans first (DIR only; every root for export duplicates), then writes every file under DIR (inside a " +
@@ -120,6 +120,7 @@ var commandHelps = map[string]commandHelp{
 		flags: []view.Term{
 			{Name: "-o FILE", Text: "the CSV to write; an existing file is replaced only after asking"},
 			{Name: "--no-scan", Text: "export the register as it is, without scanning first"},
+			{Name: "--workers N", Text: "for the scan: files hashed in parallel, 1-64 (default 4; use 1 on a spinning disk)"},
 		},
 	},
 	"update": {

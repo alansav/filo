@@ -1,5 +1,5 @@
-filo export retention [DIR] -o FILE [--no-scan]
-filo export duplicates [DIR] -o FILE [--no-scan]
+filo export retention [DIR] -o FILE [--no-scan] [--workers N]
+filo export duplicates [DIR] -o FILE [--no-scan] [--workers N]
 
   Scans first (DIR only; every root for export duplicates), then writes every
   file under DIR (inside a root), or under every root, as CSV (UTF-8) to FILE. A
@@ -25,3 +25,5 @@ Flags
   -o FILE                  the CSV to write; an existing file is replaced only
                            after asking
   --no-scan                export the register as it is, without scanning first
+  --workers N              for the scan: files hashed in parallel, 1-64 (default
+                           4; use 1 on a spinning disk)
