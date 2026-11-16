@@ -2092,6 +2092,13 @@ put first on 2026-11-15). Each is an open question below until it is designed.
       report the tie line comes after "Where most need one", which stays right under the line it explains. Tests:
       `TestScanAppliesRules`, `TestRetentionByHandLeavesTheRule`, `TestScanSummaryRules`, `TestHeadedTable`,
       `TestScanRulesGolden` (`testdata/scan-rules.txt`), `TestReportRules`.
+      Reviewed the same day, six of eight findings fixed: `filo update` (and a retention given at `filo delete`)
+      keeps a file on its rule while its policy stays the rule's, so filling in a `file_date` does not take it off;
+      applying the rules reads only the files with no retention (`Filter.Ruleless`) before classifying, so a scan
+      holds the write lock for those only; one tie wording for scan and report (`report.TieWhy`); the report's tie
+      rows name the rules' directory; a scan whose only finding is a tie gets a next step. Kept: `ApplyScan` beside
+      `ApplyScanRules` (both apply the rules; the tests want the scan ID only), and the headed table's trailing
+      padding (`write` already drops it).
    4. *`move` and `copy`*, then the README (a "Directory rules" section, quoting patterns) and the help overview.
       Scenarios E.
 5. Progress in the report, and `export retention --needing-retention`.
