@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/alansav/filo/internal/store"
 )
 
 // filo rules (docs/design.md, Lifespan, Directory rules; slice 2): the list, add (with --dry-run), set and remove.
@@ -162,4 +164,29 @@ func TestRulesListScope(t *testing.T) {
 	out = rt.filo(ExitOK, "", false, "rules").stdout
 	rt.contains("two roots", strings.ReplaceAll(out, rt.root, "<root>"), "Rules   4 . 4 directories . 2 roots",
 		"<root>\n", "other\n", "  .\n    *.eml")
+}
+
+// TestRulesReviewFindings: the cases found in the code review of slice 2 (2026-11-16).
+func TestRulesReviewFindings(t *testing.T) {
+	rt := newRuleTest(t)
+	bank := rt.in("bank")
+	rt.filo(ExitOK, "", false, "rules", "add", bank, "statements")
+
+	// set naming the policy a rule has changes nothing, so it leaves no snapshot.
+	snaps := func() int {
+		es, err := os.ReadDir(store.SnapshotDir(rt.db))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return len(es)
+	}
+	before := snaps()
+	rt.contains("unchanged", rt.filo(ExitOK, "", false, "rules", "set", bank, "Statements").stdout, "Unchanged")
+	if after := snaps(); after != before {
+		t.Errorf("a set that changed nothing left a snapshot: %d, was %d", after, before)
+	}
+
+	// A DIR with no rules at or below it says so, not "none yet".
+	rt.contains("none below", rt.filo(ExitOK, "", false, "rules", rt.in("bank/2024")).stdout,
+		"none at or below it (the rules above it are listed by filo rules)")
 }

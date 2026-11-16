@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/alansav/filo/internal/report"
@@ -206,23 +207,30 @@ func datedRows(ds []store.RuleDated) []view.FileRow {
 	return rows
 }
 
-// ruleTies says which files no rule dates because rules match them equally, grouped by the rules involved.
+// ruleTies says which files no rule dates because rules match them equally, or their hard links are decided by
+// different rules, grouped by the rules involved (in any order) and listing each file once.
 func (e *env) ruleTies(ties []store.RuleTie) {
 	type group struct {
-		rs    []store.Rule
+		t     store.RuleTie // the first: its rules and why
 		files []view.FileRow
 	}
 	var groups []*group
 	byKey := map[string]*group{}
+	seen := map[int64]bool{}
 	for _, t := range ties {
-		var ids []string
-		for _, r := range t.Rules {
-			ids = append(ids, fmt.Sprint(r.ID))
+		if seen[t.FileID] { // a file with paths in two roots comes once per root
+			continue
 		}
-		key := strings.Join(ids, ",")
+		seen[t.FileID] = true
+		var ids []int64
+		for _, r := range t.Rules {
+			ids = append(ids, r.ID)
+		}
+		slices.Sort(ids)
+		key := fmt.Sprint(t.HardLinks, ids)
 		g, ok := byKey[key]
 		if !ok {
-			g = &group{rs: t.Rules}
+			g = &group{t: t}
 			byKey[key] = g
 			groups = append(groups, g)
 		}
@@ -231,25 +239,22 @@ func (e *env) ruleTies(ties []store.RuleTie) {
 	r := e.view
 	for _, g := range groups {
 		n := int64(len(g.files))
-		var patterns []string
-		sameDir := true
-		for _, x := range g.rs {
-			patterns = append(patterns, x.Pattern)
-			sameDir = sameDir && x.RootID == g.rs[0].RootID && x.Dir == g.rs[0].Dir
-		}
-		what := report.Plural(n, "file matches", "files match") + " " + report.Count(int64(len(g.rs))) +
-			" rules of " + e.ruleWhere(g.rs[0].RootPath, g.rs[0].Dir) + " equally"
-		if !sameDir {
+		var what string
+		if g.t.HardLinks {
 			var each []string
-			for _, x := range g.rs {
+			for _, x := range g.t.Rules {
 				each = append(each, e.ruleWhere(x.RootPath, x.Dir)+" "+x.Pattern)
-				patterns = nil
 			}
 			what = report.Plural(n, "file has hard links", "files have hard links") + " that different rules decide (" +
 				strings.Join(each, ", ") + ")"
-		}
-		if patterns != nil {
-			what += " (" + strings.Join(patterns, ", ") + ")"
+		} else {
+			var patterns []string
+			for _, x := range g.t.Rules {
+				patterns = append(patterns, x.Pattern)
+			}
+			first := g.t.Rules[0]
+			what = report.Plural(n, "file matches", "files match") + " " + report.Count(int64(len(patterns))) +
+				" rules of " + e.ruleWhere(first.RootPath, first.Dir) + " equally (" + strings.Join(patterns, ", ") + ")"
 		}
 		r.Blank()
 		r.Note(view.Attention, "Not applied   "+what)
@@ -324,7 +329,11 @@ func (e *env) ruleList(ctx context.Context, s *store.Store, pos []string) error 
 	}
 	r := e.view
 	if len(rs) == 0 {
-		r.Heading("Rules", where, "none yet")
+		none := "none yet"
+		if len(pos) == 1 {
+			none = "none at or below it (the rules above it are listed by filo rules)"
+		}
+		r.Heading("Rules", where, none)
 		r.Blank()
 		r.Next("Next: filo rules add DIR [PATTERN] POLICY")
 		return nil
@@ -343,6 +352,7 @@ func (e *env) ruleList(ctx context.Context, s *store.Store, pos []string) error 
 		groups []view.TableGroup
 	}
 	var sections []*section
+	reach := map[int64]error{} // each root checked once
 	dirs, attention := 0, 0
 	for _, x := range rs {
 		if len(sections) == 0 || sections[len(sections)-1].root.ID != x.RootID {
@@ -350,7 +360,11 @@ func (e *env) ruleList(ctx context.Context, s *store.Store, pos []string) error 
 		}
 		sec := sections[len(sections)-1]
 		if n := len(sec.groups); n == 0 || sec.groups[n-1].Name != e.ruleGroupName(x.Dir) {
-			g := view.TableGroup{Name: e.ruleGroupName(x.Dir), Attention: ruleDirAttention(sec.root, x.Dir)}
+			if _, ok := reach[x.RootID]; !ok {
+				reach[x.RootID] = store.CheckRoot(sec.root)
+			}
+			g := view.TableGroup{Name: e.ruleGroupName(x.Dir), Attention: ruleDirAttention(sec.root, x.Dir,
+				reach[x.RootID])}
 			if g.Attention != "" {
 				attention++
 			}
@@ -409,9 +423,9 @@ func (e *env) ruleGroupName(dir string) string {
 }
 
 // ruleDirAttention checks a rule's directory on disk: the register keeps no directories, so an empty one still
-// counts. A root that cannot be reached cannot be checked.
-func ruleDirAttention(root store.Root, dir string) string {
-	if err := store.CheckRoot(root); err != nil {
+// counts. A root that cannot be reached (reach, from store.CheckRoot) cannot be checked.
+func ruleDirAttention(root store.Root, dir string, reach error) string {
+	if reach != nil {
 		return "cannot be checked: its root is not reachable"
 	}
 	fi, err := os.Stat(store.AbsPath(root.Path, dir))

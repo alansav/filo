@@ -243,7 +243,8 @@ func addRule(ctx context.Context, tx *sql.Tx, rootID int64, dir, pattern, policy
 
 // SetRule changes the policy of the rule with exactly pattern at dir in a root (ErrNoRule if there is none). Files it
 // dated keep their policy: the change is for the files it dates from now on. A policy that does not exist is created
-// with no value. It returns the rule as it was, with the files it has dated.
+// with no value. It returns the rule as it was, with the files it has dated; naming the policy it has already
+// changes nothing.
 func (s *Store) SetRule(ctx context.Context, rootID int64, dir, pattern, policy string,
 	now time.Time) (old Rule, created bool, err error) {
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -253,6 +254,9 @@ func (s *Store) SetRule(ctx context.Context, rootID int64, dir, pattern, policy 
 	defer tx.Rollback()
 	if old, err = findRule(ctx, tx, rootID, dir, pattern); err != nil {
 		return Rule{}, false, err
+	}
+	if n, err := PolicyName(policy); err == nil && n == old.Policy {
+		return old, false, nil // nothing to change: no write, so no snapshot
 	}
 	policyID, created, err := rulePolicy(ctx, tx, policy, now)
 	if err != nil {
