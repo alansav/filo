@@ -227,3 +227,19 @@ func TestScanRulesGolden(t *testing.T) {
 	}
 	golden(t, "scan-rules.txt", rt.root, took.ReplaceAllString(out.String(), "<took>"))
 }
+
+// TestReportRules: filo report's Retention section counts the files with a policy set by rules, lists the files no
+// rule could give one with the rules that tie on them, and names filo rules add in its next step.
+func TestReportRules(t *testing.T) {
+	rt := newRuleTest(t)
+	bank := rt.in("bank")
+	rt.filo(ExitOK, "", false, "rules", "add", bank, "*Statement*", "statements")
+	rt.filo(ExitOK, "", false, "rules", "add", bank, "*2024*", "tax")
+	rt.filo(ExitOK, "", false, "rules", "add", bank, "*bank*", "banking")
+	rt.write("bank/new-2024-bank.pdf", "4")
+	rt.filo(ExitOK, "", false, "scan")
+	out := strings.ReplaceAll(rt.filo(ExitOK, "", false, "report").stdout, rt.root, "<root>")
+	rt.contains("report", out, "  - 4 with a policy set by directory rules (filo rules)",
+		"  [!] 1 not given a policy: two rules match it equally\n    bank/new-2024-bank.pdf   *2024*, *bank*",
+		"Next: filo export retention [DIR] -o FILE, then filo update FILE, or filo rules add DIR POLICY")
+}
