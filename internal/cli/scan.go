@@ -49,7 +49,7 @@ func (e *env) scan(ctx context.Context, dbBefore string, args []string) error {
 	if len(pos) == 1 {
 		dir = pos[0]
 	}
-	return e.scanWhere(ctx, s, reconcile.Options{Workers: *workers, AllowEmpty: *allowEmpty}, dir, true)
+	return e.scanWhere(ctx, s, reconcile.Options{Workers: *workers, AllowEmpty: *allowEmpty}, dir)
 }
 
 // checkWorkers checks a command's --workers: 1 to hasher.MaxWorkers, and not given with --no-scan, which skips the
@@ -70,15 +70,14 @@ func checkWorkers(fs *flag.FlagSet, workers int, noScan bool) error {
 var errNoRoots = errors.New("no roots yet; add one with: filo roots add DIR")
 
 // scanWhere scans dir (inside a root) if it is not "", otherwise every root: filo scan, and the scan before an export.
-// next is as for scanAll.
-func (e *env) scanWhere(ctx context.Context, s *store.Store, opt reconcile.Options, dir string, next bool) error {
+func (e *env) scanWhere(ctx context.Context, s *store.Store, opt reconcile.Options, dir string) error {
 	if dir != "" {
 		target, err := filepath.Abs(dir)
 		if err != nil {
 			return err
 		}
 		opt.Target = target
-		return e.scanTarget(ctx, s, opt, next)
+		return e.scanTarget(ctx, s, opt)
 	}
 	roots, err := s.Roots(ctx)
 	if err != nil {
@@ -87,7 +86,7 @@ func (e *env) scanWhere(ctx context.Context, s *store.Store, opt reconcile.Optio
 	if len(roots) == 0 {
 		return errNoRoots
 	}
-	return e.scanAll(ctx, s, opt, roots, next)
+	return e.scanAll(ctx, s, opt, roots)
 }
 
 // runScan is reconcile.Scan; tests replace it to interrupt a scan at a chosen point.
@@ -95,10 +94,8 @@ var runScan = reconcile.Scan
 
 // scanAll scans every root in turn, each in its own transaction and its own block of output (docs/design.md,
 // Terminal output, Scan and roots). A root that fails is a block of its own on stdout, and the others are still
-// scanned; the run then exits 1. Only cancellation stops it early. next adds "Next: filo report" where something needs
-// a look; a command with a next step of its own (export) leaves it out.
-func (e *env) scanAll(ctx context.Context, s *store.Store, opt reconcile.Options, roots []store.Root,
-	next bool) error {
+// scanned; the run then exits 1. Only cancellation stops it early.
+func (e *env) scanAll(ctx context.Context, s *store.Store, opt reconcile.Options, roots []store.Root) error {
 	v := e.view
 	pr := e.startProgress(&opt)
 	defer pr.stop()
@@ -143,10 +140,10 @@ func (e *env) scanAll(ctx context.Context, s *store.Store, opt reconcile.Options
 			facts = append(facts, report.Count(int64(failed))+" failed")
 		}
 		v.Outcome("Done", facts...)
-	} else if next && (attention || failed > 0) {
+	} else if attention || failed > 0 {
 		v.Blank()
 	}
-	if next && (attention || failed > 0) {
+	if attention || failed > 0 {
 		v.Next("Next: filo report")
 	}
 	if failed > 0 {
@@ -160,8 +157,7 @@ func (e *env) scanAll(ctx context.Context, s *store.Store, opt reconcile.Options
 }
 
 // scanTarget scans one directory (a root, or a directory inside one) with a progress line, and shows what it did.
-// next is as for scanAll.
-func (e *env) scanTarget(ctx context.Context, s *store.Store, opt reconcile.Options, next bool) error {
+func (e *env) scanTarget(ctx context.Context, s *store.Store, opt reconcile.Options) error {
 	pr := e.startProgress(&opt)
 	defer pr.stop()
 	pr.label(opt.Target)
@@ -171,7 +167,7 @@ func (e *env) scanTarget(ctx context.Context, s *store.Store, opt reconcile.Opti
 	if err != nil {
 		return err
 	}
-	if renderScan(e.view, sum, time.Since(start)) && next {
+	if renderScan(e.view, sum, time.Since(start)) {
 		e.view.Blank()
 		e.view.Next("Next: filo report")
 	}

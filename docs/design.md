@@ -1327,7 +1327,10 @@ Next: filo scan /home/you/FiloTest
 
 **Export** (agreed 2026-11-15, one topic at a time):
 
-- **The scan first** (2026-11-16): the scan block, as `filo scan` prints it, then the export's block.
+- **The scan first** (2026-11-16): the scan block exactly as `filo scan` prints it, `Next: filo report` included
+  when the scan found something, then the export's block. The export runs whatever the scan found (missing and moved
+  files are usually genuine); the person sees it all and decides whether to look. The one place a run shows two
+  `Next:` lines, agreed with the user: hiding the scan's would hide where its findings are listed.
   With `--no-scan`, no scan block, and a `·` line in the export block: `not scanned first: as of the last scan,
   <when>`.
 - **`filo export retention`**: a heading, `Retention export`, with the export number (the one `filo update`

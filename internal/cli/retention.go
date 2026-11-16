@@ -173,16 +173,16 @@ func (e *env) export(ctx context.Context, dbBefore string, args []string) error 
 }
 
 // scanFirst is an export's scan (docs/design.md, Lifespan, "A scan first"): a retention export of DIR scans DIR;
-// any other export scans every root, since a duplicate group's copies can be anywhere. Its output is filo scan's,
-// without the scan's own next step. A root that fails to scan stops the export, so a missing disk never gives a CSV
-// that looks complete. scanned is false when there was nothing to scan (no roots), so nothing was shown.
+// any other export scans every root, since a duplicate group's copies can be anywhere. Its output is exactly filo
+// scan's, Next: filo report included when it found something, so nothing it found is hidden. A root that fails to
+// scan stops the export, so a missing disk never gives a CSV that looks complete. scanned is false when there was nothing to scan (no roots), so nothing was shown.
 func (e *env) scanFirst(ctx context.Context, s *store.Store, kind string, pos []string, workers int) (scanned bool,
 	err error) {
 	dir := ""
 	if kind == "retention" && len(pos) == 1 {
 		dir = pos[0]
 	}
-	err = e.scanWhere(ctx, s, reconcile.Options{Workers: workers}, dir, false)
+	err = e.scanWhere(ctx, s, reconcile.Options{Workers: workers}, dir)
 	switch {
 	case errors.Is(err, errNoRoots):
 		return false, nil

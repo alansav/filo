@@ -221,7 +221,7 @@ func TestExportScansFirst(t *testing.T) {
 	r := filo(ExitOK, "", false, "export", "retention", ct.in("tax"), "-o", csv("1.csv"))
 	contains("scan of DIR", r.stdout, "Scan   scan 2 . 2 files seen", "under tax/", "  - 1 new\n",
 		"Retention export   export 1 . 2 files")
-	lacks("scan of DIR", r.stdout, "Next: filo report")
+	contains("scan of DIR", r.stdout, "  - 1 new\n\nNext: filo report\n\nRetention export") // exactly filo scan's output
 	contains("CSV of DIR", string(mustRead(t, csv("1.csv"))), ",new.txt,")
 
 	// DIR only: photos/ was not scanned, so a --no-scan export of the whole root does not know p.jpg yet.

@@ -150,7 +150,7 @@ func (e *env) rootsAdd(ctx context.Context, dbBefore string, args []string) erro
 		return nil
 	}
 	e.view.Blank()
-	if err := e.scanTarget(ctx, s, reconcile.Options{Target: r.Path, Workers: *workers}, true); err != nil {
+	if err := e.scanTarget(ctx, s, reconcile.Options{Target: r.Path, Workers: *workers}); err != nil {
 		if ctx.Err() != nil { // interrupted, whatever error that surfaced as (SQLite has its own)
 			return fmt.Errorf("scan interrupted; the root is added, nothing from the scan was written: filo scan %s",
 				shellQuote(r.Path))
