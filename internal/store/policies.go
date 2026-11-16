@@ -411,6 +411,11 @@ func (s *Store) MovePolicy(ctx context.Context, from, to string, now time.Time) 
 		if _, err := workOutFiles(ctx, tx, target.ID, target.Value); err != nil {
 			return 0, fmt.Errorf("move policy %s: %w", p.Name, err)
 		}
+		// The rules naming it follow its files (a rename keeps them: the policy keeps its ID).
+		if _, err := tx.ExecContext(ctx, `UPDATE rules SET policy_id = ? WHERE policy_id = ?`, target.ID,
+			p.ID); err != nil {
+			return 0, fmt.Errorf("move policy %s: %w", p.Name, err)
+		}
 		if err := recordPolicyChange(ctx, tx, "move", p.Name, "", target.Name, p.Files, now); err != nil {
 			return 0, err
 		}
@@ -430,7 +435,7 @@ func (s *Store) MovePolicy(ctx context.Context, from, to string, now time.Time) 
 	return p.Files, s.commit(tx)
 }
 
-// RemovePolicy removes a policy that no present file uses (ErrPolicyInUse otherwise). Files filo deleted, and
+// RemovePolicy removes a policy that no present file and no directory rule uses (ErrPolicyInUse otherwise). Files filo deleted, and
 // missing files, that were on it keep their keep_until, with the policy's value as a retention of their own, so a
 // missing file that comes back still has one; except a period with no file_date to count from, which would be a
 // retention without a keep_until: those get none, and need a retention if they come back.
@@ -446,6 +451,14 @@ func (s *Store) RemovePolicy(ctx context.Context, name string, now time.Time) er
 	}
 	if p.Files > 0 {
 		return fmt.Errorf("%s is used by %d files: %w", p.Name, p.Files, ErrPolicyInUse)
+	}
+	// A rule naming it would name nothing (docs/design.md, Directory rules, Policies and rules).
+	if n, err := rulesUsing(ctx, tx, p.ID); err != nil || n > 0 {
+		if err != nil {
+			return err
+		}
+		return fmt.Errorf("%s is used by %d %s (filo rules lists them): %w", p.Name, n, plural(n, "rule", "rules"),
+			ErrPolicyInUse)
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE files SET policy_id = NULL,
 		retention = CASE WHEN ? AND file_date IS NULL THEN NULL ELSE ? END WHERE policy_id = ?`,
