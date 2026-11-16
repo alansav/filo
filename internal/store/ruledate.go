@@ -61,7 +61,7 @@ func dateByRules(ctx context.Context, tx *sql.Tx, rootID int64, scope string, on
 		byID[r.ID], ms[i] = r, r.Matcher()
 	}
 	set := rules.NewSet(ms)
-	items, err := files(ctx, tx, today, Filter{RootID: rootID, Scope: scope})
+	items, err := files(ctx, tx, today, Filter{RootID: rootID, Scope: scope, Ruleless: true})
 	if err != nil {
 		return run, err
 	}
