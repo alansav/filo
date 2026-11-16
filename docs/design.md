@@ -298,6 +298,28 @@ retention CSV and `filo update` write only the register and the CSV file the use
   holds **every present file** under DIR (or every root), with its current date, not a queue: dated files are
   reviewed too, and filtering on a blank `retention` gives the undated ones. Missing and moved files are not in it;
   they are in `filo report`. On a large system, export one directory at a time so a spreadsheet can open it.
+- **A scan first** (decided 2026-11-16, not built yet, section 5 item 12): every export scans before it reads the
+  register, so the CSV holds the files as they are now, not as of the last scan, and a file saved since is in it.
+  `--no-scan` skips it (nothing changed, or the scan is slow). What it scans:
+
+  | Export | Scans first |
+  |---|---|
+  | `export retention DIR` | DIR only (a scan of part of a root is safe, see Scan) |
+  | `export retention`, no DIR | every root |
+  | `export duplicates [DIR]` | every root: a group's copies can be anywhere |
+
+  It is the ordinary scan, with its block on stdout before the export's (see Terminal output, Scan and roots), so the
+  export's `after_scan` is that scan. An export therefore writes the register: it takes the lock and leaves a
+  snapshot. A root that fails to scan is reported in its place, as `filo scan` does, and the export stops without
+  writing the CSV, so a wrong or missing disk never produces a CSV that looks complete; `--no-scan` exports from the
+  register as it is. Ctrl-C during the scan writes nothing, neither scan nor CSV. A directory that cannot be read
+  leaves its files as they were (see Scan) and the export goes on. With `--no-scan` the export block says so with a
+  `·` line naming when the last scan of the place finished.
+  - **No "is a scan needed?" check** (considered 2026-11-16, rejected): the incremental scan is that check. Its cost
+    is hashing, and it hashes only files whose size, mtime, ctime or inode changed; with nothing changed it walks and
+    lstats, and hashes nothing. Every cheaper test misses something: a folder's mtime changes when a file in it is
+    added, removed or renamed, but not when a file is edited in place; "scanned a few minutes ago" is a guess that
+    leaves out a file saved since, unnoticed; watching the disk needs a process running all the time.
 - **Columns**, in order: `id` (file row ID), `export` (export number), `directory` (absolute), `name`, `size`
   (bytes), `modified` (local time; a cue to when the file was last worked on), `file_date`, `retention`, `keep_until`
   (see Retention CSV, second shape). The name is a column of its own because file names often carry dates. Left out on purpose: a reason (one purpose only), an action (a
@@ -663,16 +685,14 @@ of this section.
   left out entirely: filo duplicates exclude DIR" (see Output, below; it first said "lists the exclusions" and
   "always ends with", changed on 2026-11-15: a list repeats `filo duplicates`, and a line on every run stops being
   read). Expected to be used rarely, mainly for backups.
-- **`filo export duplicates [DIR] -o FILE`** writes every group with at least one copy under DIR, and all of that
+- **`filo export duplicates [DIR] -o FILE [--no-scan]`** writes every group with at least one copy under DIR, and all of that
   group's copies, also those outside DIR (the copy to keep may live elsewhere), so exports of different directories
   can overlap. One row per copy, groups numbered in order of their first path. Same CSV rules as the retention CSV
   (byte order mark, formula guard, `-o` required, mode 0600, an existing file replaced only after asking). Columns: `id, export, group, copies,
   directory, name, size, modified, file_date, retention, keep_until, action`. `copies` is the group's size, so a
   filtered view shows when copies are hidden. The retention columns are display only. `export_rows` records each
-  row's hash, group and path. **A scan first** (decided 2026-11-16, not built yet, section 5 item 12): the export
-  scans every root before it writes, so the CSV matches the files as they are now, not as of the last scan. Every
-  root, not only DIR, since a group's copies can be anywhere. Scans are incremental (only new or changed files are
-  hashed), so this is cheap after the first one. The `action` cell is blank, except `keep` on a copy that is one of a set of records (a
+  row's hash, group and path. **A scan first**, of every root, not only DIR, since a group's copies can be anywhere;
+  `--no-scan` skips it (see Lifespan, "A scan first"; not built yet, section 5 item 12). The `action` cell is blank, except `keep` on a copy that is one of a set of records (a
   new copy of records is exported with them: `delete` it, or `keep` it to join the set).
 - **Why the export reads the register, not the disk alone** (considered 2026-11-16: an export that only walks DIR
   and hashes it, with no root or scan, so the CSV is never stale and no setup is needed; rejected, and the scan first
@@ -968,7 +988,8 @@ Next: edit the action column, then filo delete /tmp/d.csv
   unmounted) is reported in its place on stdout (see Terminal output, Scan and roots) and the others are still
   scanned. `--workers` is 1–64, default 4.
 - `filo report [--top N]`: see section 4.
-- `filo export retention [DIR] -o FILE` and `filo update FILE [--dry-run]`: see Lifespan. The word after `export`
+- `filo export retention [DIR] -o FILE [--no-scan]` and `filo update FILE [--dry-run]`: see Lifespan. Every export
+  scans first unless `--no-scan` is given (see Lifespan, "A scan first"). The word after `export`
   names the CSV, so a later CSV is a new word, not a new command; `update` tells the kind from the CSV's header.
 - `filo delete [DIR] [-y]`: lists the files past their keep-until date and deletes the ones chosen (see Disposal).
 - `filo delete FILE.csv [-y]`: carries out a duplicates CSV (see Duplicates). An argument that is a directory is
@@ -1294,6 +1315,9 @@ Next: filo scan /home/you/FiloTest
 
 **Export** (agreed 2026-11-15, one topic at a time):
 
+- **The scan first** (2026-11-16, not built yet): the scan block, as `filo scan` prints it, then the export's block.
+  With `--no-scan`, no scan block, and a `·` line in the export block: `not scanned first: as of the last scan,
+  <when>`.
 - **`filo export retention`**: a heading, `Retention export`, with the export number (the one `filo update`
   refers to), the number of files and the place (`~/Documents, under tax/`, as everywhere); a count line of files
   without a retention and with one (`·`); a `!` line when file_dates were filled in from file names, since a wrong
@@ -1786,7 +1810,8 @@ put first on 2026-11-15). Each is an open question below until it is designed.
 9. Synced roots, sharing decisions between devices, and getting snapshots to the backup machine.
 10. A summary for scheduled scans.
 11. Replacing an existing `-o` file after asking (decided 2026-11-16, see Lifespan; small, can go earlier).
-12. `filo export duplicates` scans every root first (decided 2026-11-16, see Duplicates; small, can go earlier).
+12. Every export scans first, `--no-scan` to skip it (decided 2026-11-16 for `export duplicates`, widened the same
+    day to `export retention`; see Lifespan, "A scan first"; small, can go earlier).
 
 Later: the **UI** in place of the CSV, including viewing and editing the register in place, and notes, links and
 tasks (see Open questions). All of it hangs off the stable file ID, so none of it needs the register to change
