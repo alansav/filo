@@ -161,7 +161,7 @@ func (s *Store) AddRootAbsorb(ctx context.Context, path string, set Settings) (R
 }
 
 // absorb moves root old into root into, under prefix: its paths, scans (a scan of the old root is a scan of the new
-// one scoped to prefix) and events, then deletes the old root. Files keep their IDs, so their history and review
+// one scoped to prefix), events and excluded directories, then deletes the old root. Files keep their IDs, so their history and review
 // decisions are untouched.
 func absorb(ctx context.Context, tx *sql.Tx, old, into int64, prefix string) error {
 	under := func(col string) string {
@@ -179,6 +179,9 @@ func absorb(ctx context.Context, tx *sql.Tx, old, into int64, prefix string) err
 			WHERE scan_id IN (SELECT id FROM scans WHERE root_id = ?)`, []any{prefix, prefix, prefix, old}},
 		{`UPDATE paths SET root_id = ?, path = ? || '/' || path WHERE root_id = ?`, []any{into, prefix, old}},
 		{`UPDATE scans SET root_id = ?, scope = ` + under("scope") + ` WHERE root_id = ?`,
+			[]any{into, prefix, prefix, old}},
+		// An excluded directory follows its root ('' was the whole old root: it is now its folder).
+		{`UPDATE excluded_dirs SET root_id = ?, path = ` + under("path") + ` WHERE root_id = ?`,
 			[]any{into, prefix, prefix, old}},
 		{`DELETE FROM roots WHERE id = ?`, []any{old}},
 	}

@@ -9,8 +9,8 @@ import (
 )
 
 // TestExportGolden: filo export's whole plain output (docs/design.md, Terminal output, Export): a retention export
-// of a folder with a file_date read from a file name, one with nothing to export, a duplicates export, and
-// --separate with no contents marked separate. The CSVs themselves are tested in the round trips.
+// of a folder with a file_date read from a file name, one with nothing to export, and a duplicates export. The CSVs
+// themselves are tested in the round trips.
 func TestExportGolden(t *testing.T) {
 	ct := newCLITest(t)
 	setNow(t, time.Date(2026, 11, 15, 12, 0, 0, 0, time.Local))
@@ -33,7 +33,6 @@ func TestExportGolden(t *testing.T) {
 	step("export retention tax", "export", "retention", in("tax"), "-o", csv("l.csv"))
 	step("export retention empty", "export", "retention", in("empty"), "-o", csv("e.csv"))
 	step("export duplicates", "export", "duplicates", "-o", csv("my d.csv"))
-	step("export duplicates --separate", "export", "duplicates", "--separate", "-o", csv("s.csv"))
 
 	got := strings.ReplaceAll(out.String(), ct.root, "<root>") // the root first: it is inside the work folder
 	got = strings.ReplaceAll(got, ct.work, "<work>")

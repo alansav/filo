@@ -1,0 +1,77 @@
+$ filo duplicates exclude <root>/Backup/Documents
+
+Excluded   <root>/Backup/Documents
+  - 2 files under it no longer count as duplicates (still scanned, retentions unchanged)
+  - 2 duplicate groups fewer: 1 left
+
+Next: filo duplicates include <root>/Backup/Documents to undo it
+
+$ filo duplicates exclude <root>/Backup
+
+Excluded   <root>/Backup
+  - 3 files under it no longer count as duplicates (still scanned, retentions unchanged)
+  - replaces 1 exclusion under it: Documents
+  - duplicate groups unchanged: 1
+
+Next: filo duplicates include <root>/Backup to undo it
+
+$ filo duplicates exclude <root>/Backup/Documents
+
+Already excluded   <root>/Backup/Documents
+  - through <root>/Backup
+
+$ filo duplicates
+
+Not counted as duplicates   1 excluded directory . 1 content always . 1 set of records . <root>
+
+Excluded directories
+  <root>/Backup   3 files . 16 B
+
+Contents always
+    LICENSE . 3 B each . 5 copies
+      projects/a/LICENSE
+      projects/b/LICENSE
+      projects/c/LICENSE
+    ... 2 more copies
+
+Sets of records
+    terms.pdf . 5 B each . 2 records
+      2020/terms.pdf   until 2027-12-31
+      2021/terms.pdf   until 2028-12-31
+
+Next: filo duplicates include PATH to count one as a duplicate again
+
+$ filo duplicates include <root>/Backup/Documents
+
+Not excluded itself   <root>/Backup/Documents
+  - <root>/Backup is: filo duplicates include <root>/Backup counts all of it again
+
+$ filo duplicates include <root>/Backup
+
+Included again   <root>/Backup
+  - 3 files under it count as duplicates again
+  - 2 duplicate groups more: 3
+
+Next: filo export duplicates -o FILE to decide them
+
+$ filo duplicates include <root>/projects/a/LICENSE
+
+Duplicate again   LICENSE . 3 B each . 5 copies
+  - no longer always: 1 duplicate group more: 4
+
+$ filo duplicates include <root>/2020/terms.pdf
+
+Duplicates again   terms.pdf . 5 B each . 2 records
+  - the set of 2 records is removed: 1 duplicate group more: 5
+
+$ filo duplicates include <root>/Documents/notes.txt
+
+Nothing to include   <root>/Documents/notes.txt
+  - not excluded, always or a record: it already counts as a duplicate
+
+$ filo duplicates
+
+Not counted as duplicates   none . <root>
+
+Next: filo duplicates exclude DIR to leave out a folder that is a copy on purpose (a backup)
+

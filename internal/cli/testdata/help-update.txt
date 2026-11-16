@@ -11,13 +11,8 @@ filo update FILE [--dry-run]
   file changed since the export, or its retention was changed from a later
   export. The other rows are still applied.
 
-  A duplicates CSV (from export duplicates) only records decisions; it never
-  deletes. A group whose cells are all blank is left alone. A decided group
-  needs Y or N on every copy and at least one N; a copy can be marked Y only if
-  a copy marked N is kept at least as long. Otherwise the group is refused, with
-  one line saying why. If anything is refused, or a content would be marked
-  separate, filo lists it and asks once before recording anything; without a
-  terminal it records nothing. Then run filo delete.
+  A duplicates CSV (from export duplicates) is refused: its decisions are not
+  recorded, but carried out by filo delete FILE.
 
 Flags
   --dry-run                check everything and write nothing

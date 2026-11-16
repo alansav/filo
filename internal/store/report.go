@@ -136,23 +136,22 @@ func (c GroupCopy) AbsPath() string { return absPath(c.Root, c.Rel) }
 
 // Duplicates is every duplicate group's total, plus the largest groups in detail.
 type Duplicates struct {
-	Groups        int64 // number of groups
-	Copies        int64 // copies in all groups (hard links to one file are one copy)
-	Reclaimable   int64 // across all groups
-	Top           []DupGroup
-	Separate      int64 // contents marked separate (identical copies that are not duplicates)
-	SeparateFiles int64 // their present files
-	Marked        int64 // copies marked for deletion, on their current content
+	Groups      int64 // number of groups
+	Copies      int64 // copies in all groups (hard links to one file are one copy)
+	Reclaimable int64 // across all groups
+	Top         []DupGroup
+	NotCounted  NotCounted // kept out of the groups on purpose: excluded directories, contents always, records
 }
 
-// Duplicates finds the duplicate groups across all roots (DuplicateGroups: two or more copies of a content, not
-// marked separate) and returns the n groups with the most reclaimable space.
+// Duplicates finds the duplicate groups across all roots (DuplicateGroups) and returns the n groups with the most
+// reclaimable space, and what is not counted as duplicates on purpose.
 func (s *Store) Duplicates(ctx context.Context, n int) (Duplicates, error) {
 	var d Duplicates
-	all, err := s.DuplicateGroups(ctx, Filter{})
+	all, nc, err := s.groupsAndNotCounted(ctx)
 	if err != nil {
 		return d, err
 	}
+	d.NotCounted = nc
 	// Sort by reclaimable space and keep the top n before building any path list.
 	type ranked struct {
 		c           DupContent
@@ -185,15 +184,40 @@ func (s *Store) Duplicates(ctx context.Context, n int) (Duplicates, error) {
 		}
 		d.Top = append(d.Top, g)
 	}
-	if d.Separate, d.SeparateFiles, err = s.SeparateTotals(ctx); err != nil {
-		return d, err
-	}
-	if err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM duplicate_marks m JOIN files f ON f.id = m.file_id
-		JOIN paths p ON p.file_id = f.id AND p.valid_to_scan IS NULL
-		WHERE f.hash = m.hash AND f.deleted_utc IS NULL`).Scan(&d.Marked); err != nil {
-		return d, fmt.Errorf("read marks: %w", err)
-	}
 	return d, nil
+}
+
+// NotCounted counts what is kept out of the duplicate groups on purpose, across the register.
+func (s *Store) NotCounted(ctx context.Context) (NotCounted, error) {
+	_, nc, err := s.groupsAndNotCounted(ctx)
+	return nc, err
+}
+
+// groupsAndNotCounted reads every duplicate group, and in the same pass what would be a group but is kept out on
+// purpose: an always content, or a set of records, with two or more copies (one with a single copy left keeps
+// nothing out); and the excluded directories.
+func (s *Store) groupsAndNotCounted(ctx context.Context) ([]DupContent, NotCounted, error) {
+	var nc NotCounted
+	contents, err := loadContents(ctx, s.db, hashesShared)
+	if err != nil {
+		return nil, nc, err
+	}
+	var groups []DupContent
+	for _, c := range contents {
+		switch {
+		case c.IsGroup():
+			groups = append(groups, c)
+		case len(c.Copies) < 2:
+		case c.Always:
+			nc.Always++
+		case c.OneRecordSet():
+			nc.RecordSets++
+		}
+	}
+	if err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM excluded_dirs`).Scan(&nc.Dirs); err != nil {
+		return nil, nc, fmt.Errorf("read excluded directories: %w", err)
+	}
+	return groups, nc, nil
 }
 
 // LinkRow is one present symlink.

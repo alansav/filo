@@ -1,5 +1,5 @@
 filo export retention [DIR] -o FILE
-filo export duplicates [DIR] [--separate] -o FILE
+filo export duplicates [DIR] -o FILE
 
   Writes every file under DIR (inside a root), or under every root, as CSV
   (UTF-8) to FILE, which must not exist. Columns: id, export, directory, name,
@@ -12,14 +12,11 @@ filo export duplicates [DIR] [--separate] -o FILE
   export duplicates writes each duplicate group (two or more copies of the same
   content; hard links to one file are one copy) with a copy under DIR, with all
   its copies. Columns: id, export, group, copies, directory, name, size,
-  modified, file_date, retention, keep_until, delete. In each group you decide
-  on, write Y under delete for the copies to delete and N for the ones to keep,
-  then run filo update FILE; filo delete deletes them later. Two or more N mark
-  the content separate: identical copies meant to exist, no longer listed as
-  duplicates.
+  modified, file_date, retention, keep_until, action. In each group you decide
+  on, write keep for the copy to keep and delete for the rest (or k and d); keep
+  on two or more copies makes them records, each kept with its own retention;
+  always on every row means the content belongs everywhere. A group left blank
+  is left alone. filo delete FILE carries the CSV out.
 
 Flags
   -o FILE                  the CSV to write; it must not exist
-  --separate               export duplicates only: export the contents marked
-                           separate, with N filled in; blank a group's cells to
-                           make it a duplicate group again

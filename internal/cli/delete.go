@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -27,16 +28,38 @@ func (e *env) delete(ctx context.Context, dbBefore string, args []string) error 
 		return err
 	}
 	if len(pos) > 1 {
-		return usageError{"delete takes at most one DIR"}
+		return usageError{"delete takes at most one DIR or FILE"}
 	}
-	if err := checkTildes("DIR", pos...); err != nil {
+	// A directory limits the retention list; anything else is a duplicates CSV to carry out (docs/design.md,
+	// Duplicates), so a mistyped file name fails as a file that cannot be opened, not as a directory.
+	csvPath := ""
+	if len(pos) == 1 {
+		if fi, err := os.Stat(pos[0]); err != nil || !fi.IsDir() {
+			if csvPath, err = filepath.Abs(pos[0]); err != nil {
+				return err
+			}
+		}
+	}
+	what := "DIR"
+	if csvPath != "" {
+		what = "FILE"
+	}
+	if err := checkTildes(what, pos...); err != nil {
 		return err
+	}
+	if csvPath != "" {
+		if _, err := os.Stat(csvPath); err != nil {
+			return fmt.Errorf("open %s: %w", csvPath, errors.Unwrap(err))
+		}
 	}
 	s, err := e.open(ctx, *db)
 	if err != nil {
 		return err
 	}
 	defer e.closeStore(s)
+	if csvPath != "" {
+		return e.deleteDuplicates(ctx, s, csvPath, *yes)
+	}
 	f, where, err := filterFor(ctx, s, pos)
 	if err != nil {
 		return err
@@ -45,34 +68,16 @@ func (e *env) delete(ctx context.Context, dbBefore string, args []string) error 
 	if err != nil {
 		return err
 	}
-	// The candidates past their retention: listed there, never as duplicates, and never counted as a kept copy.
-	expired := map[int64]bool{}
-	for _, c := range cands {
-		expired[c.FileID] = true
-	}
-	groups, stale, err := markedGroups(ctx, s, f, expired)
-	if err != nil {
-		return err
-	}
-
 	r := e.view
-	marked := 0
-	for _, g := range groups {
-		marked += len(g.Delete)
-	}
-	if len(cands) == 0 && marked == 0 {
+	if len(cands) == 0 {
 		under := ""
 		if f.RootID != 0 { // a DIR was given
 			under = " under " + r.Tilde(filepath.Join(where.Roots[0], filepath.FromSlash(where.Under)))
 		}
 		r.Next("No files" + under + " are past their retention.")
-		noteStale(r, stale)
 		return nil
 	}
-	list, err := buildDeleteList(ctx, s, f, cands, groups, stale, expired)
-	if err != nil {
-		return err
-	}
+	list := buildDeleteList(f, cands)
 	// Ask only if both the question can be seen (stdout) and answered (stdin): with stdout in a file, the list and the
 	// question would go there while filo waited on the keyboard.
 	asking := !*yes && e.canPrompt()
@@ -94,7 +99,7 @@ func (e *env) delete(ctx context.Context, dbBefore string, args []string) error 
 		pr = newPrompter(e.stdin)
 		pr.end, pr.check = r.Blank, e.outputErr
 		defer pr.close()
-		total := len(cands) + marked
+		total := len(cands)
 		choices := []view.Choice{{Key: "a", Word: "all"}, {Key: "s", Word: "select"}, {Key: "l", Word: "list"},
 			{Key: "n", Word: "none"}}
 		question := fmt.Sprintf("Delete all %s, select one by one, list them all, or none?", report.Count(int64(total)))
@@ -144,137 +149,17 @@ func (e *env) delete(ctx context.Context, dbBefore string, args []string) error 
 		failed            bool // could not be read or deleted: a failure, not a skip
 	}
 	var (
-		deleted, renewed, unmarked, left int
-		freed                            int64
-		skips                            []skipped
-		failed                           bool
-		runErr                           error
+		deleted, renewed, left int
+		freed                  int64
+		skips                  []skipped
+		failed                 bool
+		runErr                 error
 	)
-	total := marked + len(cands)
+	total := len(cands)
 	n := 0 // files gone through, for (n/total)
-	quit := false
-
-	// Duplicates first, a group at a time, each checked right before its own deletions: never the last copy.
-	// stop counts what this run leaves untouched from group gi on (from copy i of it), plus every candidate.
-	stop := func(gi, i int, err error) {
-		left += len(groups[gi].Delete) - i
-		for _, later := range groups[gi+1:] {
-			left += len(later.Delete)
-		}
-		left += len(cands)
-		runErr = err
-		quit = true
-	}
-groups:
-	for gi, g := range groups {
-		var chosen []store.Candidate
-		for i, c := range g.Delete {
-			n++
-			if !selecting {
-				chosen = append(chosen, c)
-				continue
-			}
-			if n > 1 {
-				r.Blank()
-			}
-			r.Item(n, total, "duplicate", filepath.Base(c.Path), report.Size(c.Size))
-			for _, k := range g.Keep {
-				r.ItemPath("keep", k.RootPath, k.Path, keptNote(k, expired))
-			}
-			r.ItemPath("delete", c.RootPath, c.Path, retentionNote(c))
-			act, err := e.choose(ctx, pr, choice{view.Choice{Key: "u", Word: "unmark", Label: "unmark"}, actUnmark,
-				func() (bool, error) { return true, s.Unmark(ctx, c.FileID, now()) }})
-			switch {
-			case err != nil || act == actQuit:
-				// Stop now: nothing more is deleted, this group's earlier choices included.
-				stop(gi, i, err)
-				left += len(chosen)
-				if len(chosen) > 0 {
-					r.Result(view.Neutral, fmt.Sprintf("not deleted: %s chosen in this group, left for later since "+
-						"the group was not finished", report.Plural(int64(len(chosen)), "copy", "copies")))
-				}
-				break groups
-			case act == actUnmark:
-				unmarked++
-				r.Result(view.Neutral, "unmarked: no longer marked for deletion")
-			case act == actSkip:
-				left++
-				r.Result(view.Neutral, "skipped")
-			default:
-				// Not a prediction: whether it goes is decided once the group is done, against its kept copy.
-				chosen = append(chosen, c)
-				r.Result(view.Neutral, "chosen: checked against its kept copy just before deleting")
-			}
-		}
-		if len(chosen) == 0 {
-			continue
-		}
-		kept, why, err := findKept(ctx, g, chosen, expired)
-		if err != nil {
-			stop(gi, len(g.Delete), err)
-			left += len(chosen)
-			break
-		}
-		if kept != nil {
-			// The retention rule, checked again: never lose a decision.
-			for _, c := range chosen {
-				if !store.LastsAtLeast(kept.Candidate().KeepUntil, c.KeepUntil) {
-					why = fmt.Sprintf("the copy kept, %s, has a shorter retention than this one (until %s); give it "+
-						"a longer retention, or keep this copy", kept.Path(), c.KeepUntil)
-					kept = nil
-					break
-				}
-			}
-		}
-		// In select mode each chosen copy gets its real result once its group is done.
-		result := func(c store.Candidate, deletedIt, failedIt bool, reason string) {
-			switch {
-			case !selecting:
-			case deletedIt:
-				r.ResultFile(view.Done, "deleted", c.RootPath, c.Path, "")
-			case failedIt:
-				r.ResultFile(view.Refused, "not deleted", c.RootPath, c.Path, reason)
-			default:
-				r.ResultFile(view.Attention, "not deleted", c.RootPath, c.Path, reason)
-			}
-		}
-		for ci, c := range chosen {
-			if kept == nil {
-				skips = append(skips, skipped{c.RootPath, c.Path, why, false})
-				result(c, false, false, why)
-				continue
-			}
-			// Never delete once output has failed: what is deleted must have been shown.
-			var o dispose.Outcome
-			err := e.outputErr()
-			if err == nil {
-				o, err = d.DeleteDuplicate(ctx, c, kept)
-			}
-			if o.Deleted {
-				deleted++
-				freed += fileBytes(c)
-				result(c, true, false, "")
-			} else if err == nil {
-				skips = append(skips, skipped{c.RootPath, c.Path, o.Reason, o.Failed})
-				failed = failed || o.Failed
-				result(c, false, o.Failed, o.Reason)
-			}
-			if err != nil {
-				stop(gi, len(g.Delete), err)
-				left += len(chosen) - ci // this copy and the rest of the group's choices
-				if o.Deleted {
-					left--
-				}
-				break groups
-			}
-		}
-	}
 
 files:
 	for i, c := range cands {
-		if quit {
-			break
-		}
 		n++
 		if selecting {
 			if n > 1 {
@@ -362,15 +247,11 @@ files:
 		r.Blank()
 		r.Problems(fmt.Sprintf("Folders not removed: %s", report.Count(int64(len(problems)))), view.Attention, ps)
 	}
-	if renewed > 0 || unmarked > 0 || left > 0 {
+	if renewed > 0 || left > 0 {
 		r.Blank()
 	}
 	if renewed > 0 {
 		r.Count(view.Neutral, report.Plural(int64(renewed), "file", "files")+" given a new retention")
-	}
-	if unmarked > 0 {
-		r.Count(view.Neutral, report.Plural(int64(unmarked), "copy", "copies")+" unmarked: no longer marked for "+
-			"deletion")
 	}
 	if left > 0 {
 		r.Count(view.Neutral, report.Plural(int64(left), "file", "files")+" left for later")
@@ -410,11 +291,10 @@ const (
 	actRetention
 	actSkip
 	actQuit
-	actUnmark
 )
 
-// choice is select mode's answer besides delete, skip and quit: a new retention for a file past its retention, or
-// unmark for a duplicate copy. do carries it out at once; false (no error) asks again.
+// choice is select mode's answer besides delete, skip and quit: a new retention for a file past its retention. do
+// carries it out at once; false (no error) asks again.
 type choice struct {
 	view.Choice
 	act action
@@ -490,98 +370,37 @@ func (e *env) askRetention(ctx context.Context, pr *prompter, s *store.Store, c 
 	}
 }
 
-// deleteList is what filo delete is about to delete, worked out once (the database read included) and drawn as often
-// as needed: first as an overview, again in full for l or before a cut list's a.
+// deleteList is what filo delete is about to delete, worked out once and drawn as often as needed: first as an
+// overview, again in full for l or before a cut list's a.
 type deleteList struct {
 	f       store.Filter
 	roots   []string       // the root of each file (Heading shows each once)
 	expired []view.FileRow // past their retention
 	exBytes int64
-	dups    []view.DupGroup
-	dupN    int // copies to delete in dups
-	dupSize int64
-	stale   int
 }
 
-// buildDeleteList gathers the list: the candidates past their retention and the duplicate groups with their copies
-// marked for deletion. A kept copy that is itself on the retention list is shown as not counting, since this run
-// may delete it too (findKept never counts it).
-func buildDeleteList(ctx context.Context, s *store.Store, f store.Filter, cands []store.Candidate,
-	groups []store.MarkedGroup, stale int, expired map[int64]bool) (*deleteList, error) {
-	l := &deleteList{f: f, stale: stale}
+// buildDeleteList gathers the candidates past their retention.
+func buildDeleteList(f store.Filter, cands []store.Candidate) *deleteList {
+	l := &deleteList{f: f}
 	for _, c := range cands {
 		l.roots = append(l.roots, c.RootPath)
 		l.exBytes += fileBytes(c)
 		l.expired = append(l.expired, view.FileRow{Root: c.RootPath, Rel: c.Path,
 			Cells: []string{c.KeepUntil, report.Size(c.Size)}})
 	}
-	var targets []string
-	for _, g := range groups {
-		for _, c := range g.Delete {
-			l.roots = append(l.roots, c.RootPath)
-			targets = append(targets, c.AbsPath())
-			l.dupN++
-			l.dupSize += c.Size
-		}
-	}
-	links, err := s.SymlinksTo(ctx, targets)
-	if err != nil {
-		return nil, err
-	}
-	for _, g := range groups {
-		dg := view.DupGroup{Name: filepath.Base(g.Delete[0].Path), Each: report.Size(g.Size),
-			NoKeep: "no other copy is left; this group will be skipped"}
-		for _, k := range g.Keep {
-			dg.Keep = append(dg.Keep, view.Copy{Root: k.RootPath, Rel: k.Path, Note: keptNote(k, expired)})
-		}
-		for _, c := range g.Delete {
-			dg.Delete = append(dg.Delete, view.Copy{Root: c.RootPath, Rel: c.Path, Note: retentionNote(c),
-				Symlinks: links[c.AbsPath()]})
-		}
-		l.dups = append(l.dups, dg)
-	}
-	return l, nil
+	return l
 }
 
-// keptNote is a kept copy's note: its retention, or that it does not count as kept in this run.
-func keptNote(k store.Candidate, expired map[int64]bool) string {
-	if expired[k.FileID] {
-		return "past its own retention: does not count as kept in this run"
-	}
-	return retentionNote(k)
-}
-
-// draw writes the list. max > 0 shows that many entries per section and "… N more"; it reports whether anything
-// was left out.
+// draw writes the list. max > 0 shows that many entries and "… N more"; it reports whether anything was left out.
 func (l *deleteList) draw(r *view.Renderer, max int) (cut bool) {
 	r.Heading("Ready to delete", view.Where{Roots: l.roots, Under: l.f.Scope},
-		report.Plural(int64(len(l.expired)+l.dupN), "file", "files"), report.Size(l.exBytes+l.dupSize))
-	if len(l.expired) > 0 {
-		r.Blank()
-		r.Section("Past their retention", report.Plural(int64(len(l.expired)), "file", "files"), report.Size(l.exBytes))
-		r.Files(view.FileList{Columns: []view.Column{{Header: "until"}, {Header: "size", Right: true}},
-			Rows: l.expired, ByRoot: true, Max: max, More: "files", MoreOne: "file"})
-	}
-	if len(l.dups) > 0 {
-		r.Blank()
-		r.Section("Duplicate copies marked for deletion", report.Plural(int64(l.dupN), "file", "files")+" in "+
-			report.Plural(int64(len(l.dups)), "group", "groups"), report.Size(l.dupSize))
-		r.Dups(l.dups, max)
-	}
-	if l.stale > 0 {
-		r.Blank()
-		noteStale(r, l.stale)
-	}
+		report.Plural(int64(len(l.expired)), "file", "files"), report.Size(l.exBytes))
 	r.Blank()
-	return max > 0 && (len(l.expired) > max || len(l.dups) > max)
-}
-
-// noteStale says how many duplicate marks no longer count because their copy changed.
-func noteStale(r *view.Renderer, stale int) {
-	if stale > 0 {
-		r.Note(view.Attention, fmt.Sprintf("%s no longer %s: the copy changed since it was marked (export "+
-			"duplicates again).", report.Plural(int64(stale), "mark", "marks"), pluralWord(stale, "counts", "count")))
-	}
+	r.Section("Past their retention", report.Plural(int64(len(l.expired)), "file", "files"), report.Size(l.exBytes))
+	r.Files(view.FileList{Columns: []view.Column{{Header: "until"}, {Header: "size", Right: true}},
+		Rows: l.expired, ByRoot: true, Max: max, More: "files", MoreOne: "file"})
+	r.Blank()
+	return max > 0 && len(l.expired) > max
 }
 
 // prompter asks questions on standard input. Each read runs in a goroutine, so Ctrl-C (a cancelled context) ends a

@@ -4,8 +4,9 @@ Filo keeps a register of your files: what they are, where they live, how that ch
 should be kept. It is the start of a review-and-dispose workflow meant to stop files piling up forever ("keep it in
 case someone asks").
 
-**Status: iterations 1 to 3 done: scan, lifespan, delete.** You give every file a retention (how long to keep it), and
-`filo delete` lists the files past theirs, asks, and deletes the ones you choose. Apart from that, Filo is
+**Status: scan, lifespan, delete and duplicates done.** You give every file a retention (how long to keep it), and
+`filo delete` lists the files past theirs, asks, and deletes the ones you choose. For identical copies you decide
+which to keep in a spreadsheet, and `filo delete` carries that out the same careful way. Apart from that, Filo is
 **read-only on your files**: no other command modifies, moves, renames or deletes anything outside its own database.
 See [Roadmap](#roadmap) for what comes next.
 
@@ -30,6 +31,9 @@ See [Roadmap](#roadmap) for what comes next.
   delete` shows you the list and asks.
 - **Deletes what you confirm**, after reading each file again just before deleting it: a file that changed since its
   retention was set, moved, or can't be read is skipped, never deleted.
+- **Clears out duplicates you decide on**: export the groups of identical copies, write `keep` or `delete` against
+  each, and `filo delete` deletes the extra copies, never the last one. Copies kept on purpose (records, a `LICENSE`
+  in every project, a backup folder) can be marked so they stop being reported. See [Duplicates](#duplicates).
 - **Rescans quickly.** A file is only re-read when its size, modification time, change time (ctime) or inode changes.
   The change time is what catches a file whose permissions changed, or one rewritten with its old modification time
   put back. Windows has no change time, so there it isn't compared.
@@ -215,6 +219,98 @@ In a terminal the output has colour and symbols (set `NO_COLOR`, or `TERM=dumb`,
 window: a path is never cut, but a long one moves to its own line. Piped into a file or another program, it is plain
 text with the same words, one line per file.
 
+## Duplicates
+
+The report lists **duplicate groups**: the same content held by two or more copies (hard links to one file are one
+copy). To deal with them, export the groups, decide in a spreadsheet, then carry the CSV out:
+
+```sh
+filo export duplicates ~/Documents -o dupes.csv   # every group with a copy under ~/Documents, with all its copies
+# open dupes.csv, fill in the action column, save it as CSV
+filo delete dupes.csv                             # check, list, ask, delete
+```
+
+**The rule: Filo decides which copy to keep, never whether the content goes.** Deciding duplicates never removes a
+content or shortens how long it is kept; only a retention does.
+
+Identical files exist for four reasons, and each has its own kind of keep:
+
+| why the copies exist | example | what you do |
+|---|---|---|
+| a copy made by accident | a download saved twice | `keep` one copy, `delete` the rest |
+| copies that are each a record | insurance terms received in 2020 and again in 2021, each with its own retention | `keep` on two or more: they are kept as a **set of records** |
+| a content that belongs everywhere | `LICENSE`, `__init__.py`, a template in each project | `always` on every row: the content is never a duplicate again |
+| a deliberate copy of a folder | a backup, an old laptop's files | `filo duplicates exclude DIR`: nothing under it counts as a duplicate |
+
+The `action` cell takes `delete`, `keep` or `always` (or `d`, `k`, `a`, any case). Each group is decided on its own:
+
+| rows of a group | result |
+|---|---|
+| all blank | not decided: left alone, so you can work through a CSV and run it several times |
+| some blank, some filled | refused: every copy needs a value |
+| one `keep`, the rest `delete` | the `delete` copies are deleted |
+| two or more `keep`, the rest `delete` or none | the `delete` copies are deleted; the copies kept become a set of records |
+| every row `always` | the content is recorded as always; nothing is deleted |
+| `always` mixed with anything else | refused: `always` is about the content, so it goes on every row |
+| every row `delete` | refused: no copy would be left. To remove a content entirely, give it a past retention |
+
+**Retentions across copies:** a copy can be deleted only if a copy kept lasts at least as long (the same or a later
+`keep_until`, or `forever`). Terms from 2020 and 2021, each kept 7 years: keeping 2021 and deleting 2020 is fine;
+the other way round is refused ("keep it instead, or keep both"). Filo never changes a retention to make a group
+pass.
+
+`filo delete dupes.csv` checks every decided group against the disk first, then lists what it will do:
+
+```
+Duplicates   dupes.csv · export 7 · 12 groups · ~/Documents
+
+Will delete                                              9 copies in 6 groups · 1.2 GB
+    contract.pdf · 8 MB each
+      keep     a/contract.pdf          forever
+      delete   b/contract.pdf
+      delete   c/contract.pdf
+               ↳ the symlink ~/Desktop/contract points here and would break
+    … 5 more groups
+
+Will record
+  ◆ set of 2 records: terms.pdf
+  ◆ content always (never a duplicate): LICENSE (3 copies)
+
+Won't touch
+  ✗ group 3   line 12   IMG_2041.jpg: every copy is delete: no copy would be left
+  ! group 5   line 19   b/photo.jpg: changed since the export: export again
+  · 3 groups not decided (blank)
+
+Delete 9 copies and record 2 decisions? [y/s/l/N]
+```
+
+- **Strict about changes:** a group any of whose files changed or moved since the export is skipped whole, so a copy
+  is deleted only if it is still exactly the content you decided on. A copy that is gone since (deleted by another
+  run, or by you) is ignored and the rest of its group goes ahead. A file Filo can't check (a disk not mounted, a
+  folder it can't read) is never taken as gone: its group is skipped.
+- **Never the last copy:** just before deleting, Filo reads a copy kept again and checks it is still there with the
+  same content, and is not the same file as the copy being deleted (a hard link, or a folder mounted twice). A copy
+  with other hard links can be kept but not deleted, since deleting it frees nothing.
+- **Run it again:** the CSV is your saved work, and nothing waits in the register between deciding and deleting.
+  Edit it further and run it again: groups already done are reported as done, and only what is still as exported is
+  acted on. A CSV of several exports, a sorted CSV, or one with groups removed are all fine; a row moved to another
+  group, added or duplicated refuses the groups it touches ("export again").
+- **The answers:** `y` does it all, `s` goes group by group (`d` do it, `s` skip, `q` quit), `l` lists every group,
+  `n` does nothing. Without a terminal it only lists; `-y` does it all without asking.
+
+`filo duplicates` lists what is not counted as duplicates, and `filo duplicates include PATH` undoes one: a
+directory's exclusion, a content always, or a whole set of records.
+
+```
+$ filo duplicates exclude ~/Backup
+
+Excluded   ~/Backup
+  · 3,210 files under it no longer count as duplicates (still scanned, retentions unchanged)
+  · 41 duplicate groups fewer: 256 left
+
+Next: filo duplicates include /home/you/Backup to undo it
+```
+
 ## Commands
 
 | Command | What it does |
@@ -225,9 +321,13 @@ text with the same words, one line per file.
 | `filo scan [DIR]` | Scan `DIR` (a directory inside a root: a partial scan), or every root if omitted. |
 | `filo report [--top N]` | Show the overview; `--top` sets how many entries each list shows (default 10). |
 | `filo export retention [DIR] -o FILE` | Write every file under `DIR` (or every root) with its retention, as CSV. |
-| `filo export duplicates [DIR] -o FILE` | Write the duplicate groups as CSV, to decide which copies to keep (being redesigned). |
-| `filo update FILE [--dry-run]` | Apply the retentions (or duplicate decisions) edited in an exported CSV. |
-| `filo delete [DIR] [-y]` | List the files past their retention (and duplicate copies marked for deletion), ask, and delete the ones you choose. See [Deleting](#deleting). |
+| `filo export duplicates [DIR] -o FILE` | Write the duplicate groups with a copy under `DIR` as CSV, to decide which copies to keep. See [Duplicates](#duplicates). |
+| `filo update FILE [--dry-run]` | Apply the retentions edited in an exported retention CSV. |
+| `filo delete [DIR] [-y]` | List the files past their retention, ask, and delete the ones you choose. See [Deleting](#deleting). |
+| `filo delete FILE [-y]` | Carry out a duplicates CSV: check it against the disk, list, ask, and delete the copies marked `delete`. |
+| `filo duplicates` | List what is not counted as duplicates: excluded directories, contents always, sets of records. |
+| `filo duplicates exclude DIR` | Never count the files under `DIR` as duplicates (a backup folder). |
+| `filo duplicates include PATH` | Undo one: a directory's exclusion, a file's content always, or its set of records. |
 | `filo help [COMMAND]` | Show usage. `-h` works on every command. |
 
 Options for `filo roots add` and `filo roots set`, which every scan of the root then uses:
@@ -252,7 +352,8 @@ without a terminal, as a timer does) is always the safe choice.
 
 Exit codes: `0` success (files that couldn't be read are reported but don't fail the scan; saying no at a question
 is not a failure), `1` an error, a root that failed during `filo scan` of every root, a CSV row that `filo update`
-refused, or a file `filo delete` couldn't read or delete, `2` a usage error.
+refused, a file `filo delete` couldn't read or delete, or a group of a duplicates CSV it refused, `2` a usage
+error.
 
 ## Roots
 
@@ -331,10 +432,12 @@ Enable it with `systemctl --user enable --now filo-scan.timer`.
 1. **Scan, register, report**, read-only. Done.
 2. **Lifespan**: a retention for every file, set through a CSV. Done.
 3. **Delete**: `filo delete` lists, asks, and deletes, with checks at the moment of deleting. Done.
-4. **Next**: clearer terminal output for every command (started with `filo delete`), then a redesign of how
-   duplicates are decided and deleted, then named retention policies. The order is in
-   [docs/design.md](docs/design.md), section 5.
-5. Later: **a UI** in place of the CSV.
+4. **Clearer terminal output** for every command. Done.
+5. **Duplicates**: decide in a CSV which copies to keep, carried out by `filo delete`; records, always and excluded
+   directories. Done.
+6. **Next**: named retention policies, then folder rules. The order is in [docs/design.md](docs/design.md),
+   section 5.
+7. Later: **a UI** in place of the CSV.
 
 Principles that won't change:
 - A retention is never a trigger: reaching its end makes a file a candidate you confirm.

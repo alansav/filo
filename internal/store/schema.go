@@ -3,7 +3,7 @@ package store
 // SchemaVersion is the schema this build reads and writes. It is stored in meta.schema_version when a database is
 // created. An older database with a migration in migrations is upgraded when it is opened; any other version is
 // refused.
-const SchemaVersion = 7
+const SchemaVersion = 8
 
 // Meta keys.
 const (
@@ -87,14 +87,14 @@ CREATE TABLE events (
 );
 ` + reviewSQL + duplicatesSQL
 
-// reviewSQL is the export and review tables, as of schema version 7.
+// reviewSQL is the export and review tables, as of schema version 8.
 const reviewSQL = `
 CREATE TABLE exports (
     id INTEGER PRIMARY KEY,
     created_utc TEXT NOT NULL,
     path TEXT,
     after_scan INTEGER REFERENCES scans(id),
-    kind TEXT NOT NULL DEFAULT 'retention'  -- 'retention', 'duplicates' or 'separate'
+    kind TEXT NOT NULL DEFAULT 'retention'  -- 'retention' or 'duplicates' ('separate' in schema 7: no longer written)
 );
 
 CREATE TABLE export_rows (
@@ -199,11 +199,55 @@ ALTER TABLE scans ADD COLUMN kind TEXT NOT NULL DEFAULT 'scan';
 ALTER TABLE exports ADD COLUMN kind TEXT NOT NULL DEFAULT 'retention';
 ALTER TABLE export_rows ADD COLUMN dup_group INTEGER;
 ALTER TABLE export_rows ADD COLUMN path_id INTEGER REFERENCES paths(id);
-` + duplicatesSQL,
+` + duplicatesSQLv7,
+	// 7 -> 8: the duplicates redesign (docs/design.md, Duplicates). No decisions to delete are stored: the marks and
+	// the decision history go, with the review batches only they used. Separate contents become always. Sets of
+	// records and excluded directories get tables. The marks not carried out are counted first, for the run's
+	// warning (upgradeNote7).
+	7: alwaysSQL + `
+INSERT INTO always_hashes (hash, added_utc)
+    SELECT sh.hash, b.created_utc FROM separate_hashes sh JOIN review_batches b ON b.id = sh.batch_id;
+DROP TABLE separate_hashes;
+DROP TABLE duplicate_marks;
+DROP TABLE duplicate_reviews;
+DELETE FROM review_batches WHERE id NOT IN (SELECT batch_id FROM reviews);
+` + recordsSQL,
 }
 
-// duplicatesSQL is the duplicates tables (schema version 7). A mark counts only while its hash is the file's hash.
-const duplicatesSQL = `
+// duplicatesSQL is the duplicates tables as of schema version 8. A content is always (never a duplicate group) while
+// its hash is in always_hashes. A file is one of a set of records while its row's hash is the file's hash, so an
+// edited record leaves its set by itself. An excluded directory is a path relative to its root ('/'-separated, the
+// empty path for the whole root): files under it, the whole subtree, never count as duplicates.
+const duplicatesSQL = alwaysSQL + `
+CREATE INDEX ix_files_inode ON files(inode);
+` + recordsSQL
+
+// alwaysSQL is the contents always, added in schema version 8 (from version 7's separate_hashes).
+const alwaysSQL = `
+CREATE TABLE always_hashes (hash TEXT PRIMARY KEY, added_utc TEXT NOT NULL);
+`
+
+// recordsSQL is the sets of records and the excluded directories, added in schema version 8.
+const recordsSQL = `
+CREATE TABLE duplicate_records (
+    file_id INTEGER PRIMARY KEY REFERENCES files(id),
+    hash TEXT NOT NULL,
+    set_id INTEGER NOT NULL,
+    added_utc TEXT NOT NULL
+);
+CREATE INDEX ix_duplicate_records_set ON duplicate_records(set_id);
+
+CREATE TABLE excluded_dirs (
+    root_id INTEGER NOT NULL REFERENCES roots(id),
+    path TEXT NOT NULL,
+    added_utc TEXT NOT NULL,
+    PRIMARY KEY (root_id, path)
+);
+`
+
+// duplicatesSQLv7 is the duplicates tables of schema version 7, the first design: a mark counted only while its
+// hash was the file's hash. Migration 6 -> 7 creates them; 7 -> 8 replaces them.
+const duplicatesSQLv7 = `
 CREATE TABLE duplicate_marks (
     file_id INTEGER PRIMARY KEY REFERENCES files(id),
     hash TEXT NOT NULL,

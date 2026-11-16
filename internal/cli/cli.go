@@ -162,6 +162,8 @@ func (e *env) run(ctx context.Context, args []string) error {
 		return e.update(ctx, *db, rest)
 	case "delete":
 		return e.delete(ctx, *db, rest)
+	case "duplicates":
+		return e.duplicates(ctx, *db, rest)
 	case "review":
 		return usageError{"review was replaced by export retention and update; see filo help"}
 	default:
@@ -224,7 +226,15 @@ func (e *env) open(ctx context.Context, db string) (*store.Store, error) {
 	if err := checkTilde(what, db); err != nil {
 		return nil, err
 	}
-	return store.Open(ctx, store.Options{DBPath: db})
+	s, err := store.Open(ctx, store.Options{DBPath: db})
+	if err != nil {
+		return nil, err
+	}
+	// What the schema upgrade this run made dropped or changed, said once (docs/design.md, Duplicates, Register).
+	for _, note := range s.UpgradeNotes() {
+		e.errorLine("warning: " + note)
+	}
+	return s, nil
 }
 
 // closeStore closes the register. The run's work is already written, so a problem here (most likely a snapshot that

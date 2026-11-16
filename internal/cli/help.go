@@ -23,12 +23,17 @@ var overview = struct {
 		{Name: "report [--top N]", Text: "totals, files needing a retention, largest files, duplicates, events"},
 		{Name: "export retention [DIR] -o FILE",
 			Text: "write every file under DIR (or every root) with its retention, as CSV"},
-		{Name: "export duplicates [DIR] [--separate] -o FILE",
+		{Name: "export duplicates [DIR] -o FILE",
 			Text: "write the duplicate groups with a copy under DIR, as CSV"},
 		{Name: "update FILE [--dry-run]",
-			Text: "record the retentions or duplicate decisions edited in an exported CSV"},
+			Text: "record the retentions edited in an exported CSV"},
 		{Name: "delete [DIR] [-y]",
-			Text: "delete the files past their retention and the duplicate copies marked for deletion, after asking"},
+			Text: "delete the files past their retention, after asking"},
+		{Name: "delete FILE [-y]",
+			Text: "carry out a duplicates CSV: delete the copies marked delete, after asking"},
+		{Name: "duplicates", Text: "list what is not counted as duplicates"},
+		{Name: "duplicates exclude DIR", Text: "never count the files under DIR as duplicates"},
+		{Name: "duplicates include PATH", Text: "undo an exclusion, a content always or a set of records"},
 		{Name: "help [COMMAND]", Text: "this overview, or a command's flags and rules"},
 	},
 	after: "Every command accepts --db PATH (default: $FILO_DB, then the user data directory).",
@@ -87,7 +92,7 @@ var commandHelps = map[string]commandHelp{
 	"export": {
 		usage: []string{
 			"filo export retention [DIR] -o FILE",
-			"filo export duplicates [DIR] [--separate] -o FILE",
+			"filo export duplicates [DIR] -o FILE",
 		},
 		before: []string{
 			"Writes every file under DIR (inside a root), or under every root, as CSV (UTF-8) to FILE, which must " +
@@ -97,15 +102,13 @@ var commandHelps = map[string]commandHelp{
 				"last day); check it. On a large system, export one directory at a time.",
 			"export duplicates writes each duplicate group (two or more copies of the same content; hard links to " +
 				"one file are one copy) with a copy under DIR, with all its copies. Columns: id, export, group, " +
-				"copies, directory, name, size, modified, file_date, retention, keep_until, delete. In each group " +
-				"you decide on, write Y under delete for the copies to delete and N for the ones to keep, then run " +
-				"filo update FILE; filo delete deletes them later. Two or more N mark the content separate: " +
-				"identical copies meant to exist, no longer listed as duplicates.",
+				"copies, directory, name, size, modified, file_date, retention, keep_until, action. In each group " +
+				"you decide on, write keep for the copy to keep and delete for the rest (or k and d); keep on two or " +
+				"more copies makes them records, each kept with its own retention; always on every row means the " +
+				"content belongs everywhere. A group left blank is left alone. filo delete FILE carries the CSV out.",
 		},
 		flags: []view.Term{
 			{Name: "-o FILE", Text: "the CSV to write; it must not exist"},
-			{Name: "--separate", Text: "export duplicates only: export the contents marked separate, with N filled " +
-				"in; blank a group's cells to make it a duplicate group again"},
 		},
 	},
 	"update": {
@@ -119,35 +122,51 @@ var commandHelps = map[string]commandHelp{
 				"terminal leaves them alone. A row is refused, with one line saying why, if a value does not parse, " +
 				"a period has no file_date, the file changed since the export, or its retention was changed from a " +
 				"later export. The other rows are still applied.",
-			"A duplicates CSV (from export duplicates) only records decisions; it never deletes. A group whose " +
-				"cells are all blank is left alone. A decided group needs Y or N on every copy and at least one N; " +
-				"a copy can be marked Y only if a copy marked N is kept at least as long. Otherwise the group is " +
-				"refused, with one line saying why. If anything is refused, or a content would be marked separate, " +
-				"filo lists it and asks once before recording anything; without a terminal it records nothing. " +
-				"Then run filo delete.",
+			"A duplicates CSV (from export duplicates) is refused: its decisions are not recorded, but carried " +
+				"out by filo delete FILE.",
 		},
 		flags: []view.Term{{Name: "--dry-run", Text: "check everything and write nothing"}},
 	},
 	"delete": {
-		usage: []string{"filo delete [DIR] [-y]"},
+		usage: []string{"filo delete [DIR] [-y]", "filo delete FILE [-y]"},
 		before: []string{
 			"Lists the files past their retention under DIR (inside a root), or under every root, whose content " +
-				"has not changed since the retention was set, and the duplicate copies marked for deletion (see " +
-				"filo help update) with the copies kept, then asks: all, select one by one, list them all, or none " +
-				"[a/s/l/N]. In a terminal the list shows 10 entries per section; l lists every one. Select goes " +
-				"file by file: d delete, r new retention, s skip or q quit; for a duplicate copy, u unmark in place " +
-				"of r. Enter, or an answer filo does not know, never deletes anything. Without a terminal it only " +
+				"has not changed since the retention was set, then asks: all, select one by one, list them all, or " +
+				"none [a/s/l/N]. In a terminal the list shows 10 entries; l lists every one. Select goes file by " +
+				"file: d delete, r new retention, s skip or q quit. Enter, or an answer filo does not know, never deletes anything. Without a terminal it only " +
 				"lists. Deletion is permanent: there is no recycle bin, so keep backups.",
 		},
-		flags: []view.Term{{Name: "-y", Text: "delete them all without asking"}},
+		flags: []view.Term{{Name: "-y", Text: "delete them all (or do all of the CSV) without asking"}},
 		after: []string{
-			"A duplicate copy is deleted only after another copy of the same content has been read again and " +
-				"found unchanged at its path, and only if that copy is kept at least as long; otherwise its group " +
-				"is skipped. The last copy of a content is never deleted this way.",
 			"Just before deleting, each file is read again. It is deleted only if it is still at its path as the " +
 				"same file and its content is still the content its retention was set on; otherwise it is skipped " +
 				"with one line saying why. A file that cannot be read is never deleted. Folders the run emptied are " +
 				"removed, up to the root. Exit code 1 if a file could not be read or deleted.",
+			"filo delete FILE carries out a duplicates CSV (filo export duplicates). Each group is checked against " +
+				"the disk: a group any of whose files changed or moved since the export is skipped, and a copy gone " +
+				"since is ignored. It lists what it will delete, what it will record (contents always, sets of " +
+				"records) and what it won't touch, then asks: yes, select group by group, list, or no [y/s/l/N]. A " +
+				"copy is deleted only while a copy kept is still there with the same content, and only if a copy " +
+				"kept lasts at least as long (its keep_until). A CSV can be edited further and run again: groups " +
+				"done are reported, and only what is still as exported is acted on. Exit code 1 if the CSV refuses " +
+				"a group.",
+		},
+	},
+	"duplicates": {
+		usage: []string{
+			"filo duplicates",
+			"filo duplicates exclude DIR",
+			"filo duplicates include PATH",
+		},
+		before: []string{
+			"Lists what is not counted as duplicates: excluded directories, contents always and sets of records. " +
+				"Contents always and sets of records are made in a duplicates CSV (always on every row of a group, " +
+				"or keep on two or more copies) and carried out by filo delete FILE.",
+			"exclude makes the files under DIR, a directory inside a root, never count as duplicates, of each " +
+				"other or of files elsewhere. They are still scanned and their retentions are unchanged. It " +
+				"replaces the exclusions under DIR.",
+			"include undoes one of them: for a directory, its exclusion; for a file, its content always, or its " +
+				"whole set of records. PATH may be gone from the disk.",
 		},
 	},
 }

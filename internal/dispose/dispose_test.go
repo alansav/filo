@@ -439,7 +439,7 @@ func TestCheckKept(t *testing.T) {
 	}
 }
 
-// TestDeleteDuplicate: a marked copy is deleted only while the kept copy still holds the same content, looked at
+// TestDeleteDuplicate: a copy to delete is deleted only while the kept copy still holds the same content, looked at
 // again right before the removal, and is never the same file as the kept copy.
 func TestDeleteDuplicate(t *testing.T) {
 	ctx := context.Background()
@@ -459,8 +459,14 @@ func TestDeleteDuplicate(t *testing.T) {
 		{name: "other content", want: "no copy of the same content is kept",
 			prepare: func(t *testing.T, _ string, c *store.Candidate) { c.ReviewedHash = strings.Repeat("0", 64) }},
 		{name: "no kept copy", noKept: true, want: "no copy of the same content is kept"},
-		{name: "marked copy changed since it was marked", want: "changed since it was marked",
+		{name: "copy to delete changed since the export", want: "changed since the export",
 			prepare: func(t *testing.T, root string, _ *store.Candidate) { write(t, filepath.Join(root, "dup"), "edited!") }},
+		{name: "a hard link made during the check", want: "has another hard link",
+			beforeRemove: func(t *testing.T, root string) {
+				if err := os.Link(filepath.Join(root, "dup"), filepath.Join(root, "dup-link")); err != nil {
+					t.Fatal(err)
+				}
+			}},
 		{name: "the same file through a bind mount", want: "is the same file as the copy kept",
 			prepare: func(t *testing.T, root string, _ *store.Candidate) {
 				// Another root seeing the kept file: the register has two copies, the disk one file.
@@ -501,9 +507,9 @@ func TestDeleteDuplicate(t *testing.T) {
 			_, dupErr := os.Lstat(filepath.Join(root, "dup"))
 			switch {
 			case tt.want == "" && (!o.Deleted || dupErr == nil):
-				t.Errorf("DeleteDuplicate = %+v; want the marked copy deleted", o)
+				t.Errorf("DeleteDuplicate = %+v; want the copy deleted", o)
 			case tt.want != "" && (o.Deleted || dupErr != nil || !strings.Contains(o.Reason, tt.want)):
-				t.Errorf("DeleteDuplicate = %+v (marked copy: %v); want skipped, %q", o, dupErr, tt.want)
+				t.Errorf("DeleteDuplicate = %+v (copy to delete: %v); want skipped, %q", o, dupErr, tt.want)
 			}
 		})
 	}

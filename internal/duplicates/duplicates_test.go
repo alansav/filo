@@ -3,122 +3,302 @@ package duplicates
 import (
 	"bytes"
 	"errors"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/alansav/filo/internal/sheet"
 	"github.com/alansav/filo/internal/store"
 )
 
-func TestParseDecision(t *testing.T) {
+func TestParseAction(t *testing.T) {
 	tests := []struct {
 		in      string
-		want    byte
+		want    Action
 		wantErr bool
 	}{
-		{"", store.DecideNone, false},
-		{"  ", store.DecideNone, false},
-		{"Y", store.DecideDelete, false},
-		{"y", store.DecideDelete, false},
-		{" Yes ", store.DecideDelete, false},
-		{"N", store.DecideKeep, false},
-		{"no", store.DecideKeep, false},
-		{"x", 0, true},
-		{"delete", 0, true},
-		{"keep", 0, true},
-		{"1", 0, true},
-		{"TRUE", 0, true},
+		{"", None, false},
+		{"  ", None, false},
+		{"delete", Delete, false},
+		{" Delete ", Delete, false},
+		{"D", Delete, false},
+		{"keep", Keep, false},
+		{"k", Keep, false},
+		{"ALWAYS", Always, false},
+		{"a", Always, false},
+		{"del", None, true},
+		{"delete this", None, true},
+		{"Y", None, true}, // the first design's word
+		{"N", None, true},
+		{"x", None, true},
 	}
-	for _, tt := range tests {
-		got, err := ParseDecision(tt.in)
-		if (err != nil) != tt.wantErr || got != tt.want {
-			t.Errorf("ParseDecision(%q) = %q, %v; want %q, error %v", tt.in, got, err, tt.want, tt.wantErr)
+	for _, tc := range tests {
+		got, err := ParseAction(tc.in)
+		if (err != nil) != tc.wantErr || got != tc.want {
+			t.Errorf("ParseAction(%q) = %v, %v; want %v, error %v", tc.in, got, err, tc.want, tc.wantErr)
 		}
 	}
 }
 
-func TestWriteAndReadCSV(t *testing.T) {
-	groups := []store.DupContent{{Hash: "h1", Size: 3, Copies: []store.DupCopy{
-		{Candidate: store.Candidate{FileItem: store.FileItem{FileID: 4, RootPath: "/r", Path: "a/=x.txt", Size: 3}}},
-		{Candidate: store.Candidate{FileItem: store.FileItem{FileID: 9, RootPath: "/r", Path: "b.txt", Size: 3,
-			Retention: "7y", FileDate: "2020-01-01", KeepUntil: "2027-01-01"}}},
-	}}}
-	var buf bytes.Buffer
-	if err := WriteCSV(&buf, 12, groups, "N", time.UTC); err != nil {
-		t.Fatal(err)
+// csvOf builds a duplicates CSV with the given rows (export, group, id, action), in the order given.
+func csvOf(rows ...[4]string) []byte {
+	var b strings.Builder
+	b.WriteString(sheet.BOM + strings.Join(Header, ",") + "\r\n")
+	for _, r := range rows {
+		// id, export, group, copies, directory, name, size, modified, file_date, retention, keep_until, action
+		b.WriteString(r[2] + "," + r[0] + "," + r[1] + ",2,/r,x,1,2026-11-15 10:00,,,," + r[3] + "\r\n")
 	}
-	out := buf.String()
-	for _, want := range []string{"\ufeffid,export,group,copies,directory,name,size,modified,file_date,retention," +
-		"keep_until,delete\n", "4,12,1,2,/r/a,'=x.txt,3,", "9,12,1,2,/r,b.txt,3,", "2020-01-01,7y,2027-01-01,N\n"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("CSV lacks %q:\n%s", want, out)
-		}
-	}
-	if !IsDuplicatesCSV(buf.Bytes()) {
-		t.Error("IsDuplicatesCSV = false for a duplicates CSV")
-	}
-	p, err := ReadCSV(&buf)
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := []store.DupRow{{Line: 2, ExportID: 12, FileID: 4, Group: 1, Decision: 'N'},
-		{Line: 3, ExportID: 12, FileID: 9, Group: 1, Decision: 'N'}}
-	if len(p.Problems) != 0 || len(p.Rows) != 2 || p.Rows[0] != want[0] || p.Rows[1] != want[1] {
-		t.Errorf("ReadCSV = %+v, want %+v", p, want)
-	}
+	return []byte(b.String())
 }
 
-// TestReadCSVSpreadsheet: what a spreadsheet does to the file is accepted; what cannot be read is refused row by row.
-func TestReadCSVSpreadsheet(t *testing.T) {
-	in := "\ufeffdelete;group;export;id;mine\r\n" +
-		"y;1;3;10;\r\n" +
-		";;;;\r\n" +
-		"n;1;3;11;note\r\n" +
-		"maybe;2;3;12;\r\n" +
-		"Y;2;3;13;;extra\r\n" +
-		"Y;x;3;14;\r\n" +
-		"N;3;3;15;\r\n" +
-		"Y;3;3;15;\r\n"
-	p, err := ReadCSV(strings.NewReader(in))
-	if err != nil {
-		t.Fatal(err)
-	}
-	got := map[int64]byte{}
-	for _, r := range p.Rows {
-		got[r.FileID] = r.Decision
-	}
-	if len(got) != 2 || got[10] != 'Y' || got[11] != 'N' {
-		t.Errorf("rows = %+v, want files 10 (Y) and 11 (N)", p.Rows)
-	}
-	problems := map[int]string{}
-	for _, pr := range p.Problems {
-		problems[pr.Line] += pr.Msg
-	}
-	for line, want := range map[int]string{5: `delete "maybe"`, 6: "outside the columns", 7: "not a group number",
-		8: "more than once", 9: "more than once"} {
-		if !strings.Contains(problems[line], want) {
-			t.Errorf("line %d: problem %q, want %q", line, problems[line], want)
-		}
-	}
-}
-
-func TestReadCSVHeaders(t *testing.T) {
+func TestReadCSVRefusesOtherCSVs(t *testing.T) {
 	tests := []struct {
-		name, head string
-		want       error
+		name string
+		data string
+		want error
 	}{
-		{"retention CSV", "id,export,directory,name,file_date,retention,keep_until", ErrNotDuplicatesCSV},
-		{"delete column removed", "id,export,group,copies,name", ErrNoDelete},
-		{"not a CSV of filo's", "a,b,c", ErrNotDuplicatesCSV},
+		{"the first design's CSV, with a delete column",
+			sheet.BOM + "id,export,group,copies,directory,name,size,modified,file_date,retention,keep_until,delete\r\n" +
+				"1,1,1,2,/r,x,1,2026-11-15 10:00,,,,Y\r\n", ErrOlderCSV},
+		{"a retention CSV",
+			sheet.BOM + "id,export,directory,name,size,modified,file_date,retention,keep_until\r\n", ErrRetentionCSV},
+		{"no action column", sheet.BOM + "id,export,group,copies\r\n", ErrNoAction},
+		{"not a filo CSV", "a,b,c\r\n1,2,3\r\n", ErrNotDuplicatesCSV},
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if _, err := ReadCSV(strings.NewReader(tt.head + "\n")); !errors.Is(err, tt.want) {
-				t.Errorf("ReadCSV: %v, want %v", err, tt.want)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := ReadCSV(bytes.NewReader([]byte(tc.data))); !errors.Is(err, tc.want) {
+				t.Errorf("err = %v, want %v", err, tc.want)
 			}
 		})
 	}
-	if IsDuplicatesCSV([]byte("id,export,retention\n1,1,7y\n")) {
-		t.Error("IsDuplicatesCSV = true for a retention CSV")
+}
+
+// exported is export 7 as the register recorded it: group 1 holds files 1, 2 and 3; group 2 holds files 4 and 5;
+// group 3 holds files 6 and 7. Export 8 holds file 9 in group 1.
+var exported = map[int64]map[int64]int64{
+	7: {1: 1, 2: 1, 3: 1, 4: 2, 5: 2, 6: 3, 7: 3},
+	8: {9: 1},
+	9: {1: 1, 2: 1, 3: 1}, // overlaps export 7's group 1 (B3)
+}
+
+// plan reads the CSV and plans it against exported, returning each group's outcome as "group: what" and the
+// problems not tied to a group as "line: message".
+func plan(t *testing.T, data []byte) (map[GroupKey]GroupPlan, []string) {
+	t.Helper()
+	p, err := ReadCSV(bytes.NewReader(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	plans, problems := Plan(p, exported)
+	out := map[GroupKey]GroupPlan{}
+	for _, g := range plans {
+		out[g.Key] = g
+	}
+	var msgs []string
+	for _, pr := range problems {
+		msgs = append(msgs, pr.Msg)
+	}
+	return out, msgs
+}
+
+// TestPlanGroupRules: each row of the group rules table (docs/design.md, Duplicates), for group 1 of export 7.
+func TestPlanGroupRules(t *testing.T) {
+	g1 := func(a1, a2, a3 string) []byte {
+		return csvOf([4]string{"7", "1", "1", a1}, [4]string{"7", "1", "2", a2}, [4]string{"7", "1", "3", a3})
+	}
+	tests := []struct {
+		name       string
+		data       []byte
+		status     Status
+		reason     string // a part of it
+		keep, del  []int64
+		alwaysWant bool
+	}{
+		{"all blank: not decided", g1("", "", ""), NotDecided, "", nil, nil, false},
+		{"some blank, some filled: refused", g1("keep", "delete", ""), Refused, "every copy needs a value", nil, nil,
+			false},
+		{"one keep, the rest delete", g1("keep", "delete", "d"), Decided, "", []int64{1}, []int64{2, 3}, false},
+		{"two keep, one delete: records and a deletion", g1("keep", "k", "delete"), Decided, "", []int64{1, 2},
+			[]int64{3}, false},
+		{"all keep: records only", g1("keep", "keep", "keep"), Decided, "", []int64{1, 2, 3}, nil, false},
+		{"every row always", g1("always", "a", "ALWAYS"), Decided, "", nil, nil, true},
+		{"always with anything else: refused", g1("always", "always", "keep"), Refused,
+			"always is about the content, so it goes on every row", nil, nil, false},
+		{"every row delete: refused", g1("delete", "delete", "delete"), Refused,
+			"no copy would be left; to remove this content entirely, give it a past retention", nil, nil, false},
+		{"C3: an unknown value refuses the group", g1("keep", "del", "delete"), Refused,
+			`"del" is not an action`, nil, nil, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			plans, problems := plan(t, tc.data)
+			g := plans[GroupKey{7, 1}]
+			if g.Status != tc.status || !strings.Contains(g.Reason, tc.reason) || !slices.Equal(g.Keep, tc.keep) ||
+				!slices.Equal(g.Delete, tc.del) || g.Always != tc.alwaysWant {
+				t.Errorf("got %+v, want status %v, reason with %q, keep %v, delete %v, always %v", g, tc.status,
+					tc.reason, tc.keep, tc.del, tc.alwaysWant)
+			}
+			if len(problems) > 0 {
+				t.Errorf("problems %q, want none", problems)
+			}
+		})
 	}
 }
+
+// TestPlanStructure: scenarios C1, C2 and C5. A row not as exported refuses the groups it touches; the others are
+// still planned. Sorting is fine. A row deleted from the CSV is noted for the check against the disk.
+func TestPlanStructure(t *testing.T) {
+	decided2 := [][4]string{{"7", "2", "4", "keep"}, {"7", "2", "5", "delete"}}
+	tests := []struct {
+		name    string
+		rows    [][4]string
+		refused []GroupKey // groups refused for their structure
+		reason  string     // a part of each refused group's reason
+	}{
+		{"C2: a row's group edited refuses both groups it touches",
+			append([][4]string{{"7", "1", "1", "keep"}, {"7", "1", "2", "delete"}, {"7", "3", "3", "delete"},
+				{"7", "3", "6", "keep"}, {"7", "3", "7", "delete"}}, decided2...),
+			[]GroupKey{{7, 1}, {7, 3}}, "in group 1 of export 7, not group 3"},
+		{"C2: a row from another export pasted in",
+			append([][4]string{{"7", "1", "1", "keep"}, {"7", "1", "2", "delete"}, {"7", "1", "3", "delete"},
+				{"7", "1", "9", "delete"}}, decided2...),
+			[]GroupKey{{7, 1}}, "is not in export 7"},
+		{"C2: a row duplicated",
+			append([][4]string{{"7", "1", "1", "keep"}, {"7", "1", "2", "delete"}, {"7", "1", "3", "delete"},
+				{"7", "1", "3", "delete"}}, decided2...),
+			[]GroupKey{{7, 1}}, "listed more than once"},
+		{"C2: a row duplicated into another group, the original first",
+			append([][4]string{{"7", "1", "1", "keep"}, {"7", "1", "2", "delete"}, {"7", "1", "3", "delete"},
+				{"7", "3", "6", "keep"}, {"7", "3", "7", "delete"}, {"7", "3", "3", "keep"}}, decided2...),
+			[]GroupKey{{7, 1}, {7, 3}}, "export again"},
+		{"C2: a row duplicated into another group, the copy first",
+			append([][4]string{{"7", "3", "3", "keep"}, {"7", "1", "1", "keep"}, {"7", "1", "2", "delete"},
+				{"7", "1", "3", "delete"}, {"7", "3", "6", "keep"}, {"7", "3", "7", "delete"}}, decided2...),
+			[]GroupKey{{7, 1}, {7, 3}}, "export again"},
+		{"C2: an export this register does not have",
+			append([][4]string{{"12", "1", "1", "keep"}, {"12", "1", "2", "delete"}}, decided2...),
+			[]GroupKey{{12, 1}}, "export 12 is not a duplicates export of this register"},
+		{"C5: sorted rows are fine",
+			[][4]string{{"7", "1", "3", "delete"}, {"7", "2", "5", "delete"}, {"7", "1", "1", "keep"},
+				{"7", "2", "4", "keep"}, {"7", "1", "2", "delete"}},
+			nil, ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			plans, problems := plan(t, csvOf(tc.rows...))
+			for _, k := range tc.refused {
+				if g := plans[k]; g.Status != Refused || !strings.Contains(g.Reason, tc.reason) {
+					t.Errorf("group %v: %+v, want refused with %q", k, g, tc.reason)
+				}
+			}
+			if g := plans[GroupKey{7, 2}]; g.Status != Decided || !slices.Equal(g.Delete, []int64{5}) {
+				t.Errorf("group 2, untouched, = %+v; want decided, deleting 5", g)
+			}
+			if len(problems) > 0 {
+				t.Errorf("problems %q, want none", problems)
+			}
+		})
+	}
+
+	t.Run("B3: a file with different actions in two exports refuses both groups", func(t *testing.T) {
+		plans, _ := plan(t, csvOf([4]string{"7", "1", "1", "keep"}, [4]string{"7", "1", "2", "delete"},
+			[4]string{"7", "1", "3", "delete"}, [4]string{"9", "1", "1", "delete"}, [4]string{"9", "1", "2", "keep"},
+			[4]string{"9", "1", "3", "delete"}))
+		for _, k := range []GroupKey{{7, 1}, {9, 1}} {
+			if g := plans[k]; g.Status != Refused || !strings.Contains(g.Reason, "give it one action") {
+				t.Errorf("group %v = %+v, want refused for its conflicting actions", k, g)
+			}
+		}
+	})
+	t.Run("B3: the same actions in two exports, or one export left blank, are fine", func(t *testing.T) {
+		for _, tc := range []struct {
+			actions [3]string // export 9's rows for files 1, 2, 3
+			want    Status    // export 9's group
+		}{
+			{[3]string{"keep", "delete", "delete"}, Decided},
+			{[3]string{"", "", ""}, NotDecided},
+		} {
+			plans, _ := plan(t, csvOf([4]string{"7", "1", "1", "keep"}, [4]string{"7", "1", "2", "delete"},
+				[4]string{"7", "1", "3", "delete"}, [4]string{"9", "1", "1", tc.actions[0]},
+				[4]string{"9", "1", "2", tc.actions[1]}, [4]string{"9", "1", "3", tc.actions[2]}))
+			if g := plans[GroupKey{7, 1}]; g.Status != Decided {
+				t.Errorf("export 9 %q: group 7/1 = %+v, want decided", tc.actions, g)
+			}
+			if g := plans[GroupKey{9, 1}]; g.Status != tc.want {
+				t.Errorf("export 9 %q: group 9/1 = %+v, want status %d", tc.actions, g, tc.want)
+			}
+		}
+	})
+	t.Run("a partial CSV: groups deleted from it are not planned, a blank one is left alone", func(t *testing.T) {
+		plans, problems := plan(t, csvOf([4]string{"7", "2", "4", "keep"}, [4]string{"7", "2", "5", "delete"},
+			[4]string{"7", "3", "6", ""}, [4]string{"7", "3", "7", ""}))
+		if len(plans) != 2 || plans[GroupKey{7, 2}].Status != Decided || plans[GroupKey{7, 3}].Status != NotDecided {
+			t.Errorf("plans = %+v, want group 2 decided, group 3 not decided and group 1 (not in the CSV) absent", plans)
+		}
+		if len(problems) > 0 {
+			t.Errorf("problems %q, want none", problems)
+		}
+	})
+	t.Run("C1: a row deleted from the CSV is noted, for the check against the disk", func(t *testing.T) {
+		plans, _ := plan(t, csvOf([4]string{"7", "1", "1", "keep"}, [4]string{"7", "1", "2", "delete"}))
+		if g := plans[GroupKey{7, 1}]; g.Status != Decided || !slices.Equal(g.Missing, []int64{3}) {
+			t.Errorf("group 1 = %+v, want decided with file 3 missing from the CSV", g)
+		}
+	})
+	t.Run("a row that cannot be read is a problem of its line, and refuses its group", func(t *testing.T) {
+		plans, problems := plan(t, csvOf([4]string{"7", "1", "x", "keep"}, [4]string{"7", "1", "2", "delete"},
+			[4]string{"7", "1", "3", "delete"}, [4]string{"7", "zz", "4", "keep"}))
+		if g := plans[GroupKey{7, 1}]; g.Status != Refused || !strings.Contains(g.Reason, `id "x"`) {
+			t.Errorf("group 1 = %+v, want refused for its unreadable row", g)
+		}
+		if len(problems) != 1 || !strings.Contains(problems[0], `group "zz"`) {
+			t.Errorf("problems = %q, want the row whose group cannot be read", problems)
+		}
+	})
+}
+
+// TestWriteCSV: one row per copy, groups numbered in order, the action cell blank except keep on a copy that is one
+// of a set of records (F3: a new copy of records is exported with them as keep, itself blank).
+func TestWriteCSV(t *testing.T) {
+	cp := func(id int64, rel string, set int64) store.DupCopy {
+		c := store.DupCopy{RecordSet: set}
+		c.FileID, c.RootPath, c.Path, c.Size = id, "/r", rel, 4
+		return c
+	}
+	groups := []store.DupContent{
+		{Hash: "h1", Copies: []store.DupCopy{cp(1, "a/x", 0), cp(2, "b/x", 0)}},
+		{Hash: "h2", Copies: []store.DupCopy{cp(3, "2020/terms.pdf", 5), cp(4, "2021/terms.pdf", 5),
+			cp(5, "new/terms.pdf", 0)}},
+	}
+	var b bytes.Buffer
+	if err := WriteCSV(&b, 9, groups, time.UTC); err != nil {
+		t.Fatal(err)
+	}
+	p, err := ReadCSV(bytes.NewReader(b.Bytes()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, r := range p.Rows {
+		got = append(got, strings.Join([]string{itoa(r.Key.Export), itoa(r.Key.Group), itoa(r.FileID), r.Action.String()}, " "))
+	}
+	want := []string{"9 1 1 ", "9 1 2 ", "9 2 3 keep", "9 2 4 keep", "9 2 5 "}
+	if !slices.Equal(got, want) {
+		t.Errorf("rows read back = %q, want %q", got, want)
+	}
+	if !strings.HasPrefix(b.String(), sheet.BOM+strings.Join(Header, ",")) || !strings.HasSuffix(Header[len(Header)-1], "action") {
+		t.Errorf("header: %q", strings.SplitN(b.String(), "\n", 2)[0])
+	}
+	// As exported, the group with records is partly filled: refused until the new copy has a value.
+	plans, _ := Plan(p, map[int64]map[int64]int64{9: {1: 1, 2: 1, 3: 2, 4: 2, 5: 2}})
+	for _, g := range plans {
+		if g.Key == (GroupKey{9, 2}) && (g.Status != Refused || !strings.Contains(g.Reason, "every copy needs a value")) {
+			t.Errorf("group 2 as exported = %+v, want refused until the new copy is decided", g)
+		}
+	}
+}
+
+func itoa(n int64) string { return strconv.FormatInt(n, 10) }

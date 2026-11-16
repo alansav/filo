@@ -28,7 +28,7 @@ type Candidate struct {
 	CtimeNS      int64  // 0 = not known
 	Ino          uint64 // 0 = not known
 	LinkTarget   string // symlinks
-	ReviewedHash string // the content its retention was set on (for a duplicate copy: the content it was marked on)
+	ReviewedHash string // the content its retention was set on (for a duplicate copy: the content exported)
 	DuplicateOf  string // a duplicate copy being deleted: the copy kept, absolute; "" otherwise
 }
 
@@ -140,9 +140,6 @@ func (r *DeleteRun) Deleted(ctx context.Context, c Candidate, now time.Time) err
 		}
 		if n, err := res.RowsAffected(); err != nil || n != 1 {
 			return fmt.Errorf("path %d was not current (affected %d, %v)", c.PathID, n, err)
-		}
-		if _, err := tx.ExecContext(ctx, `DELETE FROM duplicate_marks WHERE file_id = ?`, c.FileID); err != nil {
-			return err
 		}
 		detail := "retention " + c.Retention
 		if c.KeepUntil != c.Retention {

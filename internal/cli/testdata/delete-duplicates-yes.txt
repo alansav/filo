@@ -1,0 +1,18 @@
+Duplicates   d.csv . export 1 . 5 groups . <root>
+
+Will delete   2 copies in 1 group . 16 B
+    contract.pdf . 8 B each
+      keep     a/contract.pdf
+      delete   b/contract.pdf
+               -> the symlink <root>/link points here and would break
+      delete   c/contract.pdf
+
+Will record
+  [kept] set of 2 records: terms.pdf
+  [kept] content always (never a duplicate): LICENSE (3 copies)
+
+Won't touch
+  [refused] group 5   line 12   report.pdf: every copy is delete: no copy would be left; to remove this content entirely, give it a past retention
+  - 1 group not decided (blank)
+
+Done   deleted 2 copies . freed 16 B . recorded 2 decisions

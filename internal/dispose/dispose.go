@@ -94,7 +94,7 @@ func (d *Disposer) delete(ctx context.Context, c store.Candidate, guard func(p s
 		// The quick check: a different size or modification time means the content changed, without reading it.
 		if fi.Size() != c.Size || fi.ModTime().UnixNano() != c.MtimeNS {
 			if c.DuplicateOf != "" {
-				return skip("changed since it was marked for deletion; run filo scan"), nil
+				return skip("changed since the export; export again"), nil
 			}
 			return skip("changed since its retention was set; run filo scan, then give it a new retention"), nil
 		}
@@ -118,7 +118,7 @@ func (d *Disposer) delete(ctx context.Context, c store.Candidate, guard func(p s
 				return Outcome{}, err
 			}
 			if c.DuplicateOf != "" {
-				return skip("changed since it was marked for deletion; its mark no longer counts"), nil
+				return skip("changed since the export; export again"), nil
 			}
 			return skip("changed since its retention was set; it needs a new retention"), nil
 		}
@@ -368,8 +368,8 @@ func (k *Kept) still() (string, bool) {
 	return "", true
 }
 
-// DeleteDuplicate deletes c, a copy marked for deletion, through the same check as Delete (against the content it
-// was marked on), as long as kept still holds the same content: kept is looked at again right before the removal.
+// DeleteDuplicate deletes c, a copy decided on in a duplicates CSV, through the same check as Delete (against the
+// content exported), as long as kept still holds the same content: kept is looked at again right before the removal.
 func (d *Disposer) DeleteDuplicate(ctx context.Context, c store.Candidate, kept *Kept) (Outcome, error) {
 	if kept == nil || c.ReviewedHash == "" || c.ReviewedHash != kept.c.ReviewedHash {
 		return skip("no copy of the same content is kept"), nil
@@ -384,8 +384,28 @@ func (d *Disposer) DeleteDuplicate(ctx context.Context, c store.Candidate, kept 
 		if why, ok := kept.still(); !ok {
 			return why, false
 		}
+		if why, ok := OnlyLink(p); !ok {
+			return why, false
+		}
 		return notSameFile(p, kept.path)
 	})
+}
+
+// OnlyLink checks, live, that the file at p has no other hard link: deleting one of two links frees nothing, so a
+// copy with hard links can be kept but not deleted (docs/design.md, Duplicates). Where the link count is not known
+// (an OS filo cannot read it on), it is not taken to be one.
+func OnlyLink(p string) (string, bool) {
+	fi, err := os.Lstat(p)
+	switch {
+	case err != nil:
+		return "could not be looked at: " + store.ErrDetail(err) + "; run filo scan", false
+	case fsid.Links(fi) == 0:
+		return "its hard links cannot be counted on this system, so it is not deleted", false
+	case fsid.Links(fi) > 1:
+		return "has another hard link, so deleting it frees nothing: a copy with hard links can be kept but not " +
+			"deleted", false
+	}
+	return "", true
 }
 
 // notSameFile checks, live, that two paths are not one file: a hard link in the same root, or the same file seen
