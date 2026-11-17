@@ -24,7 +24,9 @@ FILE.csv`, no stored decisions to delete, four kinds of keep), built on 2026-11-
 ## Build log
 
 The iterations and the items of the roadmap as they were built, moved from `design.md` section 5 on 2026-11-17.
-Item numbers are the roadmap's.
+Item numbers are the roadmap's. Section numbers and names are those of `design.md` at the time: section 5 was this
+list, section 6 the open questions (now in `roadmap.md`), section 7 "Rejected or deferred" (now `design.md`,
+Rejected, and the deferred ideas in `roadmap.md`; the deferred revert is roadmap item 27a).
 
 1. **Scan, register, report** (read-only). Done 2026-11-11. Done when: on a generated test tree, every kind of change (rename, move,
    edit, delete, duplicate, symlink, unreadable directory, unreadable file) is reported exactly on rescan
@@ -325,7 +327,7 @@ of this section.
   decisions to delete at all, and to splitting "separate" into records (these copies) and always (the content), since
   insurance terms kept as two records should not make every future copy of them acceptable.
 
-## Schema versions 2 to 7
+## Schema versions
 
 `ctime_ns` and `unreadable_since_scan` are schema version 2,
 the first migration (two `ALTER TABLE ... ADD COLUMN`s; existing rows start with ctime 0, so the first scan after the
@@ -345,6 +347,15 @@ Version 8 (2026-11-15) is the duplicates redesign: it drops `duplicate_marks`, `
 used, and adds `duplicate_records` and `excluded_dirs`; the run that upgrades warns once about decisions not carried
 out. Version 9 (2026-11-16) adds `files.policy_id` and the tables `policies` and `policy_changes`. Version 10
 (2026-11-16) adds `files.rule_id`, `files.rule_dated_utc` and the table `rules`.
+
+## Duplicates: showing the decisions recorded
+
+An open question raised 2026-11-14 and resolved 2026-11-16 by the duplicates redesign: nothing waits in the register
+to be shown (see "the first design, and why it changed" above). Points the abandoned branch
+(`fix-duplicates-includes-copy-decision`, a4ffe5f) found that the redesign's build had to keep in mind: records are
+matched by hash, so a file restored to the content it was kept on would rejoin its set; a copy with hard links is one
+copy, named by its first path; `created_utc` strings do not sort as times (order by ids); the same content in two
+groups of one CSV (rows pasted from two exports) must not give contradictory actions.
 
 ## Notes on decisions
 
