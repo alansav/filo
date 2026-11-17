@@ -13,9 +13,9 @@ redesign (`docs/design.md`, Duplicates: `filo delete FILE.csv`, records, always,
 and merged. The terminal output is done (every command prints through `internal/view`, see "Terminal output"). Named
 retention policies (`docs/design.md`, Lifespan, Named retention policies; schema 9; `filo policies`) are done and
 merged. Replacing an existing `-o` file after asking (section 5 item 11) and every export scanning first, `--no-scan` to
-skip it (item 12), are done. "Folder" is now "directory" everywhere. Next in `docs/design.md` section 5: directory rules
-(item 4, designed in Lifespan, Directory rules; schema 10), in four slices on branch `directory-rules` with one PR at
-the end; slice 1 (register and matching) first. Then removing empty directories (item 13, to be designed).
+skip it (item 12), are done. "Folder" is now "directory" everywhere. Directory rules (item 4, `docs/design.md`,
+Lifespan, Directory rules; schema 10; `filo rules`) are done in four slices on branch `directory-rules`, one PR for
+them. Next in `docs/design.md` section 5: removing empty directories (item 13, to be designed).
 **`internal/dispose` is the only code allowed to delete the user's files**, and only from `filo delete`; everything
 else stays read-only on them, and nothing overwrites an existing file without asking (only an `-o` output file,
 see the hard rules). Stay inside the current piece of work.

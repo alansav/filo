@@ -12,7 +12,9 @@ the database next to it) were added on 2026-11-13. The order of the next work wa
 The duplicates CSV was designed on 2026-11-13/14 and taken ahead of that order (schema version 7); a gap found on
 2026-11-14 (a second export shows decided groups blank) led to a redesign on 2026-11-16 (Duplicates: `filo delete
 FILE.csv`, no stored decisions to delete, four kinds of keep), built on 2026-11-15/16 in five slices (schema version
-8). The terminal output was designed on 2026-11-15 and built first (Terminal output). Last updated: 2026-11-16.
+8). The terminal output was designed on 2026-11-15 and built first (Terminal output). Named retention policies
+(schema version 9) and directory rules (schema version 10) were designed and built on 2026-11-16/17. Last updated:
+2026-11-17.
 
 This file records settled decisions, the planned data model and the open questions. When a decision changes,
 change it here in the same commit.
@@ -567,7 +569,7 @@ Shorten bills for 212 files, putting 6 past their retention? [y/N]
   | F1 a file on a date policy reaching its date | a candidate that day; `filo delete` checks its content as before |
   | G1 the upgrade from schema 8 | tables created, nothing else changes; the pre-upgrade snapshot kept |
 
-### Directory rules (designed 2026-11-16)
+### Directory rules (designed 2026-11-16, built 2026-11-16/17)
 Setting retention in the CSV is a one-off: a file added later arrives undated and needs a decision. A rule names a
 policy for the files under a directory, or only those whose name matches a pattern: "files under
 `personal/home/electric` get `bills`", "under `bank`, `*DailyStatement*` gets `daily-statements`". Settled with the
@@ -2109,6 +2111,15 @@ put first on 2026-11-15). Each is an open question below until it is designed.
       not), and a `\` in a pattern is refused as a `/` is; each refusal of a pattern names the check that failed.
    4. *`move` and `copy`*, then the README (a "Directory rules" section, quoting patterns) and the help overview.
       Scenarios E.
+      Done on 2026-11-17: `filo rules move OLD NEW` and `copy OLD NEW` with `--dry-run` (`store.MoveRules`,
+      `PreviewMoveRules` from slice 1), said as agreed: `Done   moved 2 rules from bank to banking · policy set on 1
+      file`, a dry run as `add`'s (`would move`, the files, "nothing was changed"). OLD may be gone from disk (found
+      by its path, `store.Locate`: the rename that calls for a move); NEW must be on disk in a root that can be
+      reached. With two roots both directories are named in full. A refusal because NEW or a directory below it has
+      rules lists them under their directories before the error line. The help page and the overview list both;
+      the README has a "Directory rules" section. Tests: `TestRulesMoveCopy` (E1-E3, a dry run, another root, the
+      arguments), `TestRulesMoveGolden` (`testdata/rules-move.txt`). **Directory rules are done**: every scenario in
+      the table has a test. Next: the PR, then removing empty directories (item 13).
 5. Progress in the report, and `export retention --needing-retention`.
 6. Duplicates: one decision for all copies (the duplicates review CSV was done first, see iteration 5).
 7. `scan --verify`, with sidecar hash files.
