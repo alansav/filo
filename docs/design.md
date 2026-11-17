@@ -771,9 +771,10 @@ Retention   250 files and symlinks
     Next: filo export retention [DIR] -o FILE, then filo update FILE, or filo rules add DIR POLICY
 ```
 - **Register (schema version 10)**: `rules` (id, root, directory relative to the root, empty for the root itself,
-  pattern as typed, its letter count, policy, when added; the root, directory and lowercased pattern unique);
-  `files.rule_id` (the rule that dated the file, NULL once that rule is removed) and `files.rule_dated_utc` (when;
-  set once, and while it is set no rule dates the file again). The upgrade only creates the table and the columns.
+  pattern as typed, its length (column `letters`: every character but `*`; a `?` counted from 2026-11-17), policy, when
+  added; the root, directory and lowercased pattern unique); `files.rule_id` (the rule that dated the file, NULL once
+  that rule is removed) and `files.rule_dated_utc` (when; set once, and while it is set no rule dates the file again).
+  The upgrade only creates the table and the columns.
 - **The scenarios** (the test list):
 
   | scenario | outcome |
@@ -2062,8 +2063,9 @@ put first on 2026-11-15). Each is an open question below until it is designed.
       letter count, nearest directory first, ties reported); the store adds, changes, removes, moves and copies rules
       and dates files by them; rules get a root's prefix when a root is added above it; `filo policies` remove and move
       take rules into account. Nothing calls the rules yet. Scenarios C1-C3, D3, G1, F3. Done on 2026-11-16:
-      `internal/rules` (`Pattern`, `Letters`, `Match`, `Resolve`, `Compare`; a `[` or `\` in a pattern is itself, and
-      `**` is `*`); schema 10 (`TestMigrateFromV9`); `store.AddRule`, `SetRule`, `RemoveRule`, `Rules`, `MoveRules`
+      `internal/rules` (`Pattern`, `Letters`, `Match`, `Resolve`, `Compare`; a `[` or `\` in a pattern is itself (a `\`
+      refused since 2026-11-17, and `Letters` is now `Length`, see after slice 3), and `**` is `*`); schema 10
+      (`TestMigrateFromV9`); `store.AddRule`, `SetRule`, `RemoveRule`, `Rules`, `MoveRules`
       (move and copy), each of the three that apply rules with a preview that runs the same work in a transaction it
       rolls back (`PreviewAddRule`, `PreviewMoveRules`); dating in `store/ruledate.go`. Tests: `TestResolve`,
       `TestCompare`, `TestMatch`, `TestAddRule`, `TestSetAndRemoveRule`, `TestMoveRules`, `TestPoliciesAndRules`,
