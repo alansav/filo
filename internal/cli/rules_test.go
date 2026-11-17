@@ -97,7 +97,7 @@ func TestRulesAdd(t *testing.T) {
 	rt.contains("a bad policy", rt.filo(ExitError, "", false, "rules", "add", bank, "*.pdf", "7y").stderr,
 		"starting with a letter")
 	rt.contains("dry run elsewhere", rt.filo(ExitUsage, "", false, "rules", "remove", bank, "--dry-run").stderr,
-		"--dry-run is for rules add")
+		"--dry-run is for rules add, move and copy")
 	rt.contains("unknown", rt.filo(ExitUsage, "", false, "rules", "ad", bank, "x").stderr,
 		`unknown rules command "ad"`)
 }

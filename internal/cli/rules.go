@@ -16,12 +16,14 @@ import (
 )
 
 // filo rules (docs/design.md, Lifespan, Directory rules): a policy for the files under a directory. With no
-// subcommand it lists the rules, at DIR and below if a directory is given; add, set and remove act on one. No
-// command asks: add says how many files it dated, and --dry-run shows them first.
+// subcommand it lists the rules, at DIR and below if a directory is given; add, set and remove act on one; move and
+// copy put a directory's rules under another. No command asks: add, move and copy say how many files they set a
+// policy on, and --dry-run shows them first.
 
 // rulesUsage is the one line the wrong number of arguments gets.
 const rulesUsage = "filo rules [DIR] | add DIR [PATTERN] POLICY [--dry-run] | set DIR [PATTERN] POLICY | " +
-	"remove DIR [PATTERN]; quote a pattern with * or spaces ('*Statement*')"
+	"remove DIR [PATTERN] | move OLD NEW [--dry-run] | copy OLD NEW [--dry-run]; quote a pattern with * or spaces " +
+	"('*Statement*')"
 
 func (e *env) rules(ctx context.Context, dbBefore string, args []string) error {
 	sub, rest := rootsSub(args)
@@ -32,7 +34,8 @@ func (e *env) rules(ctx context.Context, dbBefore string, args []string) error {
 	if err != nil {
 		return err
 	}
-	want := map[string][2]int{"": {0, 1}, "add": {2, 3}, "set": {2, 3}, "remove": {1, 2}}
+	want := map[string][2]int{"": {0, 1}, "add": {2, 3}, "set": {2, 3}, "remove": {1, 2}, "move": {2, 2},
+		"copy": {2, 2}}
 	if _, known := want[sub]; !known {
 		if len(pos) > 0 {
 			return usageError{fmt.Sprintf("unknown rules command %q; see filo help rules", sub)}
@@ -43,10 +46,14 @@ func (e *env) rules(ctx context.Context, dbBefore string, args []string) error {
 	switch {
 	case len(pos) < n[0] || len(pos) > n[1]:
 		return usageError{"wrong number of arguments: " + rulesUsage}
-	case *dry && sub != "add":
-		return usageError{"--dry-run is for rules add"}
+	case *dry && sub != "add" && sub != "move" && sub != "copy":
+		return usageError{"--dry-run is for rules add, move and copy"}
 	}
-	if len(pos) > 0 {
+	if sub == "move" || sub == "copy" {
+		if err := checkTildes("OLD and NEW", pos...); err != nil {
+			return err
+		}
+	} else if len(pos) > 0 {
 		if err := checkTilde("DIR", pos[0]); err != nil {
 			return err
 		}
@@ -72,6 +79,8 @@ func (e *env) rules(ctx context.Context, dbBefore string, args []string) error {
 			pattern = pos[1]
 		}
 		return e.ruleRemove(ctx, s, pos[0], pattern)
+	case "move", "copy":
+		return e.ruleMove(ctx, s, pos[0], pos[1], sub == "copy", *dry)
 	}
 	return e.ruleList(ctx, s, pos)
 }
@@ -147,12 +156,7 @@ func (e *env) ruleAdd(ctx context.Context, s *store.Store, arg, pattern, policy 
 		return ruleErr(err, where, pattern)
 	}
 	r := e.view
-	needs := 0
-	for _, d := range run.Dated {
-		if d.NeedsFileDate() {
-			needs++
-		}
-	}
+	needs := needFileDate(run)
 	title, set := "Done", "policy set on "
 	if dry {
 		title, set = "Dry run", "policy would be set on "
@@ -171,26 +175,114 @@ func (e *env) ruleAdd(ctx context.Context, s *store.Store, arg, pattern, policy 
 		r.Count(view.Neutral, "policy "+rule.Policy+" "+was+" created with no value: its files need a retention "+
 			"until it has one")
 	}
+	next := ""
+	if created && !dry {
+		next = "Next: filo policies set " + rule.Policy + " VALUE"
+	}
+	e.ruleRunEnd(run, dry, next, store.AbsPath(root.Path, dir))
+	return nil
+}
+
+// needFileDate counts the files a run set a policy on that need a file_date for it.
+func needFileDate(run store.RuleRun) int {
+	n := 0
+	for _, d := range run.Dated {
+		if d.NeedsFileDate() {
+			n++
+		}
+	}
+	return n
+}
+
+// ruleRunEnd ends the output of add, move and copy: a dry run's files, the ties, and the next step (next, if given;
+// else filling in the file_dates under dir, the directory's absolute path, when files need one).
+func (e *env) ruleRunEnd(run store.RuleRun, dry bool, next, dir string) {
+	r := e.view
 	if dry && len(run.Dated) > 0 {
 		r.Blank()
 		r.Files(view.FileList{Columns: []view.Column{{Header: "file_date"}, {Header: "until"}},
 			Rows: datedRows(run.Dated), Max: r.Overview(), More: "files", MoreOne: "file"})
 	}
 	e.ruleTies(run.Ties)
-	next := ""
 	switch {
 	case dry:
 		next = "Dry run: nothing was changed."
-	case created:
-		next = "Next: filo policies set " + rule.Policy + " VALUE"
-	case needs > 0:
-		next = "Next: filo export retention " + shellQuote(store.AbsPath(root.Path, dir)) +
-			" -o FILE, fill in file_date, then filo update FILE"
+	case next == "" && needFileDate(run) > 0:
+		next = "Next: filo export retention " + shellQuote(dir) + " -o FILE, fill in file_date, then filo update FILE"
 	}
 	if next != "" {
 		r.Blank()
 		r.Next(next)
 	}
+}
+
+// ruleMove is filo rules move OLD NEW and filo rules copy OLD NEW: the rules at OLD and below it put in the same
+// places under NEW, and the files with no retention under NEW they now decide given their policy. OLD may be gone
+// from disk (the rename that calls for a move); NEW must be there, in a root that can be reached.
+func (e *env) ruleMove(ctx context.Context, s *store.Store, oldArg, newArg string, cp, dry bool) error {
+	from, fromDir, err := ruleDir(ctx, s, oldArg, true)
+	if err != nil {
+		return err
+	}
+	to, toDir, err := ruleDir(ctx, s, newArg, false)
+	if err != nil {
+		return err
+	}
+	r := e.view
+	// Each directory relative to its root, as every rules line names one; in full when the roots differ.
+	oldWhere, newWhere := e.ruleWhere(from.Path, fromDir), e.ruleWhere(to.Path, toDir)
+	if from.ID != to.ID {
+		oldWhere, newWhere = r.Tilde(store.AbsPath(from.Path, fromDir)), r.Tilde(store.AbsPath(to.Path, toDir))
+	}
+	m := store.RuleMove{FromRoot: from.ID, FromDir: fromDir, ToRoot: to.ID, ToDir: toDir, Copy: cp}
+	move := s.MoveRules
+	if dry {
+		move = s.PreviewMoveRules
+	}
+	moved, run, err := move(ctx, m, today(), now())
+	var there store.RulesThereError
+	switch {
+	case errors.As(err, &there):
+		// Listed, so the person sees what is in the way: never merged.
+		r.Note(view.Attention, newWhere+" has rules already")
+		var groups []view.TableGroup
+		for _, x := range there.Rules {
+			name := e.ruleWhere(to.Path, x.Dir)
+			if n := len(groups); n == 0 || groups[n-1].Name != name {
+				groups = append(groups, view.TableGroup{Name: name})
+			}
+			g := &groups[len(groups)-1]
+			g.Rows = append(g.Rows, view.TableRow{Name: x.Pattern, Cells: []string{x.Policy}})
+		}
+		r.Groups(groups)
+		n := int64(len(there.Rules))
+		return fmt.Errorf("%s: %s at or below it already: remove %s first, or add the rules by hand", newWhere,
+			report.Plural(n, "rule", "rules"), verb(n, "it", "them"))
+	case errors.Is(err, store.ErrNoRulesToMove):
+		return fmt.Errorf("%s: no rules at or below it (filo rules lists them)", oldWhere)
+	case errors.Is(err, store.ErrRuleInside):
+		return fmt.Errorf("%s is %s or inside it: the rules go to another directory", newWhere, oldWhere)
+	case err != nil:
+		return err
+	}
+	verbDone, title, set := "moved", "Done", "policy set on "
+	if cp {
+		verbDone = "copied"
+	}
+	if dry {
+		verbDone, title, set = "would move", "Dry run", "policy would be set on "
+		if cp {
+			verbDone = "would copy"
+		}
+	}
+	n := int64(len(moved))
+	facts := []string{verbDone + " " + report.Plural(n, "rule", "rules") + " from " + oldWhere + " to " + newWhere,
+		set + report.Plural(int64(len(run.Dated)), "file", "files")}
+	if needs := needFileDate(run); needs > 0 {
+		facts = append(facts, report.Plural(int64(needs), "needs a file_date", "need a file_date"))
+	}
+	r.Heading(title, view.Where{Roots: []string{from.Path, to.Path}}, facts...)
+	e.ruleRunEnd(run, dry, "", store.AbsPath(to.Path, toDir))
 	return nil
 }
 

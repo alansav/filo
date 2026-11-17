@@ -1,0 +1,46 @@
+$ filo rules 
+Rules   2 . 2 directories . 3 need attention . <root>
+
+  bank                                              [!] no such directory
+    *Statement*   statements   7y         3 files
+  bank/2024                                         [!] no such directory
+    *             tax          no value   0 files   [!] needs a retention
+
+Next: filo rules add DIR [PATTERN] POLICY, filo rules remove DIR [PATTERN]
+
+$ filo rules move <root>/bank <root>/banking --dry-run
+Dry run   would move 2 rules from bank to banking . policy would be set on 1 file . 1 needs a file_date . <root>
+
+    file_date   until
+                needs a file_date   banking/AnnualStatement.pdf
+
+Dry run: nothing was changed.
+
+$ filo rules move <root>/bank <root>/banking
+Done   moved 2 rules from bank to banking . policy set on 1 file . 1 needs a file_date . <root>
+
+Next: filo export retention <root>/banking -o FILE, fill in file_date, then filo update FILE
+
+$ filo rules copy <root>/banking/2024 <root>/banking/2025
+Done   copied 1 rule from banking/2024 to banking/2025 . policy set on 1 file . <root>
+
+$ filo rules move <root>/banking <root>/personal
+[!] personal has rules already
+  personal/home
+    *.pdf   bills
+filo: personal: 1 rule at or below it already: remove it first, or add the rules by hand
+
+$ filo rules 
+Rules   4 . 4 directories . 3 need attention . <root>
+
+  banking
+    *Statement*   statements   7y         4 files
+  banking/2024
+    *             tax          no value   0 files   [!] needs a retention
+  banking/2025
+    *             tax          no value    1 file   [!] needs a retention
+  personal/home
+    *.pdf         bills        no value    1 file   [!] needs a retention
+
+Next: filo rules add DIR [PATTERN] POLICY, filo rules remove DIR [PATTERN]
+
