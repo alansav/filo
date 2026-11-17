@@ -23,6 +23,9 @@ Next: filo export retention <root>/banking -o FILE, fill in file_date, then filo
 
 $ filo rules copy <root>/banking/2024 <root>/banking/2025
 Done   copied 1 rule from banking/2024 to banking/2025 . policy set on 1 file . <root>
+  - policy tax has no value: its files need a retention until it has one
+
+Next: filo policies set tax VALUE
 
 $ filo rules move <root>/banking <root>/personal
 [!] personal has rules already

@@ -80,11 +80,15 @@ func TestRulesMoveCopy(t *testing.T) {
 	// E3: refused, with nothing changed: NEW or a directory below it has rules (listed); NEW is OLD or inside it;
 	// OLD without rules; NEW not on disk.
 	before = list()
-	r := rt.filo(ExitError, "", false, "rules", "copy", rt.in("banking/2024"), rt.in("banking"))
+	r := rt.filo(ExitError, "", false, "rules", "move", rt.in("banking/2024"), rt.in("banking"))
 	rt.contains("rules there", r.stdout, "[!] banking has rules already", "  banking\n    *Statement*   statements",
-		"  banking/2024\n    *             tax", "  banking/2025\n")
+		"  banking/2025\n    *             tax")
+	rt.lacks("not the rules moved", r.stdout, "banking/2024")
 	rt.contains("rules there", r.stderr,
-		"filo: banking: 3 rules at or below it already: remove them first, or add the rules by hand")
+		"filo: banking: 2 rules at or below it already: remove them first, or add the rules by hand")
+	rt.contains("copy up", rt.filo(ExitError, "", false, "rules", "copy", rt.in("banking/2024"),
+		rt.in("banking")).stderr, "filo: banking is above banking/2024: a copy there would sit next to the rules it "+
+		"copies (copy to another directory)")
 	rt.contains("inside", rt.filo(ExitError, "", false, "rules", "move", rt.in("banking"),
 		rt.in("banking/2025")).stderr, "filo: banking/2025 is banking or inside it: the rules go to another directory")
 	rt.contains("itself", rt.filo(ExitError, "", false, "rules", "copy", rt.in("banking"), rt.in("banking")).stderr,
@@ -126,4 +130,32 @@ func TestRulesMoveCopy(t *testing.T) {
 		"--dry-run is for rules add, move and copy")
 	rt.contains("outside", rt.filo(ExitError, "", false, "rules", "copy", rt.in("banking"), rt.work).stderr,
 		"not inside any root")
+}
+
+// TestRulesMoveReviewFindings: the cases found in the code review of slice 4 (2026-11-17).
+func TestRulesMoveReviewFindings(t *testing.T) {
+	rt := newRuleTest(t)
+	rt.filo(ExitOK, "", false, "rules", "add", rt.in("bank/2024"), "tax")
+
+	// A ~ is named with the argument it is in.
+	rt.contains("tilde", rt.filo(ExitError, "", false, "rules", "move", rt.in("bank"), "~/x").stderr, "filo: NEW ~/x")
+
+	// The rules in the way at the root itself are named "." as filo rules names them.
+	rt.filo(ExitOK, "", false, "rules", "add", rt.root, "*.txt", "statements")
+	r := rt.filo(ExitError, "", false, "rules", "move", rt.in("bank/2024"), rt.root)
+	rt.contains("root named .", r.stdout, "[!] "+rt.root+" has rules already", "  .\n    *.txt")
+
+	// In another root, the rules in the way are named in full.
+	other := filepath.Join(rt.work, "other")
+	if err := os.MkdirAll(filepath.Join(other, "inbox", "2024"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	rt.filo(ExitOK, "", false, "roots", "add", other)
+	rt.filo(ExitOK, "", false, "rules", "add", filepath.Join(other, "inbox", "2024"), "statements")
+	r = rt.filo(ExitError, "", false, "rules", "copy", rt.in("bank/2024"), filepath.Join(other, "inbox"))
+	rt.contains("in full", r.stdout, "  "+filepath.Join(other, "inbox", "2024")+"\n    *")
+
+	// A rule whose policy has no value says so, and how to give it one.
+	rt.contains("no value", rt.filo(ExitOK, "", false, "rules", "copy", rt.in("bank/2024"), rt.in("personal")).stdout,
+		"- policy tax has no value: its files need a retention until it has one", "Next: filo policies set tax VALUE")
 }

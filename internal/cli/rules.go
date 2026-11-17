@@ -50,8 +50,10 @@ func (e *env) rules(ctx context.Context, dbBefore string, args []string) error {
 		return usageError{"--dry-run is for rules add, move and copy"}
 	}
 	if sub == "move" || sub == "copy" {
-		if err := checkTildes("OLD and NEW", pos...); err != nil {
-			return err
+		for i, what := range []string{"OLD", "NEW"} {
+			if err := checkTilde(what, pos[i]); err != nil {
+				return err
+			}
 		}
 	} else if len(pos) > 0 {
 		if err := checkTilde("DIR", pos[0]); err != nil {
@@ -179,7 +181,7 @@ func (e *env) ruleAdd(ctx context.Context, s *store.Store, arg, pattern, policy 
 	if created && !dry {
 		next = "Next: filo policies set " + rule.Policy + " VALUE"
 	}
-	e.ruleRunEnd(run, dry, next, store.AbsPath(root.Path, dir))
+	e.ruleRunEnd(run, dry, needs, next, store.AbsPath(root.Path, dir))
 	return nil
 }
 
@@ -195,8 +197,8 @@ func needFileDate(run store.RuleRun) int {
 }
 
 // ruleRunEnd ends the output of add, move and copy: a dry run's files, the ties, and the next step (next, if given;
-// else filling in the file_dates under dir, the directory's absolute path, when files need one).
-func (e *env) ruleRunEnd(run store.RuleRun, dry bool, next, dir string) {
+// else filling in the file_dates under dir, the directory's absolute path, when needs files need one).
+func (e *env) ruleRunEnd(run store.RuleRun, dry bool, needs int, next, dir string) {
 	r := e.view
 	if dry && len(run.Dated) > 0 {
 		r.Blank()
@@ -207,7 +209,7 @@ func (e *env) ruleRunEnd(run store.RuleRun, dry bool, next, dir string) {
 	switch {
 	case dry:
 		next = "Dry run: nothing was changed."
-	case next == "" && needFileDate(run) > 0:
+	case next == "" && needs > 0:
 		next = "Next: filo export retention " + shellQuote(dir) + " -o FILE, fill in file_date, then filo update FILE"
 	}
 	if next != "" {
@@ -234,6 +236,11 @@ func (e *env) ruleMove(ctx context.Context, s *store.Store, oldArg, newArg strin
 	if from.ID != to.ID {
 		oldWhere, newWhere = r.Tilde(store.AbsPath(from.Path, fromDir)), r.Tilde(store.AbsPath(to.Path, toDir))
 	}
+	if cp && from.ID == to.ID && fromDir != toDir && (toDir == "" || strings.HasPrefix(fromDir, toDir+"/")) {
+		// Always refused as rules there already (its own, which a copy keeps): said as what it is.
+		return fmt.Errorf("%s is above %s: a copy there would sit next to the rules it copies (copy to another "+
+			"directory)", newWhere, oldWhere)
+	}
 	m := store.RuleMove{FromRoot: from.ID, FromDir: fromDir, ToRoot: to.ID, ToDir: toDir, Copy: cp}
 	move := s.MoveRules
 	if dry {
@@ -247,7 +254,10 @@ func (e *env) ruleMove(ctx context.Context, s *store.Store, oldArg, newArg strin
 		r.Note(view.Attention, newWhere+" has rules already")
 		var groups []view.TableGroup
 		for _, x := range there.Rules {
-			name := e.ruleWhere(to.Path, x.Dir)
+			name := e.ruleGroupName(x.Dir) // as filo rules names it
+			if from.ID != to.ID {
+				name = r.Tilde(store.AbsPath(to.Path, x.Dir))
+			}
 			if n := len(groups); n == 0 || groups[n-1].Name != name {
 				groups = append(groups, view.TableGroup{Name: name})
 			}
@@ -278,11 +288,25 @@ func (e *env) ruleMove(ctx context.Context, s *store.Store, oldArg, newArg strin
 	n := int64(len(moved))
 	facts := []string{verbDone + " " + report.Plural(n, "rule", "rules") + " from " + oldWhere + " to " + newWhere,
 		set + report.Plural(int64(len(run.Dated)), "file", "files")}
-	if needs := needFileDate(run); needs > 0 {
+	needs := needFileDate(run)
+	if needs > 0 {
 		facts = append(facts, report.Plural(int64(needs), "needs a file_date", "need a file_date"))
 	}
 	r.Heading(title, view.Where{Roots: []string{from.Path, to.Path}}, facts...)
-	e.ruleRunEnd(run, dry, "", store.AbsPath(to.Path, toDir))
+	// A policy with no value set on files: they need a retention until it has one, as add says of a policy it
+	// creates.
+	next := ""
+	noValue := map[string]bool{}
+	for _, d := range run.Dated {
+		if p := d.Rule.Policy; d.Rule.PolicyValue == "" && !noValue[p] {
+			noValue[p] = true
+			r.Count(view.Neutral, "policy "+p+" has no value: its files need a retention until it has one")
+			if next == "" && !dry {
+				next = "Next: filo policies set " + p + " VALUE"
+			}
+		}
+	}
+	e.ruleRunEnd(run, dry, needs, next, store.AbsPath(to.Path, toDir))
 	return nil
 }
 
