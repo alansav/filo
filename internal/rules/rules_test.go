@@ -30,6 +30,7 @@ func TestPattern(t *testing.T) {
 		{`\*`, "", "a pattern is a file name, without / or a backslash"},
 		{"a\x00b", "", "a pattern cannot contain a NUL character"},
 		{"\xff", "", "a pattern must be valid UTF-8"},
+		{"C:\\x\xff", "", "a pattern is a file name, without / or a backslash"}, // the separator first
 		{strings.Repeat("a", 256), "", "a pattern is at most 255 bytes"},
 		{strings.Repeat("é", 128), "", "a pattern is at most 255 bytes"}, // 256 bytes, 128 characters
 	}

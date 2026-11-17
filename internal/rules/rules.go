@@ -48,13 +48,14 @@ func Pattern(p string) (string, error) {
 	if p == "" {
 		return Any, nil
 	}
+	// The separator first: it is the likely mistake (a path), and a pasted path may be wrong in other ways too.
 	switch {
-	case !utf8.ValidString(p):
-		return "", errUTF8
-	case strings.ContainsRune(p, 0):
-		return "", errNUL
 	case strings.ContainsAny(p, "/\\"):
 		return "", errSeparator
+	case strings.ContainsRune(p, 0):
+		return "", errNUL
+	case !utf8.ValidString(p):
+		return "", errUTF8
 	case len(p) > maxPattern:
 		return "", errLong
 	}

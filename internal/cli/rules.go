@@ -126,7 +126,8 @@ func ruleErr(err error, where, pattern string) error {
 	case errors.Is(err, store.ErrNoRule):
 		return fmt.Errorf("%s: no rule %s there (filo rules lists them)", where, p)
 	case errors.Is(err, rules.ErrPattern):
-		return fmt.Errorf("%q: %w", pattern, err)
+		// Quoted, not %q: the error line escapes it once, and %q would escape it again (a\b shown as "a\\\\b").
+		return fmt.Errorf(`"%s": %w`, pattern, err)
 	}
 	return err
 }
