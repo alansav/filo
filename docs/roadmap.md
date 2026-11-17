@@ -1,10 +1,10 @@
 # Filo: roadmap
 
-Everything Filo does not do yet: the work planned, ideas, open questions and deferred improvements. What Filo does
+Everything Filo does not do: the work planned, ideas, open questions, deferred improvements, and ideas rejected. What Filo does
 today is in `design.md`; how it was built is in `history.md`. An item stays here while it is discussed and designed.
 When work on it starts, its design moves into `design.md` (the first commit of its branch); when it is complete,
 nothing of it is left here. Items keep their numbers, so gaps in the numbering are work already done, or ideas
-rejected (those are in `design.md`, Rejected: 14, deleting to the trash, on 2026-11-17). Last updated: 2026-11-17.
+rejected (see Rejected, at the end: 14 is deleting to the trash). Last updated: 2026-11-17.
 
 ## Direction
 
@@ -92,8 +92,8 @@ surfaced.
 
 ### 9b. A device ID (V3, C1)
 A random device ID in `meta`, made when the database is created, and recorded with each decision, so no decision
-ever has an unknown origin. Small, and cheaper the earlier it is done; needed by 9c. **To decide first:** `design.md`
-(Rejected, "Device tracking in the database", and Register, "no device column") rules it out while the register is
+ever has an unknown origin. Small, and cheaper the earlier it is done; needed by 9c. **To decide first:** Rejected (below,
+"Device tracking in the database") and `design.md` (Register, "no device column") rule it out while the register is
 never synced; sharing decisions (9c) is the reason to revisit that, while the register itself stays per device.
 
 ### 9c. Sharing decisions between devices (V9, C8)
@@ -168,7 +168,7 @@ never copies files into the scanned trees: the copies would come back as new fil
 ### 19. Search by name (V8, C2)
 `filo files --name GLOB [DIR]`: find files in the register by name; read-only. The first slice of the query view
 (Later a), and what projects (18a) build on. Its output must work in a pipe (`-0`, or tab-separated when piped).
-**To decide first:** `design.md` (Rejected, "Building search") rejected search, since indexers already find files
+**To decide first:** Rejected (below, "Building search") rejects search, since indexers already find files
 and Filo owns lifecycle. A lookup by name over the register is narrower than that; the rejection is to be revisited
 or the item narrowed.
 
@@ -266,7 +266,7 @@ register. Links to a project are item 18a. (Holds were dropped on 2026-11-12: a 
 retention or `forever`.)
 
 ### Later e. A watcher (V3, C8)
-Seeing changes as they happen (`inotify`/`fanotify`) instead of on the next scan. `design.md` (Rejected, "A daemon")
+Seeing changes as they happen (`inotify`/`fanotify`) instead of on the next scan. Rejected (below, "A daemon")
 rejects a daemon unless near-real-time change detection is needed; a scheduled scan does the job, and inotify needs
 one watch per directory and drops events when its queue fills.
 
@@ -295,5 +295,40 @@ Smaller improvements to what exists, noted while it was built. Not prioritised.
   path, if something needs it.
 - **Help and errors:** rewriting the help's words (only their layout was redone), and reviewing the wording of the
   errors.
-- **Tiers as review intervals:** tier directories (bronze, silver, gold, platinum) were rejected (see `design.md`,
-  Rejected); kept as an idea: tiers become default review intervals.
+- **Tiers as review intervals:** tier directories (bronze, silver, gold, platinum) were rejected (see Rejected,
+  below); kept as an idea: tiers become default review intervals.
+
+## Rejected
+
+Ideas considered and not taken, with the reasons, so they are not raised again without them. An item above that
+contradicts one of them is a discussion when the roadmap is reviewed.
+
+- **Quarantine, the recycle bin, holds and `filo restore`** (rejected 2026-11-12). Deletion is permanent and backups
+  make it recoverable; the confirmed list and the re-hash check keep it safe. The bin fills up with large files and is
+  missing on network disks. A hold is a later retention or `forever`. A restored file is a new file. Considered
+  again on 2026-11-17 (deleting to the trash) and rejected again: a vital file should already be in a backup; a file in
+  the trash is not deleted, so its retention is not really carried out; and a file restored from the trash, or moved
+  out of it to somewhere else, comes back to Filo as a new file with no history.
+- **More checks at the moment of deleting** (rejected 2026-11-12): recently modified, lock and sync companion files,
+  open in a process. See Disposal.
+- **Relinking a restored file to its deleted record** (rejected 2026-11-12): it would carry the old, passed retention
+  onto a file the person just chose to bring back. It comes back as a new row, with a hint.
+- **Filling `retention` from a filesystem creation date** (rejected 2026-11-12): many filesystems do not record one,
+  and a copy, restore or sync resets it. `file_date` is typed, or read from the file name.
+
+- **Reading a retention from the file itself** (frontmatter, Office or PDF properties, extended attributes;
+  rejected 2026-11-13). A date stored in the file can be changed under the register, which then has to decide which
+  one wins; the register stays the one source of truth.
+
+- **Tier directories** (bronze, silver, gold, platinum). A good workflow, but moving files breaks links (recent-file
+  lists), scatters one subject across tiers, and ties lifetime to location.
+- **Review date stored inside each file.** Fragile: many editors drop extended attributes on save, and some formats
+  cannot carry properties. Losing it fails safe but causes churn, and it cannot hold floors reliably.
+- **A daemon.** A scheduled scan does the job; a daemon adds state, file watching limits and failure modes. Revisit only
+  for near-real-time change detection.
+- **Device tracking in the database.** Unneeded while the database is per device and never synced.
+- **One database per root** (the first Go design, with the database in `<root>/.filo`). Several roots on one device
+  meant several registers to manage; one database with a `roots` table replaced it on 2026-11-11.
+- **Themed command and project names** (the earlier "dirge" idea, funeral-style subcommands). Plain names win.
+- **Building search.** Existing indexers and document managers (Paperless-ngx for received documents, desktop
+  indexers) already cover finding files. Filo owns lifecycle.

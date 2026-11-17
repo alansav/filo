@@ -2,8 +2,8 @@
 
 Filo as built: schema version 10. Last updated: 2026-11-17.
 
-This file records what Filo does and why, as built. Work not done yet, ideas and open questions are in
-`roadmap.md`, where designs are worked out; a design moves here, in its own commit, when work on it starts (see
+This file records what Filo does and why, as built. Work not done yet, ideas, open questions and ideas rejected are
+in `roadmap.md`, where designs are worked out; a design moves here, in its own commit, when work on it starts (see
 `CLAUDE.md`, "After writing code").
 
 ## 1. Problem and principles
@@ -1785,49 +1785,19 @@ unreadable in); the most recent events; and Register snapshots. `--top N` sets t
 Paths are relative to the root, as everywhere (see Terminal output, Paths). A **duplicate group** is defined under
 Duplicates ("A group"): copies, not paths, so reclaimable space is size × (copies − 1) per group.
 
-## 5. Rejected
+## 5. Accepted risks
 
-- **Accepted risks** (security review of 2026-11-13). Anyone who can edit the register already runs as the user and
-  could delete files directly, so an altered register matters through indirect routes (a restored snapshot, a
-  database in a synced directory, a `--db` from elsewhere). Accepted: a register whose *root* path was altered to
-  another directory is not detected (the paths below it are checked, and the confirmation list shows absolute paths);
-  `filo delete -y` deletes without a person reading the list, which is the point of `-y`; a file swapped in the
-  microseconds between the last check and the unlink is deleted (anyone able to do that can delete it directly);
-  SQLite parses a database before Filo checks it is one of its own (kept small by staying on a current driver);
-  ownership of the snapshot directory is not checked on non-Unix platforms. From the code review of the snapshots:
-  Ctrl-C cannot interrupt a snapshot being written (milliseconds for a register of a few MB), and every run that
-  writes copies the whole register, timer scans that found nothing included (fine at a few MB). From the code review of
-  2026-11-13: a snapshot is renamed into place after a check that the name is free, and a program not taking Filo's
-  lock could create that name in between and be overwritten (the directory is private to the user; an atomic
-  no-replace rename needs `golang.org/x/sys`); and the directories on a deleted file's path are checked by name, not
-  held open, so a directory swapped in the microseconds after the last look is followed.
-
-- **Quarantine, the recycle bin, holds and `filo restore`** (rejected 2026-11-12). Deletion is permanent and backups
-  make it recoverable; the confirmed list and the re-hash check keep it safe. The bin fills up with large files and is
-  missing on network disks. A hold is a later retention or `forever`. A restored file is a new file. Considered
-  again on 2026-11-17 (deleting to the trash) and rejected again: a vital file should already be in a backup; a file in
-  the trash is not deleted, so its retention is not really carried out; and a file restored from the trash, or moved
-  out of it to somewhere else, comes back to Filo as a new file with no history.
-- **More checks at the moment of deleting** (rejected 2026-11-12): recently modified, lock and sync companion files,
-  open in a process. See Disposal.
-- **Relinking a restored file to its deleted record** (rejected 2026-11-12): it would carry the old, passed retention
-  onto a file the person just chose to bring back. It comes back as a new row, with a hint.
-- **Filling `retention` from a filesystem creation date** (rejected 2026-11-12): many filesystems do not record one,
-  and a copy, restore or sync resets it. `file_date` is typed, or read from the file name.
-
-- **Reading a retention from the file itself** (frontmatter, Office or PDF properties, extended attributes;
-  rejected 2026-11-13). A date stored in the file can be changed under the register, which then has to decide which
-  one wins; the register stays the one source of truth.
-
-- **Tier directories** (bronze, silver, gold, platinum). A good workflow, but moving files breaks links (recent-file
-  lists), scatters one subject across tiers, and ties lifetime to location.
-- **Review date stored inside each file.** Fragile: many editors drop extended attributes on save, and some formats
-  cannot carry properties. Losing it fails safe but causes churn, and it cannot hold floors reliably.
-- **A daemon.** A scheduled scan does the job; a daemon adds state, file watching limits and failure modes. Revisit only
-  for near-real-time change detection.
-- **Device tracking in the database.** Unneeded while the database is per device and never synced.
-- **One database per root** (the first Go design, with the database in `<root>/.filo`). Several roots on one device
-  meant several registers to manage; one database with a `roots` table replaced it on 2026-11-11.
-- **Themed command and project names** (the earlier "dirge" idea, funeral-style subcommands). Plain names win.
-- **Building search.** Existing indexers and document managers (Paperless-ngx for received documents, desktop
-  indexers) already cover finding files. Filo owns lifecycle.
+Limits of Filo as built, accepted on purpose (security review of 2026-11-13). Anyone who can edit the register already
+runs as the user and could delete files directly, so an altered register matters through indirect routes (a restored
+snapshot, a database in a synced directory, a `--db` from elsewhere). Accepted: a register whose *root* path was altered
+to another directory is not detected (the paths below it are checked, and the confirmation list shows absolute paths);
+`filo delete -y` deletes without a person reading the list, which is the point of `-y`; a file swapped in the
+microseconds between the last check and the unlink is deleted (anyone able to do that can delete it directly); SQLite
+parses a database before Filo checks it is one of its own (kept small by staying on a current driver); ownership of the
+snapshot directory is not checked on non-Unix platforms. From the code review of the snapshots: Ctrl-C cannot interrupt
+a snapshot being written (milliseconds for a register of a few MB), and every run that writes copies the whole register,
+timer scans that found nothing included (fine at a few MB). From the code review of 2026-11-13: a snapshot is renamed
+into place after a check that the name is free, and a program not taking Filo's lock could create that name in between
+and be overwritten (the directory is private to the user; an atomic no-replace rename needs `golang.org/x/sys`); and the
+directories on a deleted file's path are checked by name, not held open, so a directory swapped in the microseconds
+after the last look is followed.

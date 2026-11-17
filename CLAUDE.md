@@ -4,8 +4,8 @@ Go CLI that keeps a SQLite register of files, tracks where they live, and drives
 files do not pile up forever. Three documents, kept apart:
 
 - `docs/design.md`: Filo as it is on `main`, and why. Nothing that is not built. Read it before changing behaviour.
-- `docs/roadmap.md`: everything not built yet: the priority, the items (with their numbers), ideas and deferred
-  improvements. A design is worked out here while it is discussed.
+- `docs/roadmap.md`: everything not built yet: the priority, the items (with their numbers), ideas, deferred
+  improvements, and ideas rejected (with why). A design is worked out here while it is discussed.
 - `docs/history.md`: how Filo was built: the build log, replaced decisions, dated notes.
 
 When work on a roadmap item starts, the first commit of its branch moves its design from `roadmap.md` into
