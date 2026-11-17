@@ -1,9 +1,9 @@
 # Filo: roadmap
 
-Everything Filo does not do: the work planned, ideas, open questions, deferred improvements, and ideas rejected. What Filo does
-today is in `design.md`; how it was built is in `history.md`. An item stays here while it is discussed and designed.
-When work on it starts, its design moves into `design.md` (the first commit of its branch); when it is complete,
-nothing of it is left here. Items keep their numbers, so gaps in the numbering are work already done, or ideas
+Everything Filo does not do: the work planned, ideas, open questions, deferred improvements, and ideas rejected. What
+Filo does today is in `design.md`; how it was built is in `history.md`. An item stays here while it is discussed and
+designed. When work on it starts, its design moves into `design.md` (the first commit of its branch); when it is
+complete, nothing of it is left here. Items keep their numbers, so gaps in the numbering are work already done, or ideas
 rejected (see Rejected, at the end: 14 is deleting to the trash). Last updated: 2026-11-17.
 
 ## Direction
