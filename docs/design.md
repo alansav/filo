@@ -1,20 +1,6 @@
 # Filo: design
 
-Status: iteration 1 (scan, register, report) is done: it passes its test-tree criterion, and on 2026-11-11 a real home
-directory (5,582 files, about 3.7 GB) scanned completely and rescanned quickly, reporting only real changes. Iteration
-2 was reshaped on 2026-11-12 from a review queue into one keep-until date per file (the retention CSV, `filo export
-retention` and `filo update`), with root settings stored on the root; it passes its test-tree criterion, and setting
-dates on the real home directory is still to be done. A C# prototype exists as a reference spec only; its schema and
-reconcile rules were carried over. The second shape of the retention CSV (`file_date`, `retention`, schema version
-5) is implemented. Iteration 3 (deletion) was designed on 2026-11-12 and implemented on 2026-11-13 (schema version
-6); it passes its test-tree criterion and has not yet been run on real files. Register snapshots (rolling copies of
-the database next to it) were added on 2026-11-13. The order of the next work was agreed the same day (section 5).
-The duplicates CSV was designed on 2026-11-13/14 and taken ahead of that order (schema version 7); a gap found on
-2026-11-14 (a second export shows decided groups blank) led to a redesign on 2026-11-16 (Duplicates: `filo delete
-FILE.csv`, no stored decisions to delete, four kinds of keep), built on 2026-11-15/16 in five slices (schema version
-8). The terminal output was designed on 2026-11-15 and built first (Terminal output). Named retention policies
-(schema version 9) and directory rules (schema version 10) were designed and built on 2026-11-16/17. Last updated:
-2026-11-17.
+Filo as built: schema version 10. Last updated: 2026-11-17.
 
 This file records what Filo does and why, as built. Work not done yet, ideas and open questions are in
 `roadmap.md`. When a decision changes, change it here in the same commit.
@@ -115,8 +101,7 @@ the database, on the same disk. Copying the register's snapshots to a separate p
   temporary files of either kind are removed by the next snapshot. Directory 0700 (an existing one is made private),
   files 0600: the register names every file. A snapshot directory that is a symlink, not a directory, or owned by
   another user is refused (hardening of 2026-11-13).
-- **Rotation** (reworked 2026-11-13 from a first draft that kept only the newest three of the day, which was fragile
-  around midnight). Snapshots are a short-term safety net; long-term copies are the backups of them. Kept: every
+- **Rotation**. Snapshots are a short-term safety net; long-term copies are the backups of them. Kept: every
   snapshot from the last 24 hours (rolling, so working past midnight loses nothing); the newest three whatever their
   age (so a write after a month away keeps the state just before it); and, up to 31 days old, the newest of each of
   the seven most recent days with older snapshots, then the newest of each ISO week. Nothing else older than 31 days.
@@ -142,8 +127,6 @@ the database, on the same disk. Copying the register's snapshots to a separate p
   extra names to ignore (`ignores`). They are given on `filo roots add DIR [--include-hidden] [--ignore NAME]...` and
   replaced as a whole by `filo roots set DIR [--include-hidden | --skip-hidden] [--ignore NAME]...`. Every scan of
   the root, whole or partial, uses them, so a timer's `filo scan` and a manual scan always cover the same files.
-  (Until then they were flags on each scan, and a scan without `--include-hidden` quietly left hidden files
-  unchecked.)
 - `filo roots add` scans the new root straight away; `--no-scan` only registers it (for example to run the first
   scan later). Ctrl-C during that scan keeps the root and writes nothing from the scan.
 - **No aliases.** A new root is refused if it is the same directory as an existing root, by path or by identity
@@ -228,7 +211,7 @@ the database, on the same disk. Copying the register's snapshots to a separate p
   but the hash is stale while the flag is set. A file that vanished or changed while it was read is not unreadable: it
   is retried as before and the flag is untouched. Losing read access changes the file's ctime, so the next scan notices
   it (see above). Files under a directory that cannot be listed are not flagged: Filo cannot tell what happened to them,
-  so they are simply not covered by that scan and their "last verified" time stops advancing (see section 3).
+  so they are simply not covered by that scan.
   Decided 2026-11-11.
 
 ### Move detection
@@ -257,9 +240,8 @@ the database, on the same disk. Copying the register's snapshots to a separate p
   plus new. Hard links are separate files in Filo (one per path) that happen to share an inode.
 - The inode is only used to decide what to rehash, never to pair moves.
 
-### Lifespan (iteration 2)
-Decided 2026-11-12, replacing the review queue, review dates, actions and retain-until floors of 2026-11-11. The
-retention CSV and `filo update` write only the register and the CSV file the user names; they never touch the files.
+### Lifespan
+The retention CSV and `filo update` write only the register and the CSV file the user names; they never touch the files.
 
 - **Forever** (decided 2026-11-12): the retention (and so `keep_until`) may be the word `forever` instead of a date, for files kept
   indefinitely. It is stored as that word, never as a far-off date such as 9999-12-31 (which would look like a
@@ -267,7 +249,7 @@ retention CSV and `filo update` write only the register and the CSV file the use
   comparing it with dates. A `forever` file is never a deletion candidate, however old it is or however often it
   changes; `filo report` counts them so the pile stays visible, and typing a date over it later is how it ends. One
   word only, in any case (`Forever`): no aliases such as `indefinitely` or `never`.
-- **One date per file: `keep_until`**, worked out from the file's retention (see second shape). Keep the file until
+- **One date per file: `keep_until`**, worked out from the file's retention (see Retention CSV columns). Keep the file until
   then. On that date it becomes a deletion candidate, never deleted automatically: `filo delete` lists the candidates,
   and deleting each is the person's call (see Disposal). Filo tracks lifespan only. Hard legal retention is a later
   retention or `forever`; there are no holds.
@@ -293,7 +275,7 @@ retention CSV and `filo update` write only the register and the CSV file the use
   holds **every present file** under DIR (or every root), with its current date, not a queue: dated files are
   reviewed too, and filtering on a blank `retention` gives the undated ones. Missing and moved files are not in it;
   they are in `filo report`. On a large system, export one directory at a time so a spreadsheet can open it.
-- **A scan first** (decided and built 2026-11-16, section 5 item 12): every export scans before it reads the
+- **A scan first**: every export scans before it reads the
   register, so the CSV holds the files as they are now, not as of the last scan, and a file saved since is in it.
   `--no-scan` skips it (nothing changed, or the scan is slow); `--workers N` is passed to the scan, as for `filo scan`,
   and refused with `--no-scan` (so is `roots add --no-scan --workers N`, since 2026-11-16). What it scans:
@@ -318,7 +300,7 @@ retention CSV and `filo update` write only the register and the CSV file the use
     leaves out a file saved since, unnoticed; watching the disk needs a process running all the time.
 - **Columns**, in order: `id` (file row ID), `export` (export number), `directory` (absolute), `name`, `size`
   (bytes), `modified` (local time; a cue to when the file was last worked on), `file_date`, `retention`, `keep_until`
-  (see Retention CSV, second shape). The name is a column of its own because file names often carry dates. Left out on purpose: a reason (one purpose only), an action (a
+  (see Retention CSV columns). The name is a column of its own because file names often carry dates. Left out on purpose: a reason (one purpose only), an action (a
   delete column in a spreadsheet is unsafe: a one-column sort or a fill-down puts it on the wrong rows), and creation
   or first-seen dates (not reliable: many filesystems do not record a birth time, and a copy, restore or sync resets
   it). `filo update` finds columns by header name and reads only `id`, `export`, `file_date` and `retention` (and
@@ -330,12 +312,11 @@ retention CSV and `filo update` write only the register and the CSV file the use
   not run it as a formula. The update accepts a byte order mark, CRLF, `;` or tab separators, and empty rows.
 - **Dates**: `YYYY-MM-DD` only, and a real date (`2027-02-29` is refused). Anything else, such as `06/07/2027`, is
   refused, never guessed; the message suggests formatting the column as text, since spreadsheets may rewrite dates in
-  the locale's format. Past dates are accepted (see second shape). Periods counted from today (`+1y`) were dropped
+  the locale's format. Past dates are accepted (see Retention CSV columns). Periods counted from today (`+1y`) were dropped
   from the CSV on 2026-11-12: the same cell meant different dates on different days. A period counted from the row's
   `file_date` (`7y`) replaced them. Dates only: a time (`2026-12-31 15:00`) is refused, not cut off.
 - **`-o FILE` is required**: the CSV is never written to the terminal. FILE is created with mode 0600.
-- **An existing FILE is replaced only after asking** (decided and built 2026-11-16, section 5 item 11; until then an
-  existing FILE was refused). Refusing made people delete the old CSV or invent `retention2.csv`. Filo asks `Replace
+- **An existing FILE is replaced only after asking**. Refusing would make people delete the old CSV or invent `retention2.csv`. Filo asks `Replace
   retention.csv? [y/N]`; with no terminal it refuses. `-y` does not answer it: a timer or script never replaces a
   file silently. Only a regular file is replaced, never a directory, symlink or device. The new CSV is written to a
   temporary file next to it (mode 0600) and renamed over it, so a crash never leaves half a CSV. The question is
@@ -356,8 +337,7 @@ retention CSV and `filo update` write only the register and the CSV file the use
     `file_date` exported is kept;
   - the values already stored: nothing;
   - a new `file_date` or `retention`: replaces the stored ones and works `keep_until` out again. Editing the same CSV
-    again and updating again replaces them again (the old "already imported" rule, which silently ignored a
-    re-edited row, is gone);
+    again and updating again replaces them again;
   - a blank `retention` where one is stored: clears it, so the file is undated again. Clearing a retention does not
     clear `file_date`; blanking the `file_date` cell as well is a separate change and clears it too. Before
     clearing, the update lists those files (the first ten, then a count) and asks once,
@@ -376,11 +356,9 @@ retention CSV and `filo update` write only the register and the CSV file the use
 - **Bulk dates**: set in the spreadsheet (filter on `directory`, fill down). There is no command for them.
 - The hash at export is stored; it is **re-checked at action time** (`filo delete`) against `files.reviewed_hash`.
 
-### Retention CSV, second shape (decided and implemented 2026-11-12)
+### Retention CSV columns
 Retention is usually counted from a document's own date ("keep tax records for seven years"), not from today or from
-when the file reached the disk. So the CSV gains a date to count from and a retention that can be a period. This
-replaced the single `keep_until` input of the first shape; the rest of the Lifespan section (one purpose, every present file,
-encoding, refusals, the clear prompt, "since" measured in scans) stays.
+when the file reached the disk. So the CSV has a date to count from and a retention that can be a period.
 
 - **Columns**, in order: `id, export, directory, name, size, modified, file_date, retention, keep_until`.
   - `file_date`: the date the file is about or was issued, the date a retention period counts from. Typed by the
@@ -403,7 +381,7 @@ encoding, refusals, the clear prompt, "since" measured in scans) stays.
     spreadsheet rewrote it as `3/14/2030`) is refused with the same "format the column as text" hint as the other
     date columns.
   - The update reads `id`, `export`, `file_date` and `retention`.
-- **Past dates are accepted** (changed 2026-11-12; the update used to refuse a date not after today), whether typed
+- **Past dates are accepted**, whether typed
   or worked out from a period: a 2015 invoice with `7y` ends in 2022, which means it is already past its retention.
   The file simply becomes a deletion candidate. Since that also lets a typo through (`7d` for `7y`, 2016 for 2026),
   the update's summary **lists** the files it left past their retention (the first ten, then a count), with their
@@ -433,11 +411,10 @@ encoding, refusals, the clear prompt, "since" measured in scans) stays.
   `keep_until` becomes `retention` (its date, or `forever`) with the same `keep_until`. `export_rows` and `reviews`
   gain the same two columns, so an untouched cell is still recognised and the history shows what was typed.
 
-### Named retention policies (designed and built 2026-11-16)
+### Named retention policies
 A retention schedule written once and named, so the same rule is typed as a word in the CSV and changed in one
 place: if the law moves financial records from 7 to 10 years, `filo policies set bills 10y` changes every file using
-`bills`. Settled with the person one topic at a time on 2026-11-16 (it had been a proposal in Open questions since
-2026-11-13). Built on branch `retention-policies` in four slices, see section 5.
+`bills`.
 
 - **What a policy is**: a name for a retention: a period (`bills = 7y`, counted from each file's own `file_date`), a
   date (`project-x = 2030-12-31`: every file of it ends that day), or `forever`. Names are letters, digits, `-` and
@@ -445,7 +422,7 @@ place: if the law moves financial records from 7 to 10 years, `filo policies set
   stored lowercase); `forever` is reserved. In the retention cell, `7y`, `2030-12-31` and `forever` keep their
   meaning and anything else that is a valid name is a policy. A file has either a policy or a retention of its own,
   never both.
-- **Dates (unchanged, and to be said plainly in the README and help)**: a file kept until 2026-12-31 is a deletion
+- **Dates** (said plainly in the README and help): a file kept until 2026-12-31 is a deletion
   candidate on 2026-12-31, since *kept* means the date is still to come; the same for a policy as for a date typed
   per file. Nothing is deleted on that day: the file is listed by the next `filo delete`, which asks.
 - **Creating a policy** (the person's choice over creating them by command only: a policy created ahead may never be
@@ -454,7 +431,7 @@ place: if the law moves financial records from 7 to 10 years, `filo policies set
   terminal, the rows naming them are left alone and the summary says how many; `--dry-run` lists them. Its files
   need a retention until the policy gets a value. A policy made in error (`bils`) is fixed with `filo policies move
   bils bills`, then `remove bils`.
-- **`filo policies`** (a new command name):
+- **`filo policies`**:
   - `filo policies` lists each policy with its value and how many files use it, and flags what needs attention: no
     value (`! needs a retention`), a date that has passed (`! passed · 0 files: set a new date, or remove it`), files
     without a `file_date` under a period (`! 3 without a file_date`). Nothing is ever cleared up automatically: a
@@ -559,14 +536,13 @@ Shorten bills for 212 files, putting 6 past their retention? [y/N]
   | F1 a file on a date policy reaching its date | a candidate that day; `filo delete` checks its content as before |
   | G1 the upgrade from schema 8 | tables created, nothing else changes; the pre-upgrade snapshot kept |
 
-### Directory rules (designed 2026-11-16, built 2026-11-16/17)
+### Directory rules
 Setting retention in the CSV is a one-off: a file added later arrives undated and needs a decision. A rule names a
 policy for the files under a directory, or only those whose name matches a pattern: "files under
-`personal/home/electric` get `bills`", "under `bank`, `*DailyStatement*` gets `daily-statements`". Settled with the
-person one topic at a time on 2026-11-16 (it had been in Open questions since 2026-11-13). A rule is the person's own
+`personal/home/electric` get `bills`", "under `bank`, `*DailyStatement*` gets `daily-statements`". A rule is the person's own
 decision, written down ahead of time, so a file dated by it records what is known (principle 4). A rule only sets a
 retention: the file becomes a candidate at its date and is deleted only through `filo delete`, as before (principle
-1). Built on branch `directory-rules` in four slices, one PR for all of them (see section 5).
+1).
 
 - **Applied automatically** (the person's choice over confirming each time): every scan, also a scheduled one and the
   scan before an export, applies the rules in its own transaction, so the run's snapshot covers it, and says what it set
@@ -625,7 +601,7 @@ retention: the file becomes a candidate at its date and is deleted only through 
 - **Policies and rules**: `filo policies remove` is refused while a rule names the policy ("2 rules use bills:
   filo rules lists them"), as it is while files use it. `filo policies move` takes the rules with the files: a rename
   keeps them, and a merge points them at the policy moved to.
-- **`filo rules`** (a new command name). DIR is read as in every command (relative to the current directory, `~`
+- **`filo rules`**. DIR is read as in every command (relative to the current directory, `~`
   expanded) and must be a root or inside one. PATTERN may be left out, meaning `*`. A pattern with wildcards or spaces
   is quoted (`'*Statement*'` or `"*Statement*"`), since the shell expands an unquoted one; the wrong number of arguments
   is refused, and every result line shows the pattern as received, so a file name the shell put in its place shows (it
@@ -719,7 +695,7 @@ Removed   bank · *Statement* → statements
   *Statement*`, `~/Media is not reachable (not mounted?): rules are not applied while its files cannot be checked`,
   `/tmp/x is not inside any root`, and for the wrong number of arguments the usage, with "quote a pattern with * or
   spaces". The `--dry-run` list is cut at ten in a terminal ("… N more"), all of it when piped, as elsewhere. `move`
-  and `copy` (slice 4) say what they did the same way:
+  and `copy` say what they did the same way:
   `Done   moved 3 rules from bank to banking · policy set on 5 files`.
 
   **The words** (decided 2026-11-16): a rule does not date a file, it sets the file's policy, and the date follows
@@ -794,9 +770,8 @@ Retention   250 files and symlinks
   | F3 a root added above a root with rules | the rules get the prefix |
   | G1 the upgrade from schema 9 | table and columns created, nothing else changes |
 
-### Disposal (iteration 3)
-Decided 2026-11-12, implemented 2026-11-13 (package `internal/dispose`, the only code that deletes the user's
-files). Replaces the earlier plan of a quarantine, holds and several checks at the moment of acting.
+### Disposal
+Package `internal/dispose`, the only code that deletes the user's files.
 
 - **Deletion is permanent.** No quarantine directory and no recycle bin: the bin can fill up with large files, and is
   missing on network disks; backups are what make a deletion recoverable. So the list the person confirms, and the
@@ -846,7 +821,7 @@ files). Replaces the earlier plan of a quarantine, holds and several checks at t
   rows.
 - **Syncthing propagates deletes**: a delete on one device removes the file on every device that shares the Syncthing
   folder. Filo treats synced roots like any other.
-- **Decided while building it (2026-11-13):**
+- **Details:**
   - *A delete run is recorded as a scan of kind `delete`.* A closed path and an event both need a scan, so the run
     adds one `scans` row (`kind = 'delete'`, whole root) in each root where it first records something; deleted
     paths close at it, and its `deleted`, `changed` and `error` events belong to it. It is finished when the run
@@ -859,7 +834,7 @@ files). Replaces the earlier plan of a quarantine, holds and several checks at t
     Gone, replaced (another inode), no longer the same kind, or a symlink pointing elsewhere: nothing is recorded;
     the message says to run `filo scan`. Cannot be deleted: nothing is recorded, it stays a candidate, and exit 1.
     A last `lstat` just before the removal checks inode, size and modification time against what was read.
-  - *Only inside its root* (hardening of 2026-11-13). Before anything else, the recorded path must be a clean
+  - *Only inside its root*. Before anything else, the recorded path must be a clean
     relative path below a clean, absolute root (no `..`), and every directory from the root down must still be a real
     directory, each checked with `lstat`: a symlink there means the tree changed since the scan (skipped, "run filo
     scan"). Directories above the root are not checked: a symlink there (a home directory moved to another disk) moves
@@ -876,19 +851,12 @@ files). Replaces the earlier plan of a quarantine, holds and several checks at t
   - *Prompts* are read in the background, so Ctrl-C ends a wait for an answer; nothing is deleted after it.
 - Scheduled runs only ever scan; Filo never schedules a deletion.
 
-### Duplicates (designed 2026-11-13/14; redesigned 2026-11-16, built 2026-11-15/16)
-The report finds duplicate groups (297 groups, 605 files on the real home directory). The duplicates CSV lets the
+### Duplicates
+The report finds duplicate groups. The duplicates CSV lets the
 person act on them: export the groups, decide per copy in a spreadsheet, then run `filo delete` on the CSV, which
 checks every group against the disk, lists what it will and will not do, asks, and does it. It brushes against the
 rule that a delete column in a spreadsheet is unsafe (a sort or a fill-down puts it on the wrong rows), hence the group
 rules, the listing before the question and the check at the moment of deleting below.
-
-**Built** (on branch `duplicates-redesign`, in five slices, see section 5). Slice 1, the register: schema 8, the
-group definition below, the report's "not counted" line; the first design's `filo update` of a duplicates CSV, its
-marks in `filo delete` and `--separate` are gone. Slice 2, the CSV: the `action` column, `keep` filled in
-for records, and reading it into a plan per group (`duplicates.Plan`). Slice 3: `filo delete FILE.csv` carries a
-duplicates CSV out. Slice 4: `filo duplicates`, `exclude` and `include`. Slice 5: the README and the help. See "The first design, and why it changed" at the end
-of this section.
 
 - **The principle** (2026-11-16). The duplicates process decides which copy to keep, never whether the content goes.
   A duplicates decision never removes a content or shortens its life; only a retention does.
@@ -921,9 +889,7 @@ of this section.
   file with two copies in `~/Documents` and one in an excluded `~/Backup` is still a group, of the two. Filo does not
   try to spot such directories (any threshold would miss odd cases); `filo export duplicates` counts what is not
   counted, and while there is no excluded directory ends with "directories that are copies on purpose (backups) can be
-  left out entirely: filo duplicates exclude DIR" (see Output, below; it first said "lists the exclusions" and
-  "always ends with", changed on 2026-11-15: a list repeats `filo duplicates`, and a line on every run stops being
-  read). Expected to be used rarely, mainly for backups.
+  left out entirely: filo duplicates exclude DIR" (see Output, below). Expected to be used rarely, mainly for backups.
 - **`filo export duplicates [DIR] -o FILE [--no-scan] [--workers N]`** writes every group with at least one copy under DIR, and all of that
   group's copies, also those outside DIR (the copy to keep may live elsewhere), so exports of different directories
   can overlap. One row per copy, groups numbered in order of their first path. Same CSV rules as the retention CSV
@@ -931,7 +897,7 @@ of this section.
   directory, name, size, modified, file_date, retention, keep_until, action`. `copies` is the group's size, so a
   filtered view shows when copies are hidden. The retention columns are display only. `export_rows` records each
   row's hash, group and path. **A scan first**, of every root, not only DIR, since a group's copies can be anywhere;
-  `--no-scan` skips it (see Lifespan, "A scan first"; section 5 item 12). The `action` cell is blank, except `keep` on a copy that is one of a set of records (a
+  `--no-scan` skips it (see Lifespan, "A scan first"). The `action` cell is blank, except `keep` on a copy that is one of a set of records (a
   new copy of records is exported with them: `delete` it, or `keep` it to join the set).
 - **Why the export reads the register, not the disk alone** (considered 2026-11-16: an export that only walks DIR
   and hashes it, with no root or scan, so the CSV is never stale and no setup is needed; rejected, and the scan first
@@ -1025,7 +991,7 @@ of this section.
   the content a duplicate again ("LICENSE is a duplicate again (5 copies)"); a copy that is one of a set of records
   removes the whole set ("terms.pdf: the 2 records are duplicates again"); anything else says PATH is none of them.
   Records are stored per copy and its content, so a record that is edited leaves its set by itself.
-- **Output** (agreed 2026-11-15, one topic at a time; under the Terminal output rules).
+- **Output** (under the Terminal output rules).
   - `filo duplicates` lists the whole register (no DIR): excluded directories with the files and size under each
     (so one far wider than meant shows), contents always as duplicate groups (`DupGroup`) with at most 3 paths and
     `… N more copies` (they are often everywhere), and sets of records with every copy and its keep-until date (a
@@ -1041,7 +1007,7 @@ of this section.
     excluded, so one command never undoes two things. A set of records goes as a whole, and the heading names it.
     The change in groups is shown. Nothing to undo (`Not excluded itself`, with the parent that is; `Nothing to
     include`) is exit 0, nothing written. `Next:` (export to decide them) only after including a directory.
-  - `filo export duplicates` (replacing the first design's words; the shape stays): the rules as `·` lines in the
+  - `filo export duplicates`: the rules as `·` lines in the
     action words; a line when `keep` is filled in for a new copy of a set of records (F3), since the group otherwise
     looks half decided; the "not counted" count, as the report's line; the backups line only while nothing is
     excluded; `Next: edit the action column, then filo delete FILE`.
@@ -1135,11 +1101,10 @@ Next: edit the action column, then filo delete /tmp/d.csv
 - **The report** leaves out excluded directories, contents always and sets of records from its duplicate groups and
   reclaimable space, with one line: "1 excluded directory, 2 contents marked always and 1 set of identical files
   kept as separate files, these are not counted as duplicates (use "filo duplicates" to view)". Only the kinds there
-  are are named. The line "N copies marked for deletion" goes.
+  are are named.
 - **The words people see** (2026-11-16). This design calls them *records* and *always*; the output, help and README
-  say "identical files kept as separate files" (a set's copies: "2 separate files") and "marked always". The report
-  line was "not counted: … 1 set of records (filo duplicates)", which did not say counted as what, and "records" was
-  never explained. The CSV's action words (`keep`, `delete`, `always`) and the code's names (`RecordSets`,
+  say "identical files kept as separate files" (a set's copies: "2 separate files") and "marked always", since
+  "records" alone is never explained. The CSV's action words (`keep`, `delete`, `always`) and the code's names (`RecordSets`,
   `duplicate_records`) are unchanged.
 - **The scenarios** (the test list): A a CSV run twice, B several CSVs, C editing the CSV, D files changing before the
   run, E inside one run, F new copies.
@@ -1178,24 +1143,12 @@ Next: edit the action column, then filo delete /tmp/d.csv
   decide them`, in the same line how many contents marked separate are now always. Dropping a mark never deletes
   anything, only forgets a decision, and the pre-upgrade snapshot keeps it; refusing to upgrade would need the old
   build to carry the marks out.
-- **The first design, and why it changed** (2026-11-13/14, built; redesigned 2026-11-16). `filo update` recorded each
-  group's Y/N decisions as marks in the register (two or more N marked the content separate, everywhere), and
-  `filo delete` deleted the marked copies later, alongside retention candidates. A second export then showed decided
-  groups blank, though the marks were stored. A fix that filled the cells in from the register (branch
-  `fix-duplicates-includes-copy-decision`, kept at a4ffe5f) went through six code review rounds, each finding new
-  cases, and was abandoned on 2026-11-15: the same decision lived in three places (the register, the CSV and the
-  disk), each able to change on its own. Designing from the flow and its scenarios instead led to keeping no
-  decisions to delete at all, and to splitting "separate" into records (these copies) and always (the content), since
-  insurance terms kept as two records should not make every future copy of them acceptable.
 
 ### Commands and scheduling
 - Plain names, easy to remember: `roots`, `scan`, `report`, `export`, `update`, `delete`, `duplicates` (added
   2026-11-16, see Duplicates), `policies` and `rules` (both 2026-11-16, see Lifespan). No
-  themed subcommands. (`restore` was dropped on 2026-11-12: a file restored from a backup comes back as a new file.)
-  (Reshaped 2026-11-12: `review` and its subcommands `set-date`, `export` and `import` were replaced by `export
-  lifespan` and `update`; "update" says that only existing files change, which "import" did not. `export lifespan` was
-  renamed `export retention` the same day: the CSV's word names what is set in it, and the lifespan CSV became the
-  retention CSV (package `internal/retention`).)
+  themed subcommands. There is no `restore`: a file restored from a backup comes back as a new file. "Update" says
+  that only existing files change; `filo review` only says it was replaced by `export retention` and `update`.
 - **Keep flags and options to a minimum** (2026-11-11). Prefer a safe default and clear output over a flag; prefer
   doing the obvious thing and saying what was done over asking.
 - **Output cannot act on the terminal** (2026-11-13). File names can hold any byte but `/` and NUL and come from
@@ -1204,14 +1157,11 @@ Next: edit the action column, then filo delete /tmp/d.csv
   escapes (`\x1b`, `\u202e`), so a name cannot erase lines of the list a person confirms before a deletion, set the
   window title, write the clipboard, or read in another order than it is. Filo writes each line with one call, so a
   newline passes only as the last byte of a write: one inside a write can only come from a name and is shown as
-  `\n`, so a name cannot add invented lines to that list (found in the code review of 2026-11-13; the first version
-  let newlines through). Tabs are shown as `\t` and a backslash as `\\`, so an escape cannot be confused with a
-  name holding the same text. Since the terminal output components (2026-11-16, see Terminal output), the Renderer
-  escapes every text it is given the same way (`view.Escape`) and then adds only its own colour codes, so it writes
-  to stdout itself; since 2026-11-15 it is the only way to stdout, and stderr has one too, `errorLine` (each line
-  escaped, `filo: ` before it), besides the progress line's own control codes. The first design's escaping writer
-  (`safeText`) is retired, and a test (`TestOutputGoesThroughTheRenderer`) fails on any other write in the CLI (see
-  Help and errors). Trailing alignment is dropped from a line, but a space that ends a file
+  `\n`, so a name cannot add invented lines to that list. Tabs are shown as `\t` and a backslash as `\\`, so an escape cannot be confused with a
+  name holding the same text. The Renderer (see Terminal output) escapes every text it is given this way
+  (`view.Escape`) and then adds only its own colour codes; it is the only way to stdout, and stderr has one too,
+  `errorLine` (each line escaped, `filo: ` before it), besides the progress line's own control codes. A test
+  (`TestOutputGoesThroughTheRenderer`) fails on any other write in the CLI (see Help and errors). Trailing alignment is dropped from a line, but a space that ends a file
   name is shown as `\x20` (2026-11-16, from the code review), so `report ` and `report` never read the same; and a
   relative path that starts with `~` (a directory named `~` inside a root) is shown as `./~/…`, so it never reads as a
   path in the home directory. The CSV export guards against spreadsheet formulas separately.
@@ -1250,12 +1200,9 @@ Next: edit the action column, then filo delete /tmp/d.csv
   so timer and cron logs stay clean. Ctrl-C or SIGTERM cancels a scan; nothing is written and the lock is released.
 - A systemd user timer running `filo scan` is enough. No daemon. (`Persistent=true`, low CPU and I/O priority.)
 
-### Terminal output (designed 2026-11-15)
-The output worked but read badly, `filo update` and `filo delete` most: an absolute path on every line, refusals as
-dense one-line messages on stderr (`filo: d.csv line 7: /long/path: group 3 of export 4: reason`), summaries in
-whatever order the code reached them, no visual weight and no consistent next step. The terminal is treated as a UI:
-output is built from components, so files, groups, problems and prompts look the same in every command. Designed one
-topic at a time from mockups; the mockups below are the reference.
+### Terminal output
+The terminal is treated as a UI: output is built from components, so files, groups, problems and prompts look the
+same in every command. The mockups below are the reference.
 
 - **Rich in a terminal, plain when piped.** Colour and symbols (`✓` done, `✗` refused, `!` needs attention, `·`
   neutral, `◆` separate; green, red, yellow, dim) only when stdout is a terminal (one whose window size can be read,
@@ -1311,7 +1258,7 @@ topic at a time from mockups; the mockups below are the reference.
   be read.
 - **Prompts.** The question states the effect with the numbers ("Delete all 14"). The default is capitalised and
   always the safe choice (`[y/N]`, `[a/s/l/N]`); Enter takes it. A word or its first letter, any case. An
-  unrecognised answer asks again with the choices (it used to mean no). End of input means the safe default; Ctrl-C
+  unrecognised answer asks again with the choices. End of input means the safe default; Ctrl-C
   stops as before. Select mode shows `[3/14]`, what the item is and its full path, the choices on one line, and one
   result line after each answer; `q` goes to the summary. Filo asks only when both the question and the answer are in
   a terminal (stdin and stdout): with stdout in a file (`filo delete > log`) the question could not be seen, so it is
@@ -1326,8 +1273,7 @@ topic at a time from mockups; the mockups below are the reference.
   what to do; repeats collapsed), `Prompt`, `Item` (a select-mode item and its result) and `Next`. Commands build the
   data and hand it to components; they never format output themselves or decide plain or rich, relative or full
   paths. Each component writes whole lines, one write per line.
-- **Scope: every command** (roots, scan, report, export, update, delete, help and errors), in this order: `delete`,
-  `update`, `report`, `scan` and `roots`, then `export` and help.
+- **Scope: every command** (roots, scan, report, export, update, delete, help and errors).
 
 The reference mockups (rich form; colour not shown):
 
@@ -1431,7 +1377,7 @@ Duplicates   dupes.csv . export 7 . 12 groups . ~/Documents
   [refused] 2 groups (listed below)
 ```
 
-**Scan and roots** (agreed 2026-11-15, one topic at a time):
+**Scan and roots**:
 
 - **A scan** is a heading (scan number, files seen, how long, the root or DIR), then one count line per kind of
   change happened: new, changed, moved and missing are information (`·`; missing is usually a file the person
@@ -1447,8 +1393,8 @@ Duplicates   dupes.csv . export 7 . 12 groups . ~/Documents
   alone. A root that fails is a block of its own on stdout, right under its heading, in order between the others:
   `✗ not scanned: the root looks unmounted (/mnt/disk is not mounted)` for an unmounted disk, the error's own text
   otherwise. The run then ends with one line on stderr, `filo: 1 root could not be scanned: /mnt/disk/photos`, so a
-  timer that keeps only stderr (`filo scan >/dev/null`) still logs it (agreed 2026-11-15, from the second code
-  review; an exception to "stderr only for errors that stop the command"). The exit code stays 1. With more than one
+  timer that keeps only stderr (`filo scan >/dev/null`) still logs it (an exception to "stderr only for errors that
+  stop the command"). The exit code stays 1. With more than one
   root, a closing `Done   3 roots · 2 scanned · 1 failed`, and one `Next:` for the whole run (only if a root changed
   or failed), none per block.
 - **The progress line** (stderr, only in a terminal): numbers first, the root or DIR last with `~`, `root 2 of 3`
@@ -1555,12 +1501,12 @@ Settings changed   ~/FiloTest
 Next: filo scan /home/you/FiloTest
 ```
 
-**Export** (agreed 2026-11-15, one topic at a time):
+**Export**:
 
-- **The scan first** (2026-11-16): the scan block exactly as `filo scan` prints it, `Next: filo report` included
+- **The scan first**: the scan block exactly as `filo scan` prints it, `Next: filo report` included
   when the scan found something, then the export's block. The export runs whatever the scan found (missing and moved
   files are usually genuine); the person sees it all and decides whether to look. The one place a run shows two
-  `Next:` lines, agreed with the user: hiding the scan's would hide where its findings are listed.
+  `Next:` lines: hiding the scan's would hide where its findings are listed.
   With `--no-scan`, no scan block, and a `·` line in the export block: `not scanned first: as of the last scan,
   <when>`.
 - **`filo export retention`**: a heading, `Retention export`, with the export number (the one `filo update`
@@ -1616,26 +1562,23 @@ Duplicates export   no groups · ~/Documents, under photos/
 Nothing exported.
 ```
 
-**Help and errors** (agreed 2026-11-15, one topic at a time):
+**Help and errors**:
 
 - **Help** (`filo help`, `filo help COMMAND`, `-h`) goes through the Renderer: headings bold in a terminal, plain
   when piped. Its paragraphs are stored unwrapped and wrapped at word boundaries by a `Paragraph` component, to the
-  terminal's width, or 80 columns when piped (so `filo help > file` reads well); the help was hand-wrapped at about
-  115 columns, and one paragraph was a single 216-column line. Commands and flags keep two columns, a description
+  terminal's width, or 80 columns when piped (so `filo help > file` reads well). Commands and flags keep two columns, a description
   that does not fit wrapping under its own column. The words stay as they are, regrouped under `Commands` and
   `Flags` with a usage line per command (the long report paragraph split into sentences). The overview ends with `Next: filo help COMMAND for a command's flags and rules`.
 - **Errors and warnings** stay on stderr, plain (no colour, symbols or `~`: they end up in logs and get copied, and a
   full path is unambiguous there), one line each, `filo: <message>` and `filo: warning: <message>`. A usage error is
-  one line too, pointing at the command's own help, `filo: roots add takes exactly one DIR (see filo help roots)`
-  (it was two lines, the second "Run 'filo help' for usage."); exit code 2 as before. An error is always one line: a
-  newline in it is escaped like any other, since a file name can hold one and must not forge a second `filo:` line
-  (first designed as "split at newlines", changed on 2026-11-15 after the code review found that let a name do it).
+  one line too, pointing at the command's own help, `filo: roots add takes exactly one DIR (see filo help roots)`;
+  exit code 2. An error is always one line: a
+  newline in it is escaped like any other, since a file name can hold one and must not forge a second `filo:` line.
   Filo's own errors of several parts (`errors.Join`, as the snapshot warnings) are split by the code that knows the
   parts, a line each. A test runs the error cases and checks each is one line.
-- **`safeText` retired.** Two ways out remain: stdout only through the Renderer (which escapes every text it is
+- **Two ways out.** stdout only through the Renderer (which escapes every text it is
   given), and stderr only through `errorLine`, which escapes the text with `view.Escape` and writes `filo: <text>`
-  in one write; `rawStderr` is left only for the progress line, whose text `view.Fit` escapes. `safeText`,
-  `writeLines` and `env.stdout` go. A guard test, like the store's `TestWritesGoThroughTheHelpers`, fails if anything
+  in one write; `rawStderr` is left only for the progress line, whose text `view.Fit` escapes. A guard test, like the store's `TestWritesGoThroughTheHelpers`, fails if anything
   else in `internal/cli` writes with `fmt.Fprint*`, `io.WriteString`, to `os.Stdout`/`os.Stderr`, or with `Write` or
   `WriteString` on the streams; the writers allowed are named by receiver and name (`env.errorLine`,
   `progress.draw`), so another function with the same name is not.
@@ -1784,19 +1727,8 @@ CREATE TABLE excluded_dirs (            -- files under them (the whole subtree) 
 "Present" means a file has a path interval with `valid_to_scan IS NULL`; there is no status column. "New" means
 `first_seen_scan` equals the scan. Disposal does not ask when a scan last covered a file: it refuses files flagged
 unreadable and re-checks the file itself at the moment of deleting (decided 2026-11-13; an earlier note here also
-refused files no recent scan covers, which the re-hash makes unnecessary). `ctime_ns` and `unreadable_since_scan` are schema version 2,
-the first migration (two `ALTER TABLE ... ADD COLUMN`s; existing rows start with ctime 0, so the first scan after the
-upgrade rehashes nothing extra and records each file's ctime quietly). Version 3 adds the review columns on `files`
-(all NULL for existing rows, so every file starts undated) and the four review tables. Version 4 (2026-11-12) merges
-`review_date` and `retain_until` into `keep_until`, taking the later of the two so nothing is kept for less time; a
-recorded `delete` becomes `keep_until` = the day it was decided, so the file is a deletion candidate; the same in
-`reviews`; `export_rows` loses `reason` and gains `keep_until`; `import` batches are renamed `update`; roots gain
-their settings (defaults for existing roots: hidden skipped, no extra ignores). Columns are dropped with `ALTER TABLE
-... DROP COLUMN`. Version 5 (2026-11-12) adds `file_date` and `retention` to `files`, `export_rows` and
-`reviews`; each existing `keep_until` becomes the retention it was (its date, or `forever`). Version 6 (2026-11-13)
-adds `files.deleted_utc` (the deleted rows are the history of deleted files) and `scans.kind` (existing scans are
-`scan`); see Disposal. Version 7 (2026-11-14) adds `exports.kind` (existing exports are `retention`),
-`export_rows.dup_group` and `path_id`, and the three duplicates tables; see Duplicates.
+refused files no recent scan covers, which the re-hash makes unnecessary). Each schema version and its upgrade is in `internal/store/schema.go` (`migrations`); `history.md` tells what each
+changed.
 
 Location history gives snapshots without storing them: the tree at any scan is the set of intervals that cover it.
 
@@ -1832,287 +1764,7 @@ most recent events (`--top N` per list, default 10). A
 **duplicate group** is present regular files (size > 0, with a hash) sharing a hash, across all roots; each copy keeps
 its own identity. Reclaimable space is size × (copies − 1) per group. Paths are shown absolute.
 
-## 5. Iterations
-
-1. **Scan, register, report** (read-only). Done 2026-11-11. Done when: on a generated test tree, every kind of change (rename, move,
-   edit, delete, duplicate, symlink, unreadable directory, unreadable file) is reported exactly on rescan
-   (`scripts/testtree.sh`, checked by the walk and reconcile tests); a first scan of the real home
-   directory completes and shows the size of the backlog; a second scan takes seconds to a couple of minutes.
-2. **Lifespan: one keep-until date per file**, set through the retention CSV (reshaped 2026-11-12 from a review
-   queue). Done when: on a test tree, an export, edit and update round trip records exactly the dates set, refuses
-   with one clear line each a changed file, an impossible or ambiguous date, a stale export and an added row; a
-   cleared date asks first; a file past its date is listed by `filo delete`, and once edited needs a new date instead
-   (`TestRetentionRoundTrip` in `internal/cli`, plus the store and retention package tests). The second shape of the
-   CSV (`file_date`, `retention`, display-only `keep_until`, dates from file names, past dates allowed; schema
-   version 5) is done, and the round trip covers periods, `file_date` from names, the display column and clears.
-   Still to do: on the real home directory, every file gets a retention or `forever`, a directory at a time (filter
-   on `directory`, fill down), through a few directory-sized exports.
-3. **Delete.** Done 2026-11-13 on a test tree; not yet run on real files. `filo delete [DIR] [-y]` deletes the candidates after the prompt, with the re-hash check, deleted rows,
-   the "freed" line in the report and empty directories removed (see Disposal). Done when: on a test tree, a confirmed
-   run deletes exactly the unchanged candidates; a file changed, unreadable, replaced or moved after its retention was
-   set is skipped with one clear line each; directories emptied by the run are removed up to the root but not an empty
-   directory that was already there or one holding a hidden file; a restored file comes back as a new row with the hint;
-   `-y` and no-terminal behave as designed. Checked by `TestDeleteRoundTrip` and `TestDeleteInterruptedAtPrompt` in
-   `internal/cli` and the `internal/dispose` tests, and by hand on `scripts/testtree.sh` with a changed and an
-   unreadable candidate.
-4. **Register snapshots.** Done 2026-11-13 (see Register snapshots): `TestKeep` and the snapshot tests in
-   `internal/store`, `TestSnapshots` in `internal/cli`, and by hand with a throwaway database.
-5. **Duplicates CSV** (taken ahead of the order below on 2026-11-14; see Duplicates). Done when: on a test tree, an
-   export, edit, update and delete round trip deletes exactly the copies marked Y; refuses an all-Y group, a partly
-   decided group, a sorted row, a moved or changed copy and a Y with a longer retention than every N; asks before
-   recording anything refused or any separate content; marks a content separate and undoes it; and `filo delete`
-   skips a group whose kept copy was deleted or changed after the update (`TestDuplicatesRoundTrip` in
-   `internal/cli`, plus the store tests).
-
-**Next, in order** (agreed 2026-11-13; revert, the earlier iteration 4, was deferred, see section 7; items 1 and 2
-put first on 2026-11-15). Each is an open question below until it is designed.
-
-1. Terminal output (designed 2026-11-15, see Terminal output): `internal/view` and its components, then the commands one
-   at a time (`delete`, `update`, `report`, `scan` and `roots`, `export` and help). `internal/view` and `delete` done on
-   2026-11-16 (component tests in `internal/view`, golden files `internal/cli/testdata/delete-*.txt`); `update`,
-   retention and duplicates CSVs both, done on 2026-11-16 (golden files `testdata/update-*.txt`; every question in
-   `delete` and `update` goes through one helper, `askChoice`). `report` done on 2026-11-16 (golden file
-   `testdata/report.txt`: every section, an empty one as one line ending in "none" (Roots and Register snapshots say
-   "none yet" with what to do; Duplicates says "no groups" when it still lists separate or marked contents); recent
-   events as a list with scan and event columns). Done when each command's mocked scenarios have golden tests of the
-   plain output, and read as designed by hand in a terminal, a 40-column terminal, piped through `cat` and with
-   `NO_COLOR=1`. First, since the duplicates re-plan changes what `update` and `delete` print and can then use the
-   components. `scan` done on 2026-11-15 (golden file `testdata/scan.txt`: every kind of change with a kind cut at
-   ten, a clean directory scan, a disk mounted inside the root, every root with one unmounted; the progress line in
-   `TestProgress`; reviewed 2026-11-15). `roots` done on 2026-11-15 (golden file `testdata/roots.txt`: no roots,
-   add with --no-scan and with a mount point, taking in four roots with one now skipped, the list, set covering more,
-   unchanged and skipping more; `TestRootsAddInterrupted` for Ctrl-C in the first scan; the report's Roots section
-   now shows each root's settings, from the same renderer). `export` done on 2026-11-15 (golden file
-   `testdata/export.txt`: a retention export with a file_date read from a name, nothing to export, a duplicates
-   export with a path that needs quoting, `--separate` with nothing marked; see Terminal output, Export). Help and
-   errors done on 2026-11-15 (golden files `testdata/help*.txt`, one per page, wrapped at 80 columns; usage errors
-   one line with their help in `TestUsageAndHelp`; `TestErrorLine`; `TestOutputGoesThroughTheRenderer`). Nothing
-   prints outside the components now, and `safeText` is retired: the terminal output is done.
-2. Duplicates redesign (2026-11-16, see Duplicates). Done on 2026-11-16: `filo delete FILE.csv` carries out a duplicates CSV with no
-   stored decisions to delete; the `action` column (`delete`, `keep`, `always`); records and always; `filo
-   duplicates` with excluded directories; schema version 8. Done when every scenario in its table has a test, and the
-   README explains the four kinds of keep and the rules. After item 1, so its output uses the components.
-   Planned on 2026-11-15, in five slices, each with its scenario tests written first, from the table: (1) the
-   register, schema 8 (the tables, the new group definition, the report's "Not counted" line; the first design's
-   marks, `filo update` on a duplicates CSV, the marked copies in `filo delete` and `--separate` go in the same slice,
-   since their tables go; F2, the upgrade); (2) the CSV (`action` column, `keep` filled in for records, reading the
-   words, the group rules, the structure checks and refusing an older or a retention CSV; C2, C3, C5, F3); (3)
-   `filo delete FILE.csv` (the check against the disk, the retention rule, the kept-copy check at the moment of
-   deleting through `dispose`, recording records and always, the output as mocked; A, B, D, E, C1, C4); (4)
-   `filo duplicates` list, `exclude` and `include` (mockup to agree first); (5) README, help and status. Between
-   slices 1 and 3 duplicates cannot be deleted at all (accepted: the real-data run waits for the redesign anyway);
-   slices 1 to 4 stay on one branch, so `main` never sits in that gap nor points at a `filo duplicates` not yet
-   built (changed from 1 to 3 after the review of slice 1: its messages name `filo delete FILE` and `filo
-   duplicates`, true only once those slices land). The branch's build is not run on the real register before slice
-   3: the upgrade's warning is shown once, and its advice (export again to decide) can only be followed from then. Slice 1 done on 2026-11-15
-   (`TestDuplicateGroups` for the group definition, F2 and F3; `TestMigrateFromV7` and `TestMigrateFromV7Quiet` for
-   the upgrade; `TestNotCounted`, `TestAbsorbMovesExclusions`; `TestUpdateRefusesDuplicatesCSV`; and by hand: a
-   register made by the release before, with a mark and a separate content, upgraded by this build, the warning
-   once, nothing deleted). The tests of the first design's flow went with it; their scenarios return in slices 2
-   and 3, the bind-mounted copy in the check at the moment of deleting among them. Reviewed the same day: a copy is a record if any of
-   its paths is (hard links held as two file rows, and bind-mounted paths merged by the export, which then decides
-   again which contents are groups), and "not counted" counts only what would otherwise be a group. Slice 2 done on
-   2026-11-15: `duplicates.ReadCSV` refuses a CSV of the first design, a retention CSV and one without an action
-   column; `duplicates.Plan` applies the group rules and the structure checks to the rows, against the groups the
-   register recorded for each export (`store.ExportedGroups`), and notes each group's exported copies with no row in
-   the CSV for slice 3's check against the disk (C1). Tests: `TestParseAction`, `TestPlanGroupRules` (every row of
-   the rules table, C3), `TestPlanStructure` (C2, C5, C1), `TestWriteCSV` (F3), `TestReadCSVRefusesOtherCSVs`, and
-   `TestDuplicatesCSVRoundTrip` from export to plan; the export's words as agreed (Duplicates, Output). A CSV may
-   hold groups of several exports, each row checked against its own (agreed 2026-11-15); and it may be partial: groups
-   deleted from it are not planned and blank ones are left alone, so a CSV can be worked through and run several
-   times.
-   Slice 2 reviewed on 2026-11-16: a row listed twice now refuses every group it is listed in and its exported
-   group whichever row comes first (before, with the original first, its group was still decided: sorting changed
-   the outcome); both orders are in `TestPlanStructure`. And a file given different actions in two exports in one CSV now refuses
-   both groups (B3 in `TestPlanStructure`).
-   Slice 3 done on 2026-11-16: `filo delete FILE.csv` (`internal/cli/dupdelete.go`; a regular file as the argument
-   is a duplicates CSV, a directory is DIR as before), with `store.ExportedCopies` (each exported copy and its state
-   in the register now), `store.RecordSet` and `store.AddAlways`, and `fsid.Links` for the hard-link rule. A run
-   exits 1 when the CSV refuses a group (as `filo update` does for a refused row), 0 when groups are only skipped.
-   Tests: `TestDuplicatesDeleteRunTwice` (A1, A2), `TestDuplicatesDeleteSeveralCSVs` (B1-B3),
-   `TestDuplicatesDeleteEditedCSV` (C1 both ways, C4), `TestDuplicatesDeleteChangedFiles` (D1-D4, an unreadable
-   copy kept and an unreadable directory), `TestDuplicatesDeleteInsideARun` (E1-E4), `TestDuplicatesDeleteSameFile`
-   (a bind mount after the export, a hard link), `TestDuplicatesDeleteAsking`, and the golden files
-   `testdata/delete-duplicates-{yes,again,select}.txt`; checked by hand on a throwaway tree, run twice. Reviewed
-   the same day, all nine findings fixed (`TestDuplicatesDeleteReviewFindings`, and a hard link made during the
-   check in `dispose`'s `TestDeleteDuplicate`): one group in two overlapping exports with the same actions is
-   carried out once (the later says "the same as group N of export M"); a refused group exits 1 also when nothing is
-   done; records asked for with one copy to keep left say "nothing to record"; the hard-link rule is checked again
-   at the last look (`dispose.OnlyLink`; where links cannot be counted, nothing is deleted); an argument that is not
-   a directory is a CSV, so a mistyped name fails as "open FILE"; readability and hard links are checked only for a
-   group with something to delete, and one readable copy to keep is enough; groups are matched in one pass; the
-   "moved since the export (now X)" path is the first by root and path. The help for `filo delete` still names DIR only (slice 5).
-   Slice 4 done on 2026-11-16: `filo duplicates`, `exclude DIR` and `include PATH` (`internal/cli/dupcmd.go`,
-   `internal/store/notcounted.go`), as in the mockups under Duplicates, Output. The list shows the contents always
-   and the sets of records with two or more copies present, as the report's "not counted" line counts them (a set
-   or a content with one copy left keeps nothing out, so it is not listed; it stays stored). `include` on a file
-   that is both a record and always undoes the record and says the content is still always; a file not in the
-   register is an error ("run filo scan"); a directory that is not excluded but has exclusions under it says so.
-   Exclusions are matched by exact path prefix (never as LIKE patterns). Tests: `TestDuplicatesList`,
-   `TestDuplicatesExclude`, `TestDuplicatesInclude`, `TestDuplicatesUsage`, and the golden file
-   `testdata/duplicates.txt`. Reviewed the same day; nine of ten findings fixed (`TestDuplicatesReviewFindings`):
-   `include` finds a PATH no longer on disk by its path alone (`store.Locate`), so the exclusion of a directory since
-   deleted or unmounted can still be removed, and a record whose directory went still included; the list counts as the
-   report does (a content always is listed as always only; a set with a new copy is a group again, so not listed,
-   though `include` still removes it); `include` sees a file's copy as the list does (a hard link of a record is a
-   record; copies counted the same way, excluded ones left out); `filo duplicates` has its help page
-   (`testdata/help-duplicates.txt`); the "dir or under it" test is one SQL fragment (`atOrUnder`); `store.AbsPath`;
-   "1 file … counts". Not changed: `exclude` and `include` count the groups before and after (the design's sanity
-   check), and the list counts each exclusion on its own (they are few).
-   Slice 5 done on 2026-11-16: the README's Duplicates section (the rule, the four kinds of keep, the group rules,
-   retentions across copies, the list and its checks, `filo duplicates`), its status, commands, exit codes and
-   roadmap; the help overview lists `delete FILE` and `duplicates`, `filo delete`'s page covers a duplicates CSV
-   (golden files `help.txt`, `help-delete.txt`, `help-export.txt`). The redesign is done: every scenario in its
-   table has a test (A-F: slices 1-3; the plan's C2, C3, C5 in `internal/duplicates`). Still to do: run it on the
-   real register (back up first; the upgrade to schema 8 warns once), then merge the branch.
-3. Named retention policies (designed 2026-11-16, see Lifespan, Named retention policies), on branch
-   `retention-policies`, in four slices, each with its scenario tests written first: (1) the register and store,
-   schema 9 (the tables, policies worked out into `keep_until`, the status *needs a file_date*, `policy_changes`;
-   G1, B3, F1, E2's status); (2) the retention CSV (policy names in the cell, `filo update`'s create question, the
-   refusals, the export; A1-A3, B1, B2, B4, B5, E3); (3) `filo policies` (list, add, set, move, remove, show and
-   their questions; A4, C1-C4, D1, D2, E1, E2); (4) the report's line and count, the README (with the date rule),
-   the help. Done when every scenario has a test.
-   Slice 1 done on 2026-11-16 (`internal/store/policies.go`, schema 9): `PolicyName`, `AddPolicy`, `Policies`,
-   `Policy`, `PreviewPolicy` and `SetPolicy`, `PreviewMove` and `MovePolicy`, `RemovePolicy`, `PolicyFiles`; a file
-   on a policy reads with the policy's name as its retention (`FileItem.Policy`, `PolicyValue`), also in the
-   duplicates CSV; the status *needs a file_date*; `SetRetention` (filo delete's prompt) takes a file off its policy.
-   `RemovePolicy` gives the deleted and missing files still on the policy its value as a retention of their own, so a
-   missing file that comes back keeps its keep_until. `files.policy_id` is not declared a foreign key (ALTER TABLE
-   cannot drop such a column, which the upgrade tests need); the store keeps it pointing at a policy. Tests:
-   `TestPolicyName`, `TestAddPolicy` (A4), `TestPolicyKeepUntil` (B3, F1, E2's status), `TestSetPolicy` (C1-C4 in the
-   store), `TestMoveAndRemovePolicy` (D1, D2), `TestSetRetentionLeavesThePolicy` (B4 in the store),
-   `TestMigrateFromV8` (G1); by hand, a register made by the `main` build upgraded by this one (schema 9, the
-   pre-upgrade snapshot). Reviewed the same day; nine of ten findings fixed (`TestPolicyReviewFindings`,
-   `TestDuplicatesDeleteNeedsFileDate`), the tenth (a policy file's name in the CSV is refused by `filo update`) is
-   slice 2's: `filo update` setting a retention of its own takes a file off its policy too; `SetPolicy` and
-   `MovePolicy` count present files (as the previews do) and the history counts the dates changed; removing a period
-   policy gives a missing file with no file_date no retention, rather than a period with nothing to count from;
-   policies are read inside the transaction that changes them; a `Filter.PolicyID` replaces loading every file; one
-   SQL spelling of a file's retention (`retentionColumns`), so the duplicates code sees the policy's value; policy
-   names are checked in ASCII before lowering (no Kelvin sign as k); the preview leaves the status out. **In the
-   duplicates rules** (agreed 2026-11-16): a copy to delete that needs a file_date refuses its group ("needs a
-   file_date first"), since its retention's end is not known.
-   Slice 2 done on 2026-11-16: a policy name in the retention CSV (`retention.ParseRetention` returns it in lower
-   case; `store.IsPolicyRef` tells it from a period, a date and `forever`); `store.UpdateRetentionWith` puts the file
-   on the policy and works keep_until out from its value, lists the new policies (`NewPolicy`) and creates them only
-   if `ConfirmPolicies` says yes (declined, or no terminal: those rows are left alone; a dry run lists them); a row
-   naming a period policy with no file_date is refused, which also refuses clearing the file_date (E3); the stored
-   retention is read as the policy's name, so an export of a policy file updates untouched (the review's tenth
-   finding). `filo update` shows the "New policies" block and asks `Create 2 policies? [y/N]` before the clears.
-   `filo delete`'s new-retention prompt takes a policy name too: an existing policy puts the file on it, an unknown
-   one is refused there ("no such policy"), since that prompt does not create one; `KeepUntil` refuses a name, as a
-   safety net. Every policy name is a valid cell now, so a lone `y` or `indefinitely` would be a new policy: the
-   question catches them. Tests: `TestParseRetention`, `TestUpdateRetentionPolicies` (A1, A2, B1, B2, B4, B5, E3),
-   `TestSetRetentionPolicy`, `TestUpdatePolicies` (golden `testdata/update-policies.txt`). Reviewed the same day,
-   all ten findings fixed: a file_date suggested from the name is kept for a policy whose value is a period (the rule
-   looked at the name, so such rows could never apply); `filo update` counts the files put on a policy with no value
-   apart ("they need a retention until it has one"); filo delete's prompt says when a policy has no value yet, shows
-   policy names in its refusal, and treats only "no such policy" and "needs a file_date" (`NeedsFileDateError`) as
-   refusals, any other error ending the command; an update looks each policy up once (`policyCache`) and keeps its
-   ID for the write; `policyJoin` with `retentionColumns` is the one spelling, used by `filo update`'s check too.
-   **In the duplicates rules** (agreed 2026-11-16): a copy to delete on a policy with no value yet refuses its group
-   too ("its policy payslip has no value yet"). Tests: new cases in `TestUpdatePolicies`, `TestDeletePromptPolicies`,
-   `TestDuplicatesDeleteNeedsFileDate`.
-   Slice 3 done on 2026-11-16: `filo policies` (`internal/cli/policies.go`), as mocked: the list (a `view.Table`:
-   name, value, "from each file's file_date" for a period, files, and a `!` note: needs a retention, passed, N without
-   a file_date; the heading counts those needing attention), `add`, `set` (a change with nothing to ask about is one
-   `Done` line; shortening that puts files past their date, or a period leaving files without a file_date, shows them
-   and asks; `-y`; no terminal changes nothing), `move` (asks for a rename too: `Rename bils to bilz (1 file)?`; a
-   merge shows what it would do to dates and ends `Next: filo policies remove OLD`), `remove` (refused in one line
-   while in use), `show` (files needing a file_date first, with the `Next:` to fix them). A passed date policy with
-   files is flagged too ("its files are past their retention"). The help page `filo help policies`; the overview
-   waits for slice 4. Tests: `TestPoliciesAdd` (A4), `TestPoliciesList` (E1, E2's flag), `TestPoliciesSet`
-   (C1-C4), `TestPoliciesMoveRemove` (D1, D2), `TestPoliciesShow`, `TestPoliciesUsage`, golden
-   `testdata/policies.txt` and `help-policies.txt`. Reviewed the same day: seven of eight findings fixed
-   (`TestPoliciesReviewFindings`); the eighth (hard links counted twice) does not apply, since a hard link is a file
-   row of its own. A move onto the same policy (`bills` to `BILLS`) is refused; a question after a cut list offers
-   `l` (`askYesNo`, now also behind `filo update`'s two questions; `confirmChange` for the policies ones); a merge
-   into a policy with no value lists the files that would lose their keep_until (`PolicyPreview.LoseDate`) and
-   asks; one wording for a policy with no value ("no value"); the list works out today once.
-   Slice 4 done on 2026-11-16: the report's Retention section names the policies whose files need a file_date (`! 1
-   file needs a file_date: its policy counts from it (bills, 7y)`; the status reads "no file_date for their policy"
-   in the needs-a-retention count) and ends with `N policies, M need attention (filo policies)` when there are any
-   (`report.PolicyAttention`, shared with `filo policies`); the help overview lists the policies commands, `filo
-   delete`'s page states the date rule, the export page names policy names; the README has a "Retention policies"
-   section and the date rule. Test: `TestReportPolicies`; goldens `help.txt`, `help-delete.txt`, `help-export.txt`.
-   Reviewed the same day (the whole branch), all nine findings fixed (`TestOldCSVAfterMove`,
-   `TestReportPoliciesReviewFindings`): a `move` or rename records a history row per file (`reviews`, batch
-   `policies`), so a row of a CSV exported before it and edited since is refused ("changed after export"), and an
-   old CSV never puts a file back on the old name; the report's policies line shows with no files too, marked `!`
-   when a policy needs attention, and names the policies of exactly the files it counts as needing a file_date; a
-   `set` question names both what it puts past and what it leaves without a file_date. **Named retention policies are
-   done**: every scenario in the table has a test. Next: merge; then directory rules (item 4).
-4. Directory rules: a policy for the files under a directory, applied by every scan (designed 2026-11-16, see
-   Lifespan, Directory rules; schema 10). Four slices on branch `directory-rules`, one PR when all four are done, so
-   it brings a complete feature. Scenario tests first in each slice.
-   1. *Register and matching*: schema 10; matching in a new package `internal/rules` (globs on the name in any case,
-      letter count, nearest directory first, ties reported); the store adds, changes, removes, moves and copies rules
-      and dates files by them; rules get a root's prefix when a root is added above it; `filo policies` remove and move
-      take rules into account. Nothing calls the rules yet. Scenarios C1-C3, D3, G1, F3. Done on 2026-11-16:
-      `internal/rules` (`Pattern`, `Letters`, `Match`, `Resolve`, `Compare`; a `[` or `\` in a pattern is itself (a `\`
-      refused since 2026-11-17, and `Letters` is now `Length`, see after slice 3), and `**` is `*`); schema 10
-      (`TestMigrateFromV9`); `store.AddRule`, `SetRule`, `RemoveRule`, `Rules`, `MoveRules`
-      (move and copy), each of the three that apply rules with a preview that runs the same work in a transaction it
-      rolls back (`PreviewAddRule`, `PreviewMoveRules`); dating in `store/ruledate.go`. Tests: `TestResolve`,
-      `TestCompare`, `TestMatch`, `TestAddRule`, `TestSetAndRemoveRule`, `TestMoveRules`, `TestPoliciesAndRules`,
-      `TestRuleDating`, `TestRuleTies`, and the absorb test (F3). Reviewed the same day, nine of ten findings fixed (one
-      of them, hard links, undone the same day: it took a hard link for one file with two paths, while Filo keeps each
-      link as a file of its own; the person chose each link dated by its own directory's rule, C4); files under a
-      directory the latest scan covering it could not read left alone by `add`, `move` and `copy` too
-      (`TestRuleDatingUnreadDirs`); a rule's directory checked for the register's form and its root for being
-      registered; a move up allowed; `*?` stored as `?*`; a root's rules indexed once, and `add` reading only its
-      directory. The tenth (the duplicate check before the insert repeats the unique constraint) kept: it gives the
-      one-line error, with the same key. Slice 2 must refuse `add`, `move` and `copy` in a root that cannot be reached
-      (not mounted), which the store cannot see.
-   2. *`filo rules`*: the list (`[DIR]`, the order tried, counts, flags), `add` (a policy created if needed,
-      `--dry-run`), `set`, `remove`, as mocked (agreed 2026-11-16), and the help page; refused in a root that cannot be
-      reached. Scenarios A, B4, D, F1.
-      Done on 2026-11-16: `internal/cli/rules.go`, `view.Groups` (a table of rows under directory names),
-      `store.RuleTies` (the list's "Not applied"); the help page `filo help rules`. `set` and `remove` say the files
-      "keep the policy it set", not the rule's old policy by name: a rule set more than once may have dated
-      them with different ones. `add`'s line ends with the root, as every heading does. Tests: `TestRulesGolden`
-      (`testdata/rules.txt`), `TestRulesAdd`, `TestRulesSetRemove`, `TestRulesListScope`. Not tested: refusing a
-      root that is not mounted (it is `store.Resolve`'s, and needs a real mount).
-   3. *Applied by every scan*: the scan's sections on what it set and did not (as mocked, agreed 2026-11-16); `filo
-      report` counts the files with a policy set by rules, lists the ties and suggests `filo rules add`. Scenarios B,
-      C2, F2.
-      Done on 2026-11-16: `store.ApplyScanRules` applies the rules in the scan's transaction, after its changes, to
-      every file in its scope with no retention, stamped with the scan (`ApplyScan` does the same, returning the scan
-      ID only); `reconcile.Summary.Rules`; the scan's count lines, "Policies set by rules" (`view.HeadedTable`) and
-      the ties; the report's count, ties and next step; a retention set by hand (CSV, `filo delete`, a removed
-      policy's value) takes a file off its rule (`files.rule_id` cleared, the mark kept); `FileItem.RuleID`. In the
-      report the tie line comes after "Where most need one", which stays right under the line it explains. Tests:
-      `TestScanAppliesRules`, `TestRetentionByHandLeavesTheRule`, `TestScanSummaryRules`, `TestHeadedTable`,
-      `TestScanRulesGolden` (`testdata/scan-rules.txt`), `TestReportRules`.
-      Reviewed the same day, six of eight findings fixed: `filo update` (and a retention given at `filo delete`)
-      keeps a file on its rule while its policy stays the rule's, so filling in a `file_date` does not take it off;
-      applying the rules reads only the files with no retention (`Filter.Ruleless`) before classifying, so a scan
-      holds the write lock for those only; one tie wording for scan and report (`report.TieWhy`); the report's tie
-      rows name the rules' directory; a scan whose only finding is a tie gets a next step. Kept: `ApplyScan` beside
-      `ApplyScanRules` (both apply the rules; the tests want the scan ID only), and the headed table's trailing
-      padding (`write` already drops it).
-      Changed after the PR review of slices 1-3 (2026-11-17): a `?` counts toward a pattern's length (only `*` does
-      not), and a `\` in a pattern is refused as a `/` is; each refusal of a pattern names the check that failed.
-   4. *`move` and `copy`*, then the README (a "Directory rules" section, quoting patterns) and the help overview.
-      Scenarios E.
-      Done on 2026-11-17: `filo rules move OLD NEW` and `copy OLD NEW` with `--dry-run` (`store.MoveRules`,
-      `PreviewMoveRules` from slice 1), said as agreed: `Done   moved 2 rules from bank to banking · policy set on 1
-      file`, a dry run as `add`'s (`would move`, the files, "nothing was changed"). OLD may be gone from disk (found
-      by its path, `store.Locate`: the rename that calls for a move); NEW must be on disk in a root that can be
-      reached. With two roots both directories are named in full. A refusal because NEW or a directory below it has
-      rules lists them under their directories before the error line. The help page and the overview list both;
-      the README has a "Directory rules" section. Tests: `TestRulesMoveCopy` (E1-E3, a dry run, another root, the
-      arguments), `TestRulesMoveGolden` (`testdata/rules-move.txt`). **Directory rules are done**: every scenario in
-      the table has a test. Next: the PR, then removing empty directories (item 13).
-11. Replacing an existing `-o` file after asking (decided 2026-11-16, see Lifespan). Done on 2026-11-16:
-    `TestExportReplace` (no terminal, no, Enter, yes, a directory, a symlink, a device, `-y`) and
-    `TestWriteExportReplace` (a failed write and a file changed after asking leave the old file as it was).
-12. Every export scans first, `--no-scan` to skip it (decided 2026-11-16 for `export duplicates`, widened the same
-    day to `export retention`; see Lifespan, "A scan first"). Done on 2026-11-16: `TestExportScansFirst` (a file
-    saved since the last scan, DIR only, every root for duplicates, `--no-scan` and its line, a failed root, Ctrl-C)
-    and the golden file `testdata/export.txt`.
-
-## 7. Rejected
+## 5. Rejected
 
 - **Accepted risks** (security review of 2026-11-13). Anyone who can edit the register already runs as the user and
   could delete files directly, so an altered register matters through indirect routes (a restored snapshot, a
