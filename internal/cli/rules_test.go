@@ -91,7 +91,9 @@ func TestRulesAdd(t *testing.T) {
 	rt.contains("a file", rt.filo(ExitError, "", false, "rules", "add", rt.in("notes.txt"), "x").stderr,
 		"is not a directory: a rule is for a directory's files")
 	rt.contains("a pattern with /", rt.filo(ExitError, "", false, "rules", "add", bank, "a/b", "x").stderr,
-		`"a/b": a pattern is a file name with * and ?, without /`)
+		`"a/b": a pattern is a file name, without / or a backslash`)
+	rt.contains("a pattern with \\", rt.filo(ExitError, "", false, "rules", "add", bank, `a\b`, "x").stderr,
+		"a pattern is a file name, without / or a backslash")
 	rt.contains("a bad policy", rt.filo(ExitError, "", false, "rules", "add", bank, "*.pdf", "7y").stderr,
 		"starting with a letter")
 	rt.contains("dry run elsewhere", rt.filo(ExitUsage, "", false, "rules", "remove", bank, "--dry-run").stderr,

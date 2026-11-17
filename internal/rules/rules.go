@@ -17,8 +17,25 @@ import (
 // Any is the pattern that matches every name: a rule given no pattern has it.
 const Any = "*"
 
-// ErrPattern means a pattern that cannot be a rule's.
-var ErrPattern = errors.New("a pattern is a file name with * and ?, without /")
+// ErrPattern means a pattern that cannot be a rule's: errors.Is matches each refusal below, and each says which check
+// failed.
+var ErrPattern = errors.New("not a pattern")
+
+// patternError is one refusal of a pattern, which is also ErrPattern.
+type patternError string
+
+func (e patternError) Error() string        { return string(e) }
+func (e patternError) Is(target error) bool { return target == ErrPattern }
+
+// The refusals of a pattern. A \ is refused as a / is: it is usually a Windows path or a shell escape (\*), which
+// match would take as the character itself, and a name with one is still matched by ?. Nothing else is checked: a
+// pattern no file can be named (..) matches nothing, and a pattern is never joined into a path.
+const (
+	errSeparator patternError = "a pattern is a file name, without / or a backslash"
+	errNUL       patternError = "a pattern cannot contain a NUL character"
+	errUTF8      patternError = "a pattern must be valid UTF-8"
+	errLong      patternError = "a pattern is at most 255 bytes"
+)
 
 // maxPattern is the longest pattern, in bytes: the longest file name most filesystems allow.
 const maxPattern = 255
@@ -31,8 +48,15 @@ func Pattern(p string) (string, error) {
 	if p == "" {
 		return Any, nil
 	}
-	if strings.ContainsAny(p, "/\x00") || !utf8.ValidString(p) || len(p) > maxPattern {
-		return "", ErrPattern
+	switch {
+	case !utf8.ValidString(p):
+		return "", errUTF8
+	case strings.ContainsRune(p, 0):
+		return "", errNUL
+	case strings.ContainsAny(p, "/\\"):
+		return "", errSeparator
+	case len(p) > maxPattern:
+		return "", errLong
 	}
 	var b strings.Builder
 	q, star := 0, false // the run of wildcards being read: how many ?, and whether it has a *

@@ -10,27 +10,37 @@ import (
 func TestPattern(t *testing.T) {
 	tests := []struct {
 		in, want string
-		err      bool
+		err      string // the refusal, "" for none
 	}{
-		{"", Any, false},
-		{"*", "*", false},
-		{"**", "*", false},
-		{"*Daily**Statement***", "*Daily*Statement*", false},
-		{"*?", "?*", false},
-		{"?*?", "??*", false},
-		{"*?*a?**", "?*a?*", false},
-		{"a?b", "a?b", false},
-		{"Statement [2024].pdf", "Statement [2024].pdf", false},
-		{" spaced name ", " spaced name ", false},
-		{"bank/*", "", true},
-		{"a\x00b", "", true},
-		{"\xff", "", true},
-		{strings.Repeat("a", 256), "", true},
+		{"", Any, ""},
+		{"*", "*", ""},
+		{"**", "*", ""},
+		{"*Daily**Statement***", "*Daily*Statement*", ""},
+		{"*?", "?*", ""},
+		{"?*?", "??*", ""},
+		{"*?*a?**", "?*a?*", ""},
+		{"a?b", "a?b", ""},
+		{"Statement [2024].pdf", "Statement [2024].pdf", ""},
+		{" spaced name ", " spaced name ", ""},
+		{"notes..bak", "notes..bak", ""}, // a name, not a path: .. is two dots
+		{"..", "..", ""},                 // matches no file, but is not refused
+		{strings.Repeat("a", 255), strings.Repeat("a", 255), ""},
+		{"bank/*", "", "a pattern is a file name, without / or a backslash"},
+		{`bank\*`, "", "a pattern is a file name, without / or a backslash"},
+		{`\*`, "", "a pattern is a file name, without / or a backslash"},
+		{"a\x00b", "", "a pattern cannot contain a NUL character"},
+		{"\xff", "", "a pattern must be valid UTF-8"},
+		{strings.Repeat("a", 256), "", "a pattern is at most 255 bytes"},
+		{strings.Repeat("é", 128), "", "a pattern is at most 255 bytes"}, // 256 bytes, 128 characters
 	}
 	for _, tc := range tests {
 		got, err := Pattern(tc.in)
-		if (err != nil) != tc.err || got != tc.want {
-			t.Errorf("Pattern(%q) = %q, %v; want %q, error %v", tc.in, got, err, tc.want, tc.err)
+		var gotErr string
+		if err != nil {
+			gotErr = err.Error()
+		}
+		if gotErr != tc.err || got != tc.want {
+			t.Errorf("Pattern(%q) = %q, %q; want %q, %q", tc.in, got, gotErr, tc.want, tc.err)
 		}
 		if err != nil && !errors.Is(err, ErrPattern) {
 			t.Errorf("Pattern(%q): error %v is not ErrPattern", tc.in, err)
