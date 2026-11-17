@@ -1,5 +1,8 @@
 # Filo: design
 
+**The present.** Of three documents, this is the present: `design.md` (what Filo is), `roadmap.md` (the future:
+what it is not yet) and `history.md` (the past: how it got here).
+
 Filo as built: schema version 10. Last updated: 2026-11-17.
 
 This file records what Filo does and why, as built. Work not done yet, ideas, open questions and ideas rejected are

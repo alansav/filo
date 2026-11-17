@@ -1,5 +1,8 @@
 # Filo: history
 
+**The past.** Of three documents, this is the past: `history.md` (how Filo got here), `design.md` (the present:
+what it is) and `roadmap.md` (the future: what it is not yet).
+
 How Filo was built: the build log, decisions that were replaced, and the notes that explain how the design got to
 where it is. Nothing here describes Filo as it is; that is `design.md`. Work not done yet is in `roadmap.md`.
 

@@ -1,5 +1,8 @@
 # Filo: roadmap
 
+**The future.** Of three documents, this is the future: `roadmap.md` (what Filo is not yet), `design.md` (the
+present: what it is) and `history.md` (the past: how it got here).
+
 Everything Filo does not do: the work planned, ideas, open questions, deferred improvements, and ideas rejected. What
 Filo does today is in `design.md`; how it was built is in `history.md`. An item stays here while it is discussed and
 designed. When work on it starts, its design moves into `design.md` (the first commit of its branch); when it is
