@@ -1,8 +1,18 @@
 # Filo
 
 Go CLI that keeps a SQLite register of files, tracks where they live, and drives a review-and-dispose workflow so
-files do not pile up forever. The full design is in `docs/design.md`. Read it before changing behaviour, and update it
-on the same branch when a design decision changes (in its own commit, first in the series; see "After writing code").
+files do not pile up forever. Three documents, kept apart:
+
+- `docs/design.md`: Filo as it is on `main`, and why. Nothing that is not built. Read it before changing behaviour.
+- `docs/roadmap.md`: everything not built yet: the priority, the items (with their numbers), ideas and deferred
+  improvements. A design is worked out here while it is discussed.
+- `docs/history.md`: how Filo was built: the build log, replaced decisions, dated notes.
+
+When work on a roadmap item starts, the first commit of its branch moves its design from `roadmap.md` into
+`design.md`, in its own commit (see "After writing code"); a design decision that changes during the work is changed
+there on the same branch. When the item is complete, nothing of it is left in `roadmap.md`, and its build notes (dates,
+slices, review findings, test lists) go to `history.md`, never into `design.md`. So `roadmap.md` only lists work not
+done, and `design.md` only what exists.
 
 ## Current state
 
@@ -74,19 +84,20 @@ large item is built in slices on the one branch, and the PR is opened only when 
 reads every commit on its own, so a piece of work is committed as a short series of small commits on the current
 branch, never on `main`:
 
-1. Commit as you go, lower layers first, each commit with its own tests: the `docs/design.md` change alone first,
-   then the store and schema, then the internal package(s), then the `internal/view` output, then the `cmd/filo`
-   wiring and end-to-end tests. Before each commit, `gofmt`, `go vet`, `staticcheck` and `go test ./...` must all
-   pass, so every commit builds and is green on its own. Each commit is one atomic unit that does exactly what its
-   message says; its size comes second (do not split or merge commits to reach a number of lines). Each message
-   says what the commit adds and, if part of the work is still to come, what (for example "not called by any
+1. Commit as you go, lower layers first, each commit with its own tests: the design moved from `docs/roadmap.md` into
+   `docs/design.md` alone first, then the store and schema, then the internal package(s), then the `internal/view`
+   output, then the `cmd/filo` wiring and end-to-end tests. Before each commit, `gofmt`, `go vet`, `staticcheck` and `go
+   test ./...` must all pass, so every commit builds and is green on its own. Each commit is one atomic unit that does
+   exactly what its message says; its size comes second (do not split or merge commits to reach a number of lines). Each
+   message says what the commit adds and, if part of the work is still to come, what (for example "not called by any
    command yet").
 2. When the series is done (for an item built in slices, when each slice is done), run one code review over it (the
    `code-review` skill, level `medium`, on that series' commits: `main..HEAD`, or from the previous slice's last
    commit), fix what it finds, run the checks again, and commit the fixes as separate commits, one "Review fixes for
    <subject>" commit per commit they belong to, so each can be read next to what it fixes.
-3. Stop and report the commits, each with a one-line summary; after a slice, wait for the user before the next one.
-   One review round only: do not review the fixes again.
+3. When the item is complete, the last commit removes what is left of it from `docs/roadmap.md` and adds its build notes
+   to `docs/history.md`. Stop and report the commits, each with a one-line summary; after a slice, wait for the user
+   before the next one. One review round only: do not review the fixes again.
 
 Stop and ask instead of committing if a check fails and the fix is not obvious, if a finding needs a design decision
 or a change to `docs/design.md`, if a finding looks wrong or out of scope, or if anything else is unclear.
@@ -99,7 +110,8 @@ or a change to `docs/design.md`, if a finding looks wrong or out of scope, or if
   components; commands hand it data and never format output themselves)). Keep OS-specific code (hidden files,
   inodes, symlinks, path separators, the terminal's width) behind small functions.
 - `scripts/`: helper scripts (`dev.sh`, `testtree.sh`).
-- `.devcontainer/Containerfile`: the dev container. `docs/design.md`: the design.
+- `.devcontainer/Containerfile`: the dev container. `docs/design.md`: the design as built; `docs/roadmap.md`: what
+  is planned; `docs/history.md`: how it was built.
 
 ## Conventions
 
