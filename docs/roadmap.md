@@ -26,7 +26,7 @@ and getting rid of it safely when its time comes. The register is how it does th
 ## Priority
 
 Provisional, agreed 2026-11-17; the value and complexity scores (1 to 10, Claude's estimates) are still to be
-settled with the person. Items 22 to 29 are not placed yet.
+settled with the person. Items 22 to 33 are not placed yet.
 
 1. 19 search by name
 2. 9b device ID, 20 the Filo directory, 9a marking synced directories, 9c sharing decisions
@@ -240,6 +240,30 @@ Several items lean on regular scans: 10, 27a, 9c.
 `filo export --links`: a column whose cell opens the file (and, for duplicates, its directory) from the spreadsheet,
 so copies can be checked with a click. Mainly for duplicates. Whether a spreadsheet makes such a cell clickable is to
 be checked in Calc first; the column is display-only, and file names inside it are untrusted.
+
+### Docs
+
+Improvements to the three documents themselves, suggested on 2026-11-17 after the split.
+
+#### 30. A test that keeps design.md's output examples honest (V6, C3)
+The examples in `design.md` are excerpts of the golden files in `internal/cli/testdata`; they drift again as soon
+as output changes and the doc is not updated. A test could check that every example block in `design.md` still
+appears in a golden file, so a change to the output that is not carried into the doc fails the build. A Go test
+reading a document is a small coupling; in return "design.md matches the app" becomes a check, not a habit.
+
+#### 31. Splitting design.md by feature (V4, C3)
+`design.md` is about 1,800 lines. One file per feature (`design/duplicates.md`, `design/rules.md`, …) would make each
+branch's design commit, and each read before a change, smaller. The cost: the code comments that cite "design.md,
+Duplicates" and the like are updated to the new paths.
+
+#### 32. history.md append-only (V3, C1)
+New entries go at the end, dated, and old ones are never rewritten, so the past cannot drift the way `design.md`
+did. A rule for `CLAUDE.md`, no code.
+
+#### 33. Short roadmap items until one is picked (V3, C1)
+An item holds its value and complexity and a few lines of what and why; detailed design notes are written only
+once it is chosen, so the roadmap stays a list that can be scanned and reordered. Some items above already hold
+more (carried over from the old open questions); they are trimmed when reviewed. A rule for `CLAUDE.md`, no code.
 
 ### Later a. `filo files`, the query view (V6, C3)
 Viewing the register: `filo files [DIR] [--name GLOB] [--larger SIZE] [--smaller SIZE] [--modified-before DATE]
