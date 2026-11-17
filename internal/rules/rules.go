@@ -2,7 +2,8 @@
 // rules). A rule is a directory and a pattern on the file's name; for a file, the rules of its own directory are
 // tried first, then those of each parent up to the root, and the first directory with a rule that matches decides.
 // Within a directory the longest pattern wins (every character counts but *, so a ? counts as the one character it
-// matches), and two matching patterns as long are a tie: reported, never guessed. Nothing here reads the disk or the register.
+// matches), and two matching patterns as long are a tie: reported, never guessed. Nothing here reads the disk or the
+// register.
 package rules
 
 import (
