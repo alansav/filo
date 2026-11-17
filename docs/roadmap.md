@@ -3,8 +3,8 @@
 Everything Filo does not do yet: the work planned, ideas, open questions and deferred improvements. What Filo does
 today is in `design.md`; how it was built is in `history.md`. An item stays here while it is discussed and designed.
 When work on it starts, its design moves into `design.md` (the first commit of its branch); when it is complete,
-nothing of it is left here. Items keep their numbers, so gaps in the numbering are the work already done. Last
-updated: 2026-11-17.
+nothing of it is left here. Items keep their numbers, so gaps in the numbering are work already done, or ideas
+rejected (those are in `design.md`, Rejected: 14, deleting to the trash, on 2026-11-17). Last updated: 2026-11-17.
 
 ## Direction
 
@@ -92,7 +92,9 @@ surfaced.
 
 ### 9b. A device ID (V3, C1)
 A random device ID in `meta`, made when the database is created, and recorded with each decision, so no decision
-ever has an unknown origin. Small, and cheaper the earlier it is done; needed by 9c.
+ever has an unknown origin. Small, and cheaper the earlier it is done; needed by 9c. **To decide first:** `design.md`
+(Rejected, "Device tracking in the database", and Register, "no device column") rules it out while the register is
+never synced; sharing decisions (9c) is the reason to revisit that, while the register itself stays per device.
 
 ### 9c. Sharing decisions between devices (V9, C8)
 A Syncthing folder is on several devices, each with its own register; a retention set on one should be known on the
@@ -121,8 +123,9 @@ there; the content is the same everywhere and deletes propagate.
 
 ### 9d. Snapshots to the backup machine (V4, C3)
 Getting the register snapshots off the machine, so a lost disk does not take the register with it. A snapshot is a
-finished file that nothing opens for writing, so unlike the live database it is safe to sync. With the Filo
-directory (20), each device's snapshots could go to `snapshots/<device-id>/` there.
+finished file that nothing opens for writing, so unlike the live database it is safe to sync, for example by a
+one-way sync of the snapshot directory to a machine that is backed up. With the Filo directory (20), each device's
+snapshots could go to `snapshots/<device-id>/` there.
 
 ### 10. A summary for scheduled scans (V3, C2)
 A short line ("4 files past retention, 2 need a decision") a timer can pass to a desktop notification, so candidates
@@ -139,9 +142,6 @@ empty (today it does not); and that some programs need their empty directories (
 `.git/refs/tags`; project skeletons), which argues for listing them and letting the person choose, as `filo delete`
 does.
 
-### 14. Delete to the trash: rejected
-Rejected on 2026-11-17; see `design.md`, Rejected. The number is kept so the others do not move.
-
 ### 15. Where the space goes (V5, C3)
 A report section, or `filo files --sort size`, showing the largest directories and files and how much of it is past
 retention or in duplicates, so the person knows which directory to date first.
@@ -155,7 +155,8 @@ Point out directories where most files already share one policy and offer the `f
 rest. A suggestion only, never applied on its own.
 
 ### 18a. Projects (V7, C6)
-Files tagged for an event or a project: a project is a named list of files, by their stable ID, so a file keeps its
+Files tagged for an event or a project: a project is a named list of files (links modelled at the project level,
+not per file), by their stable ID, so a file keeps its
 project when it moves or is renamed, and a file can be in several projects. Optional: a project retention ("keep
 these until the project closes, plus 2 years"), next to named policies.
 
@@ -228,7 +229,8 @@ two, so the file keeps its history; its content changed, so it still needs a new
 
 ### 28. Setting up scheduled scans (V5, C2)
 `design.md` (Commands and scheduling) leaves scheduling to a systemd user timer; the README has an example, not yet
-tested. Filo could print the unit files ready to install; by the direction above it does not install them itself.
+tested. Filo could print the unit files ready to install (`Persistent=true`, low CPU and I/O priority); by the
+direction above it does not install them itself.
 Several items lean on regular scans: 10, 27a, 9c.
 
 ### 29. Links in exports (V5, C3)

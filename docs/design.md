@@ -3,7 +3,8 @@
 Filo as built: schema version 10. Last updated: 2026-11-17.
 
 This file records what Filo does and why, as built. Work not done yet, ideas and open questions are in
-`roadmap.md`. When a decision changes, change it here in the same commit.
+`roadmap.md`, where designs are worked out; a design moves here, in its own commit, when work on it starts (see
+`CLAUDE.md`, "After writing code").
 
 ## 1. Problem and principles
 
@@ -1250,8 +1251,8 @@ command's output with them. The examples here are excerpts of them.
     always listed one by one. A refused duplicates group shows its number in a group column (and its export only
     when the CSV mixes exports), and the paths inside a reason are shown relative to the heading's root, like the
     columns: a reason's text is shortened only where a path starts (at the start of the text, or after a space or an
-    opening bracket), so `/mnt/data/x.pdf` stays whole with the root `/data`. Notes (an event's detail, a symlink's
-    target) show full paths: shortening them would rewrite text, and an absolute symlink target would read as a
+    opening bracket), so `/mnt/data/x.pdf` stays whole with the root `/data`. It still rewrites text: a file name
+    holding ` /data/` is shortened too. Notes (an event's detail, a symlink's target) show full paths: shortening them would rewrite text, and an absolute symlink target would read as a
     relative one.
   - *What a confirmation covers* (clears, contents always and sets of records, files now past their retention): the
     first 10 and "and N more", and the prompt offers `l` to list everything before answering (`[y/N/l]`).
