@@ -38,17 +38,17 @@ func TestPattern(t *testing.T) {
 	}
 }
 
-func TestLetters(t *testing.T) {
+func TestLength(t *testing.T) {
 	tests := []struct {
 		p    string
 		want int
 	}{
-		{"*", 0}, {"?", 0}, {"a", 1}, {"*2024*", 4}, {"*bank*", 4}, {"*DailyStatement*", 14}, {"*a*b*c*", 3},
-		{"abc*", 3}, {"Statement ?.pdf", 14}, {"*é*", 1},
+		{"*", 0}, {"?", 1}, {"?*", 1}, {"??*", 2}, {"a", 1}, {"*2024*", 4}, {"*bank*", 4}, {"*DailyStatement*", 14},
+		{"*a*b*c*", 3}, {"abc*", 3}, {"Statement ?.pdf", 15}, {"IMG_????*", 8}, {"*é*", 1},
 	}
 	for _, tc := range tests {
-		if got := Letters(tc.p); got != tc.want {
-			t.Errorf("Letters(%q) = %d, want %d", tc.p, got, tc.want)
+		if got := Length(tc.p); got != tc.want {
+			t.Errorf("Length(%q) = %d, want %d", tc.p, got, tc.want)
 		}
 	}
 }
@@ -109,7 +109,7 @@ func TestResolve(t *testing.T) {
 	}{
 		{"the longest match", "bank/DailyStatement-03.pdf", 1, nil},
 		{"one pattern", "bank/QuarterlyStatement-Q1.pdf", 2, nil},
-		{"two patterns with as many letters: a tie", "bank/bank-2024.pdf", 0, []int64{3, 4}},
+		{"two patterns as long: a tie", "bank/bank-2024.pdf", 0, []int64{3, 4}},
 		{"* is the fallback", "bank/letter.pdf", 5, nil},
 		{"a parent's rules at any depth", "bank/old/deep/letter.pdf", 5, nil},
 		{"the nearest directory wins over a longer pattern above", "bank/2024/DailyStatement-01.pdf", 6, nil},
@@ -135,6 +135,36 @@ func TestResolve(t *testing.T) {
 	}
 }
 
+// A ? counts as the one character it matches: ?* is tried before *, and a? before *a*.
+func TestResolveQuestionMark(t *testing.T) {
+	rs := []Rule{
+		{ID: 1, Dir: "scans", Pattern: "*"},
+		{ID: 2, Dir: "scans", Pattern: "?*"},
+		{ID: 3, Dir: "scans", Pattern: "*a*"},
+		{ID: 4, Dir: "scans", Pattern: "a?"},
+		{ID: 5, Dir: "scans", Pattern: "*b*"},
+	}
+	tests := []struct {
+		rel  string
+		want int64
+		ties []int64
+	}{
+		{"scans/x.pdf", 2, nil},               // ?* (1) over * (0)
+		{"scans/ab", 4, nil},                  // a? (2) over *a* and *b* (1 each)
+		{"scans/ba.pdf", 0, []int64{3, 5, 2}}, // *a*, *b* and ?* all count 1 (sorted by pattern)
+	}
+	for _, tc := range tests {
+		res := Resolve(rs, tc.rel)
+		var ties []int64
+		for _, r := range res.Ties {
+			ties = append(ties, r.ID)
+		}
+		if res.Rule.ID != tc.want || !slices.Equal(ties, tc.ties) {
+			t.Errorf("Resolve(%q) = rule %d, ties %v; want %d, %v", tc.rel, res.Rule.ID, ties, tc.want, tc.ties)
+		}
+	}
+}
+
 func TestCompare(t *testing.T) {
 	rs := []Rule{
 		{Dir: "bank-x", Pattern: "*"},
@@ -143,6 +173,7 @@ func TestCompare(t *testing.T) {
 		{Dir: "bank", Pattern: "*bank*"},
 		{Dir: "bank", Pattern: "*2024*"},
 		{Dir: "bank", Pattern: "a"},
+		{Dir: "bank", Pattern: "?*"},
 		{Dir: "bank", Pattern: "*DailyStatement*"},
 		{Dir: "", Pattern: "*.tmp"},
 	}
@@ -151,9 +182,9 @@ func TestCompare(t *testing.T) {
 	for _, r := range rs {
 		got = append(got, r.Dir+" "+r.Pattern)
 	}
-	// A parent before the directories inside it, then the order rules are tried: most letters first, a pattern a
-	// (1 letter) above * (0).
-	want := []string{" *.tmp", "bank *DailyStatement*", "bank *2024*", "bank *bank*", "bank a", "bank *",
+	// A parent before the directories inside it, then the order rules are tried: longest first, a pattern ?* or a
+	// (1 each, then by pattern) above * (0).
+	want := []string{" *.tmp", "bank *DailyStatement*", "bank *2024*", "bank *bank*", "bank ?*", "bank a", "bank *",
 		"bank/2024 *", "bank-x *"}
 	if !slices.Equal(got, want) {
 		t.Errorf("sorted:\n%q\nwant\n%q", got, want)

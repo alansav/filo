@@ -232,9 +232,10 @@ ALTER TABLE files ADD COLUMN rule_dated_utc TEXT;
 // rulesSQL is the directory rules, added in schema version 10. A rule names a policy for the files under a directory
 // of a root ('/'-separated, relative to the root, the empty path for the root itself) whose name matches its pattern
 // (as typed; '*' for none). pattern_key is the pattern in lower case: a directory's patterns are unique in any case.
-// letters is the pattern's characters that are not wildcards, the order rules are tried in (package rules). A rule
-// keeps its policy in use: the store refuses to remove a policy a rule names. files.rule_id is not declared a foreign
-// key: removing a rule sets it to NULL, and files.rule_dated_utc stays, so no rule dates that file again.
+// letters is the pattern's length, every character but * (rules.Length; the column was named before a ? counted),
+// stored for reading the register by hand: matching works it out again. A rule keeps its policy in use: the store
+// refuses to remove a policy a rule names. files.rule_id is not declared a foreign key: removing a rule sets it to
+// NULL, and files.rule_dated_utc stays, so no rule dates that file again.
 const rulesSQL = `
 CREATE TABLE rules (
     id INTEGER PRIMARY KEY,

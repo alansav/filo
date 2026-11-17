@@ -172,7 +172,7 @@ func insertRule(ctx context.Context, tx *sql.Tx, rootID int64, dir, pattern stri
 		return 0, fmt.Errorf("%s at %s: %w", pattern, dirName(dir), ErrRuleExists)
 	}
 	res, err := tx.ExecContext(ctx, `INSERT INTO rules (root_id, dir, pattern, pattern_key, letters, policy_id,
-		added_utc) VALUES (?, ?, ?, ?, ?, ?, ?)`, rootID, dir, pattern, rules.Key(pattern), rules.Letters(pattern),
+		added_utc) VALUES (?, ?, ?, ?, ?, ?, ?)`, rootID, dir, pattern, rules.Key(pattern), rules.Length(pattern),
 		policyID, utc(now))
 	if err != nil {
 		return 0, fmt.Errorf("add rule: %w", err)

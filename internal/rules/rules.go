@@ -1,8 +1,8 @@
 // Package rules works out which directory rule names a policy for a file (docs/design.md, Lifespan, Directory
 // rules). A rule is a directory and a pattern on the file's name; for a file, the rules of its own directory are
 // tried first, then those of each parent up to the root, and the first directory with a rule that matches decides.
-// Within a directory the pattern with the most letters wins (wildcards are not counted), and two matching patterns
-// with as many letters are a tie: reported, never guessed. Nothing here reads the disk or the register.
+// Within a directory the longest pattern wins (every character counts but *, so a ? counts as the one character it
+// matches), and two matching patterns as long are a tie: reported, never guessed. Nothing here reads the disk or the register.
 package rules
 
 import (
@@ -25,7 +25,7 @@ const maxPattern = 255
 
 // Pattern checks a typed pattern and returns it as stored: "" is Any, and each run of wildcards in one form, its ?
 // first and then one * if it has any (`**` is `*`, `*?` and `?*` are `?*`): they match the same names, and as two
-// patterns of one directory with as many letters they would always tie. The rest is kept as typed; the case is
+// patterns of one directory as long they would always tie. The rest is kept as typed; the case is
 // ignored when matching and comparing.
 func Pattern(p string) (string, error) {
 	if p == "" {
@@ -61,11 +61,12 @@ func Pattern(p string) (string, error) {
 // Key is a pattern as compared: in lower case, so `*statement*` and `*Statement*` are the same pattern.
 func Key(p string) string { return strings.ToLower(p) }
 
-// Letters counts a pattern's characters that are not wildcards: the longer pattern is tried first.
-func Letters(p string) int {
+// Length counts a pattern's characters but *: the longer pattern is tried first. A ? counts, since it matches one
+// character, so ?* (1) is tried before * (0).
+func Length(p string) int {
 	n := 0
 	for _, r := range p {
-		if r != '*' && r != '?' {
+		if r != '*' {
 			n++
 		}
 	}
@@ -112,12 +113,12 @@ type Rule struct {
 }
 
 // Compare orders rules as they are listed: by directory, a parent before the directories inside it, then within a
-// directory in the order they are tried: most letters first, then by pattern.
+// directory in the order they are tried: longest first, then by pattern.
 func Compare(a, b Rule) int {
 	if c := slices.Compare(dirParts(a.Dir), dirParts(b.Dir)); c != 0 {
 		return c
 	}
-	if c := cmp.Compare(Letters(b.Pattern), Letters(a.Pattern)); c != 0 {
+	if c := cmp.Compare(Length(b.Pattern), Length(a.Pattern)); c != 0 {
 		return c
 	}
 	return cmp.Compare(Key(a.Pattern), Key(b.Pattern))
@@ -133,7 +134,7 @@ func dirParts(dir string) []string {
 // Result is what the rules decide for one file.
 type Result struct {
 	Rule Rule   // the rule that decides, when Ties is empty and Found
-	Ties []Rule // two or more matching rules of one directory with as many letters: nothing is decided
+	Ties []Rule // two or more matching rules of one directory as long: nothing is decided
 	// Found is true when a directory's rules matched the file: Rule decides, or Ties says why nothing does.
 	Found bool
 }
@@ -143,11 +144,11 @@ type Set struct {
 	byDir map[string][]prepared
 }
 
-// prepared is a rule with its pattern in lower case, as runes, and its letter count, worked out once.
+// prepared is a rule with its pattern in lower case, as runes, and its length, worked out once.
 type prepared struct {
 	rule    Rule
 	pattern []rune
-	letters int
+	length  int
 }
 
 // NewSet indexes the rules of one root.
@@ -155,7 +156,7 @@ func NewSet(rs []Rule) Set {
 	s := Set{byDir: map[string][]prepared{}}
 	for _, r := range rs {
 		s.byDir[r.Dir] = append(s.byDir[r.Dir], prepared{rule: r, pattern: []rune(Key(r.Pattern)),
-			letters: Letters(r.Pattern)})
+			length: Length(r.Pattern)})
 	}
 	return s
 }
@@ -186,7 +187,7 @@ func resolveIn(ps []prepared, name []rune) Result {
 			continue
 		}
 		r := p.rule
-		switch n := p.letters; {
+		switch n := p.length; {
 		case n > best:
 			best, matched = n, []Rule{r}
 		case n == best:
