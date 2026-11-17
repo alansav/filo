@@ -16,8 +16,8 @@ FILE.csv`, no stored decisions to delete, four kinds of keep), built on 2026-11-
 (schema version 9) and directory rules (schema version 10) were designed and built on 2026-11-16/17. Last updated:
 2026-11-17.
 
-This file records settled decisions, the planned data model and the open questions. When a decision changes,
-change it here in the same commit.
+This file records what Filo does and why, as built. Work not done yet, ideas and open questions are in
+`roadmap.md`. When a decision changes, change it here in the same commit.
 
 ## 1. Problem and principles
 
@@ -60,8 +60,8 @@ Principles. These are not negotiable:
 - Claude Code runs inside the container (`scripts/dev.sh claude`) with normal permission prompts. Its login and
   settings live in a named volume (`filo-claude`). Git commits and pushes happen on the host: the container has no git
   identity and no SSH keys.
-- OS-specific behaviour (hidden-file rules, inode lookup, symlinks, path separators) lives behind small functions so a
-  Windows build is possible later. No platform is prioritised.
+- OS-specific behaviour (hidden-file rules, inode lookup, symlinks, path separators) lives behind small functions.
+  Only Unix builds run: other platforms refuse to open the register (see Register).
 
 ### Register
 - SQLite, one row per file identity, in **one database per device holding any number of roots**. Default location:
@@ -70,15 +70,14 @@ Principles. These are not negotiable:
   `FILO_DB`) overrides it. Created automatically on first run; the default `filo` directory is the only directory
   Filo creates (mode 0700), and an explicit `--db` path must have an existing parent.
 - **Never synced.** The default location is outside every root, so the register is never inside a synced directory and
-  never scanned. That is also why there is no device column. Sharing retention decisions between devices is an open
-  question; the register itself stays per device (see Open questions).
+  never scanned. That is also why there is no device column. The register stays per device.
 - Driver: `modernc.org/sqlite` (pure Go, no CGO, plain `database/sql`), chosen 2026-11-11 at v1.62.0.
 - `meta.schema_version` must equal the build's version. An older database is upgraded when it is opened, one version
   at a time, each step in its own transaction with the version bump (1 to 2, 2 to 3, then 3 to 4); a newer version, or an older
   one with no migration, is refused, as is a SQLite file without Filo's `meta` keys. WAL mode is set only after those checks pass, so
   a foreign database is never modified.
 - One writer at a time: an `flock` on `<db>.lock`, taken before the database is opened. The kernel drops it if Filo
-  dies, so there are no stale locks. Non-unix platforms refuse to open until locking is implemented for them. Each
+  dies, so there are no stale locks. Non-unix platforms have no lock, so they refuse to open the register. Each
   scan is applied in a single transaction. The lock file is opened with `O_NOFOLLOW`, so a symlink planted in its
   place (with `--db` in a shared directory such as `/tmp`) is refused, not followed.
 - **The schema is not trusted** (2026-11-13): `PRAGMA trusted_schema = OFF` on every connection, so triggers and
@@ -91,7 +90,7 @@ Principles. These are not negotiable:
 ### Register snapshots
 Decided and implemented 2026-11-13. The register holds decisions (retentions, file dates) that exist nowhere else.
 A snapshot is taken at the end of every run that changed the register, and the recent ones are kept (see Rotation),
-so the register can be rolled back to an earlier state, by hand for now (see Restoring; a command may come later).
+so the register can be rolled back to an earlier state, by hand (see Restoring).
 They are a short-term safety net against Filo's own mistakes, such as a bad update, not a backup: they sit next to
 the database, on the same disk. Copying the register's snapshots to a separate physical location is the user's job.
 
@@ -132,15 +131,11 @@ the database, on the same disk. Copying the register's snapshots to a separate p
   before its snapshot and with the same time, so any change counts (a root's settings too). That is how a failing
   snapshot is noticed when scans run from a timer.
 - **Restoring** is by hand: with no filo running, move `filo.db`, `filo.db-wal` and `filo.db-shm` aside and copy a
-  snapshot to `filo.db`. A command can come later if wanted.
-- **Getting them off the machine** (to another machine or a backup) is part of the synced-roots work: for
-  example a one-way sync of the snapshot directory to a machine that is backed up. A snapshot is a finished file that
-  nothing opens for writing, so unlike the live database it is safe to sync.
+  snapshot to `filo.db`.
 
 ### Roots
 - Roots are registered explicitly and deliberately (`filo roots add DIR`), and stored in the `roots` table as absolute
-  paths with symlinks resolved. `filo roots` lists them; `filo roots remove` (later, with a dry run) removes a root's
-  register rows, never files. Considered on 2026-11-12: letting `filo scan DIR` add DIR as a root when it is in none.
+  paths with symlinks resolved. `filo roots` lists them; there is no command to remove one. Considered on 2026-11-12: letting `filo scan DIR` add DIR as a root when it is in none.
   Rejected, because a root carries settings that every later scan relies on, so setting one up should be a
   deliberate act; a scan of a directory under no root is refused with a hint to add it.
 - **A root owns its scan settings** (decided 2026-11-12): whether hidden entries are scanned (`include_hidden`) and the
@@ -180,10 +175,10 @@ the database, on the same disk. Copying the register's snapshots to a separate p
   directory on that root's filesystem. A DIR under no root is refused with a hint to add it.
 - Each scan records its root, its **scope** (a path relative to the root, empty for everything) and the hidden/ignore
   settings it ran with (the root's at the time).
-- A file moved from one root to another shows as new plus missing; pairing across roots is a later improvement. File
-  identity is not tied to a root, so that needs no schema change.
+- A file moved from one root to another is linked as a returned file when the old root is scanned first; scanned the
+  other way round it is new plus missing (see Move detection). File identity is not tied to a root.
 - Location history: each file's paths are stored as intervals (`valid_from_scan`, `valid_to_scan`, NULL = current),
-  so the tree can be reconstructed at any scan and directory moves can be reverted.
+  so the tree at any scan is recorded.
 
 ### Scan
 - Skips hidden entries unless the root includes them, plus noise: `node_modules`, `__pycache__`, `.filo`, the root's
@@ -191,8 +186,8 @@ the database, on the same disk. Copying the register's snapshots to a separate p
 - **One filesystem.** A walk never descends into a directory on a different device from its root; such directories are
   reported once in the summary, not as errors. A directory already visited in the same walk (same device and inode: a
   bind mount of an ancestor, or a loop) is skipped and reported.
-- Symlinks are recorded with their target and a broken flag (target missing, or a loop), never followed. Checking them
-  is a later iteration.
+- Symlinks are recorded with their target and a broken flag (target missing, or a loop), never followed. `filo report`
+  lists the broken ones.
 - Only regular files and symlinks are recorded. FIFOs, sockets and devices are skipped silently. A file that vanishes
   between the listing and its lstat is simply not seen.
 - **A file can only be marked missing if this scan would have visited it.** Entries outside the scan's scope, entries
@@ -245,8 +240,7 @@ the database, on the same disk. Copying the register's snapshots to a separate p
   plus missing.
 - Same name, different content (edited then moved?) is reported as a **possible move** and never applied.
 - Pairing only happens inside a scan's scope. A file moved in from outside the scope appears as new, and its old path is
-  marked missing by the next scan that covers it, so the history link is lost. (Possible improvement: stat the old path
-  of same-hash files outside the scope.)
+  marked missing by the next scan that covers it, so the history link is lost.
 - **Path reuse.** A file whose content changed at a known path may be another file moved onto it: if its new content
   pairs with a file gone in this scan, that file moved there, and the file that was at the path is displaced (it moved
   too if its old content pairs with a new file, otherwise it is missing). If the new content pairs with nothing, it is
@@ -261,8 +255,7 @@ the database, on the same disk. Copying the register's snapshots to a separate p
   inode) that keeps both its size and its mtime is noticed only through its ctime, so not on a platform without one
   (Windows). Symlinks have no hash, so a moved symlink is missing
   plus new. Hard links are separate files in Filo (one per path) that happen to share an inode.
-- Pairing moves by inode instead of hash (to avoid hashing moved files) is a later optimisation; the inode is only
-  used to decide what to rehash.
+- The inode is only used to decide what to rehash, never to pair moves.
 
 ### Lifespan (iteration 2)
 Decided 2026-11-12, replacing the review queue, review dates, actions and retain-until floors of 2026-11-11. The
@@ -276,9 +269,8 @@ retention CSV and `filo update` write only the register and the CSV file the use
   word only, in any case (`Forever`): no aliases such as `indefinitely` or `never`.
 - **One date per file: `keep_until`**, worked out from the file's retention (see second shape). Keep the file until
   then. On that date it becomes a deletion candidate, never deleted automatically: `filo delete` lists the candidates,
-  and deleting each is the person's call (see Disposal). A recurring check on a file (an annual look at a seven-year
-  record) is a task, a later iteration; this iteration tracks lifespan only. Hard legal retention is a later retention
-  or `forever` (holds were dropped on 2026-11-12).
+  and deleting each is the person's call (see Disposal). Filo tracks lifespan only. Hard legal retention is a later
+  retention or `forever`; there are no holds.
 - **Status of a present file** (regular files and symlinks), the first that applies:
   1. *unreadable*: flagged unreadable and its date not set since the scan that flagged it; or flagged and past its
      date (its content cannot be checked);
@@ -381,8 +373,7 @@ retention CSV and `filo update` write only the register and the CSV file the use
   `retention` header is refused as a whole: with a pointer to `filo export retention` if it is a review CSV or a
   retention CSV from before schema version 5, or, if it has a `file_date` column (a current CSV whose `retention`
   column was deleted or renamed), saying the `retention` column is missing.
-- **Bulk dates**: set in the spreadsheet (filter on `directory`, fill down). `filo review set-date` was dropped on
-  2026-11-12, at least for now.
+- **Bulk dates**: set in the spreadsheet (filter on `directory`, fill down). There is no command for them.
 - The hash at export is stored; it is **re-checked at action time** (`filo delete`) against `files.reviewed_hash`.
 
 ### Retention CSV, second shape (decided and implemented 2026-11-12)
@@ -436,7 +427,6 @@ encoding, refusals, the clear prompt, "since" measured in scans) stays.
   retention is a period, which is when it is used and the person has had reason to look at it; with `forever`, a
   fixed date or no retention it is dropped, so a later period can never count from a guess nobody checked. (Found in
   a code review on 2026-11-12: `scan 20190101 id.pdf` would otherwise keep 2019-01-01 as its file_date.)
-  Dates from photos' EXIF data: later (needs a library).
 - **Register (schema version 5)**: `files.file_date` (YYYY-MM-DD, NULL = none), `files.retention` (the value as
   given: a period, `forever` or a date; NULL = none), and `files.keep_until`, now always worked out from those two
   (YYYY-MM-DD or `forever`). Statuses and `filo delete` keep using `keep_until` only. Migration: an existing
@@ -669,7 +659,6 @@ retention: the file becomes a candidate at its date and is deleted only through 
     `add`, `move` and `copy` go by the latest scan covering each directory, and refuse a root that cannot be reached.
   - A root added above an existing one (Roots): the old root's rules get the same prefix as its files, in the same
     transaction.
-  - A root removed (`filo roots remove`, when it comes): its rules go with it, and its confirmation says how many.
 - **Output** (mocked and agreed 2026-11-16, under the Terminal output rules). The list: one root in the heading, or a
   sub-heading per root; each rule with its policy's value, so a policy with no value shows; the flags on the right.
 
@@ -856,7 +845,7 @@ files). Replaces the earlier plan of a quarantine, holds and several checks at t
 - **`filo report`** adds "Deleted by filo: N files, size freed (last run DATE: n files, size)", from the deleted
   rows.
 - **Syncthing propagates deletes**: a delete on one device removes the file on every device that shares the Syncthing
-  folder. A flag for synced roots is left for later (see Open questions). Surface `*.sync-conflict-*` files later too.
+  folder. Filo treats synced roots like any other.
 - **Decided while building it (2026-11-13):**
   - *A delete run is recorded as a scan of kind `delete`.* A closed path and an event both need a scan, so the run
     adds one `scans` row (`kind = 'delete'`, whole root) in each root where it first records something; deleted
@@ -1201,7 +1190,7 @@ Next: edit the action column, then filo delete /tmp/d.csv
 
 ### Commands and scheduling
 - Plain names, easy to remember: `roots`, `scan`, `report`, `export`, `update`, `delete`, `duplicates` (added
-  2026-11-16, see Duplicates; a `revert` was deferred), `policies` and `rules` (both 2026-11-16, see Lifespan). No
+  2026-11-16, see Duplicates), `policies` and `rules` (both 2026-11-16, see Lifespan). No
   themed subcommands. (`restore` was dropped on 2026-11-12: a file restored from a backup comes back as a new file.)
   (Reshaped 2026-11-12: `review` and its subcommands `set-date`, `export` and `import` were replaced by `export
   lifespan` and `update`; "update" says that only existing files change, which "import" did not. `export lifespan` was
@@ -1231,8 +1220,7 @@ Next: edit the action column, then filo delete /tmp/d.csv
   terminal on standard input, is always the safe choice, so Filo still works the same from a script or a timer.
 - `filo roots` lists roots (settings, mount point, files, size, last scan); `filo roots add DIR [--include-hidden]
   [--ignore NAME]... [--no-scan]` registers one and scans it (absorbing any roots inside it on the same filesystem,
-  see Roots); `filo roots set DIR [--include-hidden | --skip-hidden] [--ignore NAME]...` replaces its settings; later
-  `filo roots remove DIR`.
+  see Roots); `filo roots set DIR [--include-hidden | --skip-hidden] [--ignore NAME]...` replaces its settings.
 - `filo scan [DIR] [--workers N] [--allow-empty]` scans DIR, which must be inside a registered root (see Roots), with
   the root's settings; with no DIR, every root in turn, each in its own transaction. A root that fails (for example
   unmounted) is reported in its place on stdout (see Terminal output, Scan and roots) and the others are still
@@ -1297,8 +1285,7 @@ topic at a time from mockups; the mockups below are the reference.
   unchanged: 0 nothing went wrong (rows unchanged, groups left alone, declining a prompt, and a file `filo delete`
   skipped because it changed, all included), 1 an error, a CSV row or group refused, or a file `filo delete` could
   not read, delete, or tidy up after, 2 a usage error. Output that could not be written (a full disk, a closed pipe)
-  makes a command exit 1 with the reason, so a scheduled `filo report > log` that fails is not taken for success. A
-  finer split waits for scheduled scans.
+  makes a command exit 1 with the reason, so a scheduled `filo report > log` that fails is not taken for success.
 - **Long lists**, three kinds:
   - *About to be deleted* (the `filo delete` overview): in a terminal 10 per section, then `… N more`, and the
     question gains `l` to list everything and ask again (`[a/s/l/N]`). If the list was cut, `a` first shows every
@@ -1310,7 +1297,10 @@ topic at a time from mockups; the mockups below are the reference.
     count and the line range (a sorted CSV can refuse every row for one reason). Skips that come from no CSV line are
     always listed one by one. A refused duplicates group shows its number in a group column (and its export only
     when the CSV mixes exports), and the paths inside a reason are shown relative to the heading's root, like the
-    columns.
+    columns: a reason's text is shortened only where a path starts (at the start of the text, or after a space or an
+    opening bracket), so `/mnt/data/x.pdf` stays whole with the root `/data`. Notes (an event's detail, a symlink's
+    target) show full paths: shortening them would rewrite text, and an absolute symlink target would read as a
+    relative one.
   - *What a confirmation covers* (clears, contents always and sets of records, files now past their retention): the
     first 10 and "and N more", and the prompt offers `l` to list everything before answering (`[y/N/l]`).
 - **Width.** A path is never cut, not even with `…`: every path printed is about to be acted on or names something to
@@ -1326,7 +1316,8 @@ topic at a time from mockups; the mockups below are the reference.
   result line after each answer; `q` goes to the summary. Filo asks only when both the question and the answer are in
   a terminal (stdin and stdout): with stdout in a file (`filo delete > log`) the question could not be seen, so it is
   not asked (2026-11-16, from the code review). Otherwise nothing is recorded or deleted, and one line says so and how
-  to go on.
+  to go on. Standard input counts as a terminal when it is a character device, so `filo delete </dev/null` asks, reads
+  end of input and deletes nothing (a real terminal check needs a dependency).
 - **Components** (package `internal/view`). One `Renderer` holds what every component needs: the escaping writer
   (see "Output cannot act on the terminal"), whether this is a terminal, colour, the width, the home directory and
   the roots. The components: `Heading`, `Section` (title, totals at the right edge, body), `Counts` (marker lines),
@@ -1334,8 +1325,7 @@ topic at a time from mockups; the mockups below are the reference.
   (`contract.pdf · 8 MB each` with its keep and delete lines and symlink notes), `Problems` (line, file, reason and
   what to do; repeats collapsed), `Prompt`, `Item` (a select-mode item and its result) and `Next`. Commands build the
   data and hand it to components; they never format output themselves or decide plain or rich, relative or full
-  paths. Each component writes whole lines, one write per line. Not called `ui`: the "UI in place of the CSV" is a
-  different, later thing.
+  paths. Each component writes whole lines, one write per line.
 - **Scope: every command** (roots, scan, report, export, update, delete, help and errors), in this order: `delete`,
   `update`, `report`, `scan` and `roots`, then `export` and help.
 
@@ -1450,8 +1440,7 @@ Duplicates   dupes.csv . export 7 . 12 groups . ~/Documents
   scan, so it says no more than is true of all of them). Nothing found: `✓ no changes`, right under the heading, so a
   clean scan from a timer is two lines. Then the events (`Events   up to 10 of each kind`), as the report's event rows
   (same columns and words, relative to the root): the first 10 of each kind (`reconcile.SampleSize`; the first, not
-  the latest), and a kind that had more gets one `… N more <kind>` line (no command lists all of a scan's events
-  yet; see Open questions). Directories that failed to list are already error events. A directory on another
+  the latest), and a kind that had more gets one `… N more <kind>` line (no command lists all of a scan's events). Directories that failed to list are already error events. A directory on another
   filesystem is shown (`· 1 directory on another filesystem, not scanned`, event word `other filesystem`) but is not
   a change: every scan finds it. `Next: filo report` only when something changed, failed or needs attention.
 - **`filo scan` of every root**: one block per root, each with its own heading, so it reads like a scan of that root
@@ -1634,8 +1623,7 @@ Nothing exported.
   terminal's width, or 80 columns when piped (so `filo help > file` reads well); the help was hand-wrapped at about
   115 columns, and one paragraph was a single 216-column line. Commands and flags keep two columns, a description
   that does not fit wrapping under its own column. The words stay as they are, regrouped under `Commands` and
-  `Flags` with a usage line per command (the long report paragraph split into sentences); rewriting them is separate
-  work. The overview ends with `Next: filo help COMMAND for a command's flags and rules`.
+  `Flags` with a usage line per command (the long report paragraph split into sentences). The overview ends with `Next: filo help COMMAND for a command's flags and rules`.
 - **Errors and warnings** stay on stderr, plain (no colour, symbols or `~`: they end up in logs and get copied, and a
   full path is unambiguous there), one line each, `filo: <message>` and `filo: warning: <message>`. A usage error is
   one line too, pointing at the command's own help, `filo: roots add takes exactly one DIR (see filo help roots)`
@@ -1643,8 +1631,7 @@ Nothing exported.
   newline in it is escaped like any other, since a file name can hold one and must not forge a second `filo:` line
   (first designed as "split at newlines", changed on 2026-11-15 after the code review found that let a name do it).
   Filo's own errors of several parts (`errors.Join`, as the snapshot warnings) are split by the code that knows the
-  parts, a line each. The wording of the errors is not reviewed here; a test runs the error cases and checks each is
-  one line.
+  parts, a line each. A test runs the error cases and checks each is one line.
 - **`safeText` retired.** Two ways out remain: stdout only through the Renderer (which escapes every text it is
   given), and stderr only through `errorLine`, which escapes the text with `view.Escape` and writes `filo: <text>`
   in one write; `rawStderr` is left only for the progress line, whose text `view.Fit` escapes. `safeText`,
@@ -1795,10 +1782,9 @@ CREATE TABLE excluded_dirs (            -- files under them (the whole subtree) 
 ```
 
 "Present" means a file has a path interval with `valid_to_scan IS NULL`; there is no status column. "New" means
-`first_seen_scan` equals the scan. A file's "last verified" time is derived, not stored: it is the latest completed scan
-whose scope covers its path. Disposal does not look at it: it refuses files flagged unreadable and re-checks the
-file itself at the moment of deleting (decided 2026-11-13; an earlier note here also refused files no recent scan
-covers, which the re-hash makes unnecessary). `ctime_ns` and `unreadable_since_scan` are schema version 2,
+`first_seen_scan` equals the scan. Disposal does not ask when a scan last covered a file: it refuses files flagged
+unreadable and re-checks the file itself at the moment of deleting (decided 2026-11-13; an earlier note here also
+refused files no recent scan covers, which the re-hash makes unnecessary). `ctime_ns` and `unreadable_since_scan` are schema version 2,
 the first migration (two `ALTER TABLE ... ADD COLUMN`s; existing rows start with ctime 0, so the first scan after the
 upgrade rehashes nothing extra and records each file's ctime quietly). Version 3 adds the review columns on `files`
 (all NULL for existing rows, so every file starts undated) and the four review tables. Version 4 (2026-11-12) merges
@@ -1813,8 +1799,6 @@ adds `files.deleted_utc` (the deleted rows are the history of deleted files) and
 `export_rows.dup_group` and `path_id`, and the three duplicates tables; see Duplicates.
 
 Location history gives snapshots without storing them: the tree at any scan is the set of intervals that cover it.
-A revert moves each file back to the path it had then, with a dry run that reports and skips conflicts. It reverts
-**locations only**; content recovery is the job of backups.
 
 ## 4. Scan and reconcile
 
@@ -2120,12 +2104,6 @@ put first on 2026-11-15). Each is an open question below until it is designed.
       the README has a "Directory rules" section. Tests: `TestRulesMoveCopy` (E1-E3, a dry run, another root, the
       arguments), `TestRulesMoveGolden` (`testdata/rules-move.txt`). **Directory rules are done**: every scenario in
       the table has a test. Next: the PR, then removing empty directories (item 13).
-5. Progress in the report, and `export retention --needing-retention`.
-6. Duplicates: one decision for all copies (the duplicates review CSV was done first, see iteration 5).
-7. `scan --verify`, with sidecar hash files.
-8. Backup awareness.
-9. Synced roots, sharing decisions between devices, and getting snapshots to the backup machine.
-10. A summary for scheduled scans.
 11. Replacing an existing `-o` file after asking (decided 2026-11-16, see Lifespan). Done on 2026-11-16:
     `TestExportReplace` (no terminal, no, Enter, yes, a directory, a symlink, a device, `-y`) and
     `TestWriteExportReplace` (a failed write and a file changed after asking leave the old file as it was).
@@ -2133,130 +2111,8 @@ put first on 2026-11-15). Each is an open question below until it is designed.
     day to `export retention`; see Lifespan, "A scan first"). Done on 2026-11-16: `TestExportScansFirst` (a file
     saved since the last scan, DIR only, every root for duplicates, `--no-scan` and its line, a failed root, Ctrl-C)
     and the golden file `testdata/export.txt`.
-13. Removing empty directories, through `filo delete` (split from directory rules on 2026-11-16: it is the only
-    destructive part, and has nothing to do with rules). Next after item 4; to be designed first, see Open questions.
 
-Later: the **UI** in place of the CSV, including viewing and editing the register in place, and notes, links and
-tasks (see Open questions). All of it hangs off the stable file ID, so none of it needs the register to change
-shape.
-
-## 6. Open questions
-
-- **Notes, links and tasks** (raised 2026-11-13; merges asset links, the long-term "projects and tasks linked to
-  files", and notes on files). Notes on a file; links to an asset or project (modelled at that level, not per
-  file); tasks, some with files and some without; possibly a productivity system built on the register. That is a
-  change of scope from "Filo owns lifecycle" and needs its own discussion first. The stable file ID means nothing
-  built now blocks it. (Holds were dropped on 2026-11-12: a file that must be kept gets a later retention or
-  `forever`.)
-- How synced roots are marked, and what Filo does differently for them (Syncthing propagates deletes; surface
-  `*.sync-conflict-*` files). Belongs with sharing decisions between devices and getting snapshots to the backup
-  machine (Register snapshots).
-- **Sharing retention decisions between devices** (raised 2026-11-13). A Syncthing folder is on several
-  devices, each with its own register; a retention set on one should be known on the others. Tested on 2026-11-13:
-  a file dated on the laptop, then moved and renamed on the desktop, kept its retention on the laptop's next scan,
-  because the move was paired by hash. Sharing the database file itself is rejected: Syncthing syncs `filo.db` and
-  its WAL and SHM files separately and not as transactions, so a copy can be stale or corrupt; the `flock` is local,
-  so writes on two devices between syncs give a `sync-conflict` copy and one side is silently lost; and most of the
-  register is per device (root paths, inodes, ctimes, mount points, unreadable flags, scan history), so another
-  device would rehash everything and, with sync lag, record moves back and forth. A separate database for only the
-  synced roots has the same problems. Proposed instead: each device keeps its own register and they exchange
-  **decisions keyed on content hash** (`file_date`, `retention`, when and on which device it was set). Each device
-  writes only its own file in a Syncthing folder (for example `decisions-<device-id>.csv`, so Syncthing never makes a
-  conflict copy) and reads the others'; a file with a matching hash and no decision takes the shared one, recording
-  where it came from; two devices disagreeing on a hash is reported, not resolved; an edited file has a new hash and
-  needs a date again. It also helps with deletes: another device could tell "deleted by Filo on device X after the
-  hash check" from an unexplained missing file (see the synced roots question above). No-code alternative: register
-  a Syncthing folder on one device only and set retention there; the content is the same everywhere and deletes
-  propagate. Small step worth taking early: a random device ID in `meta`, made when the database is created, and the
-  device recorded with each decision, so no decision has an unknown origin later. The exchange itself can wait until
-  after iteration 3.
-- **Backup awareness** (raised 2026-11-13). Principle 2 says backups make deletion recoverable; Filo cannot check
-  it. Being in a directory Vorta backs up is a weak signal (the backup may not have run, may have failed, or may predate
-  the current content). The strong one is "this content is in archive X from date Y": match Borg archive listings
-  (path, size, mtime, perhaps a content hash; Borg's listing options to be checked against its documentation)
-  against the register, giving each file a "last seen in a backup" date. It may only ever add warnings to
-  `filo delete` ("in no backup"), never make deleting easier. Open: reading Borg directly or through Vorta's
-  settings, the cost of listing a large archive, the repository passphrase, and that Borg runs on another machine.
-- **Duplicates: one decision for all copies** (raised 2026-11-13). Retention is about content, so dating one copy
-  could offer the same retention to its undated copies (one confirmation), and copies with different retentions are
-  reported, not resolved. The duplicates CSV itself is designed and built (see Duplicates).
-- **Duplicates: showing the decisions recorded** (raised 2026-11-14; resolved 2026-11-16 by the duplicates
-  redesign: nothing waits in the register to be shown; see Duplicates, "The first design, and why it changed").
-  Points the abandoned branch (`fix-duplicates-includes-copy-decision`, a4ffe5f) found that the redesign's build has
-  to keep in mind: records are matched by hash, so a file restored to the content it was kept on would rejoin its
-  set; a copy with hard links is one copy, named by its first path; `created_utc` strings do not sort as times
-  (order by ids); the same content in two groups of one CSV (rows pasted from two exports) must not give
-  contradictory actions.
-- **Progress** (raised 2026-11-13). A report line for how far dating has got: files with a `file_date`, files with
-  a retention, and per directory what is left. And `export retention --needing-retention`, writing only the files
-  the report counts as needing a retention, so each CSV is shorter.
-- **`filo scan --verify`** (raised 2026-11-13). A scan re-hashes only files whose size, mtime, ctime or inode
-  changed, so bytes that rot in place go unnoticed until backups have pruned the good copy. `--verify` re-hashes
-  everything and reports content that changed with nothing else changing. Sidecar hash files (`file.sha256`,
-  `SHA256SUMS`) can be checked against the register's SHA-256 at no extra cost (MD5 or SHA-1 sidecars would need
-  another read); a mismatch is reported (corruption, or a sidecar left from before an edit), never resolved.
-  Discussed 2026-11-16: the two checks catch different things. The re-hash finds rot that happened after Filo first
-  hashed a file (the register's hash is the reference, since a scan does not re-hash a file whose size, mtime, ctime
-  and inode are unchanged; an edit not yet scanned shows by its mtime, so it is told apart). It cannot find
-  corruption from before the first hash: that needs a reference from outside, a sidecar. So both stay, perhaps as
-  `scan --verify` (re-hash) and a separate `filo verify [DIR]` (sidecars against the register, no extra read).
-  Open: making references easy for files that are vital. Writing a sidecar next to each file was considered and is
-  not proposed: it would be a new kind of write into the scanned trees, and each sidecar would arrive at the next
-  scan as a new file needing a retention. Proposed instead: a "vital" flag on files and `filo export checksums -o
-  FILE`, one standard `SHA256SUMS` file (checkable with `sha256sum -c`) written where the person chooses.
-- **A summary for scheduled scans** (raised 2026-11-13; low priority). A short line ("4 files past retention, 2 need
-  a decision") a timer can pass to a desktop notification, so candidates do not sit unnoticed. Filo still never
-  deletes on its own.
-- **All of a scan's events** (raised 2026-11-15, with the scan output). A scan shows the first 10 events of each
-  kind and `… N more`; the report shows only the latest events overall, so the rest of a large scan's events (500
-  missing after a directory was moved outside the root) cannot be listed. Perhaps `filo report --scan N`.
-- **A root's last whole scan** (raised 2026-11-15). `filo roots` and the report show the last scan, which may have
-  been partial (one directory), so a root can look recently checked when most of it was not. Showing the last
-  whole-root scan as well needs one store query.
-- **Paths inside notes and reasons** (found 2026-11-15, in the code review of the scan output). Showing the paths
-  in a note (an event's detail, a symlink's target) relative to the heading's root was tried and taken back:
-  shortening rewrites text, so an absolute symlink target read as a relative one, and in a list grouped by root a
-  note was shortened against the wrong root. Notes show full paths. `Problems` and select-mode results (`delete`,
-  `update`) still shorten their reasons; since the second review that day, only where a path starts (at the start of
-  the text, or after a space or an opening bracket), so `/mnt/data/x.pdf` stays whole with the root `/data` (it
-  used to read `/mntx.pdf`). A file name holding ` /data/` is still shortened. The fix is to pass paths in notes and
-  reasons as structured parts (a root and a relative path) rather than rewriting text.
-- Confirming a possible move, and undoing an update batch.
-- **Telling a terminal from a character device** (found 2026-11-13). The prompt check treats standard input as a
-  terminal if it is any character device, so `filo delete </dev/null` asks, reads end of input and deletes nothing
-  (safe, but it should print the no-terminal message instead). A real check needs `golang.org/x/term` or
-  `golang.org/x/sys` (already an indirect dependency) used directly; not added without asking.
-- **A version command** (raised 2026-11-12): `filo version` showing Filo's own version (no build version is stamped
-  yet) and the database in use: its path, schema version and when it was created. Today the schema version can
-  only be read with `sqlite3 DB "SELECT key, value FROM meta"`. Showing the same in `filo report` was considered as
-  a simpler alternative.
-- **Viewing and editing the register in place** (raised 2026-11-12). Setting or clearing `keep_until` on a few files
-  through a whole export, edit and update round is cumbersome. Wanted: query and view what the register holds (files,
-  dates, history) and set or clear a date on a few files directly. Open: a command (for example
-  `filo keep PATH... RETENTION`, taking the same retentions as the CSV), part of the UI, or both. Periods always count
-  from `file_date`; a period counted from today (`+1y`) was closed on 2026-11-13.
-  - **A read-only query view first** (proposed 2026-11-16): `filo files [DIR] [--name GLOB] [--larger SIZE]
-    [--smaller SIZE] [--modified-before DATE] [--modified-after DATE] [--status S] [--empty] [--sort
-    size|modified|keep_until]`, cut at N rows in a terminal with "… N more", all rows when piped. It filters on what
-    the register holds: size, mtime, `file_date`, `keep_until`, status, and first seen (`first_seen_scan`, the
-    register's own date, which a copy or restore cannot reset). Not on creation time (many filesystems do not record
-    it, and a copy, restore or sync resets it; see Lifespan, Columns) or access time (not stored; `relatime` and
-    `noatime` mounts make it unreliable, and Filo reads with `O_NOATIME` so as not to disturb it).
-  - **Empty files** are shown through it (`--empty`). They are registered and can be given a retention like any
-    other file (see Move detection); until the query view exists, a count line in `filo report` would keep them
-    visible.
-- **Empty directories** (raised 2026-11-16). Removing directories that hold no files: section 5 item 13, split from
-  directory rules on 2026-11-16. It is destructive, so it goes through `filo delete` and `internal/dispose` (for example
-  `filo delete --empty-directories [DIR]`). Proposed: a fresh walk finds the directories with no files at any depth (the
-  register does not store directories); the list is shown and Filo asks (or `-y`); each is removed bottom-up with the
-  call that refuses a non-empty directory; never a root, a mount point, a directory that could not be read, or one under
-  the ignore rules. Open: whether a directory holding only `.DS_Store`, `Thumbs.db` or `desktop.ini` counts as empty
-  (today it does not); and that some programs need their empty directories (a maildir's `cur`, `new`, `tmp`;
-  `.git/refs/tags`; project skeletons), which argues for listing them and letting the person choose, as `filo delete`
-  does.
-- UI technology.
-
-## 7. Rejected or deferred
+## 7. Rejected
 
 - **Accepted risks** (security review of 2026-11-13). Anyone who can edit the register already runs as the user and
   could delete files directly, so an altered register matters through indirect routes (a restored snapshot, a
@@ -2267,17 +2123,18 @@ shape.
   SQLite parses a database before Filo checks it is one of its own (kept small by staying on a current driver);
   ownership of the snapshot directory is not checked on non-Unix platforms. From the code review of the snapshots:
   Ctrl-C cannot interrupt a snapshot being written (milliseconds for a register of a few MB), and every run that
-  writes copies the whole register, timer scans that found nothing included (fine at a few MB; skipping a snapshot
-  when a scan changed nothing is the first improvement if registers grow large). From the code review of
+  writes copies the whole register, timer scans that found nothing included (fine at a few MB). From the code review of
   2026-11-13: a snapshot is renamed into place after a check that the name is free, and a program not taking Filo's
   lock could create that name in between and be overwritten (the directory is private to the user; an atomic
   no-replace rename needs `golang.org/x/sys`); and the directories on a deleted file's path are checked by name, not
-  held open, so a directory swapped in the microseconds after the last look is followed (the thorough fix, opening each
-  directory from the root and unlinking relative to it, is for later).
+  held open, so a directory swapped in the microseconds after the last look is followed.
 
 - **Quarantine, the recycle bin, holds and `filo restore`** (rejected 2026-11-12). Deletion is permanent and backups
   make it recoverable; the confirmed list and the re-hash check keep it safe. The bin fills up with large files and is
-  missing on network disks. A hold is a later retention or `forever`. A restored file is a new file.
+  missing on network disks. A hold is a later retention or `forever`. A restored file is a new file. Considered
+  again on 2026-11-17 (deleting to the trash) and rejected again: a vital file should already be in a backup; a file in
+  the trash is not deleted, so its retention is not really carried out; and a file restored from the trash, or moved
+  out of it to somewhere else, comes back to Filo as a new file with no history.
 - **More checks at the moment of deleting** (rejected 2026-11-12): recently modified, lock and sync companion files,
   open in a process. See Disposal.
 - **Relinking a restored file to its deleted record** (rejected 2026-11-12): it would carry the old, passed retention
@@ -2285,26 +2142,17 @@ shape.
 - **Filling `retention` from a filesystem creation date** (rejected 2026-11-12): many filesystems do not record one,
   and a copy, restore or sync resets it. `file_date` is typed, or read from the file name.
 
-- **Revert directory moves** (the earlier iteration 4; deferred 2026-11-13). A zip of the files taken before a
-  reorganisation covers it, and a revert only works if a scan ran before the moves anyway. The path history that
-  would drive it is kept regardless.
 - **Reading a retention from the file itself** (frontmatter, Office or PDF properties, extended attributes;
   rejected 2026-11-13). A date stored in the file can be changed under the register, which then has to decide which
   one wins; the register stays the one source of truth.
 
-- **Partial hashing of very large files** (size plus first and last megabyte, full hash on demand). Deferred
-  2026-11-11: every file is hashed in full, and only rehashed when its size or mtime changes, so the cost falls on
-  the first scan. Revisit if first scans of large media are too slow; it would need a "partial" marker per hash and a
-  full hash before any disposal.
 - **Tier directories** (bronze, silver, gold, platinum). A good workflow, but moving files breaks links (recent-file
-  lists), scatters one subject across tiers, and ties lifetime to location. Kept as an idea: tiers become default
-  review intervals.
+  lists), scatters one subject across tiers, and ties lifetime to location.
 - **Review date stored inside each file.** Fragile: many editors drop extended attributes on save, and some formats
   cannot carry properties. Losing it fails safe but causes churn, and it cannot hold floors reliably.
 - **A daemon.** A scheduled scan does the job; a daemon adds state, file watching limits and failure modes. Revisit only
   for near-real-time change detection.
-- **Device tracking in the database.** Unneeded while the database is per device and never synced. A device ID for
-  shared decisions is an open question (see Open questions).
+- **Device tracking in the database.** Unneeded while the database is per device and never synced.
 - **One database per root** (the first Go design, with the database in `<root>/.filo`). Several roots on one device
   meant several registers to manage; one database with a `roots` table replaced it on 2026-11-11.
 - **Themed command and project names** (the earlier "dirge" idea, funeral-style subcommands). Plain names win.

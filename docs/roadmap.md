@@ -1,0 +1,297 @@
+# Filo: roadmap
+
+Everything Filo does not do yet: the work planned, ideas, open questions and deferred improvements. What Filo does
+today is in `design.md`; how it was built is in `history.md`. An item stays here while it is discussed and designed.
+When work on it starts, its design moves into `design.md` (the first commit of its branch); when it is complete,
+nothing of it is left here. Items keep their numbers, so gaps in the numbering are the work already done. Last
+updated: 2026-11-17.
+
+## Direction
+
+Agreed 2026-11-17. Filo's job is the lifecycle of files: knowing what there is, deciding how long each file stays,
+and getting rid of it safely when its time comes. The register is how it does that, not the job itself.
+
+- **Filo knows and decides; it deletes because deletion needs its checks** (the re-hash, the root check and the
+  hard-link check at the moment of deleting). **Any other action on files is done by standard tools, from lists
+  Filo writes** (a list for `tar`, a script of `mv` lines the person reads and runs). This keeps it one tool, in the
+  Unix sense of programs that work together.
+- **Filo stays outside the file system.** Making Filo a file system (every move seen as it happens, no scans) was
+  considered and not taken: a bug in it could then lose data on every read and write, while today a broken Filo
+  leaves the files untouched and the worst case is a wrong register, which the snapshots cover (principle 3, fail
+  safe). It is also far more work.
+
+## Priority
+
+Provisional, agreed 2026-11-17; the value and complexity scores (1 to 10, Claude's estimates) are still to be
+settled with the person. Items 22 to 29 are not placed yet.
+
+1. 19 search by name
+2. 9b device ID, 20 the Filo directory, 9a marking synced directories, 9c sharing decisions
+3. 5a progress line, 5b `--needing-retention`
+4. 13 removing empty directories
+5. 21 script mode
+6. 18a projects, 18b project package
+7. 6 one decision for all copies
+8. 16 undoing an update batch, 17 suggested rules
+9. 15 where the space goes
+10. 7a–7c verifying content, 8 backup awareness, 9d snapshots to the backup machine
+11. 10 a summary for scheduled scans
+12. Later a–e
+
+## Items
+
+Each item: what it is, then its value (V) and complexity (C), then any notes from earlier discussions. Notes are
+starting points for the design, not decisions, unless they say so.
+
+### 5a. Progress line in the report (V6, C2)
+A line in `filo report` showing how far dating has got: files with a `file_date`, files with a retention, and per
+directory what is left. The report's "Where most need one" list already covers part of the last.
+
+### 5b. `filo export retention --needing-retention` (V6, C2)
+Writes only the files the report counts as needing a retention, so each CSV is shorter and holds only work still to
+do.
+
+### 6. Duplicates: one decision for all copies (V5, C5)
+Retention is about content, so dating one copy could offer the same retention to its undated copies (one
+confirmation). Copies with different retentions are reported, not resolved.
+
+### 7a. `filo scan --verify` (V5, C3)
+A scan re-hashes only files whose size, mtime, ctime or inode changed, so bytes that rot in place go unnoticed until
+backups have pruned the good copy. `--verify` re-hashes everything and reports content that changed with nothing
+else changing. The register's hash is the reference, so it finds rot that happened after Filo first hashed a file
+(an edit not yet scanned shows by its mtime, so it is told apart), not corruption from before.
+
+### 7b. Checking sidecar hash files (V3, C3)
+Sidecar files (`file.sha256`, `SHA256SUMS`) give a reference from outside, which finds corruption from before the
+first hash. They can be checked against the register's SHA-256 at no extra read (MD5 or SHA-1 sidecars would need
+another read); a mismatch (corruption, or a sidecar left from before an edit) is reported, never resolved. Perhaps a
+separate `filo verify [DIR]`.
+
+### 7c. Vital files and `filo export checksums -o FILE` (V4, C4)
+Making references easy for files that are vital: a "vital" flag on files and one standard `SHA256SUMS` file
+(checkable with `sha256sum -c`) written where the person chooses. Writing a sidecar next to each file was considered
+and is not proposed: it would be a new kind of write into the scanned trees, and each sidecar would arrive at the
+next scan as a new file needing a retention.
+
+### 8. Backup awareness (V6, C8)
+Principle 2 says backups make deletion recoverable; Filo cannot check it. Being in a directory Vorta backs up is a
+weak signal (the backup may not have run, may have failed, or may predate the current content). The strong one is
+"this content is in archive X from date Y": match Borg archive listings (path, size, mtime, perhaps a content hash;
+Borg's listing options to be checked against its documentation) against the register, giving each file a "last seen
+in a backup" date. It may only ever add warnings to `filo delete` ("in no backup"), never make deleting easier.
+Open: reading Borg directly or through Vorta's settings, the cost of listing a large archive, the repository
+passphrase, and that Borg runs on another machine.
+
+### 9a. Marking synced directories (V5, C3)
+The person marks a directory as synced and gives it a name, the same on every device (for example `filo roots set
+DIR --synced docs`). The person marks it, so it works with any sync service and does not break if the service
+changes; Filo reads nothing from Syncthing's own configuration (agreed 2026-11-17). Open: whether a synced
+directory is always a root or can be a directory inside one (a root `~` holding `~/Sync`). What Filo then does
+differently: Syncthing propagates deletes (see `design.md`, Disposal), and `*.sync-conflict-*` files could be
+surfaced.
+
+### 9b. A device ID (V3, C1)
+A random device ID in `meta`, made when the database is created, and recorded with each decision, so no decision
+ever has an unknown origin. Small, and cheaper the earlier it is done; needed by 9c.
+
+### 9c. Sharing decisions between devices (V9, C8)
+A Syncthing folder is on several devices, each with its own register; a retention set on one should be known on the
+others (for example a rule added on a directory of a synced folder on the laptop is applied on the desktop).
+Tested on 2026-11-13: a file dated on the laptop, then moved and renamed on the desktop, kept its retention on the
+laptop's next scan, because the move was paired by hash.
+
+Sharing the database file itself is rejected: Syncthing syncs `filo.db` and its WAL and SHM files separately and not
+as transactions, so a copy can be stale or corrupt; the `flock` is local, so writes on two devices between syncs give
+a `sync-conflict` copy and one side is silently lost; and most of the register is per device (root paths, inodes,
+ctimes, mount points, unreadable flags, scan history), so another device would rehash everything and, with sync lag,
+record moves back and forth. A separate database for only the synced roots has the same problems.
+
+Proposed instead: each device keeps its own register, and they exchange **decisions** through files in the Filo
+directory (20), one log per device (`logs/<device-id>.log`), written only by the device it names and read by the
+others, so the sync never makes a conflict copy. A log line carries the time, the device and the decision:
+- directory rules and the policies they use, with paths relative to the named synced directory (9a);
+- retentions and `file_date`s, keyed on content hash, so a file moved on one device still matches;
+- deletes by Filo, so another device can tell "deleted by Filo on the laptop after the hash check" from an
+  unexplained missing file.
+
+Another device applies them on its next scan; two devices disagreeing (the same policy name with different values,
+one hash with two retentions) is reported, never resolved. An edited file has a new hash and needs a date again.
+Needs 9b and 20. No-code alternative meanwhile: register a Syncthing folder on one device only and set retention
+there; the content is the same everywhere and deletes propagate.
+
+### 9d. Snapshots to the backup machine (V4, C3)
+Getting the register snapshots off the machine, so a lost disk does not take the register with it. A snapshot is a
+finished file that nothing opens for writing, so unlike the live database it is safe to sync. With the Filo
+directory (20), each device's snapshots could go to `snapshots/<device-id>/` there.
+
+### 10. A summary for scheduled scans (V3, C2)
+A short line ("4 files past retention, 2 need a decision") a timer can pass to a desktop notification, so candidates
+do not sit unnoticed. Filo still never deletes on its own. Perhaps with it, a finer split of exit codes.
+
+### 13. Removing empty directories (V5, C4)
+Removing directories that hold no files and were already there (`filo delete` already removes the directories its own
+run empties, see `design.md`, Disposal). Destructive, so through `filo delete` and `internal/dispose`, for example
+`filo delete --empty-directories [DIR]`. Proposed: a fresh walk finds the directories with no files at any depth (the
+register does not store directories); the list is shown and Filo asks (or `-y`); each is removed bottom-up with the
+call that refuses a non-empty directory; never a root, a mount point, a directory that could not be read, or one
+under the ignore rules. Open: whether a directory holding only `.DS_Store`, `Thumbs.db` or `desktop.ini` counts as
+empty (today it does not); and that some programs need their empty directories (a maildir's `cur`, `new`, `tmp`;
+`.git/refs/tags`; project skeletons), which argues for listing them and letting the person choose, as `filo delete`
+does.
+
+### 14. Delete to the trash: rejected
+Rejected on 2026-11-17; see `design.md`, Rejected. The number is kept so the others do not move.
+
+### 15. Where the space goes (V5, C3)
+A report section, or `filo files --sort size`, showing the largest directories and files and how much of it is past
+retention or in duplicates, so the person knows which directory to date first.
+
+### 16. Undoing an update batch (V5, C6)
+Undo a retention CSV applied by mistake. Every batch is already recorded (`review_batches`, `reviews`), so most of
+what it needs is there.
+
+### 17. Suggested rules (V5, C5)
+Point out directories where most files already share one policy and offer the `filo rules add` that would cover the
+rest. A suggestion only, never applied on its own.
+
+### 18a. Projects (V7, C6)
+Files tagged for an event or a project: a project is a named list of files, by their stable ID, so a file keeps its
+project when it moves or is renamed, and a file can be in several projects. Optional: a project retention ("keep
+these until the project closes, plus 2 years"), next to named policies.
+
+### 18b. A project package (V5, C5)
+Pull a project's files together. By the direction above, Filo writes the list and a standard tool does the copying
+(`filo files --project trip -0 | tar --null -T - -czf trip.tgz`), or Filo writes a copy script (21). Filo itself
+never copies files into the scanned trees: the copies would come back as new files and new duplicate groups.
+
+### 19. Search by name (V8, C2)
+`filo files --name GLOB [DIR]`: find files in the register by name; read-only. The first slice of the query view
+(Later a), and what projects (18a) build on. Its output must work in a pipe (`-0`, or tab-separated when piped).
+**To decide first:** `design.md` (Rejected, "Building search") rejected search, since indexers already find files
+and Filo owns lifecycle. A lookup by name over the register is narrower than that; the rejection is to be revisited
+or the item narrowed.
+
+### 20. The Filo directory (V6, C4)
+One directory per device, chosen by the person (for example `~/Sync/Filo`), shared across devices by any sync
+service, which Filo is allowed to write into. It carries the decision logs (9c), snapshots (9d) and project packages
+(18b). Filo never scans it, even inside a root. Each device writes only its own files there. Needs a change to the
+hard rule that Filo writes nothing outside its data directory, `--db` and `-o` files: one more place, chosen by the
+person.
+
+### 21. Script mode (V4, C7)
+For the cautious: instead of acting, Filo writes a script that does it, for the person to read and run (`filo delete
+--script -o FILE`; later empty directories, a revert (27a), a project package (18b)). A script is an `-o` file, so
+it fits the hard rules. The checks at the moment of deleting have to travel with the script (each line re-checks the
+hash with standard tools before `rm`); file names are untrusted, so quoting them safely is the hard part; and Filo
+records what it planned, so the next scan records a file gone with its hash matching as deleted by the script.
+
+### 22. `filo version` (V4, C2)
+Filo's own version (no build version is stamped yet) and the database in use: its path, schema version and when it
+was created. Today the schema version can only be read with `sqlite3 DB "SELECT key, value FROM meta"`. Showing the
+same in `filo report` was considered as a simpler alternative.
+
+### 23. All of a scan's events (V3, C2)
+A scan shows the first 10 events of each kind and `… N more`; the report shows only the latest events overall, so
+the rest of a large scan's events (500 missing after a directory was moved outside the root) cannot be listed.
+Perhaps `filo report --scan N`.
+
+### 24. A root's last whole scan (V3, C1)
+`filo roots` and the report show the last scan, which may have been partial (one directory), so a root can look
+recently checked when most of it was not. Showing the last whole-root scan as well needs one store query.
+
+### 25. Paths inside notes and reasons as structured parts (V2, C4)
+`Problems` and select-mode results (`delete`, `update`) shorten the paths in their reasons where a path starts (at
+the start of the text, or after a space or an opening bracket), so a file name holding ` /data/` is still shortened
+against the root `/data`. The fix is to pass paths in notes and reasons as structured parts (a root and a relative
+path) rather than rewriting text. Shortening notes (an event's detail, a symlink's target) was tried and taken back
+on 2026-11-15: an absolute symlink target read as a relative one, and in a list grouped by root a note was shortened
+against the wrong root.
+
+### 26. Telling a terminal from a character device (V2, C1)
+The prompt check treats standard input as a terminal if it is any character device, so `filo delete </dev/null`
+asks, reads end of input and deletes nothing (safe, but it should print the no-terminal message instead). A real
+check needs `golang.org/x/term` or `golang.org/x/sys` (already an indirect dependency) used directly: a new direct
+dependency, which needs the person's agreement.
+
+### 27a. `filo revert`: undo a rearrangement (V5, C7)
+A person rearranges files and directories, then after hours or days prefers the old layout: Filo moves things back
+to where they were at an earlier scan. Locations only; content recovery is the job of backups. The data is kept
+already: paths are stored as intervals of scans, so the tree at any scan is known. Deferred on 2026-11-13 (it was the
+earlier iteration 4: a zip of the files taken before a reorganisation covers it, and a revert only works if a scan
+ran before the moves, which a timer gives). By the direction above, Filo would write a script of `mv` lines (21)
+rather than move files itself. It can only undo moves Filo paired; conflicts (the old path taken, the file gone or
+unreadable, another filesystem) are reported and skipped, never resolved.
+
+### 27b. Confirming a possible move (V3, C3)
+A scan reports "same name, different content" as a possible move and never pairs it. Confirming it would join the
+two, so the file keeps its history; its content changed, so it still needs a new date.
+
+### 28. Setting up scheduled scans (V5, C2)
+`design.md` (Commands and scheduling) leaves scheduling to a systemd user timer; the README has an example, not yet
+tested. Filo could print the unit files ready to install; by the direction above it does not install them itself.
+Several items lean on regular scans: 10, 27a, 9c.
+
+### 29. Links in exports (V5, C3)
+`filo export --links`: a column whose cell opens the file (and, for duplicates, its directory) from the spreadsheet,
+so copies can be checked with a click. Mainly for duplicates. Whether a spreadsheet makes such a cell clickable is to
+be checked in Calc first; the column is display-only, and file names inside it are untrusted.
+
+### Later a. `filo files`, the query view (V6, C3)
+Viewing the register: `filo files [DIR] [--name GLOB] [--larger SIZE] [--smaller SIZE] [--modified-before DATE]
+[--modified-after DATE] [--status S] [--empty] [--sort size|modified|keep_until]`, cut at N rows in a terminal with
+"… N more", all rows when piped. It filters on what the register holds: size, mtime, `file_date`, `keep_until`,
+status, and first seen (`first_seen_scan`, the register's own date, which a copy or restore cannot reset). Not on
+creation time (many filesystems do not record it, and a copy, restore or sync resets it) or access time (not stored;
+`relatime` and `noatime` mounts make it unreliable, and Filo reads with `O_NOATIME` so as not to disturb it). Empty
+files are shown through it (`--empty`); until then a count line in `filo report` would keep them visible. `--name`
+is item 19.
+
+### Later b. Setting dates in place (V6, C4)
+Setting or clearing `keep_until` on a few files through a whole export, edit and update round is cumbersome. Wanted:
+set or clear a retention on a few files directly. Open: a command (for example `filo keep PATH... RETENTION`, taking
+the same retentions as the CSV), part of the UI, or both. Periods always count from `file_date`; a period counted
+from today (`+1y`) was closed on 2026-11-13.
+
+### Later c. A UI in place of the CSV (V8, C10)
+Including viewing and editing the register in place. Everything hangs off the stable file ID, so none of it needs the
+register to change shape. Open: the technology.
+
+### Later d. Notes and tasks (V5, C9)
+Notes on a file; tasks, some with files and some without; possibly a productivity system built on the register (a
+recurring check on a file, such as an annual look at a seven-year record, is a task). A change of scope from "Filo
+owns lifecycle" that needs its own discussion first; by the direction above it may be a separate tool reading the
+register. Links to a project are item 18a. (Holds were dropped on 2026-11-12: a file that must be kept gets a later
+retention or `forever`.)
+
+### Later e. A watcher (V3, C8)
+Seeing changes as they happen (`inotify`/`fanotify`) instead of on the next scan. `design.md` (Rejected, "A daemon")
+rejects a daemon unless near-real-time change detection is needed; a scheduled scan does the job, and inotify needs
+one watch per directory and drops events when its queue fills.
+
+## Deferred improvements
+
+Smaller improvements to what exists, noted while it was built. Not prioritised.
+
+- **Register:** a restore command for snapshots (restoring is by hand today); skipping a snapshot when a scan changed
+  nothing, if registers grow large (every run that writes copies the whole register); an atomic no-replace rename
+  for snapshots (needs `golang.org/x/sys`), so a program not taking Filo's lock cannot slip a file in under the
+  snapshot's name.
+- **Roots:** `filo roots remove DIR`, with a dry run: removes a root's register rows, never files, and its directory
+  rules with it (its confirmation says how many).
+- **Moves:** pairing across roots whichever root is scanned first (today a file moved to another root is linked only
+  when the old root is scanned first); statting the old path of same-hash files outside a scan's scope, so a file
+  moved in from outside it keeps its history; pairing moves by inode instead of hash, to avoid hashing moved files.
+- **Symlinks:** checking them beyond the broken flag.
+- **Platforms:** a Windows build (the OS-specific code sits behind small functions; locking is the missing piece:
+  non-Unix builds refuse to open the register).
+- **Dates:** reading `file_date` from photos' EXIF data (needs a library).
+- **Deleting:** opening each directory from the root and unlinking relative to it, so a directory swapped in the
+  microseconds after the last look is not followed (today the directories on the path are checked by name).
+- **Hashing:** partial hashing of very large files (size plus first and last megabyte, full hash on demand), if first
+  scans of large media are too slow; it would need a "partial" marker per hash and a full hash before any disposal.
+- **"Last verified":** a file's last verified time, derived as the latest completed scan whose scope covers its
+  path, if something needs it.
+- **Help and errors:** rewriting the help's words (only their layout was redone), and reviewing the wording of the
+  errors.
+- **Tiers as review intervals:** tier directories (bronze, silver, gold, platinum) were rejected (see `design.md`,
+  Rejected); kept as an idea: tiers become default review intervals.
