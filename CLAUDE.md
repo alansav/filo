@@ -95,9 +95,10 @@ branch, never on `main`:
    `code-review` skill, level `medium`, on that series' commits: `main..HEAD`, or from the previous slice's last
    commit), fix what it finds, run the checks again, and commit the fixes as separate commits, one "Review fixes for
    <subject>" commit per commit they belong to, so each can be read next to what it fixes.
-3. When the item is complete, the last commit removes what is left of it from `docs/roadmap.md` and adds its build notes
-   to `docs/history.md`. Stop and report the commits, each with a one-line summary; after a slice, wait for the user
-   before the next one. One review round only: do not review the fixes again.
+3. When the item is complete, after the review fixes of its last slice, one last commit removes what is left of it from
+   `docs/roadmap.md` and adds its build notes (slices, review findings, tests) to `docs/history.md`; it is not
+   reviewed. Stop and report the commits, each with a one-line summary; after a slice, wait for the user before the
+   next one. One review round only: do not review the fixes again.
 
 Stop and ask instead of committing if a check fails and the fix is not obvious, if a finding needs a design decision
 or a change to `docs/design.md`, if a finding looks wrong or out of scope, or if anything else is unclear.
