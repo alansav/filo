@@ -6,16 +6,12 @@ on the same branch when a design decision changes (in its own commit, first in t
 
 ## Current state
 
-Iterations 1 (scan, register, report), 2 (lifespan: retention through the retention CSV, `filo export retention` then
-`filo update`) and 3 (delete: `filo delete [DIR] [-y]` lists the files past their retention, asks, and deletes the
-chosen ones, each only after it is re-read and found unchanged) are done, as are register snapshots. The duplicates
-redesign (`docs/design.md`, Duplicates: `filo delete FILE.csv`, records, always, `filo duplicates`; schema 8) is done
-and merged. The terminal output is done (every command prints through `internal/view`, see "Terminal output"). Named
-retention policies (`docs/design.md`, Lifespan, Named retention policies; schema 9; `filo policies`) are done and
-merged. Replacing an existing `-o` file after asking (section 5 item 11) and every export scanning first, `--no-scan` to
-skip it (item 12), are done. "Folder" is now "directory" everywhere. Directory rules (item 4, `docs/design.md`,
-Lifespan, Directory rules; schema 10; `filo rules`) are done in four slices on branch `directory-rules`, one PR for
-them. Next in `docs/design.md` section 5: removing empty directories (item 13, to be designed).
+Everything `docs/design.md` describes is built and merged (schema 10): scan, register and report; retention through
+the retention CSV (`filo export retention`, `filo update`); `filo delete [DIR] [-y]`, which deletes a file only after
+it is re-read and found unchanged; register snapshots; duplicates (`filo delete FILE.csv`, `filo duplicates`); the
+terminal output (every command prints through `internal/view`); named retention policies (`filo policies`); directory
+rules (`filo rules`). What is next is in `docs/roadmap.md`, Priority (provisional, 2026-11-17: item 19, search by
+name, then the sync items).
 **`internal/dispose` is the only code allowed to delete the user's files**, and only from `filo delete`; everything
 else stays read-only on them, and nothing overwrites an existing file without asking (only an `-o` output file,
 see the hard rules). Stay inside the current piece of work.
@@ -73,7 +69,7 @@ Run `go vet` and the tests before saying a change is done.
 
 ## After writing code
 
-One section 5 item per branch (and so per PR), and each PR is a complete, working feature, never part of one: a
+One roadmap item per branch (and so per PR), and each PR is a complete, working feature, never part of one: a
 large item is built in slices on the one branch, and the PR is opened only when the last slice is done. The user
 reads every commit on its own, so a piece of work is committed as a short series of small commits on the current
 branch, never on `main`:

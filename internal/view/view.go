@@ -235,7 +235,7 @@ func join(root, rel string) string {
 // columns are: "/home/u/Documents/b/doc is kept until …" becomes "b/doc is kept until …". The root is left out only
 // where a path starts (at the start of the text, or after a space or an opening bracket), so a longer path that holds
 // it ("/mnt/data/x.pdf" with the root /data) stays whole. It still rewrites text: a file name holding " /data/" is
-// shortened too (docs/design.md, Open questions, Paths inside notes and reasons).
+// shortened too (docs/roadmap.md, item 25).
 func (r *Renderer) shorten(text string) string {
 	if r.root == "" || r.root == string(filepath.Separator) {
 		return text // a root of / would strip every separator

@@ -553,9 +553,8 @@ Enable it with `systemctl --user enable --now filo-scan.timer`.
    contents marked always and excluded directories. Done.
 6. **Retention policies**: a named retention typed in the CSV, changed in one place. Done.
 7. **Directory rules**: a policy for the files under a directory, applied by every scan. Done.
-8. **Next**: removing empty directories, through `filo delete`. The order is in [docs/design.md](docs/design.md),
-   section 5.
-9. Later: **a UI** in place of the CSV.
+8. **Next**: what is planned, in order, is in [docs/roadmap.md](docs/roadmap.md): finding files by name, sharing
+   decisions between devices, progress in the report, removing empty directories, and more.
 
 Principles that won't change:
 - A retention is never a trigger: reaching its end makes a file a candidate you confirm.
@@ -563,7 +562,7 @@ Principles that won't change:
 - Deletion is permanent, so keep backups: Filo has no recycle bin.
 - Anything ambiguous is reported, never guessed.
 
-The full design, settled decisions and open questions are in [docs/design.md](docs/design.md).
+How Filo works and why is in [docs/design.md](docs/design.md); what is planned is in [docs/roadmap.md](docs/roadmap.md).
 
 ## Development
 
