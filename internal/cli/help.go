@@ -229,7 +229,7 @@ var commandHelps = map[string]commandHelp{
 				"date, forever or a policy (even one with no value) is never touched, nor one whose retention you cleared after " +
 				"a rule set it. For a file, the rules of its own directory are tried first, then those of each " +
 				"directory above it: the first directory with a matching rule decides. In a directory, the pattern " +
-				"with the most letters wins (* and ? are not counted); two with as many are reported, not guessed.",
+				"with the most characters wins (* is not counted, ? counts as one); two as long are reported, not guessed.",
 			"filo rules lists them in the order they are tried, with how many files each set a policy on, and " +
 				"flags a directory that is gone and a policy with no value. add adds a rule and sets the policy of " +
 				"the files it decides now, and says how many; a policy that does not exist is created with no value. set changes the " +
