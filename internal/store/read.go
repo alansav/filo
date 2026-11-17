@@ -53,7 +53,7 @@ type ScanInfo struct {
 }
 
 // LastScanCovering returns when the latest finished scan that covered all of scope in the root finished: a scan of
-// the whole root, of scope itself or of a folder above it ("" for the whole root). "" if there was none.
+// the whole root, of scope itself or of a directory above it ("" for the whole root). "" if there was none.
 func (s *Store) LastScanCovering(ctx context.Context, rootID int64, scope string) (string, error) {
 	var finished string
 	err := s.db.QueryRowContext(ctx, `SELECT finished_utc FROM scans
@@ -92,7 +92,7 @@ func (s *Store) Scan(ctx context.Context, id int64) (ScanInfo, bool, error) {
 func (s *Store) RowCounts(ctx context.Context) (map[string]int64, error) {
 	out := map[string]int64{}
 	for _, t := range []string{"roots", "scans", "files", "paths", "events", "exports", "export_rows", "review_batches", "reviews",
-		"always_hashes", "duplicate_records", "excluded_dirs", "policies", "policy_changes"} {
+		"always_hashes", "duplicate_records", "excluded_dirs", "policies", "policy_changes", "rules"} {
 		var n int64
 		if err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM `+t).Scan(&n); err != nil {
 			return nil, fmt.Errorf("count %s: %w", t, err)

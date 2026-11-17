@@ -34,7 +34,7 @@ func newCLITest(t *testing.T) *cliTest {
 // in is the absolute path of rel ('/' separators) under the root.
 func (c *cliTest) in(rel string) string { return filepath.Join(c.root, filepath.FromSlash(rel)) }
 
-// write creates or replaces the file rel under the root, with its folders.
+// write creates or replaces the file rel under the root, with its directories.
 func (c *cliTest) write(rel, content string) {
 	c.t.Helper()
 	if err := os.MkdirAll(filepath.Dir(c.in(rel)), 0o755); err != nil {

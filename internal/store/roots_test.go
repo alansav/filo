@@ -453,6 +453,13 @@ func TestAbsorbKeepsHistoryAndReviews(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Directory rules on the whole of Documents and on its tax directory.
+	if _, err := s.db.Exec(`INSERT INTO policies (id, name, added_utc, changed_utc) VALUES (1, 'bills', 'x', 'x');
+		INSERT INTO rules (root_id, dir, pattern, pattern_key, letters, policy_id, added_utc) VALUES
+			(?, '', '*', '*', 0, 1, 'x'), (?, 'tax', '*.pdf', '*.pdf', 4, 1, 'x')`, docs.ID, docs.ID); err != nil {
+		t.Fatal(err)
+	}
+
 	home, absorbed, err := s.AddRootAbsorb(ctx, abs("home"), Settings{IncludeHidden: true, Ignore: []string{"tmp", "tmp"}})
 	if err != nil {
 		t.Fatal(err)
@@ -479,7 +486,7 @@ func TestAbsorbKeepsHistoryAndReviews(t *testing.T) {
 		t.Fatalf("roots = %+v, want only the new one, with its settings", roots)
 	}
 
-	// Same files, same IDs, paths under their folders.
+	// Same files, same IDs, paths under their directories.
 	ks, err = s.Known(ctx, home.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -518,6 +525,13 @@ func TestAbsorbKeepsHistoryAndReviews(t *testing.T) {
 	if v := rawQueryString(t, db, `SELECT path || ' <- ' || other_path FROM events WHERE detail LIKE 'returned%'`); v !=
 		"Pictures/beach.jpg <- x/beach.jpg" {
 		t.Errorf("returned event = %q", v)
+	}
+
+	// The rules followed their root: '' was the whole of Documents.
+	if v := rawQueryString(t, db, `SELECT group_concat(root_id || ':' || dir || ' ' || pattern, '|')
+		FROM (SELECT * FROM rules ORDER BY dir)`); v != strconv.FormatInt(home.ID, 10)+":Documents *|"+
+		strconv.FormatInt(home.ID, 10)+":Documents/tax *.pdf" {
+		t.Errorf("rules after absorb = %q", v)
 	}
 
 	// The keep_until date survived the absorb.

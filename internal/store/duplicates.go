@@ -297,7 +297,7 @@ type NotCounted struct {
 }
 
 // SymlinksTo returns, for each of the given absolute paths, the present symlinks in the register that point at it
-// (absolute paths). A relative target counts from the link's folder.
+// (absolute paths). A relative target counts from the link's directory.
 func (s *Store) SymlinksTo(ctx context.Context, targets []string) (map[string][]string, error) {
 	want := map[string]bool{}
 	for _, t := range targets {

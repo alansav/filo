@@ -100,6 +100,7 @@ type Summary struct {
 	Samples       map[string][]store.Event // first SampleSize events of each kind
 	OtherFS       []string
 	FailedDirs    []string
+	Rules         store.RuleRun // what the directory rules did: the policies they set, and the ties
 }
 
 type newItem struct {
@@ -493,7 +494,7 @@ func Scan(ctx context.Context, s *store.Store, opt Options) (Summary, error) {
 		MissingCount: sum.Missing, ErrorCount: sum.Errors,
 	}
 	pr.phase(PhaseWriting)
-	if sum.ScanID, err = s.ApplyScan(ctx, rec, ch); err != nil {
+	if sum.ScanID, sum.Rules, err = s.ApplyScanRules(ctx, rec, ch); err != nil {
 		return Summary{}, err
 	}
 	sum.Samples = map[string][]store.Event{}

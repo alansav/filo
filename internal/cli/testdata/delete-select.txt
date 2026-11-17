@@ -19,7 +19,7 @@ Delete all 3, select one by one, list them all, or none? [a/s/l/N]
 [3/3]  past its retention . until 2025-09-01 . 5 B
           <root>/video/2015/summer holiday in the south of France with the whole family, day 3.mp4
         d delete . r new retention . s skip . q quit  > 
-Done   deleted 1 file . freed 5 B . removed 1 empty folder
+Done   deleted 1 file . freed 5 B . removed 1 empty directory
 
   - 1 file given a new retention
   - 1 file left for later

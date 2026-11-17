@@ -12,9 +12,10 @@ chosen ones, each only after it is re-read and found unchanged) are done, as are
 redesign (`docs/design.md`, Duplicates: `filo delete FILE.csv`, records, always, `filo duplicates`; schema 8) is done
 and merged. The terminal output is done (every command prints through `internal/view`, see "Terminal output"). Named
 retention policies (`docs/design.md`, Lifespan, Named retention policies; schema 9; `filo policies`) are done and
-merged. Replacing an existing `-o` file after asking (section 5 item 11) and every export scanning first, `--no-scan`
-to skip it (item 12), are done. Next in `docs/design.md` section 5: folder rules (design first: name patterns and
-empty folders are in Open questions).
+merged. Replacing an existing `-o` file after asking (section 5 item 11) and every export scanning first, `--no-scan` to
+skip it (item 12), are done. "Folder" is now "directory" everywhere. Directory rules (item 4, `docs/design.md`,
+Lifespan, Directory rules; schema 10; `filo rules`) are done in four slices on branch `directory-rules`, one PR for
+them. Next in `docs/design.md` section 5: removing empty directories (item 13, to be designed).
 **`internal/dispose` is the only code allowed to delete the user's files**, and only from `filo delete`; everything
 else stays read-only on them, and nothing overwrites an existing file without asking (only an `-o` output file,
 see the hard rules). Stay inside the current piece of work.
@@ -48,7 +49,7 @@ see the hard rules). Stay inside the current piece of work.
 - Before changing any file in the repo, check the branch with `git branch --show-current`. If it is `main`, stop and
   ask the user to check out a branch; do not create or switch branches yourself.
 - Command names stay plain and easy to remember: `roots`, `scan`, `report`, `export`, `update`, `delete`,
-  `duplicates`, `policies`, `revert`. No themed names.
+  `duplicates`, `policies`, `rules`, `revert`. No themed names.
 
 ## Commands
 
@@ -72,19 +73,24 @@ Run `go vet` and the tests before saying a change is done.
 
 ## After writing code
 
-One section 5 item per branch (and so per PR). The user reads every commit on its own, so a piece of work is
-committed as a short series of small commits on the current branch, never on `main`:
+One section 5 item per branch (and so per PR), and each PR is a complete, working feature, never part of one: a
+large item is built in slices on the one branch, and the PR is opened only when the last slice is done. The user
+reads every commit on its own, so a piece of work is committed as a short series of small commits on the current
+branch, never on `main`:
 
 1. Commit as you go, lower layers first, each commit with its own tests: the `docs/design.md` change alone first,
    then the store and schema, then the internal package(s), then the `internal/view` output, then the `cmd/filo`
    wiring and end-to-end tests. Before each commit, `gofmt`, `go vet`, `staticcheck` and `go test ./...` must all
-   pass, so every commit builds and is green on its own. Aim for about 100 changed lines of non-test code per
-   commit; a small change stays one commit. Each message says what the commit adds and, if part of the work is
-   still to come, what (for example "not called by any command yet").
-2. When the series is done, run one code review over all of it (the `code-review` skill, level `medium`, on
-   `main..HEAD`), fix what it finds, run the checks again, and commit the fixes as separate commits, one
-   "Review fixes for <subject>" commit per commit they belong to, so each can be read next to what it fixes.
-3. Stop and report the commits, each with a one-line summary. One review round only: do not review the fixes again.
+   pass, so every commit builds and is green on its own. Each commit is one atomic unit that does exactly what its
+   message says; its size comes second (do not split or merge commits to reach a number of lines). Each message
+   says what the commit adds and, if part of the work is still to come, what (for example "not called by any
+   command yet").
+2. When the series is done (for an item built in slices, when each slice is done), run one code review over it (the
+   `code-review` skill, level `medium`, on that series' commits: `main..HEAD`, or from the previous slice's last
+   commit), fix what it finds, run the checks again, and commit the fixes as separate commits, one "Review fixes for
+   <subject>" commit per commit they belong to, so each can be read next to what it fixes.
+3. Stop and report the commits, each with a one-line summary; after a slice, wait for the user before the next one.
+   One review round only: do not review the fixes again.
 
 Stop and ask instead of committing if a check fails and the fix is not obvious, if a finding needs a design decision
 or a change to `docs/design.md`, if a finding looks wrong or out of scope, or if anything else is unclear.
@@ -103,6 +109,8 @@ or a change to `docs/design.md`, if a finding looks wrong or out of scope, or if
 
 - Idiomatic Go: wrap errors with `%w`, return errors instead of panicking, pass `context.Context` where work can be
   cancelled. User-facing errors are one clear line.
+- Say "directory", never "folder" (output, help, docs, comments); only Syncthing's own term stays "a Syncthing
+  folder" (see `docs/design.md`, Terminal output).
 - Tests are table-driven and use `t.TempDir()`. No test may touch the real home directory.
 - One database per device holds all roots. It is created automatically in the user data directory
   (`~/.local/share/filo/filo.db` on Linux); `--db` and `FILO_DB` override it. Roots are added explicitly. One writer at a

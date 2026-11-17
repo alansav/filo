@@ -157,9 +157,18 @@ type Changes struct {
 // ApplyScan records a scan and its changes in one transaction. Paths are closed before any are opened, so a path
 // freed by one move can be taken by another in the same scan. On any error nothing is written.
 func (s *Store) ApplyScan(ctx context.Context, rec ScanRecord, ch Changes) (int64, error) {
+	id, _, err := s.ApplyScanRules(ctx, rec, ch)
+	return id, err
+}
+
+// ApplyScanRules is ApplyScan, returning also what the directory rules did: in the same transaction, after the
+// changes, the rules set the policy of every file in the scan's scope with no retention (docs/design.md, Lifespan,
+// Directory rules), stamped with this scan.
+func (s *Store) ApplyScanRules(ctx context.Context, rec ScanRecord, ch Changes) (int64, RuleRun, error) {
+	var run RuleRun
 	ignores, err := json.Marshal(rec.Ignores)
 	if err != nil {
-		return 0, err
+		return 0, run, err
 	}
 	if rec.Ignores == nil {
 		ignores = []byte("[]")
@@ -167,18 +176,18 @@ func (s *Store) ApplyScan(ctx context.Context, rec ScanRecord, ch Changes) (int6
 
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return 0, err
+		return 0, run, err
 	}
 	defer tx.Rollback()
 
 	res, err := tx.ExecContext(ctx, `INSERT INTO scans (started_utc, root_id, scope, include_hidden, ignores)
 		VALUES (?, ?, ?, ?, ?)`, utc(rec.Started), rec.RootID, rec.Scope, rec.IncludeHidden, string(ignores))
 	if err != nil {
-		return 0, fmt.Errorf("record scan: %w", err)
+		return 0, run, fmt.Errorf("record scan: %w", err)
 	}
 	scanID, err := res.LastInsertId()
 	if err != nil {
-		return 0, err
+		return 0, run, err
 	}
 
 	if err := eachStmt(ctx, tx, `UPDATE paths SET valid_to_scan = ? WHERE id = ? AND valid_to_scan IS NULL`,
@@ -192,7 +201,7 @@ func (s *Store) ApplyScan(ctx context.Context, rec ScanRecord, ch Changes) (int6
 			}
 			return nil
 		}); err != nil {
-		return 0, fmt.Errorf("close paths: %w", err)
+		return 0, run, fmt.Errorf("close paths: %w", err)
 	}
 
 	if err := eachStmt(ctx, tx, `UPDATE files SET size = ?, mtime_ns = ?, ctime_ns = ?, hash = ?, inode = ?,
@@ -203,7 +212,7 @@ func (s *Store) ApplyScan(ctx context.Context, rec ScanRecord, ch Changes) (int6
 				nullString(u.LinkTarget), u.LinkBroken, u.FileID)
 			return err
 		}); err != nil {
-		return 0, fmt.Errorf("update files: %w", err)
+		return 0, run, fmt.Errorf("update files: %w", err)
 	}
 
 	if err := eachStmt(ctx, tx, `UPDATE files SET unreadable_since_scan = coalesce(unreadable_since_scan, ?)
@@ -211,7 +220,7 @@ func (s *Store) ApplyScan(ctx context.Context, rec ScanRecord, ch Changes) (int6
 		_, err := st.ExecContext(ctx, scanID, ch.Unreadable[i])
 		return err
 	}); err != nil {
-		return 0, fmt.Errorf("flag unreadable files: %w", err)
+		return 0, run, fmt.Errorf("flag unreadable files: %w", err)
 	}
 
 	openPath := `INSERT INTO paths (file_id, root_id, path, valid_from_scan) VALUES (?, ?, ?, ?)`
@@ -219,7 +228,7 @@ func (s *Store) ApplyScan(ctx context.Context, rec ScanRecord, ch Changes) (int6
 		_, err := st.ExecContext(ctx, ch.Open[i].FileID, rec.RootID, ch.Open[i].Path, scanID)
 		return err
 	}); err != nil {
-		return 0, fmt.Errorf("open paths: %w", err)
+		return 0, run, fmt.Errorf("open paths: %w", err)
 	}
 
 	if len(ch.New) > 0 {
@@ -227,12 +236,12 @@ func (s *Store) ApplyScan(ctx context.Context, rec ScanRecord, ch Changes) (int6
 			(kind, size, mtime_ns, ctime_ns, hash, inode, link_target, link_broken, unreadable_since_scan, first_seen_scan)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 		if err != nil {
-			return 0, err
+			return 0, run, err
 		}
 		defer insFile.Close()
 		insPath, err := tx.PrepareContext(ctx, openPath)
 		if err != nil {
-			return 0, err
+			return 0, run, err
 		}
 		defer insPath.Close()
 		for _, n := range ch.New {
@@ -243,14 +252,14 @@ func (s *Store) ApplyScan(ctx context.Context, rec ScanRecord, ch Changes) (int6
 			r, err := insFile.ExecContext(ctx, n.Kind, n.Size, n.MtimeNS, n.CtimeNS, nullString(n.Hash), nullIno(n.Ino),
 				nullString(n.LinkTarget), n.LinkBroken, unreadable, scanID)
 			if err != nil {
-				return 0, fmt.Errorf("insert file %s: %w", n.Path, err)
+				return 0, run, fmt.Errorf("insert file %s: %w", n.Path, err)
 			}
 			id, err := r.LastInsertId()
 			if err != nil {
-				return 0, err
+				return 0, run, err
 			}
 			if _, err := insPath.ExecContext(ctx, id, rec.RootID, n.Path, scanID); err != nil {
-				return 0, fmt.Errorf("insert path %s: %w", n.Path, err)
+				return 0, run, fmt.Errorf("insert path %s: %w", n.Path, err)
 			}
 		}
 	}
@@ -265,7 +274,7 @@ func (s *Store) ApplyScan(ctx context.Context, rec ScanRecord, ch Changes) (int6
 		_, err := st.ExecContext(ctx, scanID, e.Kind, fileID, nullString(e.Path), nullString(e.OtherPath), nullString(e.Detail))
 		return err
 	}); err != nil {
-		return 0, fmt.Errorf("record events: %w", err)
+		return 0, run, fmt.Errorf("record events: %w", err)
 	}
 
 	finished := time.Now()
@@ -273,12 +282,17 @@ func (s *Store) ApplyScan(ctx context.Context, rec ScanRecord, ch Changes) (int6
 		moved_count = ?, missing_count = ?, error_count = ?, elapsed_ms = ? WHERE id = ?`,
 		utc(finished), rec.FilesSeen, rec.NewCount, rec.ChangedCount, rec.MovedCount, rec.MissingCount, rec.ErrorCount,
 		finished.Sub(rec.Started).Milliseconds(), scanID); err != nil {
-		return 0, fmt.Errorf("finish scan: %w", err)
+		return 0, run, fmt.Errorf("finish scan: %w", err)
+	}
+	// The rules, last: they see this scan's files, and its unread directories (it is finished in tx).
+	if run, err = dateByRules(ctx, tx, rec.RootID, rec.Scope, nil, scanID, finished.Format(DateLayout), "scan",
+		finished); err != nil {
+		return 0, run, fmt.Errorf("apply directory rules: %w", err)
 	}
 	if err := s.commit(tx); err != nil {
-		return 0, fmt.Errorf("commit scan: %w", err)
+		return 0, run, fmt.Errorf("commit scan: %w", err)
 	}
-	return scanID, nil
+	return scanID, run, nil
 }
 
 // eachStmt prepares q once and runs fn for each of n items.

@@ -1,0 +1,200 @@
+package store
+
+import (
+	"context"
+	"database/sql"
+	"fmt"
+	"slices"
+	"time"
+
+	"github.com/alansav/filo/internal/rules"
+)
+
+// Dating files by directory rules (docs/design.md, Lifespan, Directory rules, "Which files a rule dates"): a rule
+// gives its policy to a present file with no retention at all, once. A file that is unreadable or the new side of a
+// possible move waits until that is resolved: its status says so, and only an undated file is dated.
+
+// RuleDated is a file a rule dated (or would date), as it is after: on the rule's policy.
+type RuleDated struct {
+	FileItem
+	Rule Rule
+}
+
+// RuleTie is a file that two or more rules of one directory match equally: no rule dates it.
+type RuleTie struct {
+	FileItem
+	Rules []Rule
+}
+
+// RuleRun is what the rules did (or would do) in one root.
+type RuleRun struct {
+	Dated []RuleDated // in path order
+	Ties  []RuleTie   // in path order
+}
+
+// datable reports whether a rule may date the file: present with no retention at all (not even a policy with no
+// value), never dated by a rule before, and undated by its status (not unreadable, not the new side of a possible
+// move, both of which outrank undated).
+func datable(it FileItem) bool {
+	return it.Status == StatusUndated && it.Retention == "" && it.Policy == "" && !it.RuleDated
+}
+
+// dateByRules dates, in tx, the datable files at scope and below in a root ("" for all of it) by the rules, and
+// returns what it did. With only, it dates just the files the rules in only decide, and reports just the ties those
+// rules are in: what adding, moving or copying them does. afterScan stamps the dates (the scan they were set after,
+// as for a CSV); command names the run in the history ("rules add", "scan"), and "" only works out what would be
+// done, writing nothing: no write lock for a listing.
+//
+// Each path is a file of its own (a hard link too: Filo keeps each link as a file, so each is dated by its own
+// directory's rule). A file at or under a directory the latest scan of it could not read is left alone: what is
+// there now is not known.
+func dateByRules(ctx context.Context, tx *sql.Tx, rootID int64, scope string, only map[int64]bool, afterScan int64,
+	today, command string, now time.Time) (RuleRun, error) {
+	var run RuleRun
+	rs, err := readRules(ctx, tx, rootID, "")
+	if err != nil || len(rs) == 0 {
+		return run, err
+	}
+	byID := map[int64]Rule{}
+	ms := make([]rules.Rule, len(rs))
+	for i, r := range rs {
+		byID[r.ID], ms[i] = r, r.Matcher()
+	}
+	set := rules.NewSet(ms)
+	items, err := files(ctx, tx, today, Filter{RootID: rootID, Scope: scope, Ruleless: true})
+	if err != nil {
+		return run, err
+	}
+	blocked, err := unreadDirs(ctx, tx, rootID)
+	if err != nil {
+		return run, err
+	}
+	seen := map[int64]bool{} // a file is dated once, even if the register held two present paths for it
+	for _, it := range items {
+		if !datable(it) || seen[it.FileID] || slices.ContainsFunc(blocked, func(d string) bool {
+			return isAtOrUnder(it.Path, d)
+		}) {
+			continue
+		}
+		seen[it.FileID] = true
+		res := set.Resolve(it.Path)
+		switch {
+		case !res.Found:
+		case len(res.Ties) > 0:
+			tie := RuleTie{FileItem: it}
+			in := only == nil
+			for _, m := range res.Ties {
+				tie.Rules = append(tie.Rules, byID[m.ID])
+				in = in || only[m.ID]
+			}
+			if in {
+				run.Ties = append(run.Ties, tie)
+			}
+		case only == nil || only[res.Rule.ID]:
+			r := byID[res.Rule.ID]
+			it.Retention, it.Policy, it.PolicyValue = r.Policy, r.Policy, r.PolicyValue
+			it.KeepUntil, _ = KeepUntil(it.FileDate, r.PolicyValue) // a period with no file_date has none
+			it.Status = classify(fileRow{item: it, reviewedAfter: afterScan,
+				reviewedHash: sql.NullString{String: it.Hash, Valid: it.Hash != ""}}, today)
+			it.ReviewedUTC, it.RuleDated = utc(now), true
+			run.Dated = append(run.Dated, RuleDated{FileItem: it, Rule: r})
+		}
+	}
+	if len(run.Dated) == 0 || command == "" {
+		return run, nil
+	}
+	batch, err := newBatch(ctx, tx, now, command, "")
+	if err != nil {
+		return run, err
+	}
+	for _, d := range run.Dated {
+		if err := dateByRule(ctx, tx, d, batch, afterScan, now); err != nil {
+			return run, err
+		}
+	}
+	return run, nil
+}
+
+// unreadDirs returns the paths in a root (relative, "" for all of it) that the latest scan covering them could not
+// read: a walk problem recorded as an error event with no file (not a file that could not be hashed, nor one that
+// vanished), in a scan with no later scan whose scope covers it. Their files' state now is not known.
+func unreadDirs(ctx context.Context, tx *sql.Tx, rootID int64) ([]string, error) {
+	type scan struct {
+		id    int64
+		scope string
+	}
+	scans, err := queryAll(ctx, tx, func(rows *sql.Rows) (scan, error) {
+		var s scan
+		err := rows.Scan(&s.id, &s.scope)
+		return s, err
+	}, `SELECT id, scope FROM scans WHERE root_id = ? AND kind = 'scan' AND finished_utc IS NOT NULL ORDER BY id DESC`,
+		rootID)
+	if err != nil {
+		return nil, fmt.Errorf("read scans: %w", err)
+	}
+	type problem struct {
+		scan int64
+		path string
+	}
+	problems, err := queryAll(ctx, tx, func(rows *sql.Rows) (problem, error) {
+		var p problem
+		err := rows.Scan(&p.scan, &p.path)
+		return p, err
+	}, `SELECT e.scan_id, coalesce(e.path, '') FROM events e JOIN scans s ON s.id = e.scan_id
+		WHERE s.root_id = ? AND e.kind = 'error' AND e.file_id IS NULL AND coalesce(e.detail, '') NOT LIKE 'hash: %'
+		AND coalesce(e.detail, '') != 'vanished during the scan'`, rootID)
+	if err != nil {
+		return nil, fmt.Errorf("read scan problems: %w", err)
+	}
+	byScan := map[int64][]string{}
+	for _, p := range problems {
+		if p.path == "." {
+			p.path = ""
+		}
+		byScan[p.scan] = append(byScan[p.scan], p.path)
+	}
+	var covered, out []string // the scopes of the later scans; the paths still unread
+	for _, sc := range scans {
+		for _, p := range byScan[sc.id] {
+			if !slices.ContainsFunc(covered, func(c string) bool { return isAtOrUnder(p, c) }) {
+				out = append(out, p)
+			}
+		}
+		covered = append(covered, sc.scope)
+	}
+	return out, nil
+}
+
+// dateByRule records one file dated by a rule, as filo update records a retention: the policy, the keep_until worked
+// out from it, the content it was set on, the scan it was set after, and a history row.
+func dateByRule(ctx context.Context, tx *sql.Tx, d RuleDated, batch, afterScan int64, now time.Time) error {
+	hash := sql.NullString{String: d.Hash, Valid: d.Hash != ""}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO reviews (batch_id, file_id, file_date, retention, keep_until, hash)
+		VALUES (?, ?, ?, ?, ?, ?)`, batch, d.FileID, nullString(d.FileDate), d.Policy, nullString(d.KeepUntil),
+		hash); err != nil {
+		return fmt.Errorf("date %s by a rule: %w", d.Path, err)
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE files SET retention = NULL, policy_id = (SELECT policy_id FROM rules
+		WHERE id = ?), keep_until = ?, reviewed_utc = ?, reviewed_after_scan = ?, reviewed_hash = ?, rule_id = ?,
+		rule_dated_utc = ? WHERE id = ?`, d.Rule.ID, nullString(d.KeepUntil), utc(now), nullInt(afterScan), hash,
+		d.Rule.ID, utc(now), d.FileID); err != nil {
+		return fmt.Errorf("date %s by a rule: %w", d.Path, err)
+	}
+	return nil
+}
+
+// RuleTies returns the present files of a root that two or more rules match equally, so no rule dates them, for the
+// list of rules. It works them out as dating would, writing nothing. today is YYYY-MM-DD.
+func (s *Store) RuleTies(ctx context.Context, rootID int64, today string, now time.Time) ([]RuleTie, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback() // read only: dateByRules writes nothing without a command
+	afterScan, err := latestScan(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	run, err := dateByRules(ctx, tx, rootID, "", nil, afterScan, today, "", now)
+	return run.Ties, err
+}

@@ -227,7 +227,7 @@ files:
 	}
 	facts := []string{"deleted " + report.Plural(int64(deleted), "file", "files"), "freed " + report.Size(freed)}
 	if len(removed) > 0 {
-		facts = append(facts, "removed "+report.Plural(int64(len(removed)), "empty folder", "empty folders"))
+		facts = append(facts, "removed "+report.Plural(int64(len(removed)), "empty directory", "empty directories"))
 	}
 	r.Outcome("Done", facts...)
 	if len(skips) > 0 {
@@ -245,7 +245,7 @@ files:
 			ps[i] = view.Problem{Reason: p.Error(), Failed: true}
 		}
 		r.Blank()
-		r.Problems(fmt.Sprintf("Folders not removed: %s", report.Count(int64(len(problems)))), view.Attention, ps)
+		r.Problems(fmt.Sprintf("Directories not removed: %s", report.Count(int64(len(problems)))), view.Attention, ps)
 	}
 	if renewed > 0 || left > 0 {
 		r.Blank()

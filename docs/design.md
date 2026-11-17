@@ -12,7 +12,9 @@ the database next to it) were added on 2026-11-13. The order of the next work wa
 The duplicates CSV was designed on 2026-11-13/14 and taken ahead of that order (schema version 7); a gap found on
 2026-11-14 (a second export shows decided groups blank) led to a redesign on 2026-11-16 (Duplicates: `filo delete
 FILE.csv`, no stored decisions to delete, four kinds of keep), built on 2026-11-15/16 in five slices (schema version
-8). The terminal output was designed on 2026-11-15 and built first (Terminal output). Last updated: 2026-11-16.
+8). The terminal output was designed on 2026-11-15 and built first (Terminal output). Named retention policies
+(schema version 9) and directory rules (schema version 10) were designed and built on 2026-11-16/17. Last updated:
+2026-11-17.
 
 This file records settled decisions, the planned data model and the open questions. When a decision changes,
 change it here in the same commit.
@@ -67,7 +69,7 @@ Principles. These are not negotiable:
   `~/Library/Application Support/filo/filo.db` on macOS, `%LocalAppData%\filo\filo.db` on Windows. `--db` (or
   `FILO_DB`) overrides it. Created automatically on first run; the default `filo` directory is the only directory
   Filo creates (mode 0700), and an explicit `--db` path must have an existing parent.
-- **Never synced.** The default location is outside every root, so the register is never inside a synced folder and
+- **Never synced.** The default location is outside every root, so the register is never inside a synced directory and
   never scanned. That is also why there is no device column. Sharing retention decisions between devices is an open
   question; the register itself stays per device (see Open questions).
 - Driver: `modernc.org/sqlite` (pure Go, no CGO, plain `database/sql`), chosen 2026-11-11 at v1.62.0.
@@ -157,20 +159,21 @@ the database, on the same disk. Copying the register's snapshots to a separate p
   filesystem, so no file belongs to two roots.
 - **A new root absorbs the roots inside it** (decided 2026-11-11, automatically: no flag, no prompt). Adding `~` when
   `~/Documents` and `~/Pictures` are roots on the same filesystem merges them into `~` in the same transaction: their
-  paths get the folder as a prefix (`a.txt` becomes `Documents/a.txt`), their scans become scans of `~` scoped to
-  that folder, their event paths are prefixed (except a returned file's `other_path`, which is relative to the root
+  paths get the directory as a prefix (`a.txt` becomes `Documents/a.txt`), their scans become scans of `~` scoped to
+  that directory, their event paths are prefixed (except a returned file's `other_path`, which is relative to the root
   named in the event's detail), and the old root rows are deleted. Files keep their IDs, so history and keep-until
   dates are kept, and the first scan of `~` finds those files unchanged. Nothing on disk changes. The new root's
   settings apply to everything it absorbs. `roots add` says which roots it absorbed, notes any whose settings differed,
-  and any that the new root's settings skip (a hidden or ignored folder: their files are then neither verified nor
+  and any that the new root's settings skip (a hidden or ignored directory: their files are then neither verified nor
   marked missing until `filo roots set` includes them). Refused instead: absorbing a
   root that cannot be checked now (not reachable or its disk not mounted), since Filo cannot tell whether it is on the
   same filesystem; and the reverse, a directory inside an existing root on the same filesystem, which is already
   covered (the message suggests `filo scan` on it). Roots inside the new one on other filesystems stay roots.
 - Each root records the **mount point it lives under** (`mount_path`): the deepest directory, the root itself or an
   ancestor, on a different device from its parent; NULL when the root is on the filesystem of `/`. A scan is refused
-  as **unmounted** if that directory is now on its parent's device, or the root is no longer on it. So
-  `/mnt/disk/photos` is protected when `/mnt/disk` is not mounted, even if an empty `photos` folder exists underneath.
+  as **unmounted** if that directory is now on its parent's device, or the root is no longer on it.
+  So `/mnt/disk/photos` is protected when `/mnt/disk` is not mounted, even if an empty `photos` directory exists
+  underneath.
 - An existing root that cannot be reached when a new one is added (an unmounted disk) is checked by path only.
 - Paths are stored relative to their root, with `/` separators. `filo scan [DIR]` maps DIR to the deepest root that
   contains it, by path or by identity (so `/mnt/home/docs` is a partial scan of `~` with scope `docs`). DIR must be a
@@ -318,7 +321,7 @@ retention CSV and `filo update` write only the register and the CSV file the use
   `·` line naming when the last scan of the place finished.
   - **No "is a scan needed?" check** (considered 2026-11-16, rejected): the incremental scan is that check. Its cost
     is hashing, and it hashes only files whose size, mtime, ctime or inode changed; with nothing changed it walks and
-    lstats, and hashes nothing. Every cheaper test misses something: a folder's mtime changes when a file in it is
+    lstats, and hashes nothing. Every cheaper test misses something: a directory's mtime changes when a file in it is
     added, removed or renamed, but not when a file is edited in place; "scanned a few minutes ago" is a guess that
     leaves out a file saved since, unnoticed; watching the disk needs a process running all the time.
 - **Columns**, in order: `id` (file row ID), `export` (export number), `directory` (absolute), `name`, `size`
@@ -486,7 +489,7 @@ place: if the law moves financial records from 7 to 10 years, `filo policies set
   whose policy is a period). In a duplicates CSV, such a copy marked `delete` refuses its group ("needs a file_date
   first"): its retention's end is not known, so no copy kept can be shown to outlast it. The same for a copy on a
   policy with no value yet ("its policy payslip has no value yet"). It is a status of its own (below *possible move*, before *undated*), so the fix is
-  named: never a deletion candidate; counted in the report's decisions with the folders holding most of them (`! 3
+  named: never a deletion candidate; counted in the report's decisions with the directories holding most of them (`! 3
   files need a file_date: their policy counts from it (bills, 7y)`); flagged by `filo policies`; listed first by
   `show`, with `Next: filo export retention DIR -o FILE, fill in file_date, then filo update FILE`.
 - **The retention CSV**: the `retention` cell holds the policy name; `keep_until` shows the date worked out, as
@@ -566,11 +569,247 @@ Shorten bills for 212 files, putting 6 past their retention? [y/N]
   | F1 a file on a date policy reaching its date | a candidate that day; `filo delete` checks its content as before |
   | G1 the upgrade from schema 8 | tables created, nothing else changes; the pre-upgrade snapshot kept |
 
+### Directory rules (designed 2026-11-16, built 2026-11-16/17)
+Setting retention in the CSV is a one-off: a file added later arrives undated and needs a decision. A rule names a
+policy for the files under a directory, or only those whose name matches a pattern: "files under
+`personal/home/electric` get `bills`", "under `bank`, `*DailyStatement*` gets `daily-statements`". Settled with the
+person one topic at a time on 2026-11-16 (it had been in Open questions since 2026-11-13). A rule is the person's own
+decision, written down ahead of time, so a file dated by it records what is known (principle 4). A rule only sets a
+retention: the file becomes a candidate at its date and is deleted only through `filo delete`, as before (principle
+1). Built on branch `directory-rules` in four slices, one PR for all of them (see section 5).
+
+- **Applied automatically** (the person's choice over confirming each time): every scan, also a scheduled one and the
+  scan before an export, applies the rules in its own transaction, so the run's snapshot covers it, and says what it set
+  (see Output). No `filo rules` command asks either (decided 2026-11-16, replacing a question on `add`): whether 0 or
+  1000 files dated is what the person meant, Filo cannot know, so it says how many and does it; `--dry-run` shows what
+  it would do first. Dating sets a retention only: nothing is deleted without `filo delete`, which asks, and the run's
+  snapshot holds the register as it was.
+- **Which files a rule dates**: a file with no retention at all (no date, no `forever`, no policy, not even a policy
+  with no value), and each file only once. The file records the rule that dated it; after that no rule touches it
+  again, even if its retention is later cleared in the CSV (the rule never undoes what the person did) or the rule is
+  removed (the file keeps its policy). Dating records the content it was set on, stamped with the scan, as `filo
+  update` does, so `filo delete` checks it the same way.
+
+  | the file, under a rule | what the rule does |
+  |---|---|
+  | new, no retention | gives it the policy |
+  | no retention and no `file_date`, the policy a period | gives it the policy; its status is *needs a file_date*, which names the fix |
+  | a retention already (a date, `forever`, a policy, also one with no value) | nothing: the person's choice wins |
+  | moved in from elsewhere with its retention | nothing: a move keeps the retention |
+  | *unreadable*, or the new side of a *possible move* | nothing until resolved: no content to record, and a move may bring its own retention |
+  | under a directory the latest scan covering it could not read | nothing: what is there now is not known |
+  | a hard link (Filo keeps each as a file of its own, see Move detection) | the rule of its own directory, as any file; its other links follow theirs (decided 2026-11-16) |
+  | dated by the rule, then its retention cleared in the CSV | stays undated |
+  | dated by the rule, then the rule removed or changed | keeps its policy |
+
+- **Matching**: a pattern is a glob on the file's name (not its path), in any case: `*` is any run of characters, `?`
+  one character, "contains" is `*X*`. No pattern is `*`, everywhere, and a run of wildcards is kept in one form, its `?`
+  first and then one `*` (`**` is `*`, `*?` is `?*`), since two forms of it would tie on every name. A rule covers the
+  files at any depth below its directory. For a file, Filo looks at the file's own directory, then each parent up to the
+  root: **the first directory with a rule that matches decides**, so the result can be read off the path. Within a
+  directory, rules are tried **longest pattern first, counting every character but `*`**: a `?` is one character, so it
+  counts (`*` counts 0, `?*` 1, `??*` 2; decided 2026-11-17), and `*` alone is always tried last (the fallback for files
+  no other pattern matched); a pattern `a` counts 1. Two matching patterns with the same count are reported, not
+  guessed, and the file stays undated. A directory's patterns are unique, in any case (`*statement*` is `*Statement*`).
+  Longer is not always more specific (`Daily*`, 5, loses to `*Statement*`, 9, on `DailyStatement.pdf`); the fix is the
+  longer pattern meant (`*DailyStatement*`), and `filo rules add --dry-run` shows the files it would date. A pattern is
+  refused, each with its own one-line reason, if it has a `/` or a `\` (a pattern is a name, not a path; a `\` is
+  usually a Windows path or a shell escape, and a name with one is still matched by `?`), a NUL, is not valid UTF-8, or
+  is longer than 255 bytes. Nothing else is checked: a pattern no file can be named (`..`) simply matches nothing, and a
+  pattern is never joined into a path.
+
+  With rules on `bank` (`*DailyStatement*` 14 → `daily-statements`, `*Statement*` 9 → `statements`, `*2024*` 4 →
+  `tax-2024`, `*bank*` 4 → `banking`, `*` 0 → `financial`) and on `bank/2024` (`*` → `tax-2024`):
+
+  | file | result |
+  |---|---|
+  | `bank/DailyStatement-03.pdf` | `daily-statements`: the longest match |
+  | `bank/QuarterlyStatement-Q1.pdf` | `statements` |
+  | `bank/bank-2024.pdf` | not applied, reported: `*2024*` and `*bank*` both count 4 |
+  | `bank/letter.pdf`, `bank/old/letter.pdf` | `financial`: `*`, from `bank` for both |
+  | `bank/2024/DailyStatement-01.pdf` | `tax-2024`: the nearest directory with a matching rule wins |
+
+- **Changing a rule affects new files only**: files it already set a policy on keep it, and `set` says so ("38 files
+  keep the policy it set: the change is for new files"). Moving them is a step of its own: `filo policies move` for
+  every file of a policy, the CSV filtered on the directory for some.
+- **Policies and rules**: `filo policies remove` is refused while a rule names the policy ("2 rules use bills:
+  filo rules lists them"), as it is while files use it. `filo policies move` takes the rules with the files: a rename
+  keeps them, and a merge points them at the policy moved to.
+- **`filo rules`** (a new command name). DIR is read as in every command (relative to the current directory, `~`
+  expanded) and must be a root or inside one. PATTERN may be left out, meaning `*`. A pattern with wildcards or spaces
+  is quoted (`'*Statement*'` or `"*Statement*"`), since the shell expands an unquoted one; the wrong number of arguments
+  is refused, and every result line shows the pattern as received, so a file name the shell put in its place shows (it
+  would usually date no files). `add`, `move` and `copy` take `--dry-run`: they show what they would date (the files,
+  cut at ten in a terminal) and change nothing. No command asks, so there is no `-y`.
+  - `filo rules [DIR]` lists the rules at DIR and below it, or every rule: by root, by directory (a parent before the
+    directories inside it), and within a directory **in the order they are tried**, each with its policy and how many
+    files it has dated. It flags a rule whose directory is not on disk (`! bank: no such directory`; the register
+    stores no directories, so an empty directory is still one) or cannot be checked (its root not reachable), and the
+    files that two rules match equally.
+  - `add DIR [PATTERN] POLICY` adds the rule and dates the files it decides now, and says how many (and how many need
+    a `file_date`, and any file it ties on). A POLICY that does not exist is created with no value, as the CSV does,
+    and the result says so. Refused if the directory already has that pattern.
+  - `set DIR [PATTERN] POLICY` changes the policy of the rule with exactly that pattern (compared as text, in any
+    case, never matched as a glob, so `*Statement*` never picks `*DailyStatement*`); a new POLICY is created as for
+    `add`. A pattern is never changed: remove the rule and add a new one.
+  - `remove DIR [PATTERN]` removes the rule with exactly that pattern.
+  - `move OLD NEW` and `copy OLD NEW` put the rules at OLD and at the directories below it in the same places under NEW
+    (`bank/2024` goes to `banking/2024`); `move` removes them from OLD, `copy` keeps them (`copy bank/2024 bank/2025`
+    for a new year). They date the undated files under NEW they now decide, as `add` does. Refused, with nothing merged,
+    if NEW or any directory below it already has rules (they are listed: remove them first, or add the rules by hand; a
+    move up, `bank/2024` to `bank`, does not count the rules it moves, a copy does); if NEW is OLD or inside it; if OLD
+    has no rules at or below it. NEW may be in another root, whose rules they then are. Files dated by a moved rule keep
+    their policy and still count as dated by it.
+  - No `show`: `--dry-run` and the list cover it.
+- **Directories that change**: a rule stores its root and its directory relative to the root, as files do.
+  - A directory renamed or removed on disk: its files are moves or missing, as before; the rule stays and is flagged,
+    never followed (pairing a directory that went with one that came is a guess, principle 6). `filo rules move`
+    fixes it.
+  - A directory that cannot be read, or a root not mounted: nothing is applied there; the scan already reports it.
+    `add`, `move` and `copy` go by the latest scan covering each directory, and refuse a root that cannot be reached.
+  - A root added above an existing one (Roots): the old root's rules get the same prefix as its files, in the same
+    transaction.
+  - A root removed (`filo roots remove`, when it comes): its rules go with it, and its confirmation says how many.
+- **Output** (mocked and agreed 2026-11-16, under the Terminal output rules). The list: one root in the heading, or a
+  sub-heading per root; each rule with its policy's value, so a policy with no value shows; the flags on the right.
+
+```
+$ filo rules
+
+Rules   6 · 4 directories · 2 need attention · ~/Documents
+
+  bank
+    *DailyStatement*   daily-statements   7y           212 files
+    *Statement*        statements         10y           40 files
+    *                  financial          7y            12 files
+  bank/2024
+    *                  tax-2024           2031-12-31     8 files
+  personal/home/electric
+    *                  bills              no value      38 files   ! needs a retention
+  scans/old                                                        ! no such directory
+    *                  financial          7y             0 files
+
+! Not applied   1 file matches two rules of bank equally (*2024*, *bank*)
+    bank/bank-2024.pdf
+
+Next: filo rules add DIR [PATTERN] POLICY, filo rules remove DIR [PATTERN]
+
+$ filo rules add bank '*DailyStatement*' daily-statements
+Done   bank · *DailyStatement* → daily-statements (7y) · policy set on 212 files · 3 need a file_date
+
+! 1 file matches *DailyStatement* and *Daily* equally: not dated
+    bank/Daily-DailyStatement.pdf
+
+Next: filo export retention bank -o FILE, fill in file_date, then filo update FILE
+
+$ filo rules add personal/home/electric bills
+Done   personal/home/electric · * → bills · policy set on 38 files
+  - policy bills created with no value: its files need a retention until it has one
+
+Next: filo policies set bills VALUE
+
+$ filo rules add bank '*DailyStatement*' daily-statements --dry-run
+Dry run   bank · *DailyStatement* → daily-statements (7y) · policy would be set on 212 files · 3 need a file_date
+
+    file_date    until
+    2019-03-14   2026-03-14   bank/DailyStatement-2019-03.pdf
+    …
+
+Nothing was changed.
+
+$ filo rules set bank '*Statement*' financial
+Done   bank · *Statement* → financial (was statements)
+  - 40 files keep the policy it set: the change is for new files
+
+$ filo rules remove bank '*Statement*'
+Removed   bank · *Statement* → statements
+  - 40 files keep the policy it set
+```
+
+  Refusals are one line each: `bank: no rule *Statment* there (filo rules lists them)`, `bank: already has the rule
+  *Statement*`, `~/Media is not reachable (not mounted?): rules are not applied while its files cannot be checked`,
+  `/tmp/x is not inside any root`, and for the wrong number of arguments the usage, with "quote a pattern with * or
+  spaces". The `--dry-run` list is cut at ten in a terminal ("… N more"), all of it when piped, as elsewhere. `move`
+  and `copy` (slice 4) say what they did the same way:
+  `Done   moved 3 rules from bank to banking · policy set on 5 files`.
+
+  **The words** (decided 2026-11-16): a rule does not date a file, it sets the file's policy, and the date follows
+  from the policy. Output says "policy set on 212 files", "given a policy by rules", "not given a policy"; never
+  "dated by a rule". **A scan** (every scan: `filo scan`, the scan before an export, `roots add`) applies the rules to
+  every file in its scope with no retention, not only the new ones, so a file is given its policy once its directory
+  can be read again or a tie is fixed. Its summary counts what the rules did and did not do; a section lists each
+  rule that set a policy, with the directory, pattern and policy lined up; every tie is listed, every scan, with its
+  files and the rules that match them equally, as `filo rules` lists them. A scan the rules did nothing in shows
+  none of it:
+
+```
+$ filo scan
+Scan   scan 7 · 5 files seen · 2s · ~/Documents
+
+  · 3 new
+  · 3 given a policy by rules
+  ! 1 not given a policy: two rules match it equally
+
+Policies set by rules
+    directory                pattern            policy
+    bank                     *DailyStatement*   daily-statements   2 files   1 needs a file_date
+    personal/home/electric   *                  bills              1 file
+
+! Not applied   1 file matches 2 rules of bank equally (*2024*, *bank*)
+    bank/new-2024-bank.pdf
+```
+
+  **`filo report`**, in its Retention section: how many present files have a policy set by rules, the files no rule
+  could give one (each with the rules that tie on it), and `filo rules add DIR POLICY` in the next step:
+
+```
+Retention   250 files and symlinks
+  · 212 with a policy set by directory rules (filo rules)
+  [!] 7 need a retention (no retention 7)
+  [!] 1 not given a policy: two rules match it equally
+      bank/new-2024-bank.pdf   *2024*, *bank*
+    Where most need one (to depth 2)
+    …
+    Next: filo export retention [DIR] -o FILE, then filo update FILE, or filo rules add DIR POLICY
+```
+- **Register (schema version 10)**: `rules` (id, root, directory relative to the root, empty for the root itself,
+  pattern as typed, its length (column `letters`: every character but `*`; a `?` counted from 2026-11-17), policy, when
+  added; the root, directory and lowercased pattern unique); `files.rule_id` (the rule that dated the file, NULL once
+  that rule is removed) and `files.rule_dated_utc` (when; set once, and while it is set no rule dates the file again).
+  The upgrade only creates the table and the columns.
+- **The scenarios** (the test list):
+
+  | scenario | outcome |
+  |---|---|
+  | A1 `add` with undated files under DIR; with `--dry-run`; in a terminal or not | added and dated, the count said; nothing changed, the files listed; the same either way |
+  | A2 `add` naming a policy that does not exist | created with no value, and said so |
+  | A3 `add` a pattern the directory has (`*statement*` after `*Statement*`) | refused |
+  | A4 the wrong number of arguments; DIR outside every root | refused |
+  | B1 a scan finds a new undated file under a rule | dated; the scan says so |
+  | B2 a file with a retention, a policy with no value, or moved in with its retention | untouched |
+  | B3 an unreadable file; the new side of a possible move | untouched until resolved |
+  | B4 a period policy, the file without a file_date | dated; needs a file_date |
+  | B5 dated by a rule, then its retention cleared in the CSV; then the rule removed | stays undated; keeps its policy |
+  | C1 two matching patterns of different counts; `*` with another match | the longer one; `*` last |
+  | C2 two matching patterns of the same count | not applied, reported by the scan and `filo rules` |
+  | C3 a rule in a parent directory; a nearer directory with a matching rule | applies at any depth; the nearer one wins |
+  | C4 two hard links in directories with different rules | each dated by its own directory's rule |
+  | D1 `set`: files already dated | keep their policy; a line says so |
+  | D2 `set` or `remove` with a pattern that is not stored (`*Statement` for `*Statement*`) | refused |
+  | D3 `filo policies remove` of a policy a rule names; `filo policies move` (a rename, a merge) | refused; the rules follow |
+  | E1 `move` after a rename, with a rule in a subdirectory | both moved; the flag gone |
+  | E2 `copy` to a new directory with undated files | dated, the count said; OLD keeps its rules |
+  | E3 NEW or a directory below it has rules; NEW inside OLD; OLD without rules | refused, nothing changed |
+  | F1 a rule's directory gone from disk | flagged by `filo rules`, never followed |
+  | F2 an unreadable directory under a rule | nothing applied there |
+  | F3 a root added above a root with rules | the rules get the prefix |
+  | G1 the upgrade from schema 9 | table and columns created, nothing else changes |
+
 ### Disposal (iteration 3)
 Decided 2026-11-12, implemented 2026-11-13 (package `internal/dispose`, the only code that deletes the user's
 files). Replaces the earlier plan of a quarantine, holds and several checks at the moment of acting.
 
-- **Deletion is permanent.** No quarantine folder and no recycle bin: the bin can fill up with large files, and is
+- **Deletion is permanent.** No quarantine directory and no recycle bin: the bin can fill up with large files, and is
   missing on network disks; backups are what make a deletion recoverable. So the list the person confirms, and the
   check below, are what keep it safe.
 - **`filo delete [DIR] [-y]`** lists the candidates (expired files) under DIR, or under every root, with their end date,
@@ -593,7 +832,7 @@ files). Replaces the earlier plan of a quarantine, holds and several checks at t
     one recorded. Otherwise it is skipped ("changed since its retention was set"), its new hash is recorded, and it
     needs a new retention.
 
-  A file that can be read but not deleted (its folder is not writable) is skipped and reported, and stays a
+  A file that can be read but not deleted (its directory is not writable) is skipped and reported, and stays a
   candidate. Dropped as checks: recently modified (the re-hash covers it; reading or opening a file does not change
   its modification time, but saving does), sync and lock companion files (`.~lock.*#`, `~$*`, `.syncthing.*.tmp`,
   `*.part`), and whether a process has the file open (platform-specific, and deleting an open file does not break the
@@ -607,17 +846,17 @@ files). Replaces the earlier plan of a quarantine, holds and several checks at t
   retention can never carry over to it. A scan that finds a new file with the same content as a deleted one says so
   ("same content as a file deleted on 2027-03-14"), as a hint only; the rows stay separate. So there is no
   `filo restore`.
-- **Empty folders.** A folder is removed only if this run deleted its last entry: never a folder that was already
-  empty, never one Filo deleted nothing from, never a root. Before removing it, Filo lists it on disk and removes it
-  only if it has no entries at all (hidden files included), then removes it with the call that refuses a non-empty
-  folder, so anything that appeared in between keeps it. Then it works up: a parent emptied by that removal is
-  checked and removed the same way, stopping at the root. The summary says how many folders were removed.
+- **Empty directories.** A directory is removed only if this run deleted its last entry: never a directory that was
+  already empty, never one Filo deleted nothing from, never a root. Before removing it, Filo lists it on disk and
+  removes it only if it has no entries at all (hidden files included), then removes it with the call that refuses a
+  non-empty directory, so anything that appeared in between keeps it. Then it works up: a parent emptied by that removal
+  is checked and removed the same way, stopping at the root. The summary says how many directories were removed.
 - **Summary and exit code.** "Deleted N files (size). Skipped M:" and one line per skipped file and why. Exit code 0
   when everything went as decided (a changed file is an expected outcome), 1 if a file could not be read or deleted.
 - **`filo report`** adds "Deleted by filo: N files, size freed (last run DATE: n files, size)", from the deleted
   rows.
-- **Syncthing propagates deletes**: a delete on one device removes the file on every device that syncs the folder.
-  A flag for synced roots is left for later (see Open questions). Surface `*.sync-conflict-*` files later too.
+- **Syncthing propagates deletes**: a delete on one device removes the file on every device that shares the Syncthing
+  folder. A flag for synced roots is left for later (see Open questions). Surface `*.sync-conflict-*` files later too.
 - **Decided while building it (2026-11-13):**
   - *A delete run is recorded as a scan of kind `delete`.* A closed path and an event both need a scan, so the run
     adds one `scans` row (`kind = 'delete'`, whole root) in each root where it first records something; deleted
@@ -632,15 +871,15 @@ files). Replaces the earlier plan of a quarantine, holds and several checks at t
     the message says to run `filo scan`. Cannot be deleted: nothing is recorded, it stays a candidate, and exit 1.
     A last `lstat` just before the removal checks inode, size and modification time against what was read.
   - *Only inside its root* (hardening of 2026-11-13). Before anything else, the recorded path must be a clean
-    relative path below a clean, absolute root (no `..`), and every folder from the root down must still be a real
-    folder, each checked with `lstat`: a symlink there means the tree changed since the scan (skipped, "run filo
-    scan"). Folders above the root are not checked: a symlink there (a home directory moved to another disk) moves
-    the whole root, which scans handle. The folder check is repeated at the last look before the unlink, since
-    hashing a large file leaves time for a folder to be swapped. A path outside its root can only come from an
+    relative path below a clean, absolute root (no `..`), and every directory from the root down must still be a real
+    directory, each checked with `lstat`: a symlink there means the tree changed since the scan (skipped, "run filo
+    scan"). Directories above the root are not checked: a symlink there (a home directory moved to another disk) moves
+    the whole root, which scans handle. The directory check is repeated at the last look before the unlink, since
+    hashing a large file leaves time for a directory to be swapped. A path outside its root can only come from an
     altered register (`../../.ssh/id_ed25519` with that file's hash): it is refused with exit 1. The hash check alone
     does not stop that, since whoever can edit the register can usually read the file.
-  - *Removal* is `unlink` for a file or symlink (it refuses a directory) and `rmdir` for a folder (it refuses a
-    non-empty folder and a file). The fallback on other platforms checks first and is untested.
+  - *Removal* is `unlink` for a file or symlink (it refuses a directory) and `rmdir` for a directory (it refuses a
+    non-empty directory and a file). The fallback on other platforms checks first and is untested.
   - *A file deleted by filo is never "missing"*: pairing (returned files) skips deleted rows. A new file with a
     deleted file's content gets a `same_as_deleted` event, shown in the scan summary and the report.
   - *`[r]etention…`* keeps the file's `file_date`, works `keep_until` out again, and is recorded as a one-row batch
@@ -682,7 +921,7 @@ of this section.
   | a copy made by accident | a download saved twice | which copy to keep (`keep` one, `delete` the rest) | a new duplicate to decide |
   | copies that are each a record | insurance terms received in 2020 and again in 2021, each with its own retention | these copies (`keep` on two or more): *records* | a new duplicate to decide |
   | a content that belongs everywhere | `LICENSE`, `__init__.py`, a template in each project | the content (`always`) | not a duplicate |
-  | a deliberate copy of a folder | a backup, an old laptop's files | a directory (`filo duplicates exclude`) | not a duplicate |
+  | a deliberate copy of a directory | a backup, an old laptop's files | a directory (`filo duplicates exclude`) | not a duplicate |
 
 - **Excluded directories.** `filo duplicates` lists everything not counted as duplicates; `filo duplicates exclude DIR`
   makes files under DIR (its whole subtree) never count as duplicates, of each other or of files elsewhere;
@@ -692,7 +931,7 @@ of this section.
   ~/Backup/Documents)"). DIR must be inside a root; exclusions are stored in the register. Retention is unaffected. A
   file with two copies in `~/Documents` and one in an excluded `~/Backup` is still a group, of the two. Filo does not
   try to spot such directories (any threshold would miss odd cases); `filo export duplicates` counts what is not
-  counted, and while there is no excluded directory ends with "folders that are copies on purpose (backups) can be
+  counted, and while there is no excluded directory ends with "directories that are copies on purpose (backups) can be
   left out entirely: filo duplicates exclude DIR" (see Output, below; it first said "lists the exclusions" and
   "always ends with", changed on 2026-11-15: a list repeats `filo duplicates`, and a line on every run stops being
   read). Expected to be used rarely, mainly for backups.
@@ -753,14 +992,14 @@ of this section.
      output advises a new export. Sorting is fine: groups are found by each row's `group` cell, not by row order. A file in groups of two exports (overlapping
      exports, B3) with different actions refuses each of those groups ("give it one action"; agreed 2026-11-16), so
      the outcome never depends on which group runs first; the same action, or a blank group, is fine.
-  2. Check every decided group against the disk, not the last scan. A file whose folder can be read and that is not
+  2. Check every decided group against the disk, not the last scan. A file whose directory can be read and that is not
      in it is gone: its row is reported and ignored, and the rest of the group is decided as usual (also when the row
-     was deleted from the CSV). A row deleted from the CSV whose file is still there: the group is skipped. A file
-     filo cannot check (drive not mounted, folder unreadable) is never "gone": its group is skipped ("can't check …:
-     is the drive mounted?"). Each copy must still be at its path and the content the export recorded (strict: a
-     group any of whose files changed or moved since the export is skipped whole, even if its copies still match
-     each other, so a file is deleted only if it is still exactly the content decided on). Then the retention rule.
-     This check reads no content (built 2026-11-16): each copy is looked at (`lstat`) and compared with the
+     was deleted from the CSV). A row deleted from the CSV whose file is still there: the group is skipped.
+     A file filo cannot check (drive not mounted, directory unreadable) is never "gone": its group is skipped
+     ("can't check …: is the drive mounted?"). Each copy must still be at its path and the content the export recorded
+     (strict: a group any of whose files changed or moved since the export is skipped whole, even if its copies still
+     match each other, so a file is deleted only if it is still exactly the content decided on). Then the retention
+     rule. This check reads no content (built 2026-11-16): each copy is looked at (`lstat`) and compared with the
      register (the export's hash still the register's, the same inode, size and modification time, no other current
      path), and a copy to keep is opened to see it can be read; the content is re-hashed once, at the moment of
      deleting. A copy moved without a scan since is not at its path, so it reads as gone, as above; one whose move
@@ -781,7 +1020,7 @@ of this section.
 - **Never the last copy: the check at the moment of deleting.** The register is not trusted for this; the disk is.
   Before a group's first deletion, Filo looks for a kept copy: a copy marked `keep` that is at its path as the same
   file, readable, and re-hashed to the same content, tried in order of the longest retention. A copy that is, on
-  disk, the same file as a copy to delete never counts (same device and inode, looked at live: a folder bind-mounted
+  disk, the same file as a copy to delete never counts (same device and inode, looked at live: a directory bind-mounted
   into a second root shows the same file as two copies, and the register keeps no device numbers; found in the code
   review of 2026-11-14). The export merges such paths into one copy, and the device and inode are compared again at
   the last look before each unlink. If none passes, nothing in the group is deleted and the list says why for each
@@ -809,7 +1048,7 @@ of this section.
     No question first: nothing is deleted and it is undone in one command. DIR may be a whole root; outside every
     root it is refused. Already covered (DIR or a parent excluded): `Already excluded`, nothing written.
   - `filo duplicates include PATH`: a directory is about exclusions, a file about always or records; a file that is
-    both (a record under an excluded folder) has its own kind undone and a line saying the folder is still
+    both (a record under an excluded directory) has its own kind undone and a line saying the directory is still
     excluded, so one command never undoes two things. A set of records goes as a whole, and the heading names it.
     The change in groups is shown. Nothing to undo (`Not excluded itself`, with the parent that is; `Nothing to
     include`) is exit 0, nothing written. `Next:` (export to decide them) only after including a directory.
@@ -962,12 +1201,12 @@ Next: edit the action column, then filo delete /tmp/d.csv
 
 ### Commands and scheduling
 - Plain names, easy to remember: `roots`, `scan`, `report`, `export`, `update`, `delete`, `duplicates` (added
-  2026-11-16, see Duplicates; a `revert` was deferred). No themed subcommands. (`restore` was dropped on 2026-11-12:
-  a file restored from a backup comes back as a new file.)
-  (Reshaped 2026-11-12: `review` and its subcommands `set-date`, `export` and
-  `import` were replaced by `export lifespan` and `update`; "update" says that only existing files change, which
-  "import" did not. `export lifespan` was renamed `export retention` the same day: the CSV's word names what is
-  set in it, and the lifespan CSV became the retention CSV (package `internal/retention`).)
+  2026-11-16, see Duplicates; a `revert` was deferred), `policies` and `rules` (both 2026-11-16, see Lifespan). No
+  themed subcommands. (`restore` was dropped on 2026-11-12: a file restored from a backup comes back as a new file.)
+  (Reshaped 2026-11-12: `review` and its subcommands `set-date`, `export` and `import` were replaced by `export
+  lifespan` and `update`; "update" says that only existing files change, which "import" did not. `export lifespan` was
+  renamed `export retention` the same day: the CSV's word names what is set in it, and the lifespan CSV became the
+  retention CSV (package `internal/retention`).)
 - **Keep flags and options to a minimum** (2026-11-11). Prefer a safe default and clear output over a flag; prefer
   doing the obvious thing and saying what was done over asking.
 - **Output cannot act on the terminal** (2026-11-13). File names can hold any byte but `/` and NUL and come from
@@ -985,7 +1224,7 @@ Next: edit the action column, then filo delete /tmp/d.csv
   (`safeText`) is retired, and a test (`TestOutputGoesThroughTheRenderer`) fails on any other write in the CLI (see
   Help and errors). Trailing alignment is dropped from a line, but a space that ends a file
   name is shown as `\x20` (2026-11-16, from the code review), so `report ` and `report` never read the same; and a
-  relative path that starts with `~` (a folder named `~` inside a root) is shown as `./~/…`, so it never reads as a
+  relative path that starts with `~` (a directory named `~` inside a root) is shown as `./~/…`, so it never reads as a
   path in the home directory. The CSV export guards against spreadsheet formulas separately.
 - **Prompts only in a terminal** (2026-11-12, replacing "no interactive prompts"). A command asks only where a person
   should look first: `filo update` before clearing dates, and `filo delete`. Declining, or having no
@@ -1012,7 +1251,7 @@ Next: edit the action column, then filo delete /tmp/d.csv
 - `--db PATH` is accepted before or after any command; `FILO_DB` is the fallback, then the default location. Flags may
   come before or after PATH. Built on the standard library's `flag` package (no CLI framework).
 - **A path that starts with `~` is refused** (2026-11-11): every DIR and FILE, `-o`, `--db` and `FILO_DB`.
-  The shell expands `~` only when it is unquoted, so `"~/Documents"` would otherwise name a folder called `~` in the
+  The shell expands `~` only when it is unquoted, so `"~/Documents"` would otherwise name a directory called `~` in the
   current directory (and `--db "~/f.db"` would create one). Filo does not expand it itself, because a name starting
   with `~` is legal. The one-line error suggests `$HOME/...` (or the full path for `~user`), and `./~...` for a name
   that really starts with `~`. Checked before the database is opened, so nothing is created.
@@ -1037,6 +1276,8 @@ topic at a time from mockups; the mockups below are the reference.
   an older console shows colour codes as text. Piped,
   the words and their order are the same, with ASCII markers (`[ok]`, `[refused]`, `[!]`). ANSI codes are written
   by filo itself: no new dependency.
+- **"Directory", never "folder"** (decided 2026-11-16): in output, help, docs and comments, matching `DIR` and the
+  `directory` CSV column. The one exception is Syncthing's own term, written "a Syncthing folder".
 - **One shape for every command**: a heading line (what, how many, where), sections, a result line, then the next
   step ("Nothing has been deleted. Next: filo delete").
 - **Paths.** With one root, the root is shown once in the heading and paths are relative to it. A DIR filter is named
@@ -1183,7 +1424,7 @@ Delete all 5, select one by one, list them all, or none? [a/s/l/N]
 ```
 
 ```
-Done   deleted 3 files · freed 812 MB · removed 1 empty folder
+Done   deleted 3 files · freed 812 MB · removed 1 empty directory
 
 Skipped 1: nothing was changed
   tax/2017 return.pdf    changed since its retention was set: give it a new retention
@@ -1623,10 +1864,10 @@ its own identity. Reclaimable space is size × (copies − 1) per group. Paths a
    Still to do: on the real home directory, every file gets a retention or `forever`, a directory at a time (filter
    on `directory`, fill down), through a few directory-sized exports.
 3. **Delete.** Done 2026-11-13 on a test tree; not yet run on real files. `filo delete [DIR] [-y]` deletes the candidates after the prompt, with the re-hash check, deleted rows,
-   the "freed" line in the report and empty folders removed (see Disposal). Done when: on a test tree, a confirmed
+   the "freed" line in the report and empty directories removed (see Disposal). Done when: on a test tree, a confirmed
    run deletes exactly the unchanged candidates; a file changed, unreadable, replaced or moved after its retention was
-   set is skipped with one clear line each; folders emptied by the run are removed up to the root but not an empty
-   folder that was already there or one holding a hidden file; a restored file comes back as a new row with the hint;
+   set is skipped with one clear line each; directories emptied by the run are removed up to the root but not an empty
+   directory that was already there or one holding a hidden file; a restored file comes back as a new row with the hint;
    `-y` and no-terminal behave as designed. Checked by `TestDeleteRoundTrip` and `TestDeleteInterruptedAtPrompt` in
    `internal/cli` and the `internal/dispose` tests, and by hand on `scripts/testtree.sh` with a changed and an
    unreadable candidate.
@@ -1706,7 +1947,7 @@ put first on 2026-11-15). Each is an open question below until it is designed.
    exits 1 when the CSV refuses a group (as `filo update` does for a refused row), 0 when groups are only skipped.
    Tests: `TestDuplicatesDeleteRunTwice` (A1, A2), `TestDuplicatesDeleteSeveralCSVs` (B1-B3),
    `TestDuplicatesDeleteEditedCSV` (C1 both ways, C4), `TestDuplicatesDeleteChangedFiles` (D1-D4, an unreadable
-   copy kept and an unreadable folder), `TestDuplicatesDeleteInsideARun` (E1-E4), `TestDuplicatesDeleteSameFile`
+   copy kept and an unreadable directory), `TestDuplicatesDeleteInsideARun` (E1-E4), `TestDuplicatesDeleteSameFile`
    (a bind mount after the export, a hard link), `TestDuplicatesDeleteAsking`, and the golden files
    `testdata/delete-duplicates-{yes,again,select}.txt`; checked by hand on a throwaway tree, run twice. Reviewed
    the same day, all nine findings fixed (`TestDuplicatesDeleteReviewFindings`, and a hard link made during the
@@ -1726,8 +1967,8 @@ put first on 2026-11-15). Each is an open question below until it is designed.
    Exclusions are matched by exact path prefix (never as LIKE patterns). Tests: `TestDuplicatesList`,
    `TestDuplicatesExclude`, `TestDuplicatesInclude`, `TestDuplicatesUsage`, and the golden file
    `testdata/duplicates.txt`. Reviewed the same day; nine of ten findings fixed (`TestDuplicatesReviewFindings`):
-   `include` finds a PATH no longer on disk by its path alone (`store.Locate`), so the exclusion of a folder since
-   deleted or unmounted can still be removed, and a record whose folder went still included; the list counts as the
+   `include` finds a PATH no longer on disk by its path alone (`store.Locate`), so the exclusion of a directory since
+   deleted or unmounted can still be removed, and a record whose directory went still included; the list counts as the
    report does (a content always is listed as always only; a set with a new copy is a group again, so not listed,
    though `include` still removes it); `include` sees a file's copy as the list does (a hard link of a record is a
    record; copies counted the same way, excluded ones left out); `filo duplicates` has its help page
@@ -1816,8 +2057,69 @@ put first on 2026-11-15). Each is an open question below until it is designed.
    old CSV never puts a file back on the old name; the report's policies line shows with no files too, marked `!`
    when a policy needs attention, and names the policies of exactly the files it counts as needing a file_date; a
    `set` question names both what it puts past and what it leaves without a file_date. **Named retention policies are
-   done**: every scenario in the table has a test. Next: merge; then folder rules (item 4).
-4. Folder rules (default retention policies on directories).
+   done**: every scenario in the table has a test. Next: merge; then directory rules (item 4).
+4. Directory rules: a policy for the files under a directory, applied by every scan (designed 2026-11-16, see
+   Lifespan, Directory rules; schema 10). Four slices on branch `directory-rules`, one PR when all four are done, so
+   it brings a complete feature. Scenario tests first in each slice.
+   1. *Register and matching*: schema 10; matching in a new package `internal/rules` (globs on the name in any case,
+      letter count, nearest directory first, ties reported); the store adds, changes, removes, moves and copies rules
+      and dates files by them; rules get a root's prefix when a root is added above it; `filo policies` remove and move
+      take rules into account. Nothing calls the rules yet. Scenarios C1-C3, D3, G1, F3. Done on 2026-11-16:
+      `internal/rules` (`Pattern`, `Letters`, `Match`, `Resolve`, `Compare`; a `[` or `\` in a pattern is itself (a `\`
+      refused since 2026-11-17, and `Letters` is now `Length`, see after slice 3), and `**` is `*`); schema 10
+      (`TestMigrateFromV9`); `store.AddRule`, `SetRule`, `RemoveRule`, `Rules`, `MoveRules`
+      (move and copy), each of the three that apply rules with a preview that runs the same work in a transaction it
+      rolls back (`PreviewAddRule`, `PreviewMoveRules`); dating in `store/ruledate.go`. Tests: `TestResolve`,
+      `TestCompare`, `TestMatch`, `TestAddRule`, `TestSetAndRemoveRule`, `TestMoveRules`, `TestPoliciesAndRules`,
+      `TestRuleDating`, `TestRuleTies`, and the absorb test (F3). Reviewed the same day, nine of ten findings fixed (one
+      of them, hard links, undone the same day: it took a hard link for one file with two paths, while Filo keeps each
+      link as a file of its own; the person chose each link dated by its own directory's rule, C4); files under a
+      directory the latest scan covering it could not read left alone by `add`, `move` and `copy` too
+      (`TestRuleDatingUnreadDirs`); a rule's directory checked for the register's form and its root for being
+      registered; a move up allowed; `*?` stored as `?*`; a root's rules indexed once, and `add` reading only its
+      directory. The tenth (the duplicate check before the insert repeats the unique constraint) kept: it gives the
+      one-line error, with the same key. Slice 2 must refuse `add`, `move` and `copy` in a root that cannot be reached
+      (not mounted), which the store cannot see.
+   2. *`filo rules`*: the list (`[DIR]`, the order tried, counts, flags), `add` (a policy created if needed,
+      `--dry-run`), `set`, `remove`, as mocked (agreed 2026-11-16), and the help page; refused in a root that cannot be
+      reached. Scenarios A, B4, D, F1.
+      Done on 2026-11-16: `internal/cli/rules.go`, `view.Groups` (a table of rows under directory names),
+      `store.RuleTies` (the list's "Not applied"); the help page `filo help rules`. `set` and `remove` say the files
+      "keep the policy it set", not the rule's old policy by name: a rule set more than once may have dated
+      them with different ones. `add`'s line ends with the root, as every heading does. Tests: `TestRulesGolden`
+      (`testdata/rules.txt`), `TestRulesAdd`, `TestRulesSetRemove`, `TestRulesListScope`. Not tested: refusing a
+      root that is not mounted (it is `store.Resolve`'s, and needs a real mount).
+   3. *Applied by every scan*: the scan's sections on what it set and did not (as mocked, agreed 2026-11-16); `filo
+      report` counts the files with a policy set by rules, lists the ties and suggests `filo rules add`. Scenarios B,
+      C2, F2.
+      Done on 2026-11-16: `store.ApplyScanRules` applies the rules in the scan's transaction, after its changes, to
+      every file in its scope with no retention, stamped with the scan (`ApplyScan` does the same, returning the scan
+      ID only); `reconcile.Summary.Rules`; the scan's count lines, "Policies set by rules" (`view.HeadedTable`) and
+      the ties; the report's count, ties and next step; a retention set by hand (CSV, `filo delete`, a removed
+      policy's value) takes a file off its rule (`files.rule_id` cleared, the mark kept); `FileItem.RuleID`. In the
+      report the tie line comes after "Where most need one", which stays right under the line it explains. Tests:
+      `TestScanAppliesRules`, `TestRetentionByHandLeavesTheRule`, `TestScanSummaryRules`, `TestHeadedTable`,
+      `TestScanRulesGolden` (`testdata/scan-rules.txt`), `TestReportRules`.
+      Reviewed the same day, six of eight findings fixed: `filo update` (and a retention given at `filo delete`)
+      keeps a file on its rule while its policy stays the rule's, so filling in a `file_date` does not take it off;
+      applying the rules reads only the files with no retention (`Filter.Ruleless`) before classifying, so a scan
+      holds the write lock for those only; one tie wording for scan and report (`report.TieWhy`); the report's tie
+      rows name the rules' directory; a scan whose only finding is a tie gets a next step. Kept: `ApplyScan` beside
+      `ApplyScanRules` (both apply the rules; the tests want the scan ID only), and the headed table's trailing
+      padding (`write` already drops it).
+      Changed after the PR review of slices 1-3 (2026-11-17): a `?` counts toward a pattern's length (only `*` does
+      not), and a `\` in a pattern is refused as a `/` is; each refusal of a pattern names the check that failed.
+   4. *`move` and `copy`*, then the README (a "Directory rules" section, quoting patterns) and the help overview.
+      Scenarios E.
+      Done on 2026-11-17: `filo rules move OLD NEW` and `copy OLD NEW` with `--dry-run` (`store.MoveRules`,
+      `PreviewMoveRules` from slice 1), said as agreed: `Done   moved 2 rules from bank to banking · policy set on 1
+      file`, a dry run as `add`'s (`would move`, the files, "nothing was changed"). OLD may be gone from disk (found
+      by its path, `store.Locate`: the rename that calls for a move); NEW must be on disk in a root that can be
+      reached. With two roots both directories are named in full. A refusal because NEW or a directory below it has
+      rules lists them under their directories before the error line. The help page and the overview list both;
+      the README has a "Directory rules" section. Tests: `TestRulesMoveCopy` (E1-E3, a dry run, another root, the
+      arguments), `TestRulesMoveGolden` (`testdata/rules-move.txt`). **Directory rules are done**: every scenario in
+      the table has a test. Next: the PR, then removing empty directories (item 13).
 5. Progress in the report, and `export retention --needing-retention`.
 6. Duplicates: one decision for all copies (the duplicates review CSV was done first, see iteration 5).
 7. `scan --verify`, with sidecar hash files.
@@ -1825,12 +2127,14 @@ put first on 2026-11-15). Each is an open question below until it is designed.
 9. Synced roots, sharing decisions between devices, and getting snapshots to the backup machine.
 10. A summary for scheduled scans.
 11. Replacing an existing `-o` file after asking (decided 2026-11-16, see Lifespan). Done on 2026-11-16:
-    `TestExportReplace` (no terminal, no, Enter, yes, a folder, a symlink, a device, `-y`) and
+    `TestExportReplace` (no terminal, no, Enter, yes, a directory, a symlink, a device, `-y`) and
     `TestWriteExportReplace` (a failed write and a file changed after asking leave the old file as it was).
 12. Every export scans first, `--no-scan` to skip it (decided 2026-11-16 for `export duplicates`, widened the same
     day to `export retention`; see Lifespan, "A scan first"). Done on 2026-11-16: `TestExportScansFirst` (a file
     saved since the last scan, DIR only, every root for duplicates, `--no-scan` and its line, a failed root, Ctrl-C)
     and the golden file `testdata/export.txt`.
+13. Removing empty directories, through `filo delete` (split from directory rules on 2026-11-16: it is the only
+    destructive part, and has nothing to do with rules). Next after item 4; to be designed first, see Open questions.
 
 Later: the **UI** in place of the CSV, including viewing and editing the register in place, and notes, links and
 tasks (see Open questions). All of it hangs off the stable file ID, so none of it needs the register to change
@@ -1847,7 +2151,7 @@ shape.
 - How synced roots are marked, and what Filo does differently for them (Syncthing propagates deletes; surface
   `*.sync-conflict-*` files). Belongs with sharing decisions between devices and getting snapshots to the backup
   machine (Register snapshots).
-- **Sharing retention decisions between devices** (raised 2026-11-13). A synced folder (Syncthing) is on several
+- **Sharing retention decisions between devices** (raised 2026-11-13). A Syncthing folder is on several
   devices, each with its own register; a retention set on one should be known on the others. Tested on 2026-11-13:
   a file dated on the laptop, then moved and renamed on the desktop, kept its retention on the laptop's next scan,
   because the move was paired by hash. Sharing the database file itself is rejected: Syncthing syncs `filo.db` and
@@ -1857,17 +2161,17 @@ shape.
   device would rehash everything and, with sync lag, record moves back and forth. A separate database for only the
   synced roots has the same problems. Proposed instead: each device keeps its own register and they exchange
   **decisions keyed on content hash** (`file_date`, `retention`, when and on which device it was set). Each device
-  writes only its own file in a synced folder (for example `decisions-<device-id>.csv`, so Syncthing never makes a
+  writes only its own file in a Syncthing folder (for example `decisions-<device-id>.csv`, so Syncthing never makes a
   conflict copy) and reads the others'; a file with a matching hash and no decision takes the shared one, recording
   where it came from; two devices disagreeing on a hash is reported, not resolved; an edited file has a new hash and
   needs a date again. It also helps with deletes: another device could tell "deleted by Filo on device X after the
   hash check" from an unexplained missing file (see the synced roots question above). No-code alternative: register
-  a synced folder on one device only and set retention there; the content is the same everywhere and deletes
+  a Syncthing folder on one device only and set retention there; the content is the same everywhere and deletes
   propagate. Small step worth taking early: a random device ID in `meta`, made when the database is created, and the
   device recorded with each decision, so no decision has an unknown origin later. The exchange itself can wait until
   after iteration 3.
 - **Backup awareness** (raised 2026-11-13). Principle 2 says backups make deletion recoverable; Filo cannot check
-  it. Being in a folder Vorta backs up is a weak signal (the backup may not have run, may have failed, or may predate
+  it. Being in a directory Vorta backs up is a weak signal (the backup may not have run, may have failed, or may predate
   the current content). The strong one is "this content is in archive X from date Y": match Borg archive listings
   (path, size, mtime, perhaps a content hash; Borg's listing options to be checked against its documentation)
   against the register, giving each file a "last seen in a backup" date. It may only ever add warnings to
@@ -1905,9 +2209,9 @@ shape.
   deletes on its own.
 - **All of a scan's events** (raised 2026-11-15, with the scan output). A scan shows the first 10 events of each
   kind and `… N more`; the report shows only the latest events overall, so the rest of a large scan's events (500
-  missing after a folder was moved outside the root) cannot be listed. Perhaps `filo report --scan N`.
+  missing after a directory was moved outside the root) cannot be listed. Perhaps `filo report --scan N`.
 - **A root's last whole scan** (raised 2026-11-15). `filo roots` and the report show the last scan, which may have
-  been partial (one folder), so a root can look recently checked when most of it was not. Showing the last
+  been partial (one directory), so a root can look recently checked when most of it was not. Showing the last
   whole-root scan as well needs one store query.
 - **Paths inside notes and reasons** (found 2026-11-15, in the code review of the scan output). Showing the paths
   in a note (an event's detail, a symlink's target) relative to the heading's root was tried and taken back:
@@ -1941,37 +2245,23 @@ shape.
   - **Empty files** are shown through it (`--empty`). They are registered and can be given a retention like any
     other file (see Move detection); until the query view exists, a count line in `filo report` would keep them
     visible.
-- **Folder rules: a default retention policy on a directory** (second in line since 2026-11-13). Setting dates in the
-  CSV is a one-off: a file added later arrives undated and needs a decision. A rule names a policy for a folder
-  ("files under `personal/home/electric` get `bills`"). Proposed: a rule proposes and the person confirms in bulk
-  (one answer per folder, not per file: "38 undated files under electric would get bills: 31 with a file_date, 7
-  without"), for files already there and for new arrivals a scan reports, which keeps principle 4 and "never a
-  trigger". About 60% of files have a `file_date` from their name; the rest need one typed before a period applies.
-  Open: how rules on nested folders combine, whether a rule overrides a retention set by hand (it should not), and
-  that a rule may never imply delete.
-  - **Name patterns** (raised 2026-11-16). A rule is a folder plus an optional pattern on the file name, naming a
-    policy: under `bank`, `*DailyStatement*` gets `daily-statements` and `*QuarterlyStatement*` gets `financial`.
-    Proposed: case-insensitive globs on the base name ("contains" is `*X*`); a rule names a policy only, never a
-    period or a date, so a change is made in one place (`policies add` first); the nearest folder's rules win, and a
-    file matching two patterns of the same folder is reported, not guessed. Open: whether a rule without a pattern in
-    the same folder is the fallback for files no pattern matched.
-  - **Empty folders** (raised 2026-11-16). Removing folders that hold no files is part of this feature, as its own
-    slice, since it is the only destructive part: it goes through `filo delete` and `internal/dispose` (for example
-    `filo delete --empty-folders [DIR]`). Proposed: a fresh walk finds the folders with no files at any depth (the
-    register does not store folders); the list is shown and Filo asks (or `-y`); each is removed bottom-up with the
-    call that refuses a non-empty folder; never a root, a mount point, a folder that could not be read, or one under
-    the ignore rules. Open: whether a folder holding only `.DS_Store`, `Thumbs.db` or `desktop.ini` counts as empty
-    (today it does not); and that some programs need their empty folders (a maildir's `cur`, `new`, `tmp`;
-    `.git/refs/tags`; project skeletons), which argues for listing them and letting the person choose, as
-    `filo delete` does.
+- **Empty directories** (raised 2026-11-16). Removing directories that hold no files: section 5 item 13, split from
+  directory rules on 2026-11-16. It is destructive, so it goes through `filo delete` and `internal/dispose` (for example
+  `filo delete --empty-directories [DIR]`). Proposed: a fresh walk finds the directories with no files at any depth (the
+  register does not store directories); the list is shown and Filo asks (or `-y`); each is removed bottom-up with the
+  call that refuses a non-empty directory; never a root, a mount point, a directory that could not be read, or one under
+  the ignore rules. Open: whether a directory holding only `.DS_Store`, `Thumbs.db` or `desktop.ini` counts as empty
+  (today it does not); and that some programs need their empty directories (a maildir's `cur`, `new`, `tmp`;
+  `.git/refs/tags`; project skeletons), which argues for listing them and letting the person choose, as `filo delete`
+  does.
 - UI technology.
 
 ## 7. Rejected or deferred
 
 - **Accepted risks** (security review of 2026-11-13). Anyone who can edit the register already runs as the user and
   could delete files directly, so an altered register matters through indirect routes (a restored snapshot, a
-  database in a synced folder, a `--db` from elsewhere). Accepted: a register whose *root* path was altered to
-  another folder is not detected (the paths below it are checked, and the confirmation list shows absolute paths);
+  database in a synced directory, a `--db` from elsewhere). Accepted: a register whose *root* path was altered to
+  another directory is not detected (the paths below it are checked, and the confirmation list shows absolute paths);
   `filo delete -y` deletes without a person reading the list, which is the point of `-y`; a file swapped in the
   microseconds between the last check and the unlink is deleted (anyone able to do that can delete it directly);
   SQLite parses a database before Filo checks it is one of its own (kept small by staying on a current driver);
@@ -1981,9 +2271,9 @@ shape.
   when a scan changed nothing is the first improvement if registers grow large). From the code review of
   2026-11-13: a snapshot is renamed into place after a check that the name is free, and a program not taking Filo's
   lock could create that name in between and be overwritten (the directory is private to the user; an atomic
-  no-replace rename needs `golang.org/x/sys`); and the folders on a deleted file's path are checked by name, not
-  held open, so a folder swapped in the microseconds after the last look is followed (the thorough fix, opening each
-  folder from the root and unlinking relative to it, is for later).
+  no-replace rename needs `golang.org/x/sys`); and the directories on a deleted file's path are checked by name, not
+  held open, so a directory swapped in the microseconds after the last look is followed (the thorough fix, opening each
+  directory from the root and unlinking relative to it, is for later).
 
 - **Quarantine, the recycle bin, holds and `filo restore`** (rejected 2026-11-12). Deletion is permanent and backups
   make it recoverable; the confirmed list and the re-hash check keep it safe. The bin fills up with large files and is

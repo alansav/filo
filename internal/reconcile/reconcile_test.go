@@ -1005,3 +1005,21 @@ func symlinkEventDetail(e *env, sum Summary) string {
 	}
 	return ""
 }
+
+// TestScanSummaryRules: a scan's summary carries what the directory rules did in it.
+func TestScanSummaryRules(t *testing.T) {
+	e := newEnv(t, nil)
+	ctx := context.Background()
+	if _, _, _, err := e.s.AddRule(ctx, e.root.ID, "bank", "", "bills", "2026-11-16", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	e.write("bank/a.pdf", "a")
+	e.write("notes/b.txt", "b")
+	sum, err := Scan(ctx, e.s, Options{Target: e.base})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sum.Rules.Dated) != 1 || sum.Rules.Dated[0].Path != "bank/a.pdf" || sum.Rules.Dated[0].Policy != "bills" {
+		t.Errorf("summary rules = %+v, want bank/a.pdf on bills", sum.Rules)
+	}
+}

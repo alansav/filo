@@ -17,7 +17,7 @@ import (
 func AbsPath(root, rel string) string { return absPath(root, rel) }
 
 // atOrUnder is the one definition, in SQL, of "the path in column col is dir or under it" (dir "" is the whole
-// root), with its arguments. Names are compared exactly, never as LIKE patterns: a folder may be called 50%_off.
+// root), with its arguments. Names are compared exactly, never as LIKE patterns: a directory may be called 50%_off.
 // The Go side of the same rule is excludedDirs.covers.
 func atOrUnder(col, dir string) (string, []any) {
 	return `(? = '' OR ` + col + ` = ? OR substr(` + col + `, 1, length(?) + 1) = ? || '/')`,
@@ -134,8 +134,8 @@ func (s *Store) Include(ctx context.Context, rootID int64, dir string) (bool, er
 	return n > 0, err
 }
 
-// Locate finds the root a path is in by the path alone, for a path that is no longer on disk (an excluded folder
-// since deleted, a record whose folder went): the deepest root that is the path or holds it. It returns the root
+// Locate finds the root a path is in by the path alone, for a path that is no longer on disk (an excluded directory
+// since deleted, a record whose directory went): the deepest root that is the path or holds it. It returns the root
 // and the path relative to it, '/'-separated.
 func (s *Store) Locate(ctx context.Context, p string) (Root, string, error) {
 	p = filepath.Clean(p)

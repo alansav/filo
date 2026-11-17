@@ -32,6 +32,8 @@ type Report struct {
 	Policies    int64                  // the named retention policies
 	PolicyAttn  int64                  // of those, the ones that need attention (PolicyAttention)
 	NeedDateIn  []string               // the policies of the files that need a file_date: "bills, 7y"
+	RuleSet     int64                  // present files whose policy a directory rule set
+	RuleTies    []store.RuleTie        // files no rule gives a policy: two or more rules match them equally
 }
 
 // DirDepth is how many levels below a root the report groups files needing a decision by.
@@ -76,6 +78,9 @@ func Build(ctx context.Context, s *store.Store, top int, today string) (Report, 
 	var undecided []store.FileItem
 	for _, it := range files {
 		r.Status[it.Status]++
+		if it.RuleID != 0 {
+			r.RuleSet++
+		}
 		if it.Status.NeedsDecision() {
 			undecided = append(undecided, it)
 		}
@@ -114,6 +119,13 @@ func Build(ctx context.Context, s *store.Store, top int, today string) (Report, 
 		return r, err
 	}
 	r.Policies = int64(len(policies))
+	for _, rt := range r.Roots {
+		ties, err := s.RuleTies(ctx, rt.Root.ID, today, time.Now())
+		if err != nil {
+			return r, err
+		}
+		r.RuleTies = append(r.RuleTies, ties...)
+	}
 	for _, p := range policies {
 		if PolicyAttention(p, today) != "" {
 			r.PolicyAttn++
@@ -331,6 +343,9 @@ func (r Report) renderRetention(v *view.Renderer) {
 		return
 	}
 	v.Section("Retention", Plural(total, "file or symlink", "files and symlinks"))
+	if r.RuleSet > 0 {
+		v.Count(view.Neutral, Count(r.RuleSet)+" with a policy set by directory rules (filo rules)")
+	}
 	if r.Undecided == 0 {
 		v.Count(view.Done, "no file needs a retention")
 	} else {
@@ -351,7 +366,24 @@ func (r Report) renderRetention(v *view.Renderer) {
 		}
 		v.Files(view.FileList{Columns: []view.Column{{Header: "files", Right: true}, {Header: "size", Right: true}},
 			Rows: rows})
-		v.Detail(4, "Next: filo export retention [DIR] -o FILE, then filo update FILE")
+		v.Detail(4, "Next: filo export retention [DIR] -o FILE, then filo update FILE, or filo rules add DIR POLICY")
+	}
+	// The files no rule gives a policy, each with the rules that match it equally (they are among those above).
+	if n := int64(len(r.RuleTies)); n > 0 {
+		v.Count(view.Attention, Count(n)+" not given a policy: "+TieWhy(r.RuleTies))
+		rows := make([]view.FileRow, len(r.RuleTies))
+		for i, t := range r.RuleTies {
+			var ps []string
+			for _, x := range t.Rules {
+				ps = append(ps, x.Pattern)
+			}
+			dir := t.Rules[0].Dir // the rules of one directory tie
+			if dir == "" {
+				dir = "the root"
+			}
+			rows[i] = view.FileRow{Root: t.RootPath, Rel: t.Path, Note: "rules of " + dir + ": " + strings.Join(ps, ", ")}
+		}
+		v.Files(view.FileList{Rows: rows, Max: v.Overview(), More: "files", MoreOne: "file"})
 	}
 
 	// The files whose policy is a period and which have no file_date: the fix is named, with their policies.
@@ -378,6 +410,18 @@ func (r Report) renderRetention(v *view.Renderer) {
 			Size(d.Bytes), last))
 	}
 	r.renderPolicies(v)
+}
+
+// TieWhy says why tied files got no policy, for the scan and the report alike: "two rules match it equally",
+// "3 rules match it equally", "two or more rules match each equally".
+func TieWhy(ties []store.RuleTie) string {
+	switch {
+	case len(ties) == 1 && len(ties[0].Rules) == 2:
+		return "two rules match it equally"
+	case len(ties) == 1:
+		return Count(int64(len(ties[0].Rules))) + " rules match it equally"
+	}
+	return "two or more rules match each equally"
 }
 
 // renderPolicies writes the policies line, when there are policies: how many, and how many need attention (marked
@@ -507,7 +551,7 @@ func EventRow(root string, e store.Event, cells ...string) view.FileRow {
 	word, from := EventParts(e)
 	rel := e.Path
 	if rel == "" {
-		rel = "." // an event on the root itself (an unreadable root folder)
+		rel = "." // an event on the root itself (an unreadable root directory)
 	}
 	fromRoot := ""
 	if _, other, ok := strings.Cut(e.Detail, store.EventFromRoot); ok && from != "" {

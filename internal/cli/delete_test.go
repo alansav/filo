@@ -17,8 +17,8 @@ import (
 )
 
 // TestDeleteRoundTrip runs filo delete the ways a person would: without a terminal, declined, file by file (delete,
-// a new retention, skip, quit), all, and -y; with a file changed since its retention was set, folders emptied by the
-// run, a rescan afterwards, and a deleted file restored.
+// a new retention, skip, quit), all, and -y; with a file changed since its retention was set, directories emptied by
+// the run, a rescan afterwards, and a deleted file restored.
 func TestDeleteRoundTrip(t *testing.T) {
 	ct := newCLITest(t)
 	setNow(t, time.Date(2026, 11, 13, 12, 0, 0, 0, time.Local))
@@ -80,9 +80,9 @@ func TestDeleteRoundTrip(t *testing.T) {
 	r = filo(ExitOK, "s\ns\nq\n", true, "delete", in("old"))
 	contains("skip and quit", r.stdout, "Done   deleted 0 files", "  - 2 files left for later")
 
-	// -y deletes without asking, and removes the folders it emptied, up to the root.
+	// -y deletes without asking, and removes the directories it emptied, up to the root.
 	r = filo(ExitOK, "", false, "delete", "-y", in("old"))
-	contains("-y", r.stdout, "Done   deleted 2 files . freed 2 B . removed 2 empty folders")
+	contains("-y", r.stdout, "Done   deleted 2 files . freed 2 B . removed 2 empty directories")
 	gone("-y", map[string]bool{"old/a.txt": true, "old/sub": true, "old": true})
 
 	// All, half an hour later (a run is told apart from the last by when it started): e, the symlink and x/f.txt go; d is still a candidate in the register (no scan since its edit), so it is
@@ -90,7 +90,7 @@ func TestDeleteRoundTrip(t *testing.T) {
 	setNow(t, time.Date(2026, 11, 13, 12, 30, 0, 0, time.Local))
 	r = filo(ExitOK, "a\n", true, "delete")
 	contains("all", r.stdout, "Past their retention ", " 4 files . 3 B", "Done   deleted 3 files . freed 2 B . removed 1 "+
-		"empty folder", "Skipped 1:")
+		"empty directory", "Skipped 1:")
 	gone("all", map[string]bool{"e.txt": true, "link": true, "x": true, "keep/c.txt": false, "keep/d.txt": false})
 	if !exists(".") {
 		t.Fatal("the root was removed")

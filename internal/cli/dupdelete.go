@@ -275,7 +275,7 @@ groups:
 		facts = append(facts, "recorded "+report.Plural(int64(recorded), "decision", "decisions"))
 	}
 	if len(removed) > 0 {
-		facts = append(facts, "removed "+report.Plural(int64(len(removed)), "empty folder", "empty folders"))
+		facts = append(facts, "removed "+report.Plural(int64(len(removed)), "empty directory", "empty directories"))
 	}
 	r.Outcome("Done", facts...)
 	if len(skips) > 0 {
@@ -289,7 +289,7 @@ groups:
 			ps[i] = view.Problem{Reason: p.Error(), Failed: true}
 		}
 		r.Blank()
-		r.Problems(fmt.Sprintf("Folders not removed: %s", report.Count(int64(len(prob)))), view.Attention, ps)
+		r.Problems(fmt.Sprintf("Directories not removed: %s", report.Count(int64(len(prob)))), view.Attention, ps)
 	}
 	if left > 0 {
 		r.Blank()
@@ -340,7 +340,7 @@ const (
 
 // checkCopy checks a copy against the disk and the register, without reading its content (that is done at the moment
 // of deleting): it must be at its exported path, the same file, with the size and modification time the register
-// has for the content exported. A file whose folder can be read and that is not in it is gone; one that cannot be
+// has for the content exported. A file whose directory can be read and that is not in it is gone; one that cannot be
 // checked never is.
 func checkCopy(c store.ExportedCopy, rootWhy func(int64) string) (copyState, string) {
 	if c.Deleted != "" {

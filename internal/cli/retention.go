@@ -30,7 +30,7 @@ func today() string { return retention.Today(now().Local()) }
 var exportKinds = []string{"retention", "duplicates"}
 
 // filterFor turns the DIR argument, if any, into a filter on the register and the place a heading names: the root
-// DIR is in and the folder under it, or every root when there is no DIR.
+// DIR is in and the directory under it, or every root when there is no DIR.
 func filterFor(ctx context.Context, s *store.Store, pos []string) (store.Filter, view.Where, error) {
 	if len(pos) == 0 {
 		roots, err := s.Roots(ctx)
@@ -199,8 +199,8 @@ func (e *env) scanFirst(ctx context.Context, s *store.Store, kind string, pos []
 
 // lastScanLine is the line an export with --no-scan shows: the CSV is as of the last scan that covered what it holds
 // (the oldest of them, when it holds several roots), or says that one was never scanned. A retention export of DIR
-// holds DIR; any other export holds every root (a duplicate group's copies can be anywhere). A scan of a folder
-// inside a root covers only that folder.
+// holds DIR; any other export holds every root (a duplicate group's copies can be anywhere). A scan of a directory
+// inside a root covers only that directory.
 func lastScanLine(ctx context.Context, s *store.Store, kind string, f store.Filter) (string, error) {
 	roots, err := s.Roots(ctx)
 	if err != nil {

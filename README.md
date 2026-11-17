@@ -7,12 +7,12 @@ case someone asks").
 **Filo manages files; it is not, and never will be, a backup tool.** `filo delete` deletes files permanently, so keep
 backups of your files, and of Filo's register and its snapshots (see [Register snapshots](docs/design.md#register-snapshots)).
 
-**Status: scan, lifespan, delete, duplicates and retention policies done.** You give every file a retention (how
-long to keep it, often through a named policy such as `bills = 7y`), and
-`filo delete` lists the files past theirs, asks, and deletes the ones you choose. For identical copies you decide
-which to keep in a spreadsheet, and `filo delete` carries that out the same careful way. Apart from that, Filo is
-**read-only on your files**: no other command modifies, moves, renames or deletes anything outside its own database.
-See [Roadmap](#roadmap) for what comes next.
+**Status: scan, lifespan, delete, duplicates, retention policies and directory rules done.** You give every file a
+retention (how long to keep it, often through a named policy such as `bills = 7y`, which a directory rule can give the
+files under a directory as they arrive), and `filo delete` lists the files past theirs, asks, and deletes the ones you
+choose. For identical copies you decide which to keep in a spreadsheet, and `filo delete` carries that out the same
+careful way. Apart from that, Filo is **read-only on your files**: no other command modifies, moves, renames or deletes
+anything outside its own database. See [Roadmap](#roadmap) for what comes next.
 
 ## What it does today
 
@@ -34,18 +34,21 @@ See [Roadmap](#roadmap) for what comes next.
   date passes, the file is listed as a deletion candidate. A retention can be a named policy (`bills = 7y`), so
   changing the rule changes every file using it. Nothing is ever deleted because a date passed: `filo
   delete` shows you the list and asks.
+- **Gives new files a policy by directory**: a rule such as "files under `bank` matching `*Statement*` get
+  `statements`" sets the policy of every file there with no retention, now and as each scan finds new ones. See
+  [Directory rules](#directory-rules).
 - **Deletes what you confirm**, after reading each file again just before deleting it: a file that changed since its
   retention was set, moved, or can't be read is skipped, never deleted.
 - **Clears out duplicates you decide on**: export the groups of identical copies, write `keep` or `delete` against
   each, and `filo delete` deletes the extra copies, never the last one. Copies kept on purpose (records, a `LICENSE`
-  in every project, a backup folder) can be marked so they stop being reported. See [Duplicates](#duplicates).
+  in every project, a backup directory) can be marked so they stop being reported. See [Duplicates](#duplicates).
 - **Rescans quickly.** A file is only re-read when its size, modification time, change time (ctime) or inode changes.
   The change time is what catches a file whose permissions changed, or one rewritten with its old modification time
   put back. Windows has no change time, so there it isn't compared.
 
 It is built to fail safe:
 
-- **Partial scans are safe.** Scanning one folder never marks files elsewhere as missing.
+- **Partial scans are safe.** Scanning one directory never marks files elsewhere as missing.
 - **Unreadable directories are harmless.** A directory that can't be read never makes its files "missing".
 - **Unreadable files are flagged.** A file Filo can see but not read (for example permission denied) is reported as an
   error and flagged as unreadable since that scan, including a file you could read before. It keeps its record and its
@@ -160,7 +163,7 @@ and filter it however you like.
 - **`keep_until`** is worked out by Filo, so you can sort by it. Leave it alone: a cell holding a different date is
   refused.
 
-To set a whole folder at once, filter on `directory` and fill the retention down. Filtering on a blank `retention`
+To set a whole directory at once, filter on `directory` and fill the retention down. Filtering on a blank `retention`
 shows the files still to decide.
 
 - Only `id`, `export`, `file_date` and `retention` are read back, so you can reorder columns or add your own. Rows
@@ -224,6 +227,57 @@ Policies   3 · 2 need attention
   last-year   2025-12-31                                  0 files   ! passed: set a new date, or remove it
 ```
 
+## Directory rules
+
+A retention set in the CSV is a one-off: a file added later arrives with none. A rule names a policy for the files
+under a directory, at any depth, or only those whose name matches a pattern, and every scan applies it to the files
+it finds there with no retention:
+
+```sh
+filo rules add ~/Documents/personal/home/electric bills              # every file under it gets bills
+filo rules add ~/Documents/bank '*Statement*' statements             # only names matching *Statement*
+filo rules add ~/Documents/bank '*Statement*' statements --dry-run   # show the files first, change nothing
+filo rules                                                           # list them, in the order they are tried
+```
+
+- **Quote a pattern** with `*` or spaces (`'*Statement*'`), or the shell replaces it with the file names it matches.
+  A pattern is a file name, not a path, in any case: `*` is any run of characters, `?` one character. No pattern is
+  `*`.
+- **Which rule decides**: for a file, the rules of its own directory are tried first, then those of each directory
+  above it; the first directory with a matching rule decides. Within a directory the longest pattern wins, counting
+  every character but `*`, and `*` alone comes last. Two matching patterns as long as each other are reported by the
+  scan, `filo rules` and `filo report`, and the file is left without a policy: make one of them longer (longer is not
+  always more specific: on `DailyStatement.pdf`, `*Statement*` beats `Daily*`; use `*DailyStatement*`).
+- **A rule only fills a gap, once.** It sets the policy of a file with no retention at all; a file with a date,
+  `forever` or a policy (even one with no value) is never touched, nor a file it set a policy on before, even if you
+  cleared that later in the CSV. Nothing is deleted by a rule: the file becomes a candidate at the end of its
+  retention, and `filo delete` asks as always.
+- **Changing a rule is for new files**: `filo rules set` and `filo rules remove` leave the files it already set a
+  policy on as they are. To move those, use `filo policies move`, or a CSV filtered on the directory.
+- **A policy named by a rule that does not exist** is created with no value; set one with `filo policies set`. A
+  policy a rule names can't be removed, and `filo policies move` takes its rules along.
+- **A directory renamed or removed**: the rule stays where it was and `filo rules` flags it (`no such directory`);
+  it is never followed to a new name. `filo rules move OLD NEW` puts the rules at `OLD` and below it in the same
+  places under `NEW`. `filo rules copy OLD NEW` does the same and keeps them at `OLD`: in `~/Documents`, `filo rules
+  copy bank/2024 bank/2025` for a new year. Both set the policy of the files under `NEW` they now decide, and are
+  refused if `NEW` or a directory below it has rules already: rules are never merged.
+
+```
+$ filo rules
+Rules   5 · 3 directories · 1 needs attention · ~/Documents
+
+  bank
+    *DailyStatement*   daily-statements   7y           212 files
+    *Statement*        statements         10y           40 files
+    *                  financial          7y            12 files
+  bank/2024
+    *                  tax-2024           2031-12-31     8 files
+  personal/home/electric
+    *                  bills              no value      38 files   ! needs a retention
+
+Next: filo rules add DIR [PATTERN] POLICY, filo rules remove DIR [PATTERN]
+```
+
 ## Deleting
 
 `filo delete [DIR]` lists the files past their retention under `DIR` (or every root), then asks:
@@ -262,8 +316,8 @@ Delete all 5, select one by one, list them all, or none? [a/s/l/N]
 - **Just before deleting**, each file is read again. It is deleted only if it is still at its path as the same file
   and its content is still the content its retention was set on. Otherwise it is skipped and listed with the reason,
   and nothing about it changes.
-- **Deletion is permanent:** there is no recycle bin, so keep backups. Folders the run emptied are removed, up to the
-  root. A file you restore from a backup comes back as a new file, needing a retention.
+- **Deletion is permanent:** there is no recycle bin, so keep backups. Directories the run emptied are removed, up to
+  the root. A file you restore from a backup comes back as a new file, needing a retention.
 
 In a terminal the output has colour and symbols (set `NO_COLOR`, or `TERM=dumb`, to turn colour off) and fits the
 window: a path is never cut, but a long one moves to its own line. Piped into a file or another program, it is plain
@@ -290,7 +344,7 @@ Identical files exist for four reasons, and each has its own kind of keep:
 | a copy made by accident | a download saved twice | `keep` one copy, `delete` the rest |
 | copies that are each a record | insurance terms received in 2020 and again in 2021, each with its own retention | `keep` on two or more: they are **kept as separate files** |
 | a content that belongs everywhere | `LICENSE`, `__init__.py`, a template in each project | `always` on every row: the content is never a duplicate again |
-| a deliberate copy of a folder | a backup, an old laptop's files | `filo duplicates exclude DIR`: nothing under it counts as a duplicate |
+| a deliberate copy of a directory | a backup, an old laptop's files | `filo duplicates exclude DIR`: nothing under it counts as a duplicate |
 
 The `action` cell takes `delete`, `keep` or `always` (or `d`, `k`, `a`, any case). Each group is decided on its own:
 
@@ -337,9 +391,9 @@ Delete 9 copies and record 2 decisions? [y/s/l/N]
 - **Strict about changes:** a group any of whose files changed or moved since the export is skipped whole, so a copy
   is deleted only if it is still exactly the content you decided on. A copy that is gone since (deleted by another
   run, or by you) is ignored and the rest of its group goes ahead. A file Filo can't check (a disk not mounted, a
-  folder it can't read) is never taken as gone: its group is skipped.
+  directory it can't read) is never taken as gone: its group is skipped.
 - **Never the last copy:** just before deleting, Filo reads a copy kept again and checks it is still there with the
-  same content, and is not the same file as the copy being deleted (a hard link, or a folder mounted twice). A copy
+  same content, and is not the same file as the copy being deleted (a hard link, or a directory mounted twice). A copy
   with other hard links can be kept but not deleted, since deleting it frees nothing.
 - **Run it again:** the CSV is your saved work, and nothing waits in the register between deciding and deleting.
   Edit it further and run it again: groups already done are reported as done, and only what is still as exported is
@@ -376,7 +430,7 @@ Next: filo duplicates include /home/you/Backup to undo it
 | `filo delete [DIR] [-y]` | List the files past their retention, ask, and delete the ones you choose. See [Deleting](#deleting). |
 | `filo delete FILE [-y]` | Carry out a duplicates CSV: check it against the disk, list, ask, and delete the copies marked `delete`. |
 | `filo duplicates` | List what is not counted as duplicates: excluded directories, contents marked always, identical files kept as separate files. |
-| `filo duplicates exclude DIR` | Never count the files under `DIR` as duplicates (a backup folder). |
+| `filo duplicates exclude DIR` | Never count the files under `DIR` as duplicates (a backup directory). |
 | `filo duplicates include PATH` | Undo one: a directory's exclusion, a file's content marked always, or its set of identical files kept as separate files. |
 | `filo policies` | List the retention policies, with what needs attention. See [Retention policies](#retention-policies). |
 | `filo policies add NAME [VALUE]` | Create a policy, with a period, a date or `forever`, or no value yet. |
@@ -384,6 +438,12 @@ Next: filo duplicates include /home/you/Backup to undo it
 | `filo policies move OLD NEW [-y]` | Move every file of a policy to another (a rename, if NEW is new). |
 | `filo policies remove NAME` | Delete a policy no file uses. |
 | `filo policies show NAME` | A policy's value and its files, those needing a `file_date` first. |
+| `filo rules [DIR]` | List the directory rules, at `DIR` and below it, in the order they are tried. See [Directory rules](#directory-rules). |
+| `filo rules add DIR [PATTERN] POLICY [--dry-run]` | Add a rule and set the policy of the files with no retention it decides now. |
+| `filo rules set DIR [PATTERN] POLICY` | Change the policy a rule gives new files. |
+| `filo rules remove DIR [PATTERN]` | Remove a rule; the files it set a policy on keep it. |
+| `filo rules move OLD NEW [--dry-run]` | Move the rules at `OLD` and below it to the same places under `NEW` (after a rename). |
+| `filo rules copy OLD NEW [--dry-run]` | Copy them, keeping them at `OLD`. |
 | `filo help [COMMAND]` | Show usage. `-h` works on every command. |
 
 Options for `filo roots add` and `filo roots set`, which every scan of the root then uses:
@@ -452,7 +512,7 @@ Use `--db PATH` or the `FILO_DB` environment variable to choose another. The dat
 `0600`), and only one Filo process can use it at a time.
 
 **Don't sync the database between machines.** It describes one device's files. Keep it out of Syncthing or other
-synced folders (the default location already is).
+synced directories (the default location already is).
 
 You can look inside it with `sqlite3`; hashes are the same as `sha256sum` prints.
 
@@ -492,9 +552,10 @@ Enable it with `systemctl --user enable --now filo-scan.timer`.
 5. **Duplicates**: decide in a CSV which copies to keep, carried out by `filo delete`; files kept as separate files,
    contents marked always and excluded directories. Done.
 6. **Retention policies**: a named retention typed in the CSV, changed in one place. Done.
-7. **Next**: folder rules (a default policy on a directory). The order is in [docs/design.md](docs/design.md),
+7. **Directory rules**: a policy for the files under a directory, applied by every scan. Done.
+8. **Next**: removing empty directories, through `filo delete`. The order is in [docs/design.md](docs/design.md),
    section 5.
-8. Later: **a UI** in place of the CSV.
+9. Later: **a UI** in place of the CSV.
 
 Principles that won't change:
 - A retention is never a trigger: reaching its end makes a file a candidate you confirm.

@@ -3,7 +3,7 @@ package store
 // SchemaVersion is the schema this build reads and writes. It is stored in meta.schema_version when a database is
 // created. An older database with a migration in migrations is upgraded when it is opened; any other version is
 // refused.
-const SchemaVersion = 9
+const SchemaVersion = 10
 
 // Meta keys.
 const (
@@ -62,7 +62,10 @@ CREATE TABLE files (
     reviewed_after_scan INTEGER REFERENCES scans(id),
     reviewed_hash TEXT,
     deleted_utc TEXT,                   -- when filo deleted it; its path is closed. NULL = not deleted by filo
-    policy_id INTEGER                   -- its retention policy (policies.id; then retention is NULL), NULL = none
+    policy_id INTEGER,                  -- its retention policy (policies.id; then retention is NULL), NULL = none
+    rule_id INTEGER,                    -- the rule that set its policy (rules.id); NULL = none, the rule removed, or
+                                        -- its retention since set by hand
+    rule_dated_utc TEXT                 -- when a rule dated it; once set, no rule dates it again
 );
 
 CREATE TABLE paths (
@@ -86,7 +89,7 @@ CREATE TABLE events (
     other_path TEXT,
     detail TEXT
 );
-` + reviewSQL + duplicatesSQL + policiesSQL
+` + reviewSQL + duplicatesSQL + policiesSQL + rulesSQL
 
 // reviewSQL is the export and review tables, as of schema version 8.
 const reviewSQL = `
@@ -218,7 +221,35 @@ DELETE FROM review_batches WHERE id NOT IN (SELECT batch_id FROM reviews);
 	8: `
 ALTER TABLE files ADD COLUMN policy_id INTEGER;
 ` + policiesSQL,
+	// 9 -> 10: directory rules (docs/design.md, Lifespan, Directory rules). Only a new table and columns: no file has
+	// been dated by a rule yet.
+	9: `
+ALTER TABLE files ADD COLUMN rule_id INTEGER;
+ALTER TABLE files ADD COLUMN rule_dated_utc TEXT;
+` + rulesSQL,
 }
+
+// rulesSQL is the directory rules, added in schema version 10. A rule names a policy for the files under a directory
+// of a root ('/'-separated, relative to the root, the empty path for the root itself) whose name matches its pattern
+// (as typed; '*' for none). pattern_key is the pattern in lower case: a directory's patterns are unique in any case.
+// letters is the pattern's length, every character but * (rules.Length; the column was named before a ? counted),
+// stored for reading the register by hand: matching works it out again. A rule keeps its policy in use: the store
+// refuses to remove a policy a rule names. files.rule_id is not declared a foreign key: removing a rule sets it to
+// NULL, and files.rule_dated_utc stays, so no rule dates that file again.
+const rulesSQL = `
+CREATE TABLE rules (
+    id INTEGER PRIMARY KEY,
+    root_id INTEGER NOT NULL REFERENCES roots(id),
+    dir TEXT NOT NULL,
+    pattern TEXT NOT NULL,
+    pattern_key TEXT NOT NULL,
+    letters INTEGER NOT NULL,
+    policy_id INTEGER NOT NULL REFERENCES policies(id),
+    added_utc TEXT NOT NULL,
+    UNIQUE (root_id, dir, pattern_key)
+);
+CREATE INDEX ix_files_rule ON files(rule_id);
+`
 
 // policiesSQL is the named retention policies, added in schema version 9. A file on a policy has files.policy_id set
 // and files.retention NULL; its keep_until is worked out from the policy's value and stored, as for a retention of

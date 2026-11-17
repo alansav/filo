@@ -408,8 +408,8 @@ func TestOneMore(t *testing.T) {
 	}
 }
 
-// TestTildeFolder: a folder named ~ inside a root never reads as the home directory.
-func TestTildeFolder(t *testing.T) {
+// TestTildeDir: a directory named ~ inside a root never reads as the home directory.
+func TestTildeDir(t *testing.T) {
 	r, b := plainView()
 	r.Heading("H", Where{Roots: []string{"/data"}})
 	b.Reset()
@@ -620,5 +620,43 @@ func TestTermsNarrow(t *testing.T) {
 		if len([]rune(l)) >= 35 {
 			t.Errorf("line %q is not within 35 columns", l)
 		}
+	}
+}
+
+// TestGroups: rows under their group names, the columns lined up across groups, and every attention note in one
+// column, the group's with its rows'.
+func TestGroups(t *testing.T) {
+	r, b := plainView()
+	r.Groups([]TableGroup{
+		{Name: "bank", Rows: []TableRow{{Name: "*DailyStatement*", Cells: []string{"daily", "7y", "212 files"}},
+			{Name: "*", Cells: []string{"financial", "7y", "1 file"}}}},
+		{Name: "scans/old ", Attention: "no such directory", Rows: []TableRow{{Name: "*",
+			Cells: []string{"bills", "no value", "38 files"}, Attention: "needs a retention"}}},
+	}, false, false, true)
+	want := "" +
+		"  bank\n" +
+		"    *DailyStatement*   daily       7y         212 files\n" +
+		"    *                  financial   7y            1 file\n" +
+		"  scans/old\\x20                                           [!] no such directory\n" +
+		"    *                  bills       no value    38 files   [!] needs a retention\n"
+	if b.String() != want {
+		t.Errorf("got\n%s\nwant\n%s", b.String(), want)
+	}
+}
+
+// TestHeadedTable: a table under a section, indented by four, below its dimmed headers, the columns lined up with
+// them; a column with no header has none.
+func TestHeadedTable(t *testing.T) {
+	r, b := plainView()
+	r.HeadedTable([]string{"directory", "pattern", "policy"}, []TableRow{
+		{Name: "bank", Cells: []string{"*DailyStatement*", "daily-statements", "2 files", "1 needs a file_date"}},
+		{Name: "personal/home/electric", Cells: []string{"*", "bills", "1 file"}},
+	}, false, false, true)
+	want := "" +
+		"    directory                pattern            policy\n" +
+		"    bank                     *DailyStatement*   daily-statements   2 files   1 needs a file_date\n" +
+		"    personal/home/electric   *                  bills               1 file\n"
+	if b.String() != want {
+		t.Errorf("got\n%s\nwant\n%s", b.String(), want)
 	}
 }

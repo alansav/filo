@@ -203,7 +203,7 @@ func TestFilesStatusAndScope(t *testing.T) {
 		t.Errorf("scoped files = %v", paths)
 	}
 
-	// An emoji folder: its siblings that share the prefix ("📷 Pictures🎉", "📷 Pictures-x") are outside it.
+	// An emoji directory: its siblings that share the prefix ("📷 Pictures🎉", "📷 Pictures-x") are outside it.
 	q, err = e.s.Files(e.ctx, "2026-11-11", Filter{RootID: e.root.ID, Scope: "📷 Pictures"})
 	if err != nil {
 		t.Fatal(err)

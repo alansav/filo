@@ -128,7 +128,7 @@ func styledName(s, style string) span {
 	return escaped(trimmed+strings.Repeat(`\x20`, len(out)-len(trimmed)), style)
 }
 
-// relName shows a path relative to a root: one that starts with ~ (a folder named ~ inside the root) gets ./ in
+// relName shows a path relative to a root: one that starts with ~ (a directory named ~ inside the root) gets ./ in
 // front, so it never reads as a path in the home directory.
 func relName(rel string) string {
 	if strings.HasPrefix(rel, "~") {

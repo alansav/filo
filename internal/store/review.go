@@ -61,6 +61,8 @@ type FileItem struct {
 	PolicyValue string // that policy's value: a period, Forever, YYYY-MM-DD, or "" for none yet
 	KeepUntil   string // worked out from the two: YYYY-MM-DD, Forever, or "" = none
 	ReviewedUTC string // when the current retention was set; "" = never
+	RuleDated   bool   // a directory rule set its policy once: no rule sets it again
+	RuleID      int64  // the rule its policy is set by; 0 = none (or its retention since set by hand)
 	Status      Status
 
 	UnreadableSince    int64  // the scan that flagged it, 0 = not flagged
@@ -77,14 +79,20 @@ type Filter struct {
 	RootID   int64  // 0 = every root
 	Scope    string // relative to the root, '/' separators; "" = the whole root
 	PolicyID int64  // only the files on this retention policy; 0 = any
+	// Ruleless: only the files a directory rule may give a policy, before their status: no retention, no policy,
+	// never given one by a rule. What a scan's rules look at, so they classify only those.
+	Ruleless bool
 }
 
 // scopeSQL returns a condition on alias p (paths) for the filter, and its arguments.
-// A policy filter is a condition on alias f (files).
+// A policy filter, and Ruleless, are conditions on alias f (files).
 func (f Filter) scopeSQL() (string, []any) {
 	cond, args := "", []any(nil)
 	if f.PolicyID != 0 {
 		cond, args = " AND f.policy_id = ?", []any{f.PolicyID}
+	}
+	if f.Ruleless {
+		cond += " AND f.retention IS NULL AND f.policy_id IS NULL AND f.rule_dated_utc IS NULL"
 	}
 	switch {
 	case f.RootID == 0:
@@ -142,14 +150,19 @@ func classify(r fileRow, today string) Status {
 // Files returns every present file (regular files and symlinks) under the filter with its status, ordered by root
 // and path. today is the local date, YYYY-MM-DD.
 func (s *Store) Files(ctx context.Context, today string, f Filter) ([]FileItem, error) {
+	return files(ctx, s.db, today, f)
+}
+
+// files is Files through q: the store, or a transaction that acts on what it reads.
+func files(ctx context.Context, q querier, today string, f Filter) ([]FileItem, error) {
 	cond, args := f.scopeSQL()
 	// A possible move event names the old file; the new file is the one whose path opened at e.path in that scan.
-	out, err := queryAll(ctx, s.db, func(rows *sql.Rows) (FileItem, error) {
+	out, err := queryAll(ctx, q, func(rows *sql.Rows) (FileItem, error) {
 		var r fileRow
 		it := &r.item
 		var moveRoot, moveRel string
 		if err := rows.Scan(&it.FileID, &it.RootPath, &it.Path, &it.Kind, &it.Size, &it.MtimeNS, &it.Hash,
-			&it.FileDate, &it.Retention, &it.Policy, &it.PolicyValue, &it.KeepUntil, &it.ReviewedUTC, &r.reviewedAfter, &r.reviewedHash, &it.UnreadableSince,
+			&it.FileDate, &it.Retention, &it.Policy, &it.PolicyValue, &it.KeepUntil, &it.ReviewedUTC, &it.RuleDated, &it.RuleID, &r.reviewedAfter, &r.reviewedHash, &it.UnreadableSince,
 			&it.UnreadableSinceUTC, &r.possibleMoveIn, &moveRoot, &moveRel, &it.MoveDetail); err != nil {
 			return *it, err
 		}
@@ -168,7 +181,8 @@ func (s *Store) Files(ctx context.Context, today string, f Filter) ([]FileItem, 
 			GROUP BY np.file_id)
 		SELECT f.id, r.path, p.path, f.kind, f.size, f.mtime_ns, coalesce(f.hash, ''),
 		       coalesce(f.file_date, ''), `+retentionColumns+`, coalesce(f.keep_until, ''),
-		       coalesce(f.reviewed_utc, ''), coalesce(f.reviewed_after_scan, 0),
+		       coalesce(f.reviewed_utc, ''), f.rule_dated_utc IS NOT NULL, coalesce(f.rule_id, 0),
+		       coalesce(f.reviewed_after_scan, 0),
 		       f.reviewed_hash, coalesce(f.unreadable_since_scan, 0), coalesce(us.finished_utc, us.started_utc, ''),
 		       coalesce(pe.scan_id, 0), coalesce(pr.path, ''), coalesce(pe.other_path, ''), coalesce(pe.detail, '')
 		FROM paths p
@@ -451,6 +465,8 @@ func (s *Store) UpdateRetentionWith(ctx context.Context, rows []RetentionRow, no
 		}
 		// A file has a policy or a retention of its own, never both: a policy name goes in policy_id (the policy
 		// created above if it is new), anything else in retention, taking the file off its policy.
+		// The rule that set its policy stays only while that is still its policy (a file_date filled in keeps it;
+		// the old values are what CASE reads).
 		own, policy := nullString(c.retention), sql.NullInt64{}
 		if c.policy {
 			own, policy = sql.NullString{}, sql.NullInt64{Int64: c.policyID, Valid: true}
@@ -459,8 +475,9 @@ func (s *Store) UpdateRetentionWith(ctx context.Context, rows []RetentionRow, no
 			}
 		}
 		if _, err := tx.ExecContext(ctx, `UPDATE files SET file_date = ?, retention = ?, policy_id = ?,
-			keep_until = ?, reviewed_utc = ?, reviewed_after_scan = ?, reviewed_hash = ? WHERE id = ?`,
-			nullString(c.fileDate), own, policy, nullString(c.keepUntil), utc(now), a.afterScan, c.exportHash,
+			keep_until = ?, reviewed_utc = ?, reviewed_after_scan = ?, reviewed_hash = ?,
+			rule_id = CASE WHEN policy_id IS ? THEN rule_id END WHERE id = ?`,
+			nullString(c.fileDate), own, policy, nullString(c.keepUntil), utc(now), a.afterScan, c.exportHash, policy,
 			r.FileID); err != nil {
 			return res, fmt.Errorf("record retention: %w", err)
 		}

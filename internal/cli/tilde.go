@@ -7,7 +7,7 @@ import (
 )
 
 // checkTilde refuses a path that starts with ~. The shell expands ~ only when it is unquoted, so "~/Documents"
-// arrives as a relative path and would name a folder called ~ in the current directory. Filo does not expand it
+// arrives as a relative path and would name a directory called ~ in the current directory. Filo does not expand it
 // itself: a name that starts with ~ is legal, and guessing would sometimes be wrong. what names the argument
 // ("PATH", "--db", "FILO_DB") for the message.
 func checkTilde(what, p string) error {

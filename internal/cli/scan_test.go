@@ -71,7 +71,7 @@ func TestScanGolden(t *testing.T) {
 	out.WriteString("\n$ filo scan (one root unmounted)\n" + r.stdout)
 
 	got := took.ReplaceAllString(out.String(), "<took>")
-	got = strings.ReplaceAll(got, ct.root, "<root>") // the root first: it is inside the work folder
+	got = strings.ReplaceAll(got, ct.root, "<root>") // the root first: it is inside the work directory
 	got = strings.ReplaceAll(got, ct.work, "<work>")
 	golden(t, "scan.txt", ct.root, got)
 }

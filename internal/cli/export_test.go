@@ -16,7 +16,7 @@ import (
 )
 
 // TestExportGolden: filo export's whole plain output (docs/design.md, Terminal output, Export): a retention export
-// of a folder with a file_date read from a file name, one with nothing to export, and a duplicates export. The CSVs
+// of a directory with a file_date read from a file name, one with nothing to export, and a duplicates export. The CSVs
 // themselves are tested in the round trips.
 func TestExportGolden(t *testing.T) {
 	ct := newCLITest(t)
@@ -41,7 +41,7 @@ func TestExportGolden(t *testing.T) {
 	step("export retention empty", "export", "retention", in("empty"), "-o", csv("e.csv"))
 	step("export duplicates", "export", "duplicates", "-o", csv("my d.csv"))
 
-	got := strings.ReplaceAll(out.String(), ct.root, "<root>") // the root first: it is inside the work folder
+	got := strings.ReplaceAll(out.String(), ct.root, "<root>") // the root first: it is inside the work directory
 	got = strings.ReplaceAll(got, ct.work, "<work>")
 	golden(t, "export.txt", ct.root, got)
 }
@@ -285,8 +285,8 @@ func TestExportScansFirst(t *testing.T) {
 	}
 }
 
-// TestExportNoScanLine: --no-scan names the last scan that covered what the CSV holds. A scan of a folder inside a
-// root covers only that folder, and a duplicates export holds every root. An empty register shows no scan and no
+// TestExportNoScanLine: --no-scan names the last scan that covered what the CSV holds. A scan of a directory inside a
+// root covers only that directory, and a duplicates export holds every root. An empty register shows no scan and no
 // stray blank line.
 func TestExportNoScanLine(t *testing.T) {
 	ct := newCLITest(t)
