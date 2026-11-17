@@ -605,12 +605,16 @@ retention: the file becomes a candidate at its date and is deleted only through 
   first and then one `*` (`**` is `*`, `*?` is `?*`), since two forms of it would tie on every name. A rule covers the
   files at any depth below its directory. For a file, Filo looks at the file's own directory, then each parent up to the
   root: **the first directory with a rule that matches decides**, so the result can be read off the path. Within a
-  directory, rules are tried **longest pattern first, counting letters only**: wildcards are not counted, so `*` counts
-  0 and is always tried last (the fallback for files no other pattern matched), and a pattern `a` counts 1. Two matching
-  patterns with the same count are reported, not guessed, and the file stays undated. A directory's patterns are unique,
-  in any case (`*statement*` is `*Statement*`). Longer is not always more specific (`Daily*`, 5, loses to `*Statement*`,
-  9, on `DailyStatement.pdf`); the fix is the longer pattern meant (`*DailyStatement*`), and `filo rules add --dry-run`
-  shows the files it would date.
+  directory, rules are tried **longest pattern first, counting every character but `*`**: a `?` is one character, so it
+  counts (`*` counts 0, `?*` 1, `??*` 2; decided 2026-11-17), and `*` alone is always tried last (the fallback for files
+  no other pattern matched); a pattern `a` counts 1. Two matching patterns with the same count are reported, not
+  guessed, and the file stays undated. A directory's patterns are unique, in any case (`*statement*` is `*Statement*`).
+  Longer is not always more specific (`Daily*`, 5, loses to `*Statement*`, 9, on `DailyStatement.pdf`); the fix is the
+  longer pattern meant (`*DailyStatement*`), and `filo rules add --dry-run` shows the files it would date. A pattern is
+  refused, each with its own one-line reason, if it has a `/` or a `\` (a pattern is a name, not a path; a `\` is
+  usually a Windows path or a shell escape, and a name with one is still matched by `?`), a NUL, is not valid UTF-8, or
+  is longer than 255 bytes. Nothing else is checked: a pattern no file can be named (`..`) simply matches nothing, and a
+  pattern is never joined into a path.
 
   With rules on `bank` (`*DailyStatement*` 14 → `daily-statements`, `*Statement*` 9 → `statements`, `*2024*` 4 →
   `tax-2024`, `*bank*` 4 → `banking`, `*` 0 → `financial`) and on `bank/2024` (`*` → `tax-2024`):
@@ -783,7 +787,7 @@ Retention   250 files and symlinks
   | B3 an unreadable file; the new side of a possible move | untouched until resolved |
   | B4 a period policy, the file without a file_date | dated; needs a file_date |
   | B5 dated by a rule, then its retention cleared in the CSV; then the rule removed | stays undated; keeps its policy |
-  | C1 two matching patterns of different letter counts; `*` with another match | the longer one; `*` last |
+  | C1 two matching patterns of different counts; `*` with another match | the longer one; `*` last |
   | C2 two matching patterns of the same count | not applied, reported by the scan and `filo rules` |
   | C3 a rule in a parent directory; a nearer directory with a matching rule | applies at any depth; the nearer one wins |
   | C4 two hard links in directories with different rules | each dated by its own directory's rule |
@@ -2099,6 +2103,8 @@ put first on 2026-11-15). Each is an open question below until it is designed.
       rows name the rules' directory; a scan whose only finding is a tie gets a next step. Kept: `ApplyScan` beside
       `ApplyScanRules` (both apply the rules; the tests want the scan ID only), and the headed table's trailing
       padding (`write` already drops it).
+      Changed after the PR review of slices 1-3 (2026-11-17): a `?` counts toward a pattern's length (only `*` does
+      not), and a `\` in a pattern is refused as a `/` is; each refusal of a pattern names the check that failed.
    4. *`move` and `copy`*, then the README (a "Directory rules" section, quoting patterns) and the help overview.
       Scenarios E.
 5. Progress in the report, and `export retention --needing-retention`.
