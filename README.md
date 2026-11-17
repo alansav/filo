@@ -8,11 +8,11 @@ case someone asks").
 backups of your files, and of Filo's register and its snapshots (see [Register snapshots](docs/design.md#register-snapshots)).
 
 **Status: scan, lifespan, delete, duplicates, retention policies and directory rules done.** You give every file a
-retention (how long to keep it, often through a named policy such as `bills = 7y`, which a directory rule can give
-the files under a directory as they arrive), and `filo delete` lists the files past theirs, asks, and deletes the ones you choose. For identical copies you decide
-which to keep in a spreadsheet, and `filo delete` carries that out the same careful way. Apart from that, Filo is
-**read-only on your files**: no other command modifies, moves, renames or deletes anything outside its own database.
-See [Roadmap](#roadmap) for what comes next.
+retention (how long to keep it, often through a named policy such as `bills = 7y`, which a directory rule can give the
+files under a directory as they arrive), and `filo delete` lists the files past theirs, asks, and deletes the ones you
+choose. For identical copies you decide which to keep in a spreadsheet, and `filo delete` carries that out the same
+careful way. Apart from that, Filo is **read-only on your files**: no other command modifies, moves, renames or deletes
+anything outside its own database. See [Roadmap](#roadmap) for what comes next.
 
 ## What it does today
 
@@ -264,7 +264,6 @@ filo rules                                                           # list them
 
 ```
 $ filo rules
-
 Rules   5 · 3 directories · 1 needs attention · ~/Documents
 
   bank
@@ -275,6 +274,8 @@ Rules   5 · 3 directories · 1 needs attention · ~/Documents
     *                  tax-2024           2031-12-31     8 files
   personal/home/electric
     *                  bills              no value      38 files   ! needs a retention
+
+Next: filo rules add DIR [PATTERN] POLICY, filo rules remove DIR [PATTERN]
 ```
 
 ## Deleting
