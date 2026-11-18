@@ -527,7 +527,7 @@ type checked struct {
 	newPolicy                        bool   // one that does not exist yet: created with no value, once confirmed
 }
 
-// checkRow applies the update's rules to one row (design section 2, Retention CSV, second shape).
+// checkRow applies the update's rules to one row (docs/design.md, Retention CSV columns).
 func checkRow(ctx context.Context, tx *sql.Tx, r RetentionRow, ex exportInfo, policies policyCache) (checked, error) {
 	var c checked
 	if !ex.found {

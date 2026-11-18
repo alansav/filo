@@ -1,21 +1,27 @@
 # Filo
 
 Go CLI that keeps a SQLite register of files, tracks where they live, and drives a review-and-dispose workflow so
-files do not pile up forever. The full design is in `docs/design.md`. Read it before changing behaviour, and update it
-on the same branch when a design decision changes (in its own commit, first in the series; see "After writing code").
+files do not pile up forever. Three documents, kept apart:
+
+- `docs/design.md`: Filo as it is on `main`, and why. Nothing that is not built. Read it before changing behaviour.
+- `docs/roadmap.md`: everything not built yet: the priority, the items (with their numbers), ideas, deferred
+  improvements, and ideas rejected (with why). A design is worked out here while it is discussed.
+- `docs/history.md`: how Filo was built: the build log, replaced decisions, dated notes.
+
+When work on a roadmap item starts, the first commit of its branch moves its design from `roadmap.md` into
+`design.md`, in its own commit (see "After writing code"); a design decision that changes during the work is changed
+there on the same branch. When the item is complete, nothing of it is left in `roadmap.md`, and its build notes (dates,
+slices, review findings, test lists) go to `history.md`, never into `design.md`. So `roadmap.md` only lists work not
+done, and `design.md` only what exists.
 
 ## Current state
 
-Iterations 1 (scan, register, report), 2 (lifespan: retention through the retention CSV, `filo export retention` then
-`filo update`) and 3 (delete: `filo delete [DIR] [-y]` lists the files past their retention, asks, and deletes the
-chosen ones, each only after it is re-read and found unchanged) are done, as are register snapshots. The duplicates
-redesign (`docs/design.md`, Duplicates: `filo delete FILE.csv`, records, always, `filo duplicates`; schema 8) is done
-and merged. The terminal output is done (every command prints through `internal/view`, see "Terminal output"). Named
-retention policies (`docs/design.md`, Lifespan, Named retention policies; schema 9; `filo policies`) are done and
-merged. Replacing an existing `-o` file after asking (section 5 item 11) and every export scanning first, `--no-scan` to
-skip it (item 12), are done. "Folder" is now "directory" everywhere. Directory rules (item 4, `docs/design.md`,
-Lifespan, Directory rules; schema 10; `filo rules`) are done in four slices on branch `directory-rules`, one PR for
-them. Next in `docs/design.md` section 5: removing empty directories (item 13, to be designed).
+Everything `docs/design.md` describes is built and merged (schema 10): scan, register and report; retention through
+the retention CSV (`filo export retention`, `filo update`); `filo delete [DIR] [-y]`, which deletes a file only after
+it is re-read and found unchanged; register snapshots; duplicates (`filo delete FILE.csv`, `filo duplicates`); the
+terminal output (every command prints through `internal/view`); named retention policies (`filo policies`); directory
+rules (`filo rules`). What is next is in `docs/roadmap.md`, Priority (provisional, 2026-11-17: item 19, search by
+name, then the sync items).
 **`internal/dispose` is the only code allowed to delete the user's files**, and only from `filo delete`; everything
 else stays read-only on them, and nothing overwrites an existing file without asking (only an `-o` output file,
 see the hard rules). Stay inside the current piece of work.
@@ -73,24 +79,26 @@ Run `go vet` and the tests before saying a change is done.
 
 ## After writing code
 
-One section 5 item per branch (and so per PR), and each PR is a complete, working feature, never part of one: a
+One roadmap item per branch (and so per PR), and each PR is a complete, working feature, never part of one: a
 large item is built in slices on the one branch, and the PR is opened only when the last slice is done. The user
 reads every commit on its own, so a piece of work is committed as a short series of small commits on the current
 branch, never on `main`:
 
-1. Commit as you go, lower layers first, each commit with its own tests: the `docs/design.md` change alone first,
-   then the store and schema, then the internal package(s), then the `internal/view` output, then the `cmd/filo`
-   wiring and end-to-end tests. Before each commit, `gofmt`, `go vet`, `staticcheck` and `go test ./...` must all
-   pass, so every commit builds and is green on its own. Each commit is one atomic unit that does exactly what its
-   message says; its size comes second (do not split or merge commits to reach a number of lines). Each message
-   says what the commit adds and, if part of the work is still to come, what (for example "not called by any
+1. Commit as you go, lower layers first, each commit with its own tests: the design moved from `docs/roadmap.md` into
+   `docs/design.md` alone first, then the store and schema, then the internal package(s), then the `internal/view`
+   output, then the `cmd/filo` wiring and end-to-end tests. Before each commit, `gofmt`, `go vet`, `staticcheck` and `go
+   test ./...` must all pass, so every commit builds and is green on its own. Each commit is one atomic unit that does
+   exactly what its message says; its size comes second (do not split or merge commits to reach a number of lines). Each
+   message says what the commit adds and, if part of the work is still to come, what (for example "not called by any
    command yet").
 2. When the series is done (for an item built in slices, when each slice is done), run one code review over it (the
    `code-review` skill, level `medium`, on that series' commits: `main..HEAD`, or from the previous slice's last
    commit), fix what it finds, run the checks again, and commit the fixes as separate commits, one "Review fixes for
    <subject>" commit per commit they belong to, so each can be read next to what it fixes.
-3. Stop and report the commits, each with a one-line summary; after a slice, wait for the user before the next one.
-   One review round only: do not review the fixes again.
+3. When the item is complete, after the review fixes of its last slice, one last commit removes what is left of it from
+   `docs/roadmap.md` and adds its build notes (slices, review findings, tests) to `docs/history.md`; it is not
+   reviewed. Stop and report the commits, each with a one-line summary; after a slice, wait for the user before the
+   next one. One review round only: do not review the fixes again.
 
 Stop and ask instead of committing if a check fails and the fix is not obvious, if a finding needs a design decision
 or a change to `docs/design.md`, if a finding looks wrong or out of scope, or if anything else is unclear.
@@ -103,7 +111,8 @@ or a change to `docs/design.md`, if a finding looks wrong or out of scope, or if
   components; commands hand it data and never format output themselves)). Keep OS-specific code (hidden files,
   inodes, symlinks, path separators, the terminal's width) behind small functions.
 - `scripts/`: helper scripts (`dev.sh`, `testtree.sh`).
-- `.devcontainer/Containerfile`: the dev container. `docs/design.md`: the design.
+- `.devcontainer/Containerfile`: the dev container. `docs/design.md`: the design as built; `docs/roadmap.md`: what
+  is planned; `docs/history.md`: how it was built.
 
 ## Conventions
 
