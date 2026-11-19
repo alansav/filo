@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -576,6 +577,7 @@ func TestDirSwappedForSymlink(t *testing.T) {
 		{"to a directory outside the root", func(_, outside string) string { return outside }},
 		{"to a directory inside the root", func(base, _ string) string { return filepath.Join(base, "b") }},
 		{"to a directory inside the root, relative", func(_, _ string) string { return "b" }},
+		{"to nothing (a dangling symlink)", func(_, _ string) string { return "nowhere" }},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -625,6 +627,51 @@ func TestDirSwappedForSymlink(t *testing.T) {
 			}
 			if got := summary(res.Entries)["b/other.txt"]; got != "file" {
 				t.Errorf("b/other.txt = %q, want it walked as usual", got)
+			}
+		})
+	}
+}
+
+// TestScopeCannotBeOpened: a root or scope that cannot be opened (permission denied) is a failed listing, as any
+// directory below it would be, not a failed walk: nothing under it is covered.
+func TestScopeCannotBeOpened(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Getuid() == 0 {
+		t.Skip("needs Unix permissions, not as root")
+	}
+	for _, scope := range []string{"", "locked", "locked/inner"} {
+		t.Run("scope "+scope, func(t *testing.T) {
+			base := canonicalTemp(t)
+			root := filepath.Join(base, "root")
+			if err := os.MkdirAll(filepath.Join(root, "locked", "inner"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(root, "locked", "inner", "f"), []byte("x"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			locked := root
+			if scope != "" {
+				locked = filepath.Join(root, "locked")
+			}
+			if err := os.Chmod(locked, 0o000); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { os.Chmod(locked, 0o755) })
+			res, err := Walk(context.Background(), Options{Root: root, Scope: scope})
+			if scope == "locked/inner" {
+				// Its lstat already fails inside the locked directory, as before: the walk cannot start.
+				if err == nil {
+					t.Error("Walk of a scope that cannot be looked at succeeded")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Walk = %v, want a failed listing", err)
+			}
+			if !slices.Equal(res.FailedDirs, []string{scope}) {
+				t.Errorf("FailedDirs = %q, want [%q]", res.FailedDirs, scope)
+			}
+			if res.Covers("locked/inner/f") {
+				t.Error("a file under the failed listing is covered")
 			}
 		})
 	}

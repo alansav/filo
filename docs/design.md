@@ -182,9 +182,10 @@ the database, on the same disk. Copying the register's snapshots to a separate p
   directory through the one above it (`os.Root`, `openat` with `O_NOFOLLOW`), and lists, `lstat`s and reads symlinks
   through that open directory, so a directory swapped for a symlink while the walk runs cannot lead it outside the
   root. A directory is walked only if the one opened is the directory its `lstat` saw (same device and inode); one
-  swapped since is skipped with a problem ("changed while it was being scanned"), so nothing under it is covered and
-  none of its files is marked missing, and one that cannot be opened is a failed listing. A scope is opened the same
-  way, so a symlink on it is refused. Only a symlink's broken flag is looked up by path, following the link.
+  swapped since, or gone by the time it is opened, is skipped with a problem ("changed while it was being scanned"),
+  so nothing under it is covered and none of its files is marked missing; one that cannot be opened (permission
+  denied) is a failed listing, the root or scope directory included. A scope is opened the same way, so a symlink on
+  it is refused. Only a symlink's broken flag is looked up by path, following the link.
 - **One filesystem.** A walk never descends into a directory on a different device from its root; such directories are
   reported once in the summary, not as errors. A directory already visited in the same walk (same device and inode: a
   bind mount of an ancestor, or a loop) is skipped and reported.
@@ -220,9 +221,12 @@ the database, on the same disk. Copying the register's snapshots to a separate p
   way, and hashes can be checked by hand.
 - Every file is hashed in full. A file is opened without following symlinks (`O_NOFOLLOW`), without blocking on a
   FIFO (`O_NONBLOCK`) and, on Linux, without updating its access time (`O_NOATIME` when Filo owns the file). Only
-  regular files are hashed. A scan opens each file through its root (`os.Root`), and only if it is the regular file
-  `lstat` sees there (same device and inode), so a directory swapped for a symlink since the walk cannot lead it to a
-  file outside the root, and a symlink swapped in for the file is not followed (issue #14). If size or mtime changes while the file is read, or fewer bytes are read than its size,
+  regular files are hashed. A scan opens each file's directory through its root (`os.Root`; each worker keeps the
+  last one open, since files come in walk order) and the file in it by name, only if it is the regular file `lstat`
+  sees there (same device and inode), so a directory swapped for a symlink since the walk cannot lead it to a file
+  outside the root, and a symlink swapped in for the file is not followed (issue #14). A directory swapped for a
+  symlink to another directory inside the root is followed: the file read there is inside the root, recorded under
+  the path walked; the next scan corrects it. If size or mtime changes while the file is read, or fewer bytes are read than its size,
   the hash is discarded and the file is retried on the next scan. The stored size and mtime are the ones the file had
   while it was hashed.
 - **Unreadable files are flagged, not dropped.** A file that is listed but cannot be opened or read (permission denied,

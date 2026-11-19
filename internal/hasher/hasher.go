@@ -11,6 +11,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -93,8 +94,11 @@ func FileIn(ctx context.Context, dir *os.Root, name string) (Result, error) {
 }
 
 // OpenIn opens the regular file name (a path below dir, '/'-separated) for reading through dir, so it is inside dir
-// whatever is swapped meanwhile, and only if it is the regular file lstat sees there: dir would follow a symlink that
-// stays inside it, so one swapped in since the lstat is caught by comparing identities (ErrChanged).
+// whatever is swapped meanwhile, and only if it is the regular file lstat sees there: dir would follow a symlink in
+// the file's place if it stays inside dir, so one swapped in since the lstat is caught by comparing identities
+// (ErrChanged). A directory on a longer name that is a symlink staying inside dir is followed by both the lstat and
+// the open; callers that must not follow one open the file's own directory first (as HashAll does) and pass a bare
+// name.
 func OpenIn(dir *os.Root, name string) (*os.File, error) {
 	fi, err := dir.Lstat(name)
 	if err != nil {
@@ -203,12 +207,8 @@ func HashAll(ctx context.Context, jobs []Job, workers int, p *Progress) ([]Outco
 		go func() {
 			defer wg.Done()
 			buf := make([]byte, bufSize)
-			roots := map[string]*os.Root{} // each root opened once per worker
-			defer func() {
-				for _, r := range roots {
-					r.Close()
-				}
-			}()
+			roots := &dirCache{roots: map[string]*os.Root{}}
+			defer roots.close()
 			for i := range idx {
 				if err := ctx.Err(); err != nil {
 					out[i].Err = err
@@ -237,7 +237,7 @@ feed:
 }
 
 // hashJob opens and hashes one job's file, through its root if it has one (opened once into roots).
-func hashJob(ctx context.Context, j Job, roots map[string]*os.Root, buf []byte, p *Progress) (Result, error) {
+func hashJob(ctx context.Context, j Job, roots *dirCache, buf []byte, p *Progress) (Result, error) {
 	if p != nil {
 		defer p.Files.Add(1)
 	}
@@ -255,19 +255,63 @@ func hashJob(ctx context.Context, j Job, roots map[string]*os.Root, buf []byte, 
 	return file(ctx, f, j.Path, buf, p)
 }
 
-func openJob(j Job, roots map[string]*os.Root) (*os.File, error) {
+// dirCache holds one worker's open roots, and the directory of its last job: jobs come in walk order, so most
+// files are in the directory of the one before, and each is then opened with a single lookup by its bare name.
+type dirCache struct {
+	roots   map[string]*os.Root // root path -> open root
+	key     string              // root and directory of dir
+	dir     *os.Root
+	ownsDir bool // dir is not one of roots
+}
+
+func (c *dirCache) close() {
+	if c.ownsDir {
+		c.dir.Close()
+	}
+	for _, r := range c.roots {
+		r.Close()
+	}
+}
+
+// open returns the directory rel (relative to root, '/'-separated, "." for the root itself), open through root.
+func (c *dirCache) open(root, rel string) (*os.Root, error) {
+	if key := root + "\x00" + rel; c.dir != nil && key == c.key {
+		return c.dir, nil
+	}
+	r, ok := c.roots[root]
+	if !ok {
+		var err error
+		if r, err = os.OpenRoot(root); err != nil {
+			return nil, err
+		}
+		c.roots[root] = r
+	}
+	d, owns := r, false
+	if rel != "." {
+		var err error
+		if d, err = r.OpenRoot(rel); err != nil {
+			return nil, err
+		}
+		owns = true
+	}
+	if c.ownsDir {
+		c.dir.Close()
+	}
+	c.key, c.dir, c.ownsDir = root+"\x00"+rel, d, owns
+	return d, nil
+}
+
+func openJob(j Job, roots *dirCache) (*os.File, error) {
 	rel, err := filepath.Rel(j.Root, j.Path)
 	if err != nil || !filepath.IsLocal(rel) {
 		return nil, fmt.Errorf("%s is not inside %s", j.Path, j.Root)
 	}
-	root, ok := roots[j.Root]
-	if !ok {
-		if root, err = os.OpenRoot(j.Root); err != nil {
-			return nil, err
-		}
-		roots[j.Root] = root
+	rel = filepath.ToSlash(rel)
+	dir, err := roots.open(j.Root, path.Dir(rel))
+	if err != nil {
+		return nil, asPathError(err, filepath.Dir(j.Path))
 	}
-	f, err := OpenIn(root, filepath.ToSlash(rel))
+	f, err := OpenIn(dir, path.Base(rel))
 	return f, asPathError(err, j.Path)
 }
 

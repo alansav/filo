@@ -120,10 +120,9 @@ func Walk(ctx context.Context, opt Options) (*Result, error) {
 		return nil, fmt.Errorf("scope %s is on a different filesystem from root %s", start, opt.Root)
 	}
 	startDir, err := openScope(opt.Root, scope)
-	if err != nil {
+	if err != nil && !errors.Is(err, fs.ErrPermission) {
 		return nil, err
 	}
-	defer startDir.Close()
 
 	w := &walker{
 		opt:     opt,
@@ -138,6 +137,19 @@ func Walk(ctx context.Context, opt Options) (*Result, error) {
 			skipped: map[string]bool{},
 		},
 	}
+	if startDir == nil {
+		// The scope directory cannot be opened (permission denied, there or above it): a failed listing, as for any
+		// directory below, so nothing is marked missing.
+		w.res.FailedDirs = append(w.res.FailedDirs, scope)
+		w.res.failed[scope] = true
+		var pe *fs.PathError
+		if errors.As(err, &pe) {
+			err = &fs.PathError{Op: "open", Path: start, Err: pe.Err}
+		}
+		w.problem(scope, err)
+		return w.res, nil
+	}
+	defer startDir.Close()
 	if err := w.dir(ctx, scope, start, startDir); err != nil {
 		return nil, err
 	}
@@ -321,7 +333,9 @@ func (w *walker) subdir(ctx context.Context, rel, abs string, parent *os.Root, n
 	sub, err := openSub(parent, name, info)
 	err = absErr(err, abs)
 	if errors.Is(err, fs.ErrNotExist) {
-		return nil
+		// It was a directory a moment ago, at its lstat: renamed away, or swapped for a symlink that leads nowhere.
+		// It is not taken to be gone; a later scan sees which.
+		err = errReplaced
 	}
 	if errors.Is(err, errReplaced) {
 		// Not walked, so nothing under it is covered: none of its files can be marked missing.
