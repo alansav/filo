@@ -69,14 +69,19 @@ Principles. These are not negotiable:
 - One writer at a time: an `flock` on `<db>.lock`, taken before the database is opened. The kernel drops it if Filo
   dies, so there are no stale locks. Non-unix platforms have no lock, so they refuse to open the register. Each
   scan is applied in a single transaction. The lock file is opened with `O_NOFOLLOW`, so a symlink planted in its
-  place (with `--db` in a shared directory such as `/tmp`) is refused, not followed.
+  place is refused, not followed.
 - **The database path is checked** (security review, issue #15): the database's directory is resolved (symlinks
   followed) before the lock is taken, so one database reached through two symlinked directories has one lock. Then the
   database and its WAL, SHM and journal files, where they exist, must each be a regular file owned by the user, not a
   symlink: SQLite opens them by path and has no way to refuse a symlink, so one planted in their place would be
-  followed. What is left is a file swapped in the instant between that check and SQLite's open, which needs write
-  access to the directory and, in a sticky directory such as `/tmp`, cannot replace a file the user owns; and a hard
-  link to the database under another name, which takes another lock.
+  followed. What is left is a hard link to the database under another name, which takes another lock.
+- **The database's directory must be private** (issue #22): owned by the user, and not writable by the group or
+  others, or the database is refused before the lock is taken and before anything is created in it (with how to fix
+  it: `chmod go-w DIR`, or another directory). Whoever can write to the directory could swap the database or a
+  companion file for a symlink in the instant between the check above and SQLite's open, or create a `-wal` file
+  before SQLite does, and the driver cannot open them by descriptor. So `--db /tmp/f.db` is refused (`/tmp` is
+  shared); a throwaway database goes in a private temporary directory (`--db "$(mktemp -d)/f.db"`). The default
+  `filo` directory is created 0700. The directories above it are not checked.
 - **The schema is not trusted** (2026-11-13): `PRAGMA trusted_schema = OFF` on every connection, so triggers and
   views stored in an altered or swapped database cannot call functions with side effects.
 - When the database does not exist yet, Filo creates it with mode 0600, and SQLite gives its WAL and SHM files the
@@ -178,6 +183,11 @@ the database, on the same disk. Copying the register's snapshots to a separate p
 ### Scan
 - Skips hidden entries unless the root includes them, plus noise: `node_modules`, `__pycache__`, `.filo`, the root's
   ignore names, and `bin`/`obj` beside a `.csproj` or `.fsproj`.
+- **A `.filo-delete-*` directory is reported, never walked** (issue #21), whatever the root's settings: it is the
+  private directory `filo delete` moves a file into to delete it (see Disposal), left behind only if the run was
+  interrupted or the file could not be put back. It is an error in the scan summary and the report ("left behind by
+  filo delete …"); the file in it is not recorded (it is not the user's file at its path any more, and it would come
+  back as a new file), and nothing under it is covered. Filo never moves it back or deletes it: the person does.
 - **Never by a path that can be redirected** (security review, issue #14). A walk opens the root, then each
   directory through the one above it (`os.Root`, `openat` with `O_NOFOLLOW`), and lists, `lstat`s and reads symlinks
   through that open directory, so a directory swapped for a symlink while the walk runs cannot lead it outside the
@@ -806,8 +816,9 @@ Retention   …
 ### Disposal
 Package `internal/dispose`, the only code that deletes the user's files.
 
-- **Deletion is permanent.** No quarantine directory and no recycle bin: the bin can fill up with large files, and is
-  missing on network disks; backups are what make a deletion recoverable. So the list the person confirms, and the
+- **Deletion is permanent.** No quarantine and no recycle bin: the bin can fill up with large files, and is
+  missing on network disks; backups are what make a deletion recoverable. (The private directory a file passes
+  through as it is deleted, below, exists only for that instant.) So the list the person confirms, and the
   check below, are what keep it safe.
 - **`filo delete [DIR] [-y]`** lists the candidates (expired files) under DIR, or under every root, with their end date,
   size and path, and their total size; `filo delete DIR` narrows it. In a terminal the list is cut at 10 (see Terminal
@@ -886,9 +897,31 @@ Package `internal/dispose`, the only code that deletes the user's files.
     (with a new one made in its place) stops the deletion. A copy kept for a duplicate is checked the same way, and
     pruning reaches each empty directory the same way, with the same check before the `rmdir`. What is left is a move
     in the instant between the last look and the removal: the file then removed is still the one checked, in the
-    directory that was checked, wherever that has just been moved to; and the file's own entry swapped in that instant,
-    inside that same directory. Only someone who can write to those directories can do either, and they could remove
-    the file themselves.
+    directory that was checked, wherever that has just been moved to. Only someone who can write to those directories
+    can do that, and they could remove the file themselves.
+  - *Through a private directory* (issue #21; Linux). After the last look, another file could be put at the name (an
+    editor or Syncthing saving a new version by renaming it into place) and be deleted unseen. So the file is not
+    unlinked at its name: a new directory `.filo-delete-<random>` is made next to it (mode 0700), opened, and checked
+    to be that very directory (not a symlink, the one `lstat` sees at its name, empty), owned by the user and not
+    writable by anyone else (only write access lets anyone replace an entry in it); the file is moved into it
+    (`renameat`, through the open directories), looked at there (the same file on disk, kind, size and modification
+    time as at the last look), then unlinked, and the empty private directory removed. If what was moved is not the
+    file checked, it is not deleted: it is moved back to its name with `renameat2(RENAME_NOREPLACE)`, which never
+    replaces anything, and the file is skipped ("changed as it was being deleted, so it was put back"). Putting it
+    back restores exactly what the other program made; leaving it hidden would let Syncthing delete it everywhere. A
+    file checked that then cannot be unlinked there (an append-only file) is put back the same way, and the run says
+    it could not be deleted (exit 1). If its name is taken again by then, or `renameat2` is refused, it stays in the
+    private directory and the run says where (exit 1). Such a directory, or one left by a run that was killed in
+    between, is reported by every scan and never touched by Filo (see Scan). A directory at the private directory's
+    name that is not empty, or not the one opened, is never used and left alone: the file stays, and the run fails
+    with exit 1.
+    *Where no private directory can be had,* the file is unlinked at its name after the last look, as before #21, so
+    the instant between the two remains there: when the directory cannot be made for a full disk, a used-up quota or
+    a read-only filesystem (deleting must still free space on a full disk), and when the directory made comes out
+    owned by someone else or writable by others (filesystems without Unix modes: FAT, exFAT, NTFS, network shares;
+    the directory is then removed). The same happens if, in the instant after it is made, another user puts an empty
+    directory of their own in its place; they could delete the file directly anyway. Other platforms always unlink at
+    the name after the last look (untested).
   - *Removal* is `unlinkat` relative to the open directory: for a file or symlink without flags (it refuses a
     directory), and for a directory with `AT_REMOVEDIR` (it refuses a non-empty directory and a file). On Unix
     systems other than Linux, whose Go `syscall` package has no `unlinkat`, the removal goes through the open
@@ -1835,10 +1868,14 @@ Limits of Filo as built, accepted on purpose (security review of 2026-11-13). An
 runs as the user and could delete files directly, so an altered register matters through indirect routes (a restored
 snapshot, a database in a synced directory, a `--db` from elsewhere). Accepted: a register whose *root* path was altered
 to another directory is not detected (the paths below it are checked, and the confirmation list shows absolute paths);
-`filo delete -y` deletes without a person reading the list, which is the point of `-y`; a file swapped in the
-microseconds between the last check and the unlink is deleted (anyone able to do that can delete it directly); SQLite
+`filo delete -y` deletes without a person reading the list, which is the point of `-y`; on platforms other than Linux,
+and on Linux where no private directory can be had (see Disposal), a file swapped in the microseconds between the last
+check and the unlink is deleted (anyone able to do that can delete
+it directly); SQLite
 parses a database before Filo checks it is one of its own (kept small by staying on a current driver); ownership of the
-snapshot directory is not checked on non-Unix platforms. From the code review of the snapshots: Ctrl-C cannot interrupt
+snapshot directory, and of the database's directory, is not checked on non-Unix platforms; and the directories above
+the database's directory are not checked (one that others can write to lets them move the database's directory aside
+and put another in its place). From the code review of the snapshots: Ctrl-C cannot interrupt
 a snapshot being written (milliseconds for a register of a few MB), and every run that writes copies the whole register,
 timer scans that found nothing included (fine at a few MB). From the code review of 2026-11-13: a snapshot is renamed
 into place after a check that the name is free, and a program not taking Filo's lock could create that name in between

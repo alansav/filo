@@ -5,15 +5,16 @@
 #   testtree.sh mutate [DIR]   apply a known set of changes, including making a directory and a file unreadable
 #   testtree.sh unlock [DIR]   make them readable again (needed before rm -rf DIR as a normal user)
 #
-# Suggested run, always with a throwaway database:
-#   testtree.sh init /tmp/FiloTest
-#   filo --db /tmp/f.db roots add /tmp/FiloTest
-#   filo --db /tmp/f.db scan      # first scan: 15 new; bin/ and .hiddendir are skipped
-#   testtree.sh mutate /tmp/FiloTest
-#   filo --db /tmp/f.db scan      # expect the results printed by mutate
-#   filo --db /tmp/f.db report    # docs/private.txt is listed under "Unreadable files"
-#   testtree.sh unlock /tmp/FiloTest
-#   filo --db /tmp/f.db scan      # nothing new, changed or missing; the unreadable flag is cleared
+# Suggested run, always with a throwaway database in a private directory (filo refuses one in /tmp itself):
+#   T=$(mktemp -d)
+#   testtree.sh init $T/FiloTest
+#   filo --db $T/f.db roots add $T/FiloTest
+#   filo --db $T/f.db scan      # first scan: 15 new; bin/ and .hiddendir are skipped
+#   testtree.sh mutate $T/FiloTest
+#   filo --db $T/f.db scan      # expect the results printed by mutate
+#   filo --db $T/f.db report    # docs/private.txt is listed under "Unreadable files"
+#   testtree.sh unlock $T/FiloTest
+#   filo --db $T/f.db scan      # nothing new, changed or missing; the unreadable flag is cleared
 #
 # Permissions are not enforced for root, so run it as a normal user: as root, mutate reports errors 0.
 set -euo pipefail

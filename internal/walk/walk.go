@@ -70,6 +70,15 @@ type Result struct {
 	skipped map[string]bool // entries not walked or not recorded: rules, other filesystem, revisits, lstat errors
 }
 
+// DeletingPrefix starts the name of the private directory filo delete moves a file into to delete it (package
+// dispose). One left behind (filo was interrupted, or the file was not the one checked and could not be put back) is
+// never walked, whatever the options: it is reported, and the person decides what happens to what is in it.
+const DeletingPrefix = ".filo-delete-"
+
+// errDeleting is the problem reported for a directory named with DeletingPrefix.
+var errDeleting = errors.New("left behind by filo delete: it holds a file filo was deleting; look inside, then " +
+	"move the file back or delete it yourself")
+
 // Names skipped everywhere, whatever the options.
 var noise = map[string]bool{".filo": true, "node_modules": true, "__pycache__": true}
 
@@ -256,6 +265,11 @@ func (w *walker) dir(ctx context.Context, rel, abs string, d *os.Root) error {
 		name := de.Name()
 		childRel := joinRel(rel, name)
 		childAbs := filepath.Join(abs, name)
+		if de.IsDir() && strings.HasPrefix(name, DeletingPrefix) {
+			w.res.skipped[childRel] = true
+			w.problem(childRel, errDeleting)
+			continue
+		}
 		if w.skipName(name, de, hasProject) || w.exclude[childAbs] {
 			w.res.skipped[childRel] = true
 			continue

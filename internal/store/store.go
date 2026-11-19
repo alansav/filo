@@ -80,6 +80,9 @@ func Open(ctx context.Context, opt Options) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := checkDBDir(filepath.Dir(dbPath)); err != nil {
+		return nil, err
+	}
 
 	lock, err := acquireLock(lockPath(dbPath))
 	if err != nil {
@@ -163,6 +166,28 @@ func resolveDBPath(dbPath string) (string, error) {
 		return "", fmt.Errorf("database directory %s: %w", parent, err)
 	}
 	return filepath.Join(dir, filepath.Base(abs)), nil
+}
+
+// checkDBDir refuses a database directory (dir, symlinks resolved) that belongs to another user or that others may
+// write to. SQLite opens the database and its companion files by path, so whoever can write to the directory could
+// swap any of them for a symlink or another file in the instant between checkDBFiles and SQLite's open, or create
+// a -wal file before SQLite does (issue #22). Only a directory no one else can change closes that gap.
+func checkDBDir(dir string) error {
+	fi, err := os.Lstat(dir)
+	if err != nil {
+		return fmt.Errorf("database directory %s: %w", dir, err)
+	}
+	switch {
+	case !fi.IsDir():
+		return fmt.Errorf("database directory %s is not a directory", dir)
+	case !ownedByUser(fi):
+		return fmt.Errorf("database directory %s belongs to another user; keep the database in a directory of "+
+			"your own", dir)
+	case writableByOthers(fi):
+		return fmt.Errorf("database directory %s can be written to by other users; keep the database in a "+
+			"directory only you can write to (chmod go-w %s)", dir, dir)
+	}
+	return nil
 }
 
 // checkDBFiles refuses a database, or a WAL, SHM or journal file next to it, that is a symlink, not a regular file,

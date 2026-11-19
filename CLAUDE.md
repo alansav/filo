@@ -69,10 +69,11 @@ prefix.)
 - Throwaway test tree: `scripts/testtree.sh init DIR` then `scripts/testtree.sh mutate DIR`, with DIR under your own
   home directory (for example `~/FiloTest`) or a temp directory. `mutate` makes a directory and a file unreadable;
   `scripts/testtree.sh unlock DIR` undoes that, and is needed before `rm -rf DIR`
-- Example dev run, always with a throwaway database and tree:
-  `bin/filo --db /tmp/f.db roots add DIR` (adds and scans), `bin/filo --db /tmp/f.db scan`,
-  `bin/filo --db /tmp/f.db report`, then `bin/filo --db /tmp/f.db export retention DIR/notes -o /tmp/l.csv`, fill in
-  `retention`, `update /tmp/l.csv` and `delete` (export refuses an existing file, so remove `/tmp/l.csv` between runs).
+- Example dev run, always with a throwaway database and tree, in a private directory (Filo refuses a database in a
+  directory others can write to, such as `/tmp`): `T=$(mktemp -d)`, then `bin/filo --db $T/f.db roots add DIR` (adds
+  and scans), `bin/filo --db $T/f.db scan`, `bin/filo --db $T/f.db report`, then
+  `bin/filo --db $T/f.db export retention DIR/notes -o $T/l.csv`, fill in `retention`, `update $T/l.csv` and `delete`
+  (export refuses an existing file, so remove `$T/l.csv` between runs).
   `delete` really deletes: run it only with a throwaway `--db` whose roots are a throwaway tree
 
 Run `go vet` and the tests before saying a change is done.

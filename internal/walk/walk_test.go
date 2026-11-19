@@ -3,6 +3,7 @@ package walk
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -672,6 +673,46 @@ func TestScopeCannotBeOpened(t *testing.T) {
 			}
 			if res.Covers("locked/inner/f") {
 				t.Error("a file under the failed listing is covered")
+			}
+		})
+	}
+}
+
+// TestDeletingDirReported checks that a private directory left by filo delete is never walked, hidden files included
+// or not, and is reported; a file with the same name is an ordinary file.
+func TestDeletingDirReported(t *testing.T) {
+	base := canonicalTemp(t)
+	build(t, base, map[string]string{
+		"keep.txt":                    "k",
+		"a/.filo-delete-x1/notes.txt": "n",
+		".filo-delete-x2/":            "",
+		"b/.filo-delete-file":         "f", // a file, not the directory
+	})
+	for _, hidden := range []bool{false, true} {
+		t.Run(fmt.Sprintf("include hidden %v", hidden), func(t *testing.T) {
+			res, err := Walk(context.Background(), Options{Root: base, IncludeHidden: hidden})
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := summary(res.Entries)
+			if _, ok := got["a/.filo-delete-x1/notes.txt"]; ok {
+				t.Error("the file inside the private directory was recorded")
+			}
+			if _, ok := got["b/.filo-delete-file"]; ok != hidden {
+				t.Errorf("a file named .filo-delete-file recorded = %v, want %v", ok, hidden)
+			}
+			var problems []string
+			for _, p := range res.Problems {
+				if errors.Is(p.Err, errDeleting) {
+					problems = append(problems, p.Path)
+				}
+			}
+			sort.Strings(problems)
+			if want := []string{".filo-delete-x2", "a/.filo-delete-x1"}; !slices.Equal(problems, want) {
+				t.Errorf("reported %v, want %v", problems, want)
+			}
+			if res.Covers("a/.filo-delete-x1/notes.txt") {
+				t.Error("the private directory's contents are covered, so they could be marked missing")
 			}
 		})
 	}

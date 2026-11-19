@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -229,5 +230,57 @@ func TestKeepFutureSnapshots(t *testing.T) {
 	want := []time.Time{future, day(8, 2), day(8, 3), day(8, 4)}
 	if !slices.EqualFunc(got, want, time.Time.Equal) {
 		t.Errorf("kept %v, want %v: a future snapshot is kept but takes none of the newest three places", got, want)
+	}
+}
+
+func TestDBDirOthersCanWriteRefused(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("no flock on windows")
+	}
+	tests := []struct {
+		name string
+		mode fs.FileMode
+		want string // "" = opens
+	}{
+		{"private", 0o700, ""},
+		{"readable by others", 0o755, ""},
+		{"group can write", 0o770, "can be written to by other users"},
+		{"others can write", 0o707, "can be written to by other users"},
+		{"shared and sticky, like /tmp", 0o777 | fs.ModeSticky, "can be written to by other users"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := filepath.Join(t.TempDir(), "d")
+			if err := os.Mkdir(dir, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chmod(dir, tc.mode); err != nil {
+				t.Fatal(err)
+			}
+			db := filepath.Join(dir, "filo.db")
+			s, err := Open(context.Background(), Options{DBPath: db})
+			if tc.want == "" {
+				if err != nil {
+					t.Fatalf("Open = %v, want it opened", err)
+				}
+				mustClose(t, s)
+				return
+			}
+			if err == nil {
+				s.Close()
+				t.Fatal("Open succeeded, want the directory refused")
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("Open = %v, want %q", err, tc.want)
+			}
+			// Refused before anything is made in it: no lock file, no database.
+			entries, err := os.ReadDir(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(entries) != 0 {
+				t.Errorf("the refused directory holds %v, want nothing", entries)
+			}
+		})
 	}
 }

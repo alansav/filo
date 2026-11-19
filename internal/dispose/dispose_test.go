@@ -15,6 +15,7 @@ import (
 	"github.com/alansav/filo/internal/fsid"
 	"github.com/alansav/filo/internal/hasher"
 	"github.com/alansav/filo/internal/store"
+	"github.com/alansav/filo/internal/walk"
 )
 
 // fakeRec records what Delete reported.
@@ -192,6 +193,9 @@ func TestDelete(t *testing.T) {
 			_, statErr := os.Lstat(p)
 			if exists := statErr == nil; exists == tc.deleted && !strings.Contains(tc.reason, "no longer at") {
 				t.Errorf("file exists = %v after deleted = %v", exists, o.Deleted)
+			}
+			if left := privateDirs(t, filepath.Dir(p)); len(left) > 0 {
+				t.Errorf("private directories left behind: %v", left)
 			}
 			got := "none"
 			switch {
@@ -627,4 +631,20 @@ func TestDeleteDuplicateLinkAfterKeptLook(t *testing.T) {
 	if err != nil || o.Deleted || !strings.Contains(o.Reason, "has another hard link") {
 		t.Errorf("DeleteDuplicate = %+v, %v; want skipped for the hard link", o, err)
 	}
+}
+
+// privateDirs lists the .filo-delete-* entries in dir.
+func privateDirs(t *testing.T, dir string) []string {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), walk.DeletingPrefix) {
+			names = append(names, e.Name())
+		}
+	}
+	return names
 }

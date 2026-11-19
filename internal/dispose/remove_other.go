@@ -36,3 +36,10 @@ func removeDir(dir *os.Root, name, path string) error {
 }
 
 func isNotEmpty(err error) bool { return errors.Is(err, fs.ErrExist) }
+
+// removeVerified removes the file name in dir, as removeFile does. Only Linux moves it into a private directory first
+// to make sure it is still the file checked (last), since only there does Filo have the calls to move it back without
+// replacing anything (renameat2). Untested: no Windows build is tested.
+func removeVerified(dir *os.Root, name, path string, _ fs.FileInfo) error {
+	return removeFile(dir, name, path)
+}
