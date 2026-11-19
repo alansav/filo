@@ -163,40 +163,76 @@ func (s *Sheet) Each(fn func(Row)) error {
 }
 
 // checkLimits checks data's rows (only the first, the header, if headerOnly) against MaxFields and MaxRecord, and
-// that there are no more than MaxRows, without parsing them: it only follows the quotes, as csv does, so a separator
-// or line end inside quotes is part of a field. The error says on which line the row starts.
+// that there are no more than MaxRows, without parsing them: it follows the quotes as csv does, so a separator or
+// line end inside a quoted field is part of it. A quote csv refuses (a bare quote in an unquoted field, or text after
+// a closing quote) ends the check there: csv stops with its own error at that row, so nothing after it is parsed.
+// The error says on which line the row starts.
 func checkLimits(data []byte, sep byte, headerOnly bool) error {
+	const (
+		fieldStart = iota
+		unquoted
+		quoted
+		afterQuote // a quote inside a quoted field: it closes it, or escapes a second quote
+	)
+	state := fieldStart
 	rows, fields, start, line, startLine := 0, 1, 0, 1, 1
-	quoted := false
 	for i, b := range data {
-		switch {
-		case b == '"':
-			quoted = !quoted
-		case b == sep && !quoted:
-			fields++
-		}
 		if fields > MaxFields {
 			return fmt.Errorf("line %d has more than %d fields, more than filo reads", startLine, MaxFields)
 		}
 		if i-start >= MaxRecord {
 			return fmt.Errorf("the row on line %d is over %d MB, more than filo reads", startLine, MaxRecord>>20)
 		}
-		if b != '\n' {
+		if b == '\n' {
+			line++
+		}
+		switch state {
+		case quoted:
+			if b == '"' {
+				state = afterQuote
+			}
 			continue
+		case afterQuote:
+			switch b {
+			case '"':
+				state = quoted
+				continue
+			case sep, '\n', '\r':
+			default:
+				return nil // text after a closing quote: csv refuses the row
+			}
+		case unquoted:
+			if b == '"' {
+				return nil // a bare quote: csv refuses the row
+			}
+		case fieldStart:
+			if b == '"' {
+				state = quoted
+				continue
+			}
 		}
-		line++
-		if quoted {
-			continue
+		switch b {
+		case sep:
+			fields++
+			state = fieldStart
+		case '\n':
+			rows++
+			if headerOnly {
+				return nil
+			}
+			if rows == MaxRows && i+1 < len(data) {
+				return fmt.Errorf("the CSV has more than %d rows, more than filo reads; export a smaller directory",
+					MaxRows)
+			}
+			fields, start, startLine, state = 1, i+1, line, fieldStart
+		case '\r':
+			// part of a CRLF line end; csv drops it
+		default:
+			state = unquoted
 		}
-		rows++
-		if headerOnly {
-			return nil
-		}
-		if rows == MaxRows && i+1 < len(data) {
-			return fmt.Errorf("the CSV has more than %d rows, more than filo reads; export a smaller directory",
-				MaxRows)
-		}
-		fields, start, startLine = 1, i+1, line
+	}
+	if fields > MaxFields {
+		return fmt.Errorf("line %d has more than %d fields, more than filo reads", startLine, MaxFields)
 	}
 	return nil
 }

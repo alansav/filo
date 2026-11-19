@@ -101,6 +101,10 @@ func TestLimits(t *testing.T) {
 		{"row too long", head + "1," + strings.Repeat("x", MaxRecord) + "\n", "row on line 2 is over"},
 		{"too many rows", head + strings.Repeat("\n", MaxRows), "more than 1048576 rows"},
 		{"as many rows as allowed", head + strings.Repeat("\n", MaxRows-1), ""},
+		{"a bare quote leaves the error to csv", head + "1,12\" ruler\n" + "1," + strings.Repeat("x", MaxRecord) + "\n",
+			"line 2, column 5: bare"},
+		{"escaped quotes inside quotes", head + `1,"a ""b"", c"` + "\n" + strings.Repeat("\n", MaxRows-2), ""},
+		{"text after a closing quote leaves the error to csv", head + `1,"a"b` + "\n", "extraneous or missing \""},
 		{"line ends inside quotes", head + "1,\"" + strings.Repeat("\n", 1000) + "\"\n" + strings.Repeat("\n", MaxRows-2), ""},
 	}
 	for _, tc := range tests {
