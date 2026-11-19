@@ -22,7 +22,8 @@ The duplicates CSV was designed on 2026-11-13/14 and taken ahead of that order (
 FILE.csv`, no stored decisions to delete, four kinds of keep), built on 2026-11-15/16 in five slices (schema version
 8). The terminal output was designed on 2026-11-15 and built first (Terminal output). Named retention policies
 (schema version 9) and directory rules (schema version 10) were designed and built on 2026-11-16/17. A security review
-raised six issues on GitHub (#13-#18), fixed on 2026-11-19 on branch `security-review` (see "Security review fixes").
+raised six issues on GitHub (#13-#18), fixed on 2026-11-19 on branch `security-review` (see "Security review fixes"),
+and two more (#21, #22), fixed the same day on branch `security-fix` (see "Security fixes: #21 and #22").
 Last updated: 2026-11-19.
 
 ## Build log
@@ -412,6 +413,42 @@ Scan, Disposal), each part naming its issue.
 - Not changed: a directory that can be entered but not read (mode 711) now makes `filo delete` refuse the files under
   it and flag them unreadable, where it used to delete them; nothing is deleted, and a scan cannot list such a
   directory either. And the go 1.27.4 requirement in the old container, which is #17's purpose.
+
+## Security fixes: #21 and #22
+
+Two more issues from the security review, fixed on 2026-11-19 on branch `security-fix`, no schema change; the design
+is in `design.md` (Register, Scan, Disposal, Accepted risks).
+
+- **#22, the database directory** (`a78b4e6`): the issue asked for a descriptor-based open; modernc's SQLite opens the
+  database and its companion files by path, so the gap between the check and the open is closed by refusing a
+  database directory not owned by the user or writable by the group or others, before the lock is taken. `--db
+  /tmp/f.db` is refused, so the dev examples (CLAUDE.md, README, `testtree.sh`) moved to `T=$(mktemp -d)`. Test:
+  `TestDBDirOthersCanWriteRefused`.
+- **#21, the file swapped before the unlink** (`4aad35c`, `ce24731`): discussed first. Anyone who can swap the entry
+  can already delete it, so the case that matters is an editor or Syncthing renaming a new version into place in that
+  instant, which Filo would delete unseen. Rejected: renaming the file in place (`notes.txt.RANDOM`; the new name is
+  still in a directory others can write to) and `chmod 0700` on the file (a file's mode does not protect its name).
+  Built: the file is moved into a private directory next to it (`/tmp` would be another filesystem), checked there,
+  unlinked, and the empty directory removed (no recursive delete); on a mismatch it is moved back with
+  `renameat2(RENAME_NOREPLACE)`, a raw syscall with its number per architecture taken from `golang.org/x/sys` (not
+  added as a dependency). Putting it back rather than leaving it hidden: Syncthing would delete a hidden file
+  everywhere. A scan reports a leftover `.filo-delete-*` directory and never walks it. Tests:
+  `TestDeleteFileSwappedBeforeUnlink` (the issue's regression test, through `beforeUnlink`; checked to fail on the
+  old plain unlink), `TestPrivateDirSwapped`, `TestDeletingDirReported`.
+
+**Review** (`code-review`, level medium, over the three commits): five findings, four fixed in one commit.
+
+- Dispose (`3ceda4d`): a full disk or used-up quota made every delete fail (the private directory could not be made),
+  and so did filesystems without Unix modes (the 0700 directory came out 0755 or 0777); the directory now needs only
+  to be the user's and not writable by others, and where none can be had the file is unlinked at its name as before
+  #21. A private directory refused that way was left behind (now removed); a file checked that could not be unlinked
+  in the private directory stayed hidden (now put back). The Linux-only tests did not build on other platforms (now
+  in `dispose_linux_test.go`). Tests: `TestNoPrivateDir`, `TestUnlinkInPrivateFails`.
+- Not changed: a group-writable database directory is refused even when its group is the user's own private group
+  (Debian and Ubuntu with umask 002); telling that apart needs the group's members, which Go's standard library does
+  not give, and the error says `chmod go-w`.
+- Untested: everything on platforms other than Linux on amd64, and a real FAT or network filesystem (simulated by
+  changing the directory's mode).
 
 ## Notes on decisions
 
