@@ -10,6 +10,9 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -71,18 +74,53 @@ var afterRead func(path string)
 
 // File hashes the regular file at path.
 func File(ctx context.Context, path string) (Result, error) {
-	return file(ctx, path, make([]byte, bufSize), nil)
-}
-
-func file(ctx context.Context, path string, buf []byte, p *Progress) (Result, error) {
-	if p != nil {
-		defer p.Files.Add(1)
-	}
 	f, err := openNoFollow(path)
 	if err != nil {
 		return Result{}, err
 	}
 	defer f.Close()
+	return file(ctx, f, path, make([]byte, bufSize), nil)
+}
+
+// FileIn hashes the regular file name in dir, opened through dir (see OpenIn).
+func FileIn(ctx context.Context, dir *os.Root, name string) (Result, error) {
+	f, err := OpenIn(dir, name)
+	if err != nil {
+		return Result{}, err
+	}
+	defer f.Close()
+	return file(ctx, f, name, make([]byte, bufSize), nil)
+}
+
+// OpenIn opens the regular file name (a path below dir, '/'-separated) for reading through dir, so it is inside dir
+// whatever is swapped meanwhile, and only if it is the regular file lstat sees there: dir would follow a symlink that
+// stays inside it, so one swapped in since the lstat is caught by comparing identities (ErrChanged).
+func OpenIn(dir *os.Root, name string) (*os.File, error) {
+	fi, err := dir.Lstat(name)
+	if err != nil {
+		return nil, err
+	}
+	if !fi.Mode().IsRegular() {
+		return nil, fmt.Errorf("%s: %w", name, ErrNotRegular)
+	}
+	f, err := openInRoot(dir, name)
+	if err != nil {
+		return nil, err
+	}
+	got, err := f.Stat()
+	if err != nil {
+		f.Close()
+		return nil, err
+	}
+	if !os.SameFile(fi, got) {
+		f.Close()
+		return nil, fmt.Errorf("%s: %w", name, ErrChanged)
+	}
+	return f, nil
+}
+
+// file hashes f, open on the file at path (named in errors).
+func file(ctx context.Context, f *os.File, path string, buf []byte, p *Progress) (Result, error) {
 
 	before, err := f.Stat()
 	if err != nil {
@@ -139,6 +177,9 @@ func inode(fi fs.FileInfo) uint64 {
 // Job is one file to hash.
 type Job struct {
 	Path string // absolute
+	// Root, if set, is the directory Path is below; the file is then opened through it (OpenIn), so a directory
+	// swapped for a symlink since the walk cannot lead outside it.
+	Root string
 }
 
 // Outcome is one job's result or error.
@@ -162,12 +203,18 @@ func HashAll(ctx context.Context, jobs []Job, workers int, p *Progress) ([]Outco
 		go func() {
 			defer wg.Done()
 			buf := make([]byte, bufSize)
+			roots := map[string]*os.Root{} // each root opened once per worker
+			defer func() {
+				for _, r := range roots {
+					r.Close()
+				}
+			}()
 			for i := range idx {
 				if err := ctx.Err(); err != nil {
 					out[i].Err = err
 					continue
 				}
-				r, err := file(ctx, jobs[i].Path, buf, p)
+				r, err := hashJob(ctx, jobs[i], roots, buf, p)
 				out[i] = Outcome{Result: r, Err: err}
 			}
 		}()
@@ -187,4 +234,49 @@ feed:
 	close(idx)
 	wg.Wait()
 	return out, ctx.Err()
+}
+
+// hashJob opens and hashes one job's file, through its root if it has one (opened once into roots).
+func hashJob(ctx context.Context, j Job, roots map[string]*os.Root, buf []byte, p *Progress) (Result, error) {
+	if p != nil {
+		defer p.Files.Add(1)
+	}
+	var f *os.File
+	var err error
+	if j.Root == "" {
+		f, err = openNoFollow(j.Path)
+	} else {
+		f, err = openJob(j, roots)
+	}
+	if err != nil {
+		return Result{}, err
+	}
+	defer f.Close()
+	return file(ctx, f, j.Path, buf, p)
+}
+
+func openJob(j Job, roots map[string]*os.Root) (*os.File, error) {
+	rel, err := filepath.Rel(j.Root, j.Path)
+	if err != nil || !filepath.IsLocal(rel) {
+		return nil, fmt.Errorf("%s is not inside %s", j.Path, j.Root)
+	}
+	root, ok := roots[j.Root]
+	if !ok {
+		if root, err = os.OpenRoot(j.Root); err != nil {
+			return nil, err
+		}
+		roots[j.Root] = root
+	}
+	f, err := OpenIn(root, filepath.ToSlash(rel))
+	return f, asPathError(err, j.Path)
+}
+
+// asPathError names the absolute path in an error from a Root, which names the path relative to it ("openat
+// docs/a.txt"), so messages read as they do for a file opened by path ("open /home/a/docs/a.txt").
+func asPathError(err error, path string) error {
+	var pe *fs.PathError
+	if errors.As(err, &pe) {
+		return &fs.PathError{Op: strings.TrimSuffix(pe.Op, "at"), Path: path, Err: pe.Err}
+	}
+	return err
 }

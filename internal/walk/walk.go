@@ -11,6 +11,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync/atomic"
 
@@ -118,6 +119,11 @@ func Walk(ctx context.Context, opt Options) (*Result, error) {
 	if startID.Dev != rootID.Dev {
 		return nil, fmt.Errorf("scope %s is on a different filesystem from root %s", start, opt.Root)
 	}
+	startDir, err := openScope(opt.Root, scope)
+	if err != nil {
+		return nil, err
+	}
+	defer startDir.Close()
 
 	w := &walker{
 		opt:     opt,
@@ -132,10 +138,64 @@ func Walk(ctx context.Context, opt Options) (*Result, error) {
 			skipped: map[string]bool{},
 		},
 	}
-	if err := w.dir(ctx, scope, start); err != nil {
+	if err := w.dir(ctx, scope, start, startDir); err != nil {
 		return nil, err
 	}
 	return w.res, nil
+}
+
+// beforeOpen, if set by a test, runs after a directory's lstat and before it is opened.
+var beforeOpen func(abs string)
+
+// errReplaced means a directory was swapped (for a symlink, or another directory) between its listing and its
+// opening.
+var errReplaced = errors.New("changed while it was being scanned (replaced, perhaps by a symlink); skipped")
+
+// openScope opens the root, then each directory of scope through the one above it, refusing a symlink on the way:
+// everything below is then reached through these handles, never by a path that a swapped directory could redirect.
+func openScope(root, scope string) (*os.Root, error) {
+	dir, err := os.OpenRoot(root)
+	if err != nil {
+		return nil, fmt.Errorf("root %s: %w", root, err)
+	}
+	if scope == "" {
+		return dir, nil
+	}
+	for _, name := range strings.Split(scope, "/") {
+		fi, err := dir.Lstat(name)
+		if err == nil && !fi.IsDir() {
+			err = errors.New("not a directory")
+		}
+		var sub *os.Root
+		if err == nil {
+			sub, err = openSub(dir, name, fi)
+		}
+		dir.Close()
+		if err != nil {
+			return nil, fmt.Errorf("scope %s: %s: %w", filepath.Join(root, filepath.FromSlash(scope)), name, err)
+		}
+		dir = sub
+	}
+	return dir, nil
+}
+
+// openSub opens the directory name in parent and checks it is the one lstat saw as fi: parent's OpenRoot would
+// follow a symlink that stays inside parent, so a directory swapped for one since the lstat is caught here.
+func openSub(parent *os.Root, name string, fi fs.FileInfo) (*os.Root, error) {
+	sub, err := parent.OpenRoot(name)
+	if err != nil {
+		return nil, err
+	}
+	got, err := sub.Stat(".")
+	if err != nil {
+		sub.Close()
+		return nil, err
+	}
+	if !os.SameFile(fi, got) {
+		sub.Close()
+		return nil, errReplaced
+	}
+	return sub, nil
 }
 
 type walker struct {
@@ -151,11 +211,14 @@ func (w *walker) problem(rel string, err error) {
 	w.res.Problems = append(w.res.Problems, Problem{Path: rel, Err: err})
 }
 
-func (w *walker) dir(ctx context.Context, rel, abs string) error {
+// dir lists the directory at rel (abs is its path, for exclusions and messages) through d, its open handle, and
+// walks what it holds. Entries are looked at and directories opened through d, so a directory above swapped for a
+// symlink while the walk runs can never lead it outside the root.
+func (w *walker) dir(ctx context.Context, rel, abs string, d *os.Root) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	entries, err := os.ReadDir(abs)
+	entries, err := readDir(d)
 	if err != nil {
 		// Even a partial listing counts as failed: nothing under this directory may be marked missing. The entries
 		// that were returned are still recorded.
@@ -186,7 +249,8 @@ func (w *walker) dir(ctx context.Context, rel, abs string) error {
 			continue
 		}
 
-		info, err := de.Info() // lstat
+		info, err := d.Lstat(name)
+		err = absErr(err, childAbs)
 		if errors.Is(err, fs.ErrNotExist) {
 			continue // vanished since the listing: simply not seen
 		}
@@ -199,11 +263,11 @@ func (w *walker) dir(ctx context.Context, rel, abs string) error {
 		mode := info.Mode()
 		switch {
 		case mode.IsDir():
-			if err := w.subdir(ctx, childRel, childAbs); err != nil {
+			if err := w.subdir(ctx, childRel, childAbs, d, name, info); err != nil {
 				return err
 			}
 		case mode&fs.ModeSymlink != 0:
-			w.symlink(childRel, childAbs, info)
+			w.symlink(childRel, childAbs, d, name, info)
 		case mode.IsRegular():
 			w.res.Entries = append(w.res.Entries, Entry{
 				Path: childRel, Kind: KindFile, Size: info.Size(), MtimeNS: info.ModTime().UnixNano(),
@@ -217,7 +281,20 @@ func (w *walker) dir(ctx context.Context, rel, abs string) error {
 	return nil
 }
 
-func (w *walker) subdir(ctx context.Context, rel, abs string) error {
+// readDir lists d's entries. A partial listing is returned with its error.
+func readDir(d *os.Root) ([]fs.DirEntry, error) {
+	f, err := d.Open(".")
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	entries, err := f.ReadDir(-1)
+	slices.SortFunc(entries, func(a, b fs.DirEntry) int { return strings.Compare(a.Name(), b.Name()) })
+	return entries, err
+}
+
+// subdir walks the directory name in parent (lstat saw it as info), opened through parent.
+func (w *walker) subdir(ctx context.Context, rel, abs string, parent *os.Root, name string, info fs.FileInfo) error {
 	id, err := statID(abs)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil
@@ -238,11 +315,36 @@ func (w *walker) subdir(ctx context.Context, rel, abs string) error {
 		return nil
 	}
 	w.visited[id] = true
-	return w.dir(ctx, rel, abs)
+	if beforeOpen != nil {
+		beforeOpen(abs)
+	}
+	sub, err := openSub(parent, name, info)
+	err = absErr(err, abs)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if errors.Is(err, errReplaced) {
+		// Not walked, so nothing under it is covered: none of its files can be marked missing.
+		w.res.skipped[rel] = true
+		w.problem(rel, err)
+		return nil
+	}
+	if err != nil {
+		// It cannot be opened, so it cannot be listed (permission denied): a failed listing, as in dir.
+		w.res.FailedDirs = append(w.res.FailedDirs, rel)
+		w.res.failed[rel] = true
+		w.problem(rel, err)
+		return nil
+	}
+	defer sub.Close()
+	return w.dir(ctx, rel, abs, sub)
 }
 
-func (w *walker) symlink(rel, abs string, info fs.FileInfo) {
-	target, err := os.Readlink(abs)
+// symlink records the symlink name in d. Whether its target exists is looked up by path, which follows the link
+// wherever it points: that only decides the broken flag.
+func (w *walker) symlink(rel, abs string, d *os.Root, name string, info fs.FileInfo) {
+	target, err := d.Readlink(name)
+	err = absErr(err, abs)
 	if errors.Is(err, fs.ErrNotExist) {
 		return
 	}
@@ -340,6 +442,16 @@ func canonicalExcludes(paths []string) map[string]bool {
 		}
 	}
 	return out
+}
+
+// absErr names the absolute path in an error from a Root, which names the path relative to it ("lstatat a.txt"), so
+// messages read as they do for a path ("lstat /home/a/a.txt").
+func absErr(err error, abs string) error {
+	var pe *fs.PathError
+	if errors.As(err, &pe) {
+		return &fs.PathError{Op: strings.TrimSuffix(pe.Op, "at"), Path: abs, Err: pe.Err}
+	}
+	return err
 }
 
 func inode(info fs.FileInfo) uint64 {
