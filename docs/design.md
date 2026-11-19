@@ -183,6 +183,11 @@ the database, on the same disk. Copying the register's snapshots to a separate p
 ### Scan
 - Skips hidden entries unless the root includes them, plus noise: `node_modules`, `__pycache__`, `.filo`, the root's
   ignore names, and `bin`/`obj` beside a `.csproj` or `.fsproj`.
+- **A `.filo-delete-*` directory is reported, never walked** (issue #21), whatever the root's settings: it is the
+  private directory `filo delete` moves a file into to delete it (see Disposal), left behind only if the run was
+  interrupted or the file could not be put back. It is an error in the scan summary and the report ("left behind by
+  filo delete …"); the file in it is not recorded (it is not the user's file at its path any more, and it would come
+  back as a new file), and nothing under it is covered. Filo never moves it back or deletes it: the person does.
 - **Never by a path that can be redirected** (security review, issue #14). A walk opens the root, then each
   directory through the one above it (`os.Root`, `openat` with `O_NOFOLLOW`), and lists, `lstat`s and reads symlinks
   through that open directory, so a directory swapped for a symlink while the walk runs cannot lead it outside the
