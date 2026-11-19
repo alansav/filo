@@ -70,6 +70,13 @@ Principles. These are not negotiable:
   dies, so there are no stale locks. Non-unix platforms have no lock, so they refuse to open the register. Each
   scan is applied in a single transaction. The lock file is opened with `O_NOFOLLOW`, so a symlink planted in its
   place (with `--db` in a shared directory such as `/tmp`) is refused, not followed.
+- **The database path is checked** (security review, issue #15): the database's directory is resolved (symlinks
+  followed) before the lock is taken, so one database reached through two symlinked directories has one lock. Then the
+  database and its WAL, SHM and journal files, where they exist, must each be a regular file owned by the user, not a
+  symlink: SQLite opens them by path and has no way to refuse a symlink, so one planted in their place would be
+  followed. What is left is a file swapped in the instant between that check and SQLite's open, which needs write
+  access to the directory and, in a sticky directory such as `/tmp`, cannot replace a file the user owns; and a hard
+  link to the database under another name, which takes another lock.
 - **The schema is not trusted** (2026-11-13): `PRAGMA trusted_schema = OFF` on every connection, so triggers and
   views stored in an altered or swapped database cannot call functions with side effects.
 - When the database does not exist yet, Filo creates it with mode 0600, and SQLite gives its WAL and SHM files the
