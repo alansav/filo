@@ -15,6 +15,7 @@ import (
 	"github.com/alansav/filo/internal/fsid"
 	"github.com/alansav/filo/internal/hasher"
 	"github.com/alansav/filo/internal/store"
+	"github.com/alansav/filo/internal/walk"
 )
 
 // fakeRec records what Delete reported.
@@ -192,6 +193,9 @@ func TestDelete(t *testing.T) {
 			_, statErr := os.Lstat(p)
 			if exists := statErr == nil; exists == tc.deleted && !strings.Contains(tc.reason, "no longer at") {
 				t.Errorf("file exists = %v after deleted = %v", exists, o.Deleted)
+			}
+			if left := privateDirs(t, filepath.Dir(p)); len(left) > 0 {
+				t.Errorf("private directories left behind: %v", left)
 			}
 			got := "none"
 			switch {
@@ -626,5 +630,156 @@ func TestDeleteDuplicateLinkAfterKeptLook(t *testing.T) {
 	o, err := New(&fakeRec{}, time.Now).DeleteDuplicate(ctx, candidate(t, root, "dup"), kept)
 	if err != nil || o.Deleted || !strings.Contains(o.Reason, "has another hard link") {
 		t.Errorf("DeleteDuplicate = %+v, %v; want skipped for the hard link", o, err)
+	}
+}
+
+// privateDirs lists the .filo-delete-* entries in dir.
+func privateDirs(t *testing.T, dir string) []string {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), walk.DeletingPrefix) {
+			names = append(names, e.Name())
+		}
+	}
+	return names
+}
+
+// swapIn puts a new file with content at p, by rename, as an editor or a sync tool saves: another inode.
+func swapIn(t *testing.T, p, content string) {
+	t.Helper()
+	write(t, p+".tmp", content)
+	if err := os.Rename(p+".tmp", p); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestDeleteFileSwappedBeforeUnlink: a file put at the name in the instant after the last look, before the removal,
+// is never the one deleted (issue #21). The entry is moved into a private directory and looked at there; what was
+// moved is not the file checked, so it is put back at its name, and nothing is deleted. Moving a file into place, as an
+// editor or Syncthing saves, must never lose that new version.
+func TestDeleteFileSwappedBeforeUnlink(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("the private directory is Linux only")
+	}
+	tests := []struct {
+		name      string
+		before    func(t *testing.T, p string) // right before the removal, after every check
+		inPrivate func(t *testing.T, p string) // once the file is in the private directory
+		failed    bool
+		reason    string
+		atPath    string // content at the path afterwards
+		left      string // content left in the private directory; "" = it is gone
+	}{
+		{name: "swapped before the move: put back",
+			before: func(t *testing.T, p string) { swapIn(t, p, "new version") },
+			reason: "changed as it was being deleted, so it was put back", atPath: "new version"},
+		{name: "swapped, then the name taken again: left in the private directory",
+			before:    func(t *testing.T, p string) { swapIn(t, p, "new version") },
+			inPrivate: func(t *testing.T, p string) { write(t, p, "newer still") },
+			failed:    true, reason: "could not be put back: it is now ", atPath: "newer still", left: "new version"},
+		{name: "written to in the private directory: put back",
+			inPrivate: func(t *testing.T, p string) {
+				priv := privateDirs(t, filepath.Dir(p))
+				if len(priv) != 1 {
+					t.Fatalf("private directories = %v, want one", priv)
+				}
+				f, err := os.OpenFile(filepath.Join(filepath.Dir(p), priv[0], "f"), os.O_APPEND|os.O_WRONLY, 0)
+				if err != nil {
+					t.Fatal(err)
+				}
+				f.WriteString(" and more")
+				f.Close()
+			},
+			reason: "changed as it was being deleted, so it was put back", atPath: "content and more"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			root := canonicalTemp(t)
+			p := filepath.Join(root, "dir", "f")
+			write(t, p, "content")
+			c := candidate(t, root, "dir/f")
+			if tc.before != nil {
+				beforeUnlink = func(string) { tc.before(t, p) }
+				t.Cleanup(func() { beforeUnlink = nil })
+			}
+			if tc.inPrivate != nil {
+				inPrivate = func(string) { tc.inPrivate(t, p) }
+				t.Cleanup(func() { inPrivate = nil })
+			}
+			rec := &fakeRec{}
+			o, err := New(rec, time.Now).Delete(context.Background(), c)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if o.Deleted || o.Failed != tc.failed || !strings.Contains(o.Reason, tc.reason) {
+				t.Errorf("outcome = %+v, want not deleted, failed %v, reason containing %q", o, tc.failed, tc.reason)
+			}
+			if len(rec.deleted) > 0 {
+				t.Error("recorded as deleted")
+			}
+			if got, err := os.ReadFile(p); err != nil || string(got) != tc.atPath {
+				t.Errorf("at its path: %q, %v; want %q", got, err, tc.atPath)
+			}
+			priv := privateDirs(t, filepath.Dir(p))
+			if tc.left == "" {
+				if len(priv) > 0 {
+					t.Errorf("private directories left behind: %v", priv)
+				}
+				return
+			}
+			if len(priv) != 1 {
+				t.Fatalf("private directories = %v, want the one left", priv)
+			}
+			leftPath := filepath.Join(filepath.Dir(p), priv[0], "f")
+			if got, err := os.ReadFile(leftPath); err != nil || string(got) != tc.left {
+				t.Errorf("in the private directory: %q, %v; want %q", got, err, tc.left)
+			}
+			if !strings.Contains(o.Reason, leftPath) {
+				t.Errorf("reason %q does not say where it was left (%s)", o.Reason, leftPath)
+			}
+			if fi, err := os.Stat(filepath.Dir(leftPath)); err != nil || fi.Mode().Perm() != 0o700 {
+				t.Errorf("private directory mode = %v, %v; want 0700", fi, err)
+			}
+		})
+	}
+}
+
+// TestPrivateDirSwapped: a directory put in place of the private directory between its creation and its use is never
+// used: the file stays where it is, not deleted.
+func TestPrivateDirSwapped(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("the private directory is Linux only")
+	}
+	root := canonicalTemp(t)
+	p := filepath.Join(root, "dir", "f")
+	write(t, p, "content")
+	c := candidate(t, root, "dir/f")
+	afterPrivateMade = func(path string) {
+		// Someone else's directory, open to all, in place of the one made.
+		if err := os.Rename(path, path+".aside"); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Mkdir(path, 0o777); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(path, 0o777); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Cleanup(func() { afterPrivateMade = nil })
+	o, err := New(&fakeRec{}, time.Now).Delete(context.Background(), c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if o.Deleted || !o.Failed || !strings.Contains(o.Reason, "changed before it was used") {
+		t.Errorf("outcome = %+v, want not deleted, failed, the private directory refused", o)
+	}
+	if got, err := os.ReadFile(p); err != nil || string(got) != "content" {
+		t.Errorf("at its path: %q, %v; want the file untouched", got, err)
 	}
 }

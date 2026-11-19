@@ -50,6 +50,21 @@ func New(rec Recorder, now func() time.Time) *Disposer {
 // removal, after every check.
 var beforeRemove, beforeUnlink func(path string)
 
+// inPrivate, if set by a test, runs on Linux after the file is moved into the private directory, before it is looked
+// at there (removeVerified).
+var inPrivate func(path string)
+
+// changedError means the file was not the one checked when it was moved to be deleted, so it was not deleted. left is
+// where it was left if it could not be put back ("" if it was).
+type changedError struct{ left string }
+
+func (e *changedError) Error() string {
+	if e.left == "" {
+		return "changed as it was being deleted; put back"
+	}
+	return "changed as it was being deleted; left in " + e.left
+}
+
 // afterKeptLook, if set by a test, runs in DeleteDuplicate's last look, after the kept copy is looked at again.
 var afterKeptLook func(path string)
 
@@ -172,7 +187,14 @@ func (d *Disposer) delete(ctx context.Context, c store.Candidate,
 	if beforeUnlink != nil {
 		beforeUnlink(p)
 	}
-	if err := removeFile(dir.Root, name, p); err != nil {
+	var changed *changedError
+	switch err := removeVerified(dir.Root, name, p, last); {
+	case errors.As(err, &changed) && changed.left == "":
+		return skip("changed as it was being deleted, so it was put back, not deleted; run filo scan"), nil
+	case errors.As(err, &changed):
+		return Outcome{Reason: "changed as it was being deleted, and could not be put back: it is now " + changed.left +
+			"; look at it, then move it back or delete it yourself", Failed: true}, nil
+	case err != nil:
 		return Outcome{Reason: "could not be deleted: " + store.ErrDetail(err), Failed: true}, nil
 	}
 	if err := d.rec.Deleted(ctx, c, d.now()); err != nil {
