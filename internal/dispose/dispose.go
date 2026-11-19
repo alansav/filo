@@ -50,6 +50,9 @@ func New(rec Recorder, now func() time.Time) *Disposer {
 // removal, after every check.
 var beforeRemove, beforeUnlink func(path string)
 
+// afterKeptLook, if set by a test, runs in DeleteDuplicate's last look, after the kept copy is looked at again.
+var afterKeptLook func(path string)
+
 // Delete checks c and deletes it if it passes. A file that fails the check is left alone; one whose content changed
 // has its new content recorded, and one that cannot be read is flagged unreadable. The error is for a cancelled run or
 // a register that could not be written; the run should stop.
@@ -57,10 +60,10 @@ func (d *Disposer) Delete(ctx context.Context, c store.Candidate) (Outcome, erro
 	return d.delete(ctx, c, nil)
 }
 
-// delete is Delete, with guard (if not nil) asked about the file (its absolute path, and what the last lstat saw) at
-// the last look before the removal; false stops it.
+// delete is Delete, with guard (if not nil) asked about the file (its absolute path, and its name in the open
+// directory that holds it) at the last look before the removal; false stops it.
 func (d *Disposer) delete(ctx context.Context, c store.Candidate,
-	guard func(p string, last fs.FileInfo) (string, bool)) (Outcome, error) {
+	guard func(p string, dir *os.Root, name string) (string, bool)) (Outcome, error) {
 	if err := ctx.Err(); err != nil {
 		return Outcome{}, err
 	}
@@ -70,7 +73,7 @@ func (d *Disposer) delete(ctx context.Context, c store.Candidate,
 	}
 	// Everything from here on goes through the directory that holds the file, opened from the root down: a directory
 	// swapped for a symlink meanwhile can then never redirect a look, a read or the removal outside the root.
-	dir, name, why, err := openDir(c.RootPath, filepath.FromSlash(c.Path))
+	dir, why, err := openDir(c.RootPath, filepath.FromSlash(c.Path))
 	switch {
 	case why != "":
 		return skip(why), nil
@@ -80,6 +83,7 @@ func (d *Disposer) delete(ctx context.Context, c store.Candidate,
 		return d.unreadable(ctx, c, err)
 	}
 	defer dir.Close()
+	name := dir.name
 	fi, err := dir.Lstat(name)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
@@ -113,7 +117,7 @@ func (d *Disposer) delete(ctx context.Context, c store.Candidate,
 			}
 			return skip("changed since its retention was set; run filo scan, then give it a new retention"), nil
 		}
-		res, err := hasher.FileIn(ctx, dir, name)
+		res, err := hasher.FileIn(ctx, dir.Root, name)
 		switch {
 		case ctx.Err() != nil:
 			return Outcome{}, ctx.Err()
@@ -145,9 +149,9 @@ func (d *Disposer) delete(ctx context.Context, c store.Candidate,
 	if beforeRemove != nil {
 		beforeRemove(p)
 	}
-	// The directories are checked again: hashing a large file takes long enough for one to be swapped for a symlink.
-	// The file is no longer at its recorded path then, though the removal, through dir, could not go astray.
-	if why, ok := realDirs(c.RootPath, filepath.FromSlash(c.Path)); !ok || why != "" {
+	// The directories are checked again: hashing a large file takes long enough for one to be swapped for a symlink,
+	// or moved out of the root with the open directory in it. Either way the file is no longer at its recorded path.
+	if !dir.stillAt() {
 		return skip("changed while it was being checked; run filo scan"), nil
 	}
 	last, err := dir.Lstat(name)
@@ -160,7 +164,7 @@ func (d *Disposer) delete(ctx context.Context, c store.Candidate,
 		return skip("changed while it was being checked; run filo scan"), nil
 	}
 	if guard != nil {
-		if why, ok := guard(p, last); !ok {
+		if why, ok := guard(p, dir.Root, name); !ok {
 			return skip(why), nil
 		}
 	}
@@ -168,7 +172,7 @@ func (d *Disposer) delete(ctx context.Context, c store.Candidate,
 	if beforeUnlink != nil {
 		beforeUnlink(p)
 	}
-	if err := removeFile(dir, name, p); err != nil {
+	if err := removeFile(dir.Root, name, p); err != nil {
 		return Outcome{Reason: "could not be deleted: " + store.ErrDetail(err), Failed: true}, nil
 	}
 	if err := d.rec.Deleted(ctx, c, d.now()); err != nil {
@@ -226,60 +230,87 @@ func realDirs(root, rel string) (why string, ok bool) {
 	return "", true
 }
 
+// heldDir is the open directory that holds a file, with what lstat saw of each directory on the way down to it.
+type heldDir struct {
+	*os.Root
+	name  string  // the file's name in it
+	chain []dirAt // the root first, then each directory down to this one
+}
+
+type dirAt struct {
+	path string
+	fi   fs.FileInfo
+}
+
+// stillAt reports whether the open directory is still where the path says: every directory from the root down is
+// still, at its path, a real directory and the very one opened. A directory moved out of the root after it was
+// opened (renamed elsewhere, a new one made in its place) leaves the handle pointing outside the root; this catches it.
+func (h *heldDir) stillAt() bool {
+	for _, d := range h.chain {
+		fi, err := os.Lstat(d.path)
+		if err != nil || notRealDir(d.path, fi) != "" || !os.SameFile(fi, d.fi) {
+			return false
+		}
+	}
+	return true
+}
+
 // openDir opens the directory that holds the file at rel below root: the root, then each directory down, each
 // through the one above it, and each only if it is a real directory (lstat, never a symlink) and the very directory
 // that lstat saw (same device and inode; opening it follows a symlink that stays inside the one above, so one
-// swapped in after the lstat is caught here). It returns the open directory and the file's name in it; why says
-// what changed on the path (a skip, as realDirs words it), and err that a directory is gone or cannot be opened.
-func openDir(root, rel string) (dir *os.Root, name, why string, err error) {
+// swapped in after the lstat is caught here). It returns the open directory; why says what changed on the path (a
+// skip, as realDirs words it), and err that a directory is gone or cannot be opened.
+func openDir(root, rel string) (*heldDir, string, error) {
 	fi, err := os.Lstat(root)
 	if err != nil {
-		return nil, "", "", err
+		return nil, "", err
 	}
 	if why := notRealDir(root, fi); why != "" {
-		return nil, "", why, nil
+		return nil, why, nil
 	}
-	dir, err = os.OpenRoot(root)
+	dir, err := os.OpenRoot(root)
 	if err != nil {
-		return nil, "", "", err
+		return nil, "", err
 	}
 	if got, err := dir.Stat("."); err != nil || !os.SameFile(fi, got) {
 		dir.Close()
-		return nil, "", "a directory on its path changed (" + root + "); run filo scan", err
+		return nil, "a directory on its path changed (" + root + "); run filo scan", err
 	}
+	chain := []dirAt{{root, fi}}
 	parts := strings.Split(rel, string(filepath.Separator))
 	path := root
 	for _, part := range parts[:len(parts)-1] {
 		path = filepath.Join(path, part)
-		sub, why, err := openSub(dir, part, path)
+		sub, fi, why, err := openSub(dir, part, path)
 		dir.Close()
 		if why != "" || err != nil {
-			return nil, "", why, err
+			return nil, why, err
 		}
 		dir = sub
+		chain = append(chain, dirAt{path, fi})
 	}
-	return dir, parts[len(parts)-1], "", nil
+	return &heldDir{Root: dir, name: parts[len(parts)-1], chain: chain}, "", nil
 }
 
 // openSub opens the directory name in parent (path is its absolute path, for messages) if it is a real directory,
-// and the one lstat saw.
-func openSub(parent *os.Root, name, path string) (*os.Root, string, error) {
+// and the one lstat saw (returned with it).
+func openSub(parent *os.Root, name, path string) (*os.Root, fs.FileInfo, string, error) {
 	fi, err := parent.Lstat(name)
 	if err != nil {
-		return nil, "", err
+		return nil, nil, "", err
 	}
 	if why := notRealDir(path, fi); why != "" {
-		return nil, why, nil
+		return nil, nil, why, nil
 	}
 	sub, err := parent.OpenRoot(name)
 	if err != nil {
-		return nil, "", err
+		return nil, nil, "", err
 	}
 	if got, err := sub.Stat("."); err != nil || !os.SameFile(fi, got) {
 		sub.Close()
-		return nil, "a directory on its path changed (" + path + "); run filo scan", err
+		return nil, nil, "a directory on its path changed (" + path + "); run filo scan", err
 	}
-	return sub, "", nil
+	return sub, fi, "", nil
 }
 
 // notRealDir says why the directory at path, as lstat saw it (fi), is not a real directory, or "".
@@ -378,12 +409,13 @@ func pruneDir(root, dir string) error {
 	if err != nil {
 		return errKept
 	}
-	parent, name, why, err := openDir(root, rel)
+	parent, why, err := openDir(root, rel)
 	if why != "" || err != nil {
 		return errKept
 	}
 	defer parent.Close()
-	sub, why, err := openSub(parent, name, dir)
+	name := parent.name
+	sub, _, why, err := openSub(parent.Root, name, dir)
 	if why != "" || err != nil {
 		return errKept
 	}
@@ -394,10 +426,10 @@ func pruneDir(root, dir string) error {
 	}
 	entries, err := f.ReadDir(1)
 	f.Close()
-	if len(entries) > 0 || !errors.Is(err, io.EOF) {
+	if len(entries) > 0 || !errors.Is(err, io.EOF) || !parent.stillAt() {
 		return errKept
 	}
-	return removeDir(parent, name, dir)
+	return removeDir(parent.Root, name, dir)
 }
 
 func depth(dir string) int { return strings.Count(filepath.Clean(dir), string(filepath.Separator)) }
@@ -429,7 +461,7 @@ func CheckKept(ctx context.Context, c store.Candidate) (*Kept, string, error) {
 	if !ok {
 		return nil, o.Reason, nil
 	}
-	dir, name, why, err := openDir(c.RootPath, filepath.FromSlash(c.Path))
+	dir, why, err := openDir(c.RootPath, filepath.FromSlash(c.Path))
 	switch {
 	case why != "":
 		return nil, why, nil
@@ -439,6 +471,7 @@ func CheckKept(ctx context.Context, c store.Candidate) (*Kept, string, error) {
 		return nil, "cannot be looked at: " + store.ErrDetail(err), nil
 	}
 	defer dir.Close()
+	name := dir.name
 	fi, err := dir.Lstat(name)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
@@ -455,7 +488,7 @@ func CheckKept(ctx context.Context, c store.Candidate) (*Kept, string, error) {
 	if fi.Size() != c.Size || fi.ModTime().UnixNano() != c.MtimeNS {
 		return nil, "changed since the last scan", nil
 	}
-	res, err := hasher.FileIn(ctx, dir, name)
+	res, err := hasher.FileIn(ctx, dir.Root, name)
 	switch {
 	case ctx.Err() != nil:
 		return nil, "", ctx.Err()
@@ -502,11 +535,19 @@ func (d *Disposer) DeleteDuplicate(ctx context.Context, c store.Candidate, kept 
 		}
 	}
 	c.DuplicateOf = kept.path
-	return d.delete(ctx, c, func(p string, last fs.FileInfo) (string, bool) {
+	return d.delete(ctx, c, func(p string, dir *os.Root, name string) (string, bool) {
 		if why, ok := kept.still(); !ok {
 			return why, false
 		}
-		if why, ok := onlyLink(last); !ok {
+		if afterKeptLook != nil {
+			afterKeptLook(p)
+		}
+		// Live, after the kept copy's look: a hard link made meanwhile is seen.
+		fi, err := dir.Lstat(name)
+		if err != nil {
+			return "could not be looked at: " + store.ErrDetail(err) + "; run filo scan", false
+		}
+		if why, ok := onlyLink(fi); !ok {
 			return why, false
 		}
 		return notSameFile(p, kept.path)

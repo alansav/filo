@@ -881,11 +881,14 @@ Package `internal/dispose`, the only code that deletes the user's files.
     opened once, from the root down, each directory through the one above it (`os.Root`, `openat` with
     `O_NOFOLLOW`), each a real directory and the very one its `lstat` saw (same device and inode). The file's `lstat`,
     its symlink target, its hash, the last look and the removal all go through that open directory, so a directory
-    swapped for a symlink at any moment, even after the last look, cannot send any of them outside the root: the
-    removal then takes the file that was checked, wherever its directory has been moved to. A copy kept for a
-    duplicate is checked the same way, and pruning reaches each empty directory the same way. What is left is the
-    file's own entry swapped in the instant between the last look and the removal, inside that same directory: only
-    someone who can write to the directory can do it, and they could remove the file themselves.
+    swapped for a symlink cannot send any of them elsewhere. The last look also checks, by path, that every directory
+    from the root down is still the very one opened, so a directory moved out of the root while the file was hashed
+    (with a new one made in its place) stops the deletion. A copy kept for a duplicate is checked the same way, and
+    pruning reaches each empty directory the same way, with the same check before the `rmdir`. What is left is a move
+    in the instant between the last look and the removal: the file then removed is still the one checked, in the
+    directory that was checked, wherever that has just been moved to; and the file's own entry swapped in that instant,
+    inside that same directory. Only someone who can write to those directories can do either, and they could remove
+    the file themselves.
   - *Removal* is `unlinkat` relative to the open directory: for a file or symlink without flags (it refuses a
     directory), and for a directory with `AT_REMOVEDIR` (it refuses a non-empty directory and a file). On Unix
     systems other than Linux, whose Go `syscall` package has no `unlinkat`, the removal goes through the open

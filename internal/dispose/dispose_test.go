@@ -579,3 +579,52 @@ func TestPruneDirSwapped(t *testing.T) {
 		t.Errorf("the empty directory outside the root was removed: %v", err)
 	}
 }
+
+// TestDeleteDirMovedOutOfRoot: a directory on the path moved out of the root while the file is checked, with a real
+// directory made in its place, leaves the open directory outside the root: the last look sees the path no longer
+// leads to it, and nothing is deleted (review of issue #13).
+func TestDeleteDirMovedOutOfRoot(t *testing.T) {
+	root := canonicalTemp(t)
+	outside := canonicalTemp(t)
+	write(t, filepath.Join(root, "a", "b", "big.bin"), "big")
+	c := candidate(t, root, "a/b/big.bin")
+	beforeRemove = func(string) {
+		if err := os.Rename(filepath.Join(root, "a"), filepath.Join(outside, "a")); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Join(root, "a", "b"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Cleanup(func() { beforeRemove = nil })
+	o, err := New(&fakeRec{}, time.Now).Delete(context.Background(), c)
+	if err != nil || o.Deleted || !strings.Contains(o.Reason, "changed while it was being checked") {
+		t.Errorf("Delete = %+v, %v; want skipped as changed", o, err)
+	}
+	if _, err := os.Stat(filepath.Join(outside, "a", "b", "big.bin")); err != nil {
+		t.Errorf("the file moved out of the root was deleted: %v", err)
+	}
+}
+
+// TestDeleteDuplicateLinkAfterKeptLook: a hard link made while the kept copy is looked at again is still seen: the
+// link count is looked at live, after it (review of issue #13).
+func TestDeleteDuplicateLinkAfterKeptLook(t *testing.T) {
+	ctx := context.Background()
+	root := canonicalTemp(t)
+	write(t, filepath.Join(root, "keep"), "same")
+	write(t, filepath.Join(root, "dup"), "same")
+	kept, why, err := CheckKept(ctx, candidate(t, root, "keep"))
+	if err != nil || kept == nil {
+		t.Fatalf("CheckKept: %q, %v", why, err)
+	}
+	afterKeptLook = func(string) {
+		if err := os.Link(filepath.Join(root, "dup"), filepath.Join(root, "dup-link")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Cleanup(func() { afterKeptLook = nil })
+	o, err := New(&fakeRec{}, time.Now).DeleteDuplicate(ctx, candidate(t, root, "dup"), kept)
+	if err != nil || o.Deleted || !strings.Contains(o.Reason, "has another hard link") {
+		t.Errorf("DeleteDuplicate = %+v, %v; want skipped for the hard link", o, err)
+	}
+}
