@@ -873,8 +873,20 @@ Package `internal/dispose`, the only code that deletes the user's files.
     hashing a large file leaves time for a directory to be swapped. A path outside its root can only come from an
     altered register (`../../.ssh/id_ed25519` with that file's hash): it is refused with exit 1. The hash check alone
     does not stop that, since whoever can edit the register can usually read the file.
-  - *Removal* is `unlink` for a file or symlink (it refuses a directory) and `rmdir` for a directory (it refuses a
-    non-empty directory and a file). The fallback on other platforms checks first and is untested.
+  - *Through the directory checked, never by path* (security review, issue #13). The directory holding the file is
+    opened once, from the root down, each directory through the one above it (`os.Root`, `openat` with
+    `O_NOFOLLOW`), each a real directory and the very one its `lstat` saw (same device and inode). The file's `lstat`,
+    its symlink target, its hash, the last look and the removal all go through that open directory, so a directory
+    swapped for a symlink at any moment, even after the last look, cannot send any of them outside the root: the
+    removal then takes the file that was checked, wherever its directory has been moved to. A copy kept for a
+    duplicate is checked the same way, and pruning reaches each empty directory the same way. What is left is the
+    file's own entry swapped in the instant between the last look and the removal, inside that same directory: only
+    someone who can write to the directory can do it, and they could remove the file themselves.
+  - *Removal* is `unlinkat` relative to the open directory: for a file or symlink without flags (it refuses a
+    directory), and for a directory with `AT_REMOVEDIR` (it refuses a non-empty directory and a file). On Unix
+    systems other than Linux, whose Go `syscall` package has no `unlinkat`, the removal goes through the open
+    directory's `Remove` after an `lstat` through it (a swap between the two stays inside that directory); that and
+    the fallback on other platforms are untested.
   - *A file deleted by filo is never "missing"*: pairing (returned files) skips deleted rows. A new file with a
     deleted file's content gets a `same_as_deleted` event, shown in the scan summary and the report.
   - *`[r]etention…`* keeps the file's `file_date`, works `keep_until` out again, and is recorded as a one-row batch

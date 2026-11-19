@@ -2,6 +2,8 @@ package dispose
 
 import (
 	"context"
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -512,5 +514,68 @@ func TestDeleteDuplicate(t *testing.T) {
 				t.Errorf("DeleteDuplicate = %+v (copy to delete: %v); want skipped, %q", o, dupErr, tt.want)
 			}
 		})
+	}
+}
+
+// TestDeleteDirSwappedBeforeUnlink: a directory on the path swapped for a symlink after every check, in the instant
+// before the removal, cannot redirect it: the unlink goes through the directory that was checked, so the file it
+// removes is the one checked, wherever its directory now is, and nothing outside the root is touched (issue #13).
+func TestDeleteDirSwappedBeforeUnlink(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks need privileges on windows")
+	}
+	root := canonicalTemp(t)
+	outside := canonicalTemp(t)
+	write(t, filepath.Join(root, "a", "b", "old.pdf"), "old")
+	write(t, filepath.Join(outside, "b", "old.pdf"), "someone else's")
+	c := candidate(t, root, "a/b/old.pdf")
+	beforeUnlink = func(string) {
+		if err := os.Rename(filepath.Join(root, "a"), filepath.Join(root, "moved")); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(outside, filepath.Join(root, "a")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Cleanup(func() { beforeUnlink = nil })
+	if _, err := New(&fakeRec{}, time.Now).Delete(context.Background(), c); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(outside, "b", "old.pdf")); err != nil {
+		t.Errorf("the file outside the root was deleted through the swapped directory: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(root, "moved", "b", "old.pdf")); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("the file checked is still there (%v), want it deleted", err)
+	}
+}
+
+// TestPruneDirSwapped: a directory above an emptied one swapped for a symlink before the pruning keeps the pruning
+// inside the root: the empty directory the symlink leads to, outside the root, stays (issue #13).
+func TestPruneDirSwapped(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks need privileges on windows")
+	}
+	root := canonicalTemp(t)
+	outside := canonicalTemp(t)
+	write(t, filepath.Join(root, "a", "b", "f"), "x")
+	if err := os.MkdirAll(filepath.Join(outside, "b"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	d := New(&fakeRec{}, time.Now)
+	if o, err := d.Delete(context.Background(), candidate(t, root, "a/b/f")); err != nil || !o.Deleted {
+		t.Fatalf("Delete = %+v, %v", o, err)
+	}
+	if err := os.Rename(filepath.Join(root, "a"), filepath.Join(root, "moved")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(root, "a")); err != nil {
+		t.Fatal(err)
+	}
+	removed, problems := d.PruneDirs()
+	if len(removed) > 0 || len(problems) > 0 {
+		t.Errorf("PruneDirs = %v, %v; want nothing removed", removed, problems)
+	}
+	if _, err := os.Stat(filepath.Join(outside, "b")); err != nil {
+		t.Errorf("the empty directory outside the root was removed: %v", err)
 	}
 }
