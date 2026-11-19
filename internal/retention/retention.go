@@ -230,7 +230,7 @@ var (
 // is refused every time it appears, rather than guessing which one is meant.
 func ReadCSV(r io.Reader) (Parsed, error) {
 	var p Parsed
-	data, err := io.ReadAll(r)
+	data, err := sheet.ReadAll(r)
 	if err != nil {
 		return p, err
 	}

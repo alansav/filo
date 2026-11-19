@@ -322,6 +322,11 @@ The retention CSV and `filo update` write only the register and the CSV file the
   as they are, emoji and all; bytes that are not valid UTF-8 are shown as U+FFFD, which is harmless because the update
   never reads the name. A display cell that starts with `= + - @`, tab or CR gets a leading `'` so a spreadsheet does
   not run it as a formula. The update accepts a byte order mark, CRLF, `;` or tab separators, and empty rows.
+- **Limits on a CSV read back** (security review, issue #18), for the retention and duplicates CSVs alike, all in
+  package `sheet`: at most 256 MB (no more than that is ever read), 1,048,576 rows (header and empty rows included)
+  and 16,384 fields in a row, the most a spreadsheet keeps, and 1 MB in one row. A CSV over any of them is refused
+  whole, before a row is read, saying which limit and on which line; the limits follow the quotes, so a separator or
+  line end inside a quoted cell does not count.
 - **Dates**: `YYYY-MM-DD` only, and a real date (`2027-02-29` is refused). Anything else, such as `06/07/2027`, is
   refused, never guessed; the message suggests formatting the column as text, since spreadsheets may rewrite dates in
   the locale's format. Past dates are accepted (see Retention CSV columns). Periods counted from today (`+1y`) were dropped

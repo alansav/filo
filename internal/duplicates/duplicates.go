@@ -142,7 +142,7 @@ type Parsed struct {
 // problem of its line; a row with another cell that cannot be read is kept, to refuse its group (see Plan).
 func ReadCSV(r io.Reader) (Parsed, error) {
 	var p Parsed
-	data, err := io.ReadAll(r)
+	data, err := sheet.ReadAll(r)
 	if err != nil {
 		return p, err
 	}

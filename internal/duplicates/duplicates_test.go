@@ -302,3 +302,11 @@ func TestWriteCSV(t *testing.T) {
 }
 
 func itoa(n int64) string { return strconv.FormatInt(n, 10) }
+
+// TestReadCSVLimits: ReadCSV reads through package sheet's limits, so a CSV over them is refused whole.
+func TestReadCSVLimits(t *testing.T) {
+	data := "id,export,group,action\n" + strings.Repeat("\n", sheet.MaxRows)
+	if _, err := ReadCSV(strings.NewReader(data)); err == nil || !strings.Contains(err.Error(), "rows") {
+		t.Errorf("ReadCSV with too many rows = %v, want refused", err)
+	}
+}
