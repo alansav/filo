@@ -508,8 +508,9 @@ One database per device holds every root:
 | Linux, BSD | `$XDG_DATA_HOME/filo/filo.db`, usually `~/.local/share/filo/filo.db` |
 | macOS | `~/Library/Application Support/filo/filo.db` |
 
-Use `--db PATH` or the `FILO_DB` environment variable to choose another. The database is private to you (mode
-`0600`), and only one Filo process can use it at a time.
+Use `--db PATH` or the `FILO_DB` environment variable to choose another. Its directory must be yours and writable
+only by you, so a database directly in a shared directory such as `/tmp` is refused (use `mktemp -d` for a throwaway
+one). The database is private to you (mode `0600`), and only one Filo process can use it at a time.
 
 **Don't sync the database between machines.** It describes one device's files. Keep it out of Syncthing or other
 synced directories (the default location already is).
@@ -584,7 +585,8 @@ start on an older host:
 
 ```sh
 scripts/dev.sh run env CGO_ENABLED=0 go build -o bin/filo ./cmd/filo
-bin/filo --db /tmp/f.db roots add ~/FiloTest           # on the host
+T=$(mktemp -d)                                         # on the host: a private directory
+bin/filo --db $T/f.db roots add ~/FiloTest
 ```
 
 Inside the container (or with Go installed locally):
@@ -602,18 +604,19 @@ again, which you need before you can delete the tree. When developing, always us
 your real home directory:
 
 ```sh
-scripts/testtree.sh init /tmp/FiloTest
-bin/filo --db /tmp/f.db roots add /tmp/FiloTest     # adds and scans
-scripts/testtree.sh mutate /tmp/FiloTest
-bin/filo --db /tmp/f.db scan
-bin/filo --db /tmp/f.db report
-scripts/testtree.sh unlock /tmp/FiloTest
-bin/filo --db /tmp/f.db scan        # nothing new, changed or missing; the unreadable flag clears
-bin/filo --db /tmp/f.db export retention /tmp/FiloTest/notes -o /tmp/l.csv
-# fill in retention in /tmp/l.csv
-bin/filo --db /tmp/f.db update /tmp/l.csv
-bin/filo --db /tmp/f.db delete
-rm -rf /tmp/FiloTest /tmp/f.db* /tmp/l.csv
+T=$(mktemp -d)    # private: filo refuses a database in a directory others can write to, such as /tmp
+scripts/testtree.sh init $T/FiloTest
+bin/filo --db $T/f.db roots add $T/FiloTest     # adds and scans
+scripts/testtree.sh mutate $T/FiloTest
+bin/filo --db $T/f.db scan
+bin/filo --db $T/f.db report
+scripts/testtree.sh unlock $T/FiloTest
+bin/filo --db $T/f.db scan        # nothing new, changed or missing; the unreadable flag clears
+bin/filo --db $T/f.db export retention $T/FiloTest/notes -o $T/l.csv
+# fill in retention in $T/l.csv
+bin/filo --db $T/f.db update $T/l.csv
+bin/filo --db $T/f.db delete
+rm -rf $T
 ```
 
 Project conventions for contributors (and for Claude Code) are in [CLAUDE.md](CLAUDE.md).

@@ -69,14 +69,19 @@ Principles. These are not negotiable:
 - One writer at a time: an `flock` on `<db>.lock`, taken before the database is opened. The kernel drops it if Filo
   dies, so there are no stale locks. Non-unix platforms have no lock, so they refuse to open the register. Each
   scan is applied in a single transaction. The lock file is opened with `O_NOFOLLOW`, so a symlink planted in its
-  place (with `--db` in a shared directory such as `/tmp`) is refused, not followed.
+  place is refused, not followed.
 - **The database path is checked** (security review, issue #15): the database's directory is resolved (symlinks
   followed) before the lock is taken, so one database reached through two symlinked directories has one lock. Then the
   database and its WAL, SHM and journal files, where they exist, must each be a regular file owned by the user, not a
   symlink: SQLite opens them by path and has no way to refuse a symlink, so one planted in their place would be
-  followed. What is left is a file swapped in the instant between that check and SQLite's open, which needs write
-  access to the directory and, in a sticky directory such as `/tmp`, cannot replace a file the user owns; and a hard
-  link to the database under another name, which takes another lock.
+  followed. What is left is a hard link to the database under another name, which takes another lock.
+- **The database's directory must be private** (issue #22): owned by the user, and not writable by the group or
+  others, or the database is refused before the lock is taken and before anything is created in it (with how to fix
+  it: `chmod go-w DIR`, or another directory). Whoever can write to the directory could swap the database or a
+  companion file for a symlink in the instant between the check above and SQLite's open, or create a `-wal` file
+  before SQLite does, and the driver cannot open them by descriptor. So `--db /tmp/f.db` is refused (`/tmp` is
+  shared); a throwaway database goes in a private temporary directory (`--db "$(mktemp -d)/f.db"`). The default
+  `filo` directory is created 0700. The directories above it are not checked.
 - **The schema is not trusted** (2026-11-13): `PRAGMA trusted_schema = OFF` on every connection, so triggers and
   views stored in an altered or swapped database cannot call functions with side effects.
 - When the database does not exist yet, Filo creates it with mode 0600, and SQLite gives its WAL and SHM files the
@@ -1838,7 +1843,9 @@ to another directory is not detected (the paths below it are checked, and the co
 `filo delete -y` deletes without a person reading the list, which is the point of `-y`; a file swapped in the
 microseconds between the last check and the unlink is deleted (anyone able to do that can delete it directly); SQLite
 parses a database before Filo checks it is one of its own (kept small by staying on a current driver); ownership of the
-snapshot directory is not checked on non-Unix platforms. From the code review of the snapshots: Ctrl-C cannot interrupt
+snapshot directory, and of the database's directory, is not checked on non-Unix platforms; and the directories above
+the database's directory are not checked (one that others can write to lets them move the database's directory aside
+and put another in its place). From the code review of the snapshots: Ctrl-C cannot interrupt
 a snapshot being written (milliseconds for a register of a few MB), and every run that writes copies the whole register,
 timer scans that found nothing included (fine at a few MB). From the code review of 2026-11-13: a snapshot is renamed
 into place after a check that the name is free, and a program not taking Filo's lock could create that name in between
