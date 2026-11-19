@@ -63,7 +63,7 @@ It is built to fail safe:
 
 ## Install
 
-Filo is pure Go (no C toolchain needed). It needs Go 1.27.3 or later and runs on Linux, macOS and the BSDs. Windows is
+Filo is pure Go (no C toolchain needed). It needs Go 1.27.4 or later and runs on Linux, macOS and the BSDs. Windows is
 not supported yet: file locking and inode lookup aren't implemented there.
 
 ```sh
