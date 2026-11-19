@@ -54,12 +54,18 @@ var beforeRemove, beforeUnlink func(path string)
 // at there (removeVerified).
 var inPrivate func(path string)
 
-// changedError means the file was not the one checked when it was moved to be deleted, so it was not deleted. left is
-// where it was left if it could not be put back ("" if it was).
-type changedError struct{ left string }
+// changedError means the file was moved to be deleted and was not: it was not the one checked, or (cause not nil) it
+// could not be unlinked. left is where it was left if it could not be put back ("" if it was).
+type changedError struct {
+	left  string
+	cause error
+}
 
 func (e *changedError) Error() string {
-	if e.left == "" {
+	switch {
+	case e.cause != nil:
+		return "could not be deleted (" + e.cause.Error() + "); left in " + e.left
+	case e.left == "":
 		return "changed as it was being deleted; put back"
 	}
 	return "changed as it was being deleted; left in " + e.left
@@ -191,6 +197,9 @@ func (d *Disposer) delete(ctx context.Context, c store.Candidate,
 	switch err := removeVerified(dir.Root, name, p, last); {
 	case errors.As(err, &changed) && changed.left == "":
 		return skip("changed as it was being deleted, so it was put back, not deleted; run filo scan"), nil
+	case errors.As(err, &changed) && changed.cause != nil:
+		return Outcome{Reason: "could not be deleted: " + store.ErrDetail(changed.cause) + "; and could not be put " +
+			"back: it is now " + changed.left + "; move it back or delete it yourself", Failed: true}, nil
 	case errors.As(err, &changed):
 		return Outcome{Reason: "changed as it was being deleted, and could not be put back: it is now " + changed.left +
 			"; look at it, then move it back or delete it yourself", Failed: true}, nil

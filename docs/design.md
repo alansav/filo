@@ -902,17 +902,26 @@ Package `internal/dispose`, the only code that deletes the user's files.
   - *Through a private directory* (issue #21; Linux). After the last look, another file could be put at the name (an
     editor or Syncthing saving a new version by renaming it into place) and be deleted unseen. So the file is not
     unlinked at its name: a new directory `.filo-delete-<random>` is made next to it (mode 0700), opened, and checked
-    to be that very directory (not a symlink, the one `lstat` sees at its name, owned by the user, closed to
-    everyone else, empty); the file is moved into it (`renameat`, through the open directories), looked at there,
-    where no other user can replace it (the same file on disk, kind, size and modification time as at the last
-    look), then unlinked, and the empty private directory removed. If what was moved is not the file checked, it is
-    not deleted: it is moved back to its name with `renameat2(RENAME_NOREPLACE)`, which never replaces anything, and
-    the file is skipped ("changed as it was being deleted, so it was put back"). Putting it back restores exactly what
-    the other program made; leaving it hidden would let Syncthing delete it everywhere. If its name is taken again by
-    then, or `renameat2` is refused, it stays in the private directory and the run says where (exit 1). Such a
-    directory, or one left by a run that was killed in between, is reported by every scan and never touched by Filo
-    (see Scan). A private directory that is not the one made is never used: the file stays, and the run fails with
-    exit 1. Other platforms unlink at the name after the last look, as before (untested).
+    to be that very directory (not a symlink, the one `lstat` sees at its name, empty), owned by the user and not
+    writable by anyone else (only write access lets anyone replace an entry in it); the file is moved into it
+    (`renameat`, through the open directories), looked at there (the same file on disk, kind, size and modification
+    time as at the last look), then unlinked, and the empty private directory removed. If what was moved is not the
+    file checked, it is not deleted: it is moved back to its name with `renameat2(RENAME_NOREPLACE)`, which never
+    replaces anything, and the file is skipped ("changed as it was being deleted, so it was put back"). Putting it
+    back restores exactly what the other program made; leaving it hidden would let Syncthing delete it everywhere. A
+    file checked that then cannot be unlinked there (an append-only file) is put back the same way, and the run says
+    it could not be deleted (exit 1). If its name is taken again by then, or `renameat2` is refused, it stays in the
+    private directory and the run says where (exit 1). Such a directory, or one left by a run that was killed in
+    between, is reported by every scan and never touched by Filo (see Scan). A directory at the private directory's
+    name that is not empty, or not the one opened, is never used and left alone: the file stays, and the run fails
+    with exit 1.
+    *Where no private directory can be had,* the file is unlinked at its name after the last look, as before #21, so
+    the instant between the two remains there: when the directory cannot be made for a full disk, a used-up quota or
+    a read-only filesystem (deleting must still free space on a full disk), and when the directory made comes out
+    owned by someone else or writable by others (filesystems without Unix modes: FAT, exFAT, NTFS, network shares;
+    the directory is then removed). The same happens if, in the instant after it is made, another user puts an empty
+    directory of their own in its place; they could delete the file directly anyway. Other platforms always unlink at
+    the name after the last look (untested).
   - *Removal* is `unlinkat` relative to the open directory: for a file or symlink without flags (it refuses a
     directory), and for a directory with `AT_REMOVEDIR` (it refuses a non-empty directory and a file). On Unix
     systems other than Linux, whose Go `syscall` package has no `unlinkat`, the removal goes through the open
@@ -1860,7 +1869,8 @@ runs as the user and could delete files directly, so an altered register matters
 snapshot, a database in a synced directory, a `--db` from elsewhere). Accepted: a register whose *root* path was altered
 to another directory is not detected (the paths below it are checked, and the confirmation list shows absolute paths);
 `filo delete -y` deletes without a person reading the list, which is the point of `-y`; on platforms other than Linux,
-a file swapped in the microseconds between the last check and the unlink is deleted (anyone able to do that can delete
+and on Linux where no private directory can be had (see Disposal), a file swapped in the microseconds between the last
+check and the unlink is deleted (anyone able to do that can delete
 it directly); SQLite
 parses a database before Filo checks it is one of its own (kept small by staying on a current driver); ownership of the
 snapshot directory, and of the database's directory, is not checked on non-Unix platforms; and the directories above
