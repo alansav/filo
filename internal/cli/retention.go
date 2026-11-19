@@ -1,12 +1,10 @@
 package cli
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"path"
 	"path/filepath"
 	"slices"
@@ -17,6 +15,7 @@ import (
 	"github.com/alansav/filo/internal/reconcile"
 	"github.com/alansav/filo/internal/report"
 	"github.com/alansav/filo/internal/retention"
+	"github.com/alansav/filo/internal/sheet"
 	"github.com/alansav/filo/internal/store"
 	"github.com/alansav/filo/internal/view"
 )
@@ -257,7 +256,7 @@ func (e *env) update(ctx context.Context, dbBefore string, args []string) error 
 	if err != nil {
 		return err
 	}
-	data, err := os.ReadFile(path)
+	data, err := sheet.ReadFile(path)
 	if err != nil {
 		return fmt.Errorf("open %s: %w", path, err)
 	}
@@ -267,7 +266,7 @@ func (e *env) update(ctx context.Context, dbBefore string, args []string) error 
 		return fmt.Errorf("%s is a duplicates CSV: filo update records retentions only; carry it out with filo delete %s",
 			path, shellQuote(path))
 	}
-	parsed, err := retention.ReadCSV(bytes.NewReader(data))
+	parsed, err := retention.ParseCSV(data)
 	if err != nil {
 		return fmt.Errorf("%s: %w", path, err)
 	}

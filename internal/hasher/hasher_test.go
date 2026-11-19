@@ -190,7 +190,7 @@ func TestCancelled(t *testing.T) {
 	if _, err := File(ctx, p); !errors.Is(err, context.Canceled) {
 		t.Errorf("File err = %v, want context.Canceled", err)
 	}
-	out, err := HashAll(ctx, []Job{{p}, {p}, {p}}, 2, nil)
+	out, err := HashAll(ctx, []Job{{Path: p}, {Path: p}, {Path: p}}, 2, nil)
 	if !errors.Is(err, context.Canceled) {
 		t.Errorf("HashAll err = %v, want context.Canceled", err)
 	}
@@ -207,7 +207,7 @@ func TestHashAll(t *testing.T) {
 	var want []Sum
 	for i := range 200 {
 		data := []byte(fmt.Sprintf("file %d", i))
-		jobs = append(jobs, Job{write(t, filepath.Join(dir, fmt.Sprintf("f%03d", i)), data)})
+		jobs = append(jobs, Job{Path: write(t, filepath.Join(dir, fmt.Sprintf("f%03d", i)), data)})
 		want = append(want, sumOf(data))
 	}
 	for _, workers := range []int{1, 4, 16} {
@@ -228,7 +228,7 @@ func TestHashAll(t *testing.T) {
 	}
 
 	t.Run("per-file errors do not stop the others", func(t *testing.T) {
-		mixed := []Job{jobs[0], {filepath.Join(dir, "missing")}, {dir}, jobs[1]}
+		mixed := []Job{jobs[0], {Path: filepath.Join(dir, "missing")}, {Path: dir}, jobs[1]}
 		out, err := HashAll(context.Background(), mixed, 3, nil)
 		if err != nil {
 			t.Fatal(err)
@@ -325,5 +325,55 @@ func TestFileCtime(t *testing.T) {
 	}
 	if want == 0 && (runtime.GOOS == "linux" || runtime.GOOS == "darwin") {
 		t.Errorf("no ctime on %s", runtime.GOOS)
+	}
+}
+
+// TestJobInRoot: a job with a Root is opened through it, so a directory on its path swapped for a symlink never
+// leads outside the root, and a symlink in the file's place is not followed even inside the root (issue #14).
+func TestJobInRoot(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks need privileges on windows")
+	}
+	root := t.TempDir()
+	outside := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, "d"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	f := write(t, filepath.Join(root, "d", "f.txt"), []byte("mine"))
+	write(t, filepath.Join(outside, "f.txt"), []byte("secret"))
+	if err := os.Symlink(outside, filepath.Join(root, "out")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("d", filepath.Join(root, "in")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("f.txt", filepath.Join(root, "d", "link.txt")); err != nil {
+		t.Fatal(err)
+	}
+	want, err := File(context.Background(), f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	jobs := []Job{
+		{Path: f, Root: root},
+		{Path: filepath.Join(root, "out", "f.txt"), Root: root},
+		{Path: filepath.Join(root, "d", "link.txt"), Root: root},
+		{Path: filepath.Join(outside, "f.txt"), Root: root},
+	}
+	out, err := HashAll(context.Background(), jobs, 2, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out[0].Err != nil || out[0].Sum != want.Sum {
+		t.Errorf("file in the root: %v, %s; want %s", out[0].Err, out[0].Sum, want.Sum)
+	}
+	for i, why := range map[int]string{1: "through a symlink out of the root", 2: "a symlink in the file's place",
+		3: "a path outside the root"} {
+		if out[i].Err == nil {
+			t.Errorf("%s was hashed (%s)", why, out[i].Sum)
+		}
+	}
+	if !errors.Is(out[2].Err, ErrNotRegular) {
+		t.Errorf("symlink in the file's place: %v, want ErrNotRegular", out[2].Err)
 	}
 }

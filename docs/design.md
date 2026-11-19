@@ -70,6 +70,13 @@ Principles. These are not negotiable:
   dies, so there are no stale locks. Non-unix platforms have no lock, so they refuse to open the register. Each
   scan is applied in a single transaction. The lock file is opened with `O_NOFOLLOW`, so a symlink planted in its
   place (with `--db` in a shared directory such as `/tmp`) is refused, not followed.
+- **The database path is checked** (security review, issue #15): the database's directory is resolved (symlinks
+  followed) before the lock is taken, so one database reached through two symlinked directories has one lock. Then the
+  database and its WAL, SHM and journal files, where they exist, must each be a regular file owned by the user, not a
+  symlink: SQLite opens them by path and has no way to refuse a symlink, so one planted in their place would be
+  followed. What is left is a file swapped in the instant between that check and SQLite's open, which needs write
+  access to the directory and, in a sticky directory such as `/tmp`, cannot replace a file the user owns; and a hard
+  link to the database under another name, which takes another lock.
 - **The schema is not trusted** (2026-11-13): `PRAGMA trusted_schema = OFF` on every connection, so triggers and
   views stored in an altered or swapped database cannot call functions with side effects.
 - When the database does not exist yet, Filo creates it with mode 0600, and SQLite gives its WAL and SHM files the
@@ -171,6 +178,14 @@ the database, on the same disk. Copying the register's snapshots to a separate p
 ### Scan
 - Skips hidden entries unless the root includes them, plus noise: `node_modules`, `__pycache__`, `.filo`, the root's
   ignore names, and `bin`/`obj` beside a `.csproj` or `.fsproj`.
+- **Never by a path that can be redirected** (security review, issue #14). A walk opens the root, then each
+  directory through the one above it (`os.Root`, `openat` with `O_NOFOLLOW`), and lists, `lstat`s and reads symlinks
+  through that open directory, so a directory swapped for a symlink while the walk runs cannot lead it outside the
+  root. A directory is walked only if the one opened is the directory its `lstat` saw (same device and inode); one
+  swapped since, or gone by the time it is opened, is skipped with a problem ("changed while it was being scanned"),
+  so nothing under it is covered and none of its files is marked missing; one that cannot be opened (permission
+  denied) is a failed listing, the root or scope directory included. A scope is opened the same way, so a symlink on
+  it is refused. Only a symlink's broken flag is looked up by path, following the link.
 - **One filesystem.** A walk never descends into a directory on a different device from its root; such directories are
   reported once in the summary, not as errors. A directory already visited in the same walk (same device and inode: a
   bind mount of an ancestor, or a loop) is skipped and reported.
@@ -206,7 +221,12 @@ the database, on the same disk. Copying the register's snapshots to a separate p
   way, and hashes can be checked by hand.
 - Every file is hashed in full. A file is opened without following symlinks (`O_NOFOLLOW`), without blocking on a
   FIFO (`O_NONBLOCK`) and, on Linux, without updating its access time (`O_NOATIME` when Filo owns the file). Only
-  regular files are hashed. If size or mtime changes while the file is read, or fewer bytes are read than its size,
+  regular files are hashed. A scan opens each file's directory through its root (`os.Root`; each worker keeps the
+  last one open, since files come in walk order) and the file in it by name, only if it is the regular file `lstat`
+  sees there (same device and inode), so a directory swapped for a symlink since the walk cannot lead it to a file
+  outside the root, and a symlink swapped in for the file is not followed (issue #14). A directory swapped for a
+  symlink to another directory inside the root is followed: the file read there is inside the root, recorded under
+  the path walked; the next scan corrects it. If size or mtime changes while the file is read, or fewer bytes are read than its size,
   the hash is discarded and the file is retried on the next scan. The stored size and mtime are the ones the file had
   while it was hashed.
 - **Unreadable files are flagged, not dropped.** A file that is listed but cannot be opened or read (permission denied,
@@ -315,6 +335,12 @@ The retention CSV and `filo update` write only the register and the CSV file the
   as they are, emoji and all; bytes that are not valid UTF-8 are shown as U+FFFD, which is harmless because the update
   never reads the name. A display cell that starts with `= + - @`, tab or CR gets a leading `'` so a spreadsheet does
   not run it as a formula. The update accepts a byte order mark, CRLF, `;` or tab separators, and empty rows.
+- **Limits on a CSV read back** (security review, issue #18), for the retention and duplicates CSVs alike, all in
+  package `sheet`: at most 256 MB (no more than that is ever read), 1,048,576 rows (header and empty rows included)
+  and 16,384 fields in a row, the most a spreadsheet keeps, and 1 MB in one row. A CSV over any of them is refused
+  whole, before a row is read, saying which limit and on which line; the limits follow the quotes, so a separator or
+  line end inside a quoted cell does not count. `filo update` and `filo delete FILE.csv` read the file once (issue
+  #16): a file whose size is over the limit is refused before it is read.
 - **Dates**: `YYYY-MM-DD` only, and a real date (`2027-02-29` is refused). Anything else, such as `06/07/2027`, is
   refused, never guessed; the message suggests formatting the column as text, since spreadsheets may rewrite dates in
   the locale's format. Past dates are accepted (see Retention CSV columns). Periods counted from today (`+1y`) were dropped
@@ -851,8 +877,23 @@ Package `internal/dispose`, the only code that deletes the user's files.
     hashing a large file leaves time for a directory to be swapped. A path outside its root can only come from an
     altered register (`../../.ssh/id_ed25519` with that file's hash): it is refused with exit 1. The hash check alone
     does not stop that, since whoever can edit the register can usually read the file.
-  - *Removal* is `unlink` for a file or symlink (it refuses a directory) and `rmdir` for a directory (it refuses a
-    non-empty directory and a file). The fallback on other platforms checks first and is untested.
+  - *Through the directory checked, never by path* (security review, issue #13). The directory holding the file is
+    opened once, from the root down, each directory through the one above it (`os.Root`, `openat` with
+    `O_NOFOLLOW`), each a real directory and the very one its `lstat` saw (same device and inode). The file's `lstat`,
+    its symlink target, its hash, the last look and the removal all go through that open directory, so a directory
+    swapped for a symlink cannot send any of them elsewhere. The last look also checks, by path, that every directory
+    from the root down is still the very one opened, so a directory moved out of the root while the file was hashed
+    (with a new one made in its place) stops the deletion. A copy kept for a duplicate is checked the same way, and
+    pruning reaches each empty directory the same way, with the same check before the `rmdir`. What is left is a move
+    in the instant between the last look and the removal: the file then removed is still the one checked, in the
+    directory that was checked, wherever that has just been moved to; and the file's own entry swapped in that instant,
+    inside that same directory. Only someone who can write to those directories can do either, and they could remove
+    the file themselves.
+  - *Removal* is `unlinkat` relative to the open directory: for a file or symlink without flags (it refuses a
+    directory), and for a directory with `AT_REMOVEDIR` (it refuses a non-empty directory and a file). On Unix
+    systems other than Linux, whose Go `syscall` package has no `unlinkat`, the removal goes through the open
+    directory's `Remove` after an `lstat` through it (a swap between the two stays inside that directory); that and
+    the fallback on other platforms are untested.
   - *A file deleted by filo is never "missing"*: pairing (returned files) skips deleted rows. A new file with a
     deleted file's content gets a `same_as_deleted` event, shown in the scan summary and the report.
   - *`[r]etention…`* keeps the file's `file_date`, works `keep_until` out again, and is recorded as a one-row batch

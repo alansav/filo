@@ -131,8 +131,9 @@ func (s *Store) OwnPaths() []string {
 // DBPath is the absolute path of the database file.
 func (s *Store) DBPath() string { return s.dbPath }
 
-// resolveDBPath returns the absolute database path. The default data directory is the only directory Filo creates;
-// an explicit path must have an existing parent directory.
+// resolveDBPath returns the absolute database path, its directory with symlinks resolved, so one database reached
+// through two symlinked directories has one lock file. The default data directory is the only directory Filo
+// creates; an explicit path must have an existing parent directory.
 func resolveDBPath(dbPath string) (string, error) {
 	if dbPath == "" {
 		def, err := DefaultDBPath()
@@ -143,7 +144,7 @@ func resolveDBPath(dbPath string) (string, error) {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			return "", fmt.Errorf("create %s: %w", dir, err)
 		}
-		return def, nil
+		dbPath = def
 	}
 	abs, err := filepath.Abs(dbPath)
 	if err != nil {
@@ -157,7 +158,34 @@ func resolveDBPath(dbPath string) (string, error) {
 	if !fi.IsDir() {
 		return "", fmt.Errorf("database directory %s is not a directory", parent)
 	}
-	return abs, nil
+	dir, err := filepath.EvalSymlinks(parent)
+	if err != nil {
+		return "", fmt.Errorf("database directory %s: %w", parent, err)
+	}
+	return filepath.Join(dir, filepath.Base(abs)), nil
+}
+
+// checkDBFiles refuses a database, or a WAL, SHM or journal file next to it, that is a symlink, not a regular file,
+// or owned by another user: SQLite opens them by path and would follow a symlink planted in their place (with --db
+// in a shared directory such as /tmp) to a file somewhere else. Files that do not exist yet are fine; SQLite creates
+// them with the database's mode.
+func checkDBFiles(dbPath string) error {
+	for _, p := range []string{dbPath, dbPath + "-wal", dbPath + "-shm", dbPath + "-journal"} {
+		fi, err := os.Lstat(p)
+		switch {
+		case errors.Is(err, fs.ErrNotExist):
+			continue
+		case err != nil:
+			return fmt.Errorf("database file %s: %w", p, err)
+		case fi.Mode()&fs.ModeSymlink != 0:
+			return fmt.Errorf("database file %s is a symlink; give the path of the database itself", p)
+		case !fi.Mode().IsRegular():
+			return fmt.Errorf("database file %s is not a regular file", p)
+		case !ownedByUser(fi):
+			return fmt.Errorf("database file %s belongs to another user", p)
+		}
+	}
+	return nil
 }
 
 func dsn(path string) string {
@@ -174,6 +202,9 @@ func dsn(path string) string {
 
 func openLocked(ctx context.Context, dbPath string) (*Store, error) {
 	if err := precreate(dbPath); err != nil {
+		return nil, err
+	}
+	if err := checkDBFiles(dbPath); err != nil {
 		return nil, err
 	}
 	db, err := sql.Open("sqlite", dsn(dbPath))

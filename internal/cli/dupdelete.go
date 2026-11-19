@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -17,6 +16,7 @@ import (
 	"github.com/alansav/filo/internal/duplicates"
 	"github.com/alansav/filo/internal/fsid"
 	"github.com/alansav/filo/internal/report"
+	"github.com/alansav/filo/internal/sheet"
 	"github.com/alansav/filo/internal/store"
 	"github.com/alansav/filo/internal/view"
 )
@@ -59,11 +59,11 @@ type goneCopy struct {
 // checks each decided group against the disk, lists what it will and will not do, asks, and carries it out a group at
 // a time, each with the check at the moment of deleting.
 func (e *env) deleteDuplicates(ctx context.Context, s *store.Store, csvPath string, yes bool) error {
-	data, err := os.ReadFile(csvPath)
+	data, err := sheet.ReadFile(csvPath)
 	if err != nil {
 		return fmt.Errorf("open %s: %w", csvPath, err)
 	}
-	parsed, err := duplicates.ReadCSV(bytes.NewReader(data))
+	parsed, err := duplicates.ParseCSV(data)
 	if err != nil {
 		return fmt.Errorf("%s: %w", csvPath, err)
 	}

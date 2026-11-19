@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alansav/filo/internal/sheet"
 	"github.com/alansav/filo/internal/store"
 )
 
@@ -290,5 +291,13 @@ func TestReadCSVBrokenQuote(t *testing.T) {
 	_, err := ReadCSV(strings.NewReader("id,export,retention\n1,2,\"2027-01-01,\n"))
 	if err == nil {
 		t.Fatal("want an error for an unterminated quote")
+	}
+}
+
+// TestReadCSVLimits: ReadCSV reads through package sheet's limits, so a CSV over them is refused whole.
+func TestReadCSVLimits(t *testing.T) {
+	data := "id,export,retention\n" + strings.Repeat("\n", sheet.MaxRows)
+	if _, err := ReadCSV(strings.NewReader(data)); err == nil || !strings.Contains(err.Error(), "rows") {
+		t.Errorf("ReadCSV with too many rows = %v, want refused", err)
 	}
 }

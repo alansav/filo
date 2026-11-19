@@ -1,28 +1,55 @@
-//go:build unix
+//go:build unix && !linux
 
 package dispose
 
 import (
 	"errors"
+	"fmt"
+	"io/fs"
 	"os"
 	"syscall"
 )
 
-// removeFile removes a file or symlink, never a directory (unlink refuses one).
-func removeFile(p string) error {
-	if err := syscall.Unlink(p); err != nil {
-		return &os.PathError{Op: "unlink", Path: p, Err: err}
+// removeFile removes the file or symlink name in dir (path is its absolute path, for messages), never a directory.
+// This OS's syscall package has no unlinkat, so dir's Remove is used, after an lstat through dir: Remove would also
+// remove an empty directory swapped in between the two, never anything outside dir. Untested: only Linux builds are
+// tested.
+func removeFile(dir *os.Root, name, path string) error {
+	fi, err := dir.Lstat(name)
+	if err != nil {
+		return &os.PathError{Op: "lstat", Path: path, Err: unwrap(err)}
+	}
+	if fi.IsDir() {
+		return &os.PathError{Op: "unlink", Path: path, Err: syscall.EISDIR}
+	}
+	if err := dir.Remove(name); err != nil {
+		return &os.PathError{Op: "unlink", Path: path, Err: unwrap(err)}
 	}
 	return nil
 }
 
-// removeDir removes a directory only if it is empty, never a file (rmdir refuses both a non-empty directory and a
-// file), so anything that appeared in it since it was listed keeps it.
-func removeDir(p string) error {
-	if err := syscall.Rmdir(p); err != nil {
-		return &os.PathError{Op: "rmdir", Path: p, Err: err}
+// removeDir removes the empty directory name in dir, never a file, after an lstat through dir (see removeFile: a
+// file swapped in between the two would be removed; it is inside dir). Untested: only Linux builds are tested.
+func removeDir(dir *os.Root, name, path string) error {
+	fi, err := dir.Lstat(name)
+	if err != nil {
+		return &os.PathError{Op: "lstat", Path: path, Err: unwrap(err)}
+	}
+	if !fi.IsDir() {
+		return fmt.Errorf("%s: %w", path, fs.ErrExist)
+	}
+	if err := dir.Remove(name); err != nil {
+		return &os.PathError{Op: "rmdir", Path: path, Err: unwrap(err)}
 	}
 	return nil
+}
+
+func unwrap(err error) error {
+	var pe *fs.PathError
+	if errors.As(err, &pe) {
+		return pe.Err
+	}
+	return err
 }
 
 func isNotEmpty(err error) bool {

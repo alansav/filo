@@ -21,8 +21,9 @@ The duplicates CSV was designed on 2026-11-13/14 and taken ahead of that order (
 2026-11-14 (a second export shows decided groups blank) led to a redesign on 2026-11-16 (Duplicates: `filo delete
 FILE.csv`, no stored decisions to delete, four kinds of keep), built on 2026-11-15/16 in five slices (schema version
 8). The terminal output was designed on 2026-11-15 and built first (Terminal output). Named retention policies
-(schema version 9) and directory rules (schema version 10) were designed and built on 2026-11-16/17. Last updated:
-2026-11-17.
+(schema version 9) and directory rules (schema version 10) were designed and built on 2026-11-16/17. A security review
+raised six issues on GitHub (#13-#18), fixed on 2026-11-19 on branch `security-review` (see "Security review fixes").
+Last updated: 2026-11-19.
 
 ## Build log
 
@@ -359,6 +360,58 @@ to be shown (see "the first design, and why it changed" above). Points the aband
 matched by hash, so a file restored to the content it was kept on would rejoin its set; a copy with hard links is one
 copy, named by its first path; `created_utc` strings do not sort as times (order by ids); the same content in two
 groups of one CSV (rows pasted from two exports) must not give contradictory actions.
+
+## Security review fixes
+
+A security review of the code raised six issues on GitHub (#13-#18). They were fixed on 2026-11-19 on branch
+`security-review`, one commit per issue, no schema change; the design is in `design.md` (Register, Retention CSV,
+Scan, Disposal), each part naming its issue.
+
+- **#15, the database path** (`a9ba70f`): the database's directory is resolved before the lock is taken; the database
+  and its WAL, SHM and journal files must be regular files owned by the user, not symlinks (modernc's SQLite has no
+  way to open with `SQLITE_OPEN_NOFOLLOW`, so the check is an `lstat` just before the open). Tests:
+  `TestDBFilesChecked`, `TestDBDirSymlinkResolved`. Untested: the refusal of a file owned by another user (a test
+  cannot make one).
+- **#18, a bounded CSV reader** (`0a1ed61`): `sheet.ReadAll` (at most 256 MB read) and limits checked before any row is
+  parsed: 1,048,576 rows and 16,384 fields (a spreadsheet's maximum), 1 MB a row. Tests: `TestReadAllLimit`,
+  `TestLimits`, `TestReadCSVLimits` (retention and duplicates).
+- **#16, the CSV read once** (`4927312`): `sheet.ReadFile` (refused from its size) and `ParseCSV` in both parsers, in
+  place of `os.ReadFile` and a second copy in `ReadCSV`. Tests: `TestReadFile`, `TestCSVTooLarge` (update and
+  delete).
+- **#14, the walk** (`d5b6d6e`): the issue said `statID` follows symlinks; it is an `lstat`, and the directory was
+  followed by `os.ReadDir`. The walk now opens each directory through the one above it (`os.Root`) and checks it is
+  the one `lstat` saw; a scan's hash jobs carry their root (`hasher.Job.Root`, `OpenIn`). Error messages keep the
+  absolute path (`open /…`, not `openat rel`). Tests: `TestDirSwappedForSymlink` (the regression test the issue
+  asked for, through a `beforeOpen` hook), `TestJobInRoot`.
+- **#13, deletion** (`6b98d95`): the file's directory is opened from the root down and every check and the removal go
+  through it. On Linux the removal is `unlinkat` by a raw syscall, since the standard `syscall` package has it only
+  without flags (`golang.org/x/sys/unix` would be cleaner, but it would be a new direct dependency); other Unix
+  systems use `os.Root.Remove` after an `lstat` (untested). Tests: `TestDeleteDirSwappedBeforeUnlink` (the old code
+  was shown to delete the file outside the root), `TestPruneDirSwapped`.
+- **#17, Go 1.27.4** (`bd5a6dc`): `go.mod`, the container image and the README. With `GOTOOLCHAIN=local` the 1.27.3
+  container refuses the new `go.mod`, so the container must be rebuilt; the checks from this commit on were run with
+  the 1.27.4 toolchain downloaded into the module cache.
+
+**Review** (`code-review`, level medium, over the six commits): nine findings, seven fixed in three commits.
+
+- Sheet (`44139af`): the limit check flipped its quoted state on every quote, so after a bare quote (`12" ruler`) it
+  stopped counting rows and named the wrong error; it now follows csv's quote rules and leaves a quote csv refuses to
+  csv. Tests: new cases in `TestLimits`.
+- Walk and hash (`b317e7b`): a directory gone between its `lstat` and its opening was taken to be gone, so its files
+  could be marked missing (now skipped as changed); a root or scope that cannot be opened stopped the walk (a failed
+  listing again, as before); hashing opens each file's directory once per worker run of files, then the file by its
+  bare name, instead of two whole-path lookups; `OpenIn`'s comment overclaimed (a directory swapped for a symlink
+  staying inside the root is followed). Tests: a dangling-symlink case in `TestDirSwappedForSymlink`,
+  `TestScopeCannotBeOpened`.
+- Dispose (`a108ac7`): a directory moved out of the root while the file was hashed, with a new one made in its place,
+  left the open directory outside the root and the file was unlinked there; the last look now checks that every
+  directory from the root down is still the one opened (`heldDir.stillAt`), and the pruning does too. The duplicate
+  guard's hard-link count was taken before the kept copy's look; it is live again. Tests:
+  `TestDeleteDirMovedOutOfRoot`, `TestDeleteDuplicateLinkAfterKeptLook` (an `afterKeptLook` hook). Both tests, and
+  the walk's dangling-symlink case, were checked to fail on the code before the fix.
+- Not changed: a directory that can be entered but not read (mode 711) now makes `filo delete` refuse the files under
+  it and flag them unreadable, where it used to delete them; nothing is deleted, and a scan cannot list such a
+  directory either. And the go 1.27.4 requirement in the old container, which is #17's purpose.
 
 ## Notes on decisions
 

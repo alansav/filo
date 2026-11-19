@@ -2,6 +2,8 @@ package dispose
 
 import (
 	"context"
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -512,5 +514,117 @@ func TestDeleteDuplicate(t *testing.T) {
 				t.Errorf("DeleteDuplicate = %+v (copy to delete: %v); want skipped, %q", o, dupErr, tt.want)
 			}
 		})
+	}
+}
+
+// TestDeleteDirSwappedBeforeUnlink: a directory on the path swapped for a symlink after every check, in the instant
+// before the removal, cannot redirect it: the unlink goes through the directory that was checked, so the file it
+// removes is the one checked, wherever its directory now is, and nothing outside the root is touched (issue #13).
+func TestDeleteDirSwappedBeforeUnlink(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks need privileges on windows")
+	}
+	root := canonicalTemp(t)
+	outside := canonicalTemp(t)
+	write(t, filepath.Join(root, "a", "b", "old.pdf"), "old")
+	write(t, filepath.Join(outside, "b", "old.pdf"), "someone else's")
+	c := candidate(t, root, "a/b/old.pdf")
+	beforeUnlink = func(string) {
+		if err := os.Rename(filepath.Join(root, "a"), filepath.Join(root, "moved")); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(outside, filepath.Join(root, "a")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Cleanup(func() { beforeUnlink = nil })
+	if _, err := New(&fakeRec{}, time.Now).Delete(context.Background(), c); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(outside, "b", "old.pdf")); err != nil {
+		t.Errorf("the file outside the root was deleted through the swapped directory: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(root, "moved", "b", "old.pdf")); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("the file checked is still there (%v), want it deleted", err)
+	}
+}
+
+// TestPruneDirSwapped: a directory above an emptied one swapped for a symlink before the pruning keeps the pruning
+// inside the root: the empty directory the symlink leads to, outside the root, stays (issue #13).
+func TestPruneDirSwapped(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks need privileges on windows")
+	}
+	root := canonicalTemp(t)
+	outside := canonicalTemp(t)
+	write(t, filepath.Join(root, "a", "b", "f"), "x")
+	if err := os.MkdirAll(filepath.Join(outside, "b"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	d := New(&fakeRec{}, time.Now)
+	if o, err := d.Delete(context.Background(), candidate(t, root, "a/b/f")); err != nil || !o.Deleted {
+		t.Fatalf("Delete = %+v, %v", o, err)
+	}
+	if err := os.Rename(filepath.Join(root, "a"), filepath.Join(root, "moved")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(root, "a")); err != nil {
+		t.Fatal(err)
+	}
+	removed, problems := d.PruneDirs()
+	if len(removed) > 0 || len(problems) > 0 {
+		t.Errorf("PruneDirs = %v, %v; want nothing removed", removed, problems)
+	}
+	if _, err := os.Stat(filepath.Join(outside, "b")); err != nil {
+		t.Errorf("the empty directory outside the root was removed: %v", err)
+	}
+}
+
+// TestDeleteDirMovedOutOfRoot: a directory on the path moved out of the root while the file is checked, with a real
+// directory made in its place, leaves the open directory outside the root: the last look sees the path no longer
+// leads to it, and nothing is deleted (review of issue #13).
+func TestDeleteDirMovedOutOfRoot(t *testing.T) {
+	root := canonicalTemp(t)
+	outside := canonicalTemp(t)
+	write(t, filepath.Join(root, "a", "b", "big.bin"), "big")
+	c := candidate(t, root, "a/b/big.bin")
+	beforeRemove = func(string) {
+		if err := os.Rename(filepath.Join(root, "a"), filepath.Join(outside, "a")); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Join(root, "a", "b"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Cleanup(func() { beforeRemove = nil })
+	o, err := New(&fakeRec{}, time.Now).Delete(context.Background(), c)
+	if err != nil || o.Deleted || !strings.Contains(o.Reason, "changed while it was being checked") {
+		t.Errorf("Delete = %+v, %v; want skipped as changed", o, err)
+	}
+	if _, err := os.Stat(filepath.Join(outside, "a", "b", "big.bin")); err != nil {
+		t.Errorf("the file moved out of the root was deleted: %v", err)
+	}
+}
+
+// TestDeleteDuplicateLinkAfterKeptLook: a hard link made while the kept copy is looked at again is still seen: the
+// link count is looked at live, after it (review of issue #13).
+func TestDeleteDuplicateLinkAfterKeptLook(t *testing.T) {
+	ctx := context.Background()
+	root := canonicalTemp(t)
+	write(t, filepath.Join(root, "keep"), "same")
+	write(t, filepath.Join(root, "dup"), "same")
+	kept, why, err := CheckKept(ctx, candidate(t, root, "keep"))
+	if err != nil || kept == nil {
+		t.Fatalf("CheckKept: %q, %v", why, err)
+	}
+	afterKeptLook = func(string) {
+		if err := os.Link(filepath.Join(root, "dup"), filepath.Join(root, "dup-link")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Cleanup(func() { afterKeptLook = nil })
+	o, err := New(&fakeRec{}, time.Now).DeleteDuplicate(ctx, candidate(t, root, "dup"), kept)
+	if err != nil || o.Deleted || !strings.Contains(o.Reason, "has another hard link") {
+		t.Errorf("DeleteDuplicate = %+v, %v; want skipped for the hard link", o, err)
 	}
 }

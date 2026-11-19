@@ -19,3 +19,9 @@ func openNoFollow(path string) (*os.File, error) {
 	}
 	return os.Open(path)
 }
+
+// openInRoot opens name in root read-only. OpenIn checks the file opened is the one lstat saw. Untested: no
+// non-Unix build is tested.
+func openInRoot(root *os.Root, name string) (*os.File, error) {
+	return root.Open(name)
+}

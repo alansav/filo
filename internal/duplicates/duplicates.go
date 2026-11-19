@@ -141,10 +141,18 @@ type Parsed struct {
 // retention CSV, or one without an action column is refused whole. A row whose export or group cannot be read is a
 // problem of its line; a row with another cell that cannot be read is kept, to refuse its group (see Plan).
 func ReadCSV(r io.Reader) (Parsed, error) {
-	var p Parsed
-	data, err := io.ReadAll(r)
+	data, err := sheet.ReadAll(r)
 	if err != nil {
-		return p, err
+		return Parsed{}, err
+	}
+	return ParseCSV(data)
+}
+
+// ParseCSV is ReadCSV on a CSV already read (with sheet.ReadFile or sheet.ReadAll), so it is not copied again.
+func ParseCSV(data []byte) (Parsed, error) {
+	var p Parsed
+	if len(data) > sheet.MaxSize {
+		return p, sheet.ErrTooLarge
 	}
 	sh, _ := sheet.Open(data, "id", "export")
 	switch {
@@ -159,7 +167,7 @@ func ReadCSV(r io.Reader) (Parsed, error) {
 	case !sh.Has("action"):
 		return p, ErrNoAction
 	}
-	err = sh.Each(func(row sheet.Row) {
+	err := sh.Each(func(row sheet.Row) {
 		ex, exErr := strconv.ParseInt(row.Get("export"), 10, 64)
 		group, gErr := strconv.ParseInt(row.Get("group"), 10, 64)
 		switch {

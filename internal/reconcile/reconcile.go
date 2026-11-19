@@ -225,12 +225,12 @@ func Scan(ctx context.Context, s *store.Store, opt Options) (Summary, error) {
 	var jobs []hasher.Job
 	abs := func(rel string) string { return filepath.Join(root.Path, filepath.FromSlash(rel)) }
 	for _, c := range cands {
-		jobs = append(jobs, hasher.Job{Path: abs(c.e.Path)})
+		jobs = append(jobs, hasher.Job{Path: abs(c.e.Path), Root: root.Path})
 	}
 	var newFileIdx []int // indexes into news of the regular files, in job order
 	for i, n := range news {
 		if n.e.Kind == walk.KindFile {
-			jobs = append(jobs, hasher.Job{Path: abs(n.e.Path)})
+			jobs = append(jobs, hasher.Job{Path: abs(n.e.Path), Root: root.Path})
 			newFileIdx = append(newFileIdx, i)
 		}
 	}

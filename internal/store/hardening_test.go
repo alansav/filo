@@ -41,6 +41,80 @@ func TestLockSymlinkRefused(t *testing.T) {
 	}
 }
 
+func TestDBFilesChecked(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("no flock on windows")
+	}
+	orig := tempDB(t)
+	mustClose(t, mustOpen(t, Options{DBPath: orig}))
+	tests := []struct {
+		name  string
+		plant func(t *testing.T, db string) // what is put at or next to db
+		want  string
+	}{
+		{"database is a symlink to a database", func(t *testing.T, db string) {
+			if err := os.Symlink(orig, db); err != nil {
+				t.Fatal(err)
+			}
+		}, "is a symlink"},
+		{"database is a dangling symlink", func(t *testing.T, db string) {
+			if err := os.Symlink(filepath.Join(t.TempDir(), "elsewhere"), db); err != nil {
+				t.Fatal(err)
+			}
+		}, "is a symlink"},
+		{"WAL file is a symlink", func(t *testing.T, db string) {
+			if err := os.Symlink(filepath.Join(t.TempDir(), "elsewhere"), db+"-wal"); err != nil {
+				t.Fatal(err)
+			}
+		}, "is a symlink"},
+		{"journal file is a symlink", func(t *testing.T, db string) {
+			if err := os.Symlink(filepath.Join(t.TempDir(), "elsewhere"), db+"-journal"); err != nil {
+				t.Fatal(err)
+			}
+		}, "is a symlink"},
+		{"database is a directory", func(t *testing.T, db string) {
+			if err := os.Mkdir(db, 0o700); err != nil {
+				t.Fatal(err)
+			}
+		}, "not a regular file"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			db := tempDB(t)
+			tc.plant(t, db)
+			s, err := Open(context.Background(), Options{DBPath: db})
+			if err == nil {
+				s.Close()
+				t.Fatal("Open succeeded, want a refused database file")
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("Open = %v, want %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestDBDirSymlinkResolved(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("no flock on windows")
+	}
+	dir := t.TempDir()
+	alias := filepath.Join(t.TempDir(), "alias")
+	if err := os.Symlink(dir, alias); err != nil {
+		t.Fatal(err)
+	}
+	s := mustOpen(t, Options{DBPath: filepath.Join(alias, "filo.db")})
+	defer mustClose(t, s)
+	if want := filepath.Join(dir, "filo.db"); s.DBPath() != want {
+		t.Errorf("DBPath = %s, want %s", s.DBPath(), want)
+	}
+	// The same database through the real directory takes the same lock.
+	if s2, err := Open(context.Background(), Options{DBPath: filepath.Join(dir, "filo.db")}); err == nil {
+		s2.Close()
+		t.Error("the same database opened twice through a symlinked directory")
+	}
+}
+
 func TestSnapshotDirChecks(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("modes and symlinks differ on windows")
