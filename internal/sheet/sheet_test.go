@@ -3,6 +3,8 @@ package sheet
 import (
 	"errors"
 	"io"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -118,5 +120,22 @@ func TestLimits(t *testing.T) {
 	}
 	if sh, _ := Open([]byte(strings.Repeat(",", MaxFields)+"id,export\n"), "id", "export"); sh != nil {
 		t.Error("Open read a header over MaxFields")
+	}
+}
+
+// TestReadFile: a file over MaxSize is refused from its size, before it is read.
+func TestReadFile(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "x.csv")
+	if err := os.WriteFile(p, []byte("id,export\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if data, err := ReadFile(p); err != nil || string(data) != "id,export\n" {
+		t.Errorf("ReadFile = %q, %v", data, err)
+	}
+	if err := os.Truncate(p, MaxSize+1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReadFile(p); !errors.Is(err, ErrTooLarge) {
+		t.Errorf("ReadFile over MaxSize = %v, want ErrTooLarge", err)
 	}
 }

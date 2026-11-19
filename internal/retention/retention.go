@@ -229,10 +229,18 @@ var (
 // ReadCSV reads an edited retention CSV, as spreadsheets save it (see package sheet). A row listed more than once
 // is refused every time it appears, rather than guessing which one is meant.
 func ReadCSV(r io.Reader) (Parsed, error) {
-	var p Parsed
 	data, err := sheet.ReadAll(r)
 	if err != nil {
-		return p, err
+		return Parsed{}, err
+	}
+	return ParseCSV(data)
+}
+
+// ParseCSV is ReadCSV on a CSV already read (with sheet.ReadFile or sheet.ReadAll), so it is not copied again.
+func ParseCSV(data []byte) (Parsed, error) {
+	var p Parsed
+	if len(data) > sheet.MaxSize {
+		return p, sheet.ErrTooLarge
 	}
 	sh, headers := sheet.Open(data, "id", "export", "retention")
 	if sh == nil {
@@ -249,7 +257,7 @@ func ReadCSV(r io.Reader) (Parsed, error) {
 		return p, ErrNotRetentionCSV
 	}
 
-	err = sh.Each(func(row sheet.Row) {
+	err := sh.Each(func(row sheet.Row) {
 		bad := func(format string, args ...any) {
 			p.Problems = append(p.Problems, Problem{row.Line, fmt.Sprintf(format, args...)})
 		}

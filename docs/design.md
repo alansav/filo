@@ -326,7 +326,8 @@ The retention CSV and `filo update` write only the register and the CSV file the
   package `sheet`: at most 256 MB (no more than that is ever read), 1,048,576 rows (header and empty rows included)
   and 16,384 fields in a row, the most a spreadsheet keeps, and 1 MB in one row. A CSV over any of them is refused
   whole, before a row is read, saying which limit and on which line; the limits follow the quotes, so a separator or
-  line end inside a quoted cell does not count.
+  line end inside a quoted cell does not count. `filo update` and `filo delete FILE.csv` read the file once (issue
+  #16): a file whose size is over the limit is refused before it is read.
 - **Dates**: `YYYY-MM-DD` only, and a real date (`2027-02-29` is refused). Anything else, such as `06/07/2027`, is
   refused, never guessed; the message suggests formatting the column as text, since spreadsheets may rewrite dates in
   the locale's format. Past dates are accepted (see Retention CSV columns). Periods counted from today (`+1y`) were dropped

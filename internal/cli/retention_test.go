@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alansav/filo/internal/sheet"
 	"github.com/alansav/filo/internal/store"
 )
 
@@ -262,4 +263,26 @@ func TestUpdateGolden(t *testing.T) {
 	editCSV(t, r2, setRetention(map[string]string{"2020 return.pdf": "", "2023-01-01 coffee.pdf": ""}))
 	golden(t, "update-retention-clear.txt", root, filo(ExitOK, "l\ny\n", true, "update", r2).stdout)
 
+}
+
+// TestCSVTooLarge: filo update and filo delete FILE.csv refuse a CSV over sheet.MaxSize in one line, without
+// reading it (the file is sparse: it takes no disk space).
+func TestCSVTooLarge(t *testing.T) {
+	for _, cmd := range []string{"update", "delete"} {
+		t.Run(cmd, func(t *testing.T) {
+			dir := t.TempDir()
+			env := map[string]string{"FILO_DB": filepath.Join(dir, "filo.db")}
+			big := filepath.Join(dir, "big.csv")
+			if err := os.WriteFile(big, []byte("id,export,retention\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Truncate(big, sheet.MaxSize+1); err != nil {
+				t.Fatal(err)
+			}
+			r := run(t, context.Background(), env, cmd, big)
+			if r.code != ExitError || !strings.Contains(r.stderr, sheet.ErrTooLarge.Error()) {
+				t.Errorf("code %d\n%s", r.code, r.stderr)
+			}
+		})
+	}
 }

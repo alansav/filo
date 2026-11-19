@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 )
 
@@ -48,6 +49,19 @@ func ReadAll(r io.Reader) ([]byte, error) {
 		return nil, ErrTooLarge
 	}
 	return data, nil
+}
+
+// ReadFile reads the CSV at path once, within MaxSize (ReadAll).
+func ReadFile(path string) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	if fi, err := f.Stat(); err == nil && fi.Mode().IsRegular() && fi.Size() > MaxSize {
+		return nil, ErrTooLarge
+	}
+	return ReadAll(f)
 }
 
 // Sheet is an edited CSV whose header has been read.
