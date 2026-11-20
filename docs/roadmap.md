@@ -36,31 +36,36 @@ what each device observes (roots, inodes, scan history) stays its own. Tags and 
 on the other device: a retention by content hash (an edited file needs a new decision), a tag by hash and then path
 (an edit keeps it; see 9c and 18a).
 
-The pieces, in the order agreed: 19 finding files (`filo files`), 18a tags, then the sync items (9b device ID, 9a synced
-directories, 9c the journal, which also carries tags), then 20 the Filo directory and 18b project notes and packages.
+The pieces, in the order agreed: 37 showing and setting a file's details (`filo show`, `set`, `get`), 19 finding
+files (`filo files`), 18a tags, 36 bash completion, then the sync items (9b device ID, 9a synced directories, 9c the
+journal, which also carries tags), then 20 the Filo directory and 18b project notes and packages. 37 comes first
+because working with a few files from the command line comes before finding and tagging many, and 36 comes after
+tags so that its completion covers tag names from the start (reordered 2026-11-20).
 Tags come before sync because the journal must start from the decisions that already exist in any case ("seeding": a
 directory can be tagged before it is marked synced, a device can join late), so tags made earlier cost the journal
 nothing extra; meanwhile tags are used on one device.
 
 ## Priority
 
-Provisional, agreed 2026-11-17, with the first four reordered on 2026-11-20 for the goal above; the value and
+Provisional, agreed 2026-11-17, with the first places reordered on 2026-11-20 for the goal above; the value and
 complexity scores (1 to 10, Claude's estimates) are still to be settled with the person. Items 22 to 33, and
 35, are not placed yet.
 
-1. 19 finding files
-2. 18a tags
-3. 9b device ID, 9a marking synced directories, 9c sharing decisions
-4. 20 the Filo directory, 18b project notes and packages
-5. 5a progress line, 5b `--needing-retention`
-6. 13 removing empty directories
-7. 21 script mode, 34 received documents (needs 21 and 9a)
-8. 6 one decision for all copies
-9. 16 undoing an update batch, 17 suggested rules
-10. 15 where the space goes
-11. 7a–7c verifying content, 8 backup awareness, 9d snapshots to the backup machine
-12. 10 a summary for scheduled scans
-13. Later a–e
+1. 37 showing and setting a file's details
+2. 19 finding files
+3. 18a tags
+4. 36 bash completion
+5. 9b device ID, 9a marking synced directories, 9c sharing decisions
+6. 20 the Filo directory, 18b project notes and packages
+7. 5a progress line, 5b `--needing-retention`
+8. 13 removing empty directories
+9. 21 script mode, 34 received documents (needs 21 and 9a)
+10. 6 one decision for all copies
+11. 16 undoing an update batch, 17 suggested rules
+12. 15 where the space goes
+13. 7a–7c verifying content, 8 backup awareness, 9d snapshots to the backup machine
+14. 10 a summary for scheduled scans
+15. Later a and c–e
 
 ## Items
 
@@ -381,6 +386,60 @@ named in the register, which outlives the retention that deleted it.
   register's `freelist` needs a `VACUUM` so forgotten names are really gone from the file; how it fits 9c's delete
   records, which other devices read.
 
+### 36. Bash completion (V5, C4)
+Agreed with the person on 2026-11-20. Tab completes Filo's commands, flags and arguments in bash.
+- **Loading it.** `filo completion bash` prints the script and writes nothing. The README shows two ways: `source
+  <(filo completion bash)` in `.bashrc` (always current, run at each shell start), or the output saved once to
+  `~/.local/share/bash-completion/completions/filo`, which the `bash-completion` package loads on the first Tab
+  (rewritten after an upgrade that changes commands). Filo never edits `.bashrc` itself (hard rules).
+- **Static:** commands, subcommands and flags. Commands are a `switch` in `internal/cli` and each command's flags are
+  known only inside it, so the list is written down once or the flags move into a table; a test checks that every
+  command and flag the CLI accepts is completed, so the two cannot drift apart.
+- **Dynamic:** a hidden `filo __complete WORDS...` the script calls on Tab. Strictly read-only: no snapshot, never
+  creates a database, prints nothing on failure, and honours a `--db` typed on the line. It completes file paths
+  from the register merged with the disk (so missing files, and files deleted by Filo, complete; the typed word,
+  relative or starting with `~`, is turned into a root and a path in it, as 37 does), policy names, rule patterns,
+  and tag names (18a comes first).
+- Bash only at first (zsh can load bash completions). No framework: Cobra would be a new dependency and a rewrite of
+  every command's parsing.
+
+### 37. Showing and setting a file's details (V7, C5)
+Agreed with the person on 2026-11-20. Everything Filo holds about a file, from the command line, and every decision
+it shows can be changed by a command: quicker than an export, edit and update round for a few files (the CSV stays
+the tool for many). Replaces "Later b, setting dates in place".
+- **`filo show PATH...`**, not a bare `filo FILE`: a file named like a command (`scan`, `delete`) would be guessed
+  at. Paths are looked up in the register, not on the disk: a missing file works, and a file deleted by Filo is
+  found by its last path. This lookup (a typed path to a root and a register path) is shared later by 36 and 18a.
+- **Observed and decided.** What Filo observed is shown and never edited, since a scan corrects it: paths now and
+  before (moves), root, status, size, modified time, hash, first seen, the copies with the same content. What the
+  person decided is all editable by command: `file_date`, the retention (a date, a period, `forever` or a policy),
+  the duplicate decisions (always, records) and, with 18a, tags. Shown but not edited: `keep_until` (worked out),
+  the review record (history), and "policy set by rule X" (changed through `filo rules`; setting a retention by
+  hand replaces it, as the CSV does).
+- **A directory** shows a summary: its root and whether it is reachable; files and size by status; retention by
+  state (dated, needs a date, candidates, `forever`) and by policy; the rules that apply and any ties; whether it is
+  excluded from duplicates and how many files have copies; later, tags. Only its own files unless `-r` or
+  `--recursive` is given, with one line per subdirectory and its count. A directory's decisions are its rules and
+  its exclusion, which have their commands already; `set` does not take a directory (a rule also covers files that
+  arrive later; two ways of doing it would blur which one set a file's retention).
+- **`filo set FILE... [--file-date DATE | --no-file-date] [--retention R | --no-retention] [--duplicates
+  always|records|counted]`.** Several flags at once, in any order. A contradiction (`--file-date` with
+  `--no-file-date`) or no flag at all is refused before anything is checked. All or nothing: if any file is
+  refused, nothing is written and every refusal is listed. The retention CSV's rules apply unchanged: a period needs
+  a `file_date` (stored, or given in the same command), so `--no-file-date` on a file whose retention is a period is
+  refused; a new `file_date` works a period out again; past dates are accepted and listed with the hint to check for
+  a typo; clearing asks first (or `-y`); no date is read from the file name (the CSV only suggests one where the
+  person sees it). Recorded as a review batch, like an update. `--duplicates` is about the content, not the one
+  file, and the output says so: `always` covers every copy ("applies to 3 copies"), `records` needs two or more
+  files with the same content, all named, and `counted` undoes either, as `filo duplicates include FILE` does. There
+  are no separate `filo duplicates always` or `records` commands (one way to do each thing).
+- **`filo get FILE... --retention --file-date --keep-until ...`**: the read-only pair of `set`, for scripts and
+  quick checks, with the same flag names plus read-only fields (`--keep-until`, `--hash`, `--size`). One flag on one
+  file prints the bare value. The layout for several files and fields (file names are untrusted when piped) is
+  settled with the mockups.
+- **Slices** (one PR), each output mocked and agreed before its slice: `show FILE`, with the path lookup; `show DIR`
+  and `-r`; `set` for file date and retention; `set --duplicates`; `get`; README and help.
+
 ### Docs
 
 Improvements to the three documents themselves, suggested on 2026-11-17 after the split.
@@ -414,12 +473,6 @@ creation time (many filesystems do not record it, and a copy, restore or sync re
 `relatime` and `noatime` mounts make it unreliable, and Filo reads with `O_NOATIME` so as not to disturb it). Empty
 files are shown through it (`--empty`); until then a count line in `filo report` would keep them visible. `--name`
 is item 19.
-
-### Later b. Setting dates in place (V6, C4)
-Setting or clearing `keep_until` on a few files through a whole export, edit and update round is cumbersome. Wanted:
-set or clear a retention on a few files directly. Open: a command (for example `filo keep PATH... RETENTION`, taking
-the same retentions as the CSV), part of the UI, or both. Periods always count from `file_date`; a period counted
-from today (`+1y`) was closed on 2026-11-13.
 
 ### Later c. A UI in place of the CSV (V8, C10)
 Including viewing and editing the register in place. Everything hangs off the stable file ID, so none of it needs the
