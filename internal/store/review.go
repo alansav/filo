@@ -79,13 +79,14 @@ type Filter struct {
 	RootID   int64  // 0 = every root
 	Scope    string // relative to the root, '/' separators; "" = the whole root
 	PolicyID int64  // only the files on this retention policy; 0 = any
+	FileID   int64  // only this file; 0 = any
 	// Ruleless: only the files a directory rule may give a policy, before their status: no retention, no policy,
 	// never given one by a rule. What a scan's rules look at, so they classify only those.
 	Ruleless bool
 }
 
 // scopeSQL returns a condition on alias p (paths) for the filter, and its arguments.
-// A policy filter, and Ruleless, are conditions on alias f (files).
+// A policy filter, Ruleless and a file are conditions on alias f (files).
 func (f Filter) scopeSQL() (string, []any) {
 	cond, args := "", []any(nil)
 	if f.PolicyID != 0 {
@@ -93,6 +94,9 @@ func (f Filter) scopeSQL() (string, []any) {
 	}
 	if f.Ruleless {
 		cond += " AND f.retention IS NULL AND f.policy_id IS NULL AND f.rule_dated_utc IS NULL"
+	}
+	if f.FileID != 0 {
+		cond, args = cond+" AND f.id = ?", append(args, f.FileID)
 	}
 	switch {
 	case f.RootID == 0:
