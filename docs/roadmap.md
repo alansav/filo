@@ -588,6 +588,24 @@ the tool for many). Replaces "Later b, setting dates in place".
       ~/Projects/c/LICENSE
     - these copies no longer count as duplicates; filo set FILE --duplicates counted undoes it
   ```
+- **`filo get`, the agreed output** (2026-11-20, for slice 5). Read-only, for scripts and quick checks. Fields are
+  `set`'s plus the read-only ones (`--file-date`, `--retention`, `--keep-until`, `--status`, `--duplicates`, `--size`,
+  `--modified`, `--sha256`, `--root`, `--first-seen`), printed in the order given; no `--all` (that is `show`). A
+  field with no value prints as empty, never "none" (a policy may be named `none`; a script tests for empty).
+  - One file, one field: the bare value, terminal or piped (`filo get tax.pdf --retention` prints `7y`).
+  - One file, several fields: name and value lines (`retention    7y`); piped, a tab between them.
+  - Several files: one row per file, values in the order given and the path last; in a terminal with a header
+    and `~`, piped with no header, tab-separated, the path absolute. The path is last because a file name may hold
+    a tab and a value cannot, so splitting on the first N tabs keeps the whole path; `-0` ends each row with NUL
+    instead of a newline, as in 19.
+
+    ```
+    retention    keep_until
+    7y           2031-03-31   ~/Documents/receipts/coffee.pdf
+                 2030-02-28   ~/Documents/receipts/lunch.pdf
+    forever      forever      ~/Documents/receipts/taxi.pdf
+    ```
+  - A path the register does not know: the error line on stderr, the other files still printed, exit status 1.
 
 ### Docs
 
