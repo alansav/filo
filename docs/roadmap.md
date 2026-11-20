@@ -146,7 +146,7 @@ The scan already skips `.filo`.
   synced directory:
   - directory rules and the policies they use;
   - retentions and `file_date`s, keyed on content hash, so a file moved on one device still matches;
-  - labels (18a), keyed on relative path and hash;
+  - tags (18a), with the file's relative path and hash;
   - deletes by Filo, so another device can tell "deleted by Filo on the laptop after the hash check" from an
     unexplained missing file.
 - **Importing.** Idempotent: each device records the highest `seq` applied per journal and skips anything at or
@@ -205,19 +205,53 @@ what it needs is there.
 Point out directories where most files already share one policy and offer the `filo rules add` that would cover the
 rest. A suggestion only, never applied on its own.
 
-### 18a. Projects (V7, C6)
-Files tagged for an event or a project: a project is a named list of files (links modelled at the project level,
-not per file), by their stable ID, so a file keeps its
-project when it moves or is renamed, and a file can be in several projects. Optional: a project retention ("keep
-these until the project closes, plus 2 years"), next to named policies.
-Proposed 2026-11-19: a tag and a project are one mechanism, a label on files (a project may carry a retention),
-not two features. In the journal (9c) a label is keyed on relative path and hash, matched on hash first and path
-second, because editing a note should not drop its project, unlike retention, which asks for a new decision when
-content changes. A label whose file cannot be found is reported, never guessed.
+### 18a. Tags (V7, C6)
+Designed with the person on 2026-11-19/20 (see Direction, the goal). Tags describe files, so files can be found by
+tag; a project is a tag.
+- **One mechanism.** Tags and projects are one thing: a project is a tag (`project:house sale`), which 18b can give
+  a markdown note. **A tag is not a retention:** a file has one retention (a date, a period or a policy) and any
+  number of tags, and a tag never carries a retention. (Possible later, not agreed: tags as an input to rules that
+  set a policy.)
+- **A tag is `key:value`, or a bare value**, and the key is first-class: files can be found by key, by key and
+  value, or by a key they lack (`--no-tag sender:`, the tagging to-do list). A file can have several values for one
+  key (two projects). Keys are created on the fly, never declared; `filo tags` lists them, and a tag exists only
+  while some file has it. A typo is fixed by renaming the tag, or by hand: list its files, add the right tag, remove
+  the wrong one. (To check with 18b: a project tag with a note whose files all lose it.)
+- **Spelling.** Values may hold spaces (trimmed at the ends, runs collapsed), keep the case first typed, and match
+  ignoring case (`sender:british gas` finds `British Gas`). Keys are lowercase whatever is typed, have no spaces
+  (letters, digits, `-`, `_`) and at least one letter. The first colon separates the key when what is before it is
+  a valid key, so `project:trip: Paris 2027` is key `project`, and `10:30 call` is a bare tag; `re: invoice` is key
+  `re`, odd but logical. A tag cannot hold `;` (the CSV's separator).
+- **Commands** (the first version): `filo tag FILE... TAG...` and `filo untag FILE... TAG...`; `filo tags`, tags with
+  their file counts; `filo tags rename OLD NEW`, across every file, which fixes a typo in the key or the value and may
+  only change case (`british gas` to `British Gas`); `filo export tags [DIR] -o FILE` and `filo update FILE` (a
+  separate CSV from retention, told apart by its header). Finding files: `filo files --tag` and `--no-tag` (19).
+- **The tags CSV** has a `tags` cell per file, tags separated by `;`, filled at export with the file's current tags.
+  The cell replaces the file's tags: a tag not in it is removed, so an untouched cell changes nothing and an emptied
+  one removes all. A file whose tags changed since the export (tagged by command meanwhile) is refused for that row,
+  as a changed file is today.
+- **A file Filo has not seen yet** (dropped in the inbox, tagged at once): `filo tag` registers only that file, not
+  its directory, for speed. Its path already known: just tagged. The same inode as a known file at another path:
+  refused, "looks moved from X; run filo scan" (never guess; a scan pairs it). Otherwise it is registered as a new
+  file (hashed; copies' tags taken, below), and the next scan treats it as known. Outside every root, or where the
+  root's settings skip it (hidden, ignored): refused, saying why.
+- **Tags follow the file**, as the register tracks it, not its path or content: kept through a move or rename (the
+  inbox routine), an edit (unlike retention, which asks again), and while missing; a file deleted by Filo drops out of
+  listings. **A copy keeps the tags:** a new file with the same content as files present takes the union of their
+  tags, once, when first seen, and the scan says so when those copies had different tags; after that each copy's tags
+  are its own. Deleted files pass on nothing (a restored file is new, as for retention). A file saved by writing a
+  new file and renaming it into place (new inode, new content) stays a reported possible move, never paired; the
+  report says the old file had tags.
+- **Slices** (one PR): the register (a schema version, a tags table on file ids) and the spelling rules; `filo tag`
+  and `untag` with single-file registration and copies' tags in scans; `filo tags` and rename; `filo files --tag`;
+  `filo export tags` and `filo update`; README and help. Each output mocked and agreed before its slice. Tags are
+  stored so each change can be written to the journal later (9c) without rework.
+- **Later:** rules that tag by name pattern (`*British Gas*` under `received` gives `sender:British Gas`), once tags
+  have been used by hand. In the journal (9c) a tag goes with its file's relative path and hash.
 
 ### 18b. A project package (V5, C5)
 Pull a project's files together. By the direction above, Filo writes the list and a standard tool does the copying
-(`filo files --project trip -0 | tar --null -T - -czf trip.tgz`), or Filo writes a copy script (21). Filo itself
+(`filo files --tag "project:trip" -0 | tar --null -T - -czf trip.tgz`), or Filo writes a copy script (21). Filo itself
 never copies files into the scanned trees: the copies would come back as new files and new duplicate groups.
 Project notes (proposed 2026-11-19): Filo could also write one markdown note per project, with a link to each
 file, into the Filo directory (20), never into a scanned tree, where each regeneration would show as a changed
@@ -225,19 +259,19 @@ file needing a decision. The output is deterministic (sorted, no timestamps, wri
 devices never make conflict copies. A relative link works on a device only if the note and its targets are in the
 same synced directory. It is Filo's first write beside the register, so it comes after the delete work.
 
-### 19. Search by name (V8, C2)
-`filo files --name GLOB [DIR]`: find files in the register by name; read-only. The first slice of the query view
-(Later a), and what projects (18a) build on. Its output must work in a pipe (`-0`, or tab-separated when piped).
-**To decide first:** Rejected (below, "Building search") rejects search, since indexers already find files
-and Filo owns lifecycle. A lookup by name over the register is narrower than that; the rejection is to be revisited
-or the item narrowed.
-Narrowed 2026-11-19 (proposed): the lookup covers what the register holds (name, status, labels from 18a), not
-file contents; see Rejected, "Building search".
+### 19. Finding files (V8, C2)
+`filo files [DIR] [--name GLOB] [-0]`: find files in the register by name; read-only. The first slice of the query
+view (Later a), and what tags (18a) build on: they add `--tag TAG` and `--no-tag TAG` (agreed 2026-11-19).
+- Conditions combine with AND only; an OR is two runs. `key:` means any value of that key, a value may be a glob
+  (`sender:British*`), and `--no-tag sender:` lists the files with no sender.
+- In a terminal: each file with its path (and, with 18a, its tags), cut at 10 with `… N more`. Piped: one absolute
+  path per line, or NUL-separated with `-0`, so `tar`, `xargs` and the like work with any file name.
+- Only files present now: not deleted, not missing.
+- It covers what the register holds (name, status, tags), not file contents; see Rejected, "Building search".
 
 ### 20. The Filo directory (V6, C4)
 One directory per device, chosen by the person (for example `~/Sync/Filo`), shared across devices by any sync
-service, which Filo is allowed to write into. It carries snapshots (9d) and project notes and packages (18a,
-18b). The decision journals (9c) moved out on 2026-11-19: they live in `.filo/` of each synced directory (9a).
+service, which Filo is allowed to write into. It carries snapshots (9d) and project notes (18b). The decision journals (9c) moved out on 2026-11-19: they live in `.filo/` of each synced directory (9a).
 Filo never scans it, even inside a root. Each device writes only its own files there. Needs a change to the hard
 rule that Filo writes nothing outside its data directory, `--db` and `-o` files: one more place, chosen by the
 person.
@@ -367,7 +401,7 @@ register to change shape. Open: the technology.
 Notes on a file; tasks, some with files and some without; possibly a productivity system built on the register (a
 recurring check on a file, such as an annual look at a seven-year record, is a task). A change of scope from "Filo
 owns lifecycle" that needs its own discussion first; by the direction above it may be a separate tool reading the
-register. Links to a project are item 18a. (Holds were dropped on 2026-11-12: a file that must be kept gets a later
+register. Linking files to a project is a tag (18a). (Holds were dropped on 2026-11-12: a file that must be kept gets a later
 retention or `forever`.)
 
 ### Later e. A watcher (V3, C8)
@@ -435,7 +469,6 @@ contradicts one of them is a discussion when the roadmap is reviewed.
 - **One database per root** (the first Go design, with the database in `<root>/.filo`). Several roots on one device
   meant several registers to manage; one database with a `roots` table replaced it on 2026-11-11.
 - **Themed command and project names** (the earlier "dirge" idea, funeral-style subcommands). Plain names win.
-- **Building search.** Existing indexers and document managers (Paperless-ngx for received documents, desktop
-  indexers) already cover finding files. Filo owns lifecycle. *To settle (2026-11-19):* narrow this to "Filo does
-  not index file contents", since finding files by name and label over what the register holds (19, 18a) is a
-  lookup, not search, and projects need it.
+- **Building search: Filo does not index file contents** (narrowed 2026-11-20). Existing indexers and document
+  managers (Paperless-ngx for received documents, desktop indexers) already search inside files. Finding files by
+  name and tag over what the register holds (19, 18a) is a lookup, not search, and is the goal (see Direction).
