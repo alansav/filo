@@ -225,7 +225,10 @@ tag; a project is a tag.
   ignoring case (`sender:british gas` finds `British Gas`). Keys are lowercase whatever is typed, have no spaces
   (letters, digits, `-`, `_`) and at least one letter. The first colon separates the key when what is before it is
   a valid key, so `project:trip: Paris 2027` is key `project`, and `10:30 call` is a bare tag; `re: invoice` is key
-  `re`, odd but logical. A tag cannot hold `;` (the CSV's separator).
+  `re`, odd but logical. A tag cannot hold `;` (the CSV's separator) or `*` (the one wildcard in a search, 19), so
+  `filo tag` refuses both and says why; `?` and `[` are ordinary characters (`urgent?`, `Q1 [draft]`). A tag needs a
+  value: `filo tag FILE sender:` is refused ("give a value"), since `key:` alone is only a search (agreed
+  2026-11-20).
 - **Commands** (the first version): `filo tag FILE... TAG...` and `filo untag FILE... TAG...`; `filo tags`, tags with
   their file counts; `filo tags rename OLD NEW`, across every file, which fixes a typo in the key or the value, and
   may also change only the case (`british gas` to `British Gas`); `filo export tags [DIR] -o FILE` and `filo update
@@ -269,8 +272,10 @@ same synced directory. It is Filo's first write beside the register, so it comes
 ### 19. Finding files (V8, C2)
 `filo files [DIR] [--name GLOB] [-0]`: find files in the register by name; read-only. The first slice of the query
 view (Later a), and what tags (18a) build on: they add `--tag TAG` and `--no-tag TAG` (agreed 2026-11-19).
-- Conditions combine with AND only; an OR is two runs. `key:` means any value of that key, a value may be a glob
-  (`sender:British*`), and `--no-tag sender:` lists the files with no sender.
+- Conditions combine with AND only; an OR is two runs. `key:` means any value of that key (only in a search: a tag
+  always has a value), `*` in a value matches any run of characters (`sender:British*`; the only wildcard, and a tag
+  cannot contain it, so an exact search is always possible; `?` and `[` match themselves), and `--no-tag sender:`
+  lists the files with no sender.
 - In a terminal: each file with its path (and, with 18a, its tags), cut at 10 with `… N more`. Piped: one absolute
   path per line, or NUL-separated with `-0`, so `tar`, `xargs` and the like work with any file name.
 - Only files present now: not deleted, not missing.
