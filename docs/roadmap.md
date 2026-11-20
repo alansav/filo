@@ -42,8 +42,8 @@ nothing extra; meanwhile tags are used on one device.
 ## Priority
 
 Provisional, agreed 2026-11-17, with the first four reordered on 2026-11-20 for the goal above; the value and
-complexity scores (1 to 10, Claude's estimates) are still to be settled with the person. Items 22 to 33 are not
-placed yet.
+complexity scores (1 to 10, Claude's estimates) are still to be settled with the person. Items 22 to 33, and
+35, are not placed yet.
 
 1. 19 finding files
 2. 18a tags
@@ -352,6 +352,22 @@ built.
 - **Inbox ageing.** A report line for files in the inbox longer than N days, from `first_seen_scan`, so the inbox
   does not become a new pile. Needs a root setting that marks a directory as an inbox.
 - Open: whether to offer a suggested name from the date alone (never the sender).
+
+### 35. Forgetting deleted files (V6, C4)
+Raised 2026-11-19, while designing tags. A file Filo deletes keeps its register row forever (`design.md`,
+Disposal: "those rows are the history of what Filo deleted"): its name, path, hash, size and retention, its path
+history, events, review and export rows, and from 18a its tags. Snapshots hold copies for up to 31 days, and the
+copies kept before a schema upgrade are never rotated. So a bill deleted because its seven years were up is still
+named in the register, which outlives the retention that deleted it.
+- What the history is used for: the report's "deleted by filo" counts and sizes, the "same content as a file
+  deleted on …" hint, and (9c) telling another device that a missing file was deleted by Filo. None of these needs
+  names or paths for long.
+- Idea: after a grace period (long enough for every device to sync the delete, for example 90 days), forget a
+  deleted file entirely (its rows, paths, events, tags, review and export rows), keeping only counts and sizes for
+  the report.
+- Open: the period, and whether it is a setting; what happens to snapshots and the pre-upgrade copies; whether the
+  register's `freelist` needs a `VACUUM` so forgotten names are really gone from the file; how it fits 9c's delete
+  records, which other devices read.
 
 ### Docs
 
