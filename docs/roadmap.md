@@ -520,7 +520,9 @@ the tool for many). Replaces "Later b, setting dates in place".
     "copies on purpose"). Files deleted by Filo are counted on the Directory line, not listed.
   - **With `-r`:** the title says "and below" and the counts cover the whole subtree; the Directories and Files
     sections become a block per directory, as `ls -R` (the same directories-then-files order at each level), each
-    under a header with the directory's path from the shown one, its file count and how many need a decision:
+    under a header with the directory's path from the shown one, its file count and how many need a decision. The
+    Rules section lists the shown directory's rules as without `-r`; a rule set on a directory below it is listed
+    under that directory's block header (agreed 2026-11-20):
 
     ```
     bills and below   directory . 3 directories . 9 files . 34 MB . ~/Documents
