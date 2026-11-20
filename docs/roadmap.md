@@ -439,6 +439,50 @@ the tool for many). Replaces "Later b, setting dates in place".
   settled with the mockups.
 - **Slices** (one PR), each output mocked and agreed before its slice: `show FILE`, with the path lookup; `show DIR`
   and `-r`; `set` for file date and retention; `set --duplicates`; `get`; README and help.
+- **`filo show FILE`, the agreed output** (2026-11-20, for slice 1). Each file starts with a title line: the name,
+  then a summary (status, size, directory); several files are shown in full one after another, each title with a
+  bold `[n/total]` in front (as `filo delete` numbers its files; no counter for one file), and the sections indented
+  under it, so only titles start at the left edge. Order: File, Retention, Copies. One `Next:` line at the end.
+
+  ```
+  [1/3] 2022-01 British Gas.pdf   kept until 2029-01-31 . 184 KB . ~/Documents/bills
+    File
+      path        ~/Documents/bills/2022-01 British Gas.pdf
+      root        ~/Documents
+      size        184 KB
+      modified    2022-02-03 09:14   unchanged since the last scan (2026-11-20)
+      sha256      3f9a1c0e8b2d47f6a9e0c5d1b7a3f2e8c4d6b0a9e1f3c5d7b9a2e4f6c8d0e21e
+      first seen  2026-11-12 (scan 3)
+      moved from  ~/Documents/inbox/british-gas.pdf   2026-11-12 to 2026-11-13   ... 2 more: --history
+    Retention
+      status      kept
+      retention   bills (7y), a policy set by rule bills/*
+      file_date   2022-01-31
+      keep_until  2029-01-31   in 2 years 2 months
+      reviewed    2026-11-14, by filo update, on this content
+    Copies   1 other file with the same content . counted as a duplicate
+      ~/Backup/bills/2022-01.pdf   until 2029-01-31
+
+  [2/3] 2025-03 Water.pdf   [!] needs a retention . 61 KB . ~/Documents/bills
+    ...
+      status      [!] undated: no retention
+
+  [3/3] 2015-06 Council Tax.pdf   deleted by filo on 2026-11-16 . 90 KB . ~/Documents/bills
+    ...
+
+  Next: filo set FILE --retention R, --file-date DATE or --duplicates always|records (filo help set for more)
+  ```
+  - **The disk check** is on the `modified` line: an `lstat` compared with the register's size, modified time and
+    inode, reading no content ("unchanged since the last scan (DATE)", or "[!] changed on disk since the last scan:
+    run filo scan"); a file not there says "[!] not on disk" on the `path` line. **`--verify`** re-hashes the file
+    and says on the `sha256` line "content matches the register (read now)" or "[!] differs from the register"
+    (the one-file form of 7a; show still records nothing). Sidecar hash files are 7b's, which adds a line here.
+  - The full SHA-256, as `sha256sum` prints it. `keep_until` with the time left: years and months, days under a
+    month, "today", and "[!] … ago" once past. `file_date` only when one is stored (no date read from the name).
+  - **Earlier paths:** the latest, with the dates Filo saw the file there, then "… N more: --history"; `--history`
+    lists every path newest first, each with its from and to dates.
+  - A missing file and a file deleted by Filo are shown from the register, with their status in the title. A path
+    the register does not know is an error: "not in the register yet: run filo scan", or "outside every root".
 
 ### Docs
 
