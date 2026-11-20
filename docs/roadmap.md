@@ -483,6 +483,59 @@ the tool for many). Replaces "Later b, setting dates in place".
     lists every path newest first, each with its from and to dates.
   - A missing file and a file deleted by Filo are shown from the register, with their status in the title. A path
     the register does not know is an error: "not in the register yet: run filo scan", or "outside every root".
+- **`filo show DIR`, the agreed output** (2026-11-20, for slice 2). The same shape: a title line with a summary,
+  sections indented under it, one `Next:` line. No retention or copies counts: the contents are listed instead.
+
+  ```
+  bills   directory . 3 directories . 14 files . 2.1 MB . ~/Documents
+    Directory
+      path        ~/Documents/bills
+      root        ~/Documents   reachable . last scan 2026-11-20
+      files       12 present . 1 missing . 1 unreadable . 4 deleted by filo
+    Rules   in the order tried
+      ~/Documents/bills   *Council*   council (3y)
+      ~/Documents/bills   *           bills (7y)
+      ~/Documents         *.pdf       documents (10y)
+    Directories   3
+      2023/     40 files . 1.9 MB   [!] 1 needs a decision
+      2024/     38 files . 1.7 MB
+      scans/    12 files .  30 MB   [!] 12 need a decision
+    Files   14
+      2019-04 Council Tax.pdf      88 KB   [!] expired 2026-11-01
+      2022-01 British Gas.pdf     184 KB   kept until 2029-01-31 . has copies
+      2024-12 Gas.pdf              90 KB   [!] missing since 2026-11-18
+      2025-03 Water.pdf            61 KB   [!] undated
+      locked.pdf                   12 KB   [!] unreadable
+      terms.pdf                     5 KB   forever . a separate record
+      ...
+
+  Next: filo show FILE for one file, filo set FILE... to change files (filo help set for more)
+  ```
+  - **Rules:** every rule that decides files here, in the order tried, with the directory it is set on (a parent's
+    rules included).
+  - **Directories** first, as `ls` lists them, with a trailing `/`: each with its whole subtree's file count and
+    size, and how many need a decision.
+  - **Files:** all of them (no cut at 10), sorted by name: the name, the size, then the status with its date
+    ("kept until", "expired", "missing since"), then the duplicate state ("has copies", "a separate record",
+    "copies on purpose"). Files deleted by Filo are counted on the Directory line, not listed.
+  - **With `-r`:** the title says "and below" and the counts cover the whole subtree; the Directories and Files
+    sections become a block per directory, as `ls -R` (the same directories-then-files order at each level), each
+    under a header with the directory's path from the shown one, its file count and how many need a decision:
+
+    ```
+    bills and below   directory . 3 directories . 9 files . 34 MB . ~/Documents
+      ...
+      bills/   3 files
+        2019-04 Council Tax.pdf      88 KB   [!] expired 2026-11-01
+        2022-01 British Gas.pdf     184 KB   kept until 2029-01-31 . has copies
+        2025-03 Water.pdf            61 KB   [!] undated
+      bills/2023/   2 files
+        2023-01 Gas.pdf              95 KB   kept until 2030-01-31
+        2023-02 Gas.pdf              91 KB   [!] undated
+      bills/scans/   2 files . [!] 2 need a decision
+        0001.pdf                     15 MB   [!] undated
+        0002.pdf                     15 MB   [!] undated
+    ```
 
 ### Docs
 
