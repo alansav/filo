@@ -31,11 +31,14 @@ than by a directory tree, from the command line or through a list piped to stand
 Filo can write a markdown note linking to its files. Tagging happens on any device: after a first pass that tags
 everything, the routine is to drop a file in the inbox, tag it, and move it to `received/YYYY/MM/`. **Everything
 about a file that is not in the file itself is shared between devices** (tags, retentions, file dates, rules,
-policies, deletes by Filo), while what each device observes (roots, inodes, scan history) stays its own.
+policies, deletes by Filo) **for files in synced directories** (9a), the only files that are on several devices;
+what each device observes (roots, inodes, scan history) stays its own. Tags and retentions are matched differently
+on the other device: a retention by content hash (an edited file needs a new decision), a tag by hash and then path
+(an edit keeps it; see 9c and 18a).
 
-The pieces, in the order agreed: 19 finding files (`filo files`), 18a tags, then the sync items (9b device ID, 9a
-synced directories, 9c the journal, which also carries tags), then 20 the Filo directory and 18b project notes. Tags
-come before sync because the journal must start from the decisions that already exist in any case ("seeding": a
+The pieces, in the order agreed: 19 finding files (`filo files`), 18a tags, then the sync items (9b device ID, 9a synced
+directories, 9c the journal, which also carries tags), then 20 the Filo directory and 18b project notes and packages.
+Tags come before sync because the journal must start from the decisions that already exist in any case ("seeding": a
 directory can be tagged before it is marked synced, a device can join late), so tags made earlier cost the journal
 nothing extra; meanwhile tags are used on one device.
 
@@ -48,7 +51,7 @@ complexity scores (1 to 10, Claude's estimates) are still to be settled with the
 1. 19 finding files
 2. 18a tags
 3. 9b device ID, 9a marking synced directories, 9c sharing decisions
-4. 20 the Filo directory, 18b project notes
+4. 20 the Filo directory, 18b project notes and packages
 5. 5a progress line, 5b `--needing-retention`
 6. 13 removing empty directories
 7. 21 script mode, 34 received documents (needs 21 and 9a)
@@ -249,7 +252,7 @@ tag; a project is a tag.
 - **Later:** rules that tag by name pattern (`*British Gas*` under `received` gives `sender:British Gas`), once tags
   have been used by hand. In the journal (9c) a tag goes with its file's relative path and hash.
 
-### 18b. A project package (V5, C5)
+### 18b. Project notes and packages (V5, C5)
 Pull a project's files together. By the direction above, Filo writes the list and a standard tool does the copying
 (`filo files --tag "project:trip" -0 | tar --null -T - -czf trip.tgz`), or Filo writes a copy script (21). Filo itself
 never copies files into the scanned trees: the copies would come back as new files and new duplicate groups.
@@ -343,7 +346,7 @@ built.
   `file_date` is read from the date in a name, and directory rules match name globs (`*British Gas*` under
   `received` gives `bills`) at any depth, so no delimiter and no parsing of the sender is needed. A delimiter
   between sender and description would only help a person, or a later search.
-- **Archive.** `received/YYYY/MM/`, the folder chosen from the date in the name when the file is filed and never
+- **Archive.** `received/YYYY/MM/`, the directory chosen from the date in the name when the file is filed and never
   changed afterwards, so paths stay stable (links from notes, recent-file lists, traffic between devices). A name
   with no date is not filed and stays in the inbox.
 - **Filing is not done by Filo.** By the direction above Filo writes a list of `mv` lines for the person to read
