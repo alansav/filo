@@ -149,7 +149,8 @@ The scan already skips `.filo`.
   synced directory:
   - directory rules and the policies they use;
   - retentions and `file_date`s, keyed on content hash, so a file moved on one device still matches;
-  - tags (18a), with the file's relative path and hash;
+  - tags (18a), with the file's relative path and hash, matched on hash first and path second; a tag whose file
+    cannot be found is reported, never guessed;
   - deletes by Filo, so another device can tell "deleted by Filo on the laptop after the hash check" from an
     unexplained missing file.
 - **Importing.** Idempotent: each device records the highest `seq` applied per journal and skips anything at or
@@ -226,9 +227,10 @@ tag; a project is a tag.
   a valid key, so `project:trip: Paris 2027` is key `project`, and `10:30 call` is a bare tag; `re: invoice` is key
   `re`, odd but logical. A tag cannot hold `;` (the CSV's separator).
 - **Commands** (the first version): `filo tag FILE... TAG...` and `filo untag FILE... TAG...`; `filo tags`, tags with
-  their file counts; `filo tags rename OLD NEW`, across every file, which fixes a typo in the key or the value and may
-  only change case (`british gas` to `British Gas`); `filo export tags [DIR] -o FILE` and `filo update FILE` (a
-  separate CSV from retention, told apart by its header). Finding files: `filo files --tag` and `--no-tag` (19).
+  their file counts; `filo tags rename OLD NEW`, across every file, which fixes a typo in the key or the value, and
+  may also change only the case (`british gas` to `British Gas`); `filo export tags [DIR] -o FILE` and `filo update
+  FILE` (a separate CSV from retention, told apart by its header). Finding files: `filo files --tag` and `--no-tag`
+  (19).
 - **The tags CSV** has a `tags` cell per file, tags separated by `;`, filled at export with the file's current tags.
   The cell replaces the file's tags: a tag not in it is removed, so an untouched cell changes nothing and an emptied
   one removes all. A file whose tags changed since the export (tagged by command meanwhile) is refused for that row,
@@ -250,7 +252,9 @@ tag; a project is a tag.
   `filo export tags` and `filo update`; README and help. Each output mocked and agreed before its slice. Tags are
   stored so each change can be written to the journal later (9c) without rework.
 - **Later:** rules that tag by name pattern (`*British Gas*` under `received` gives `sender:British Gas`), once tags
-  have been used by hand. In the journal (9c) a tag goes with its file's relative path and hash.
+  have been used by hand. In the journal (9c) a tag goes with its file's relative path and hash, and another device
+  matches it on the hash first and the path second (an edited file keeps its tags, unlike its retention); a tag
+  whose file cannot be found there is reported, never guessed onto another file (proposed 2026-11-19, with 9c).
 
 ### 18b. Project notes and packages (V5, C5)
 Pull a project's files together. By the direction above, Filo writes the list and a standard tool does the copying
@@ -273,11 +277,11 @@ view (Later a), and what tags (18a) build on: they add `--tag TAG` and `--no-tag
 - It covers what the register holds (name, status, tags), not file contents; see Rejected, "Building search".
 
 ### 20. The Filo directory (V6, C4)
-One directory per device, chosen by the person (for example `~/Sync/Filo`), shared across devices by any sync
-service, which Filo is allowed to write into. It carries snapshots (9d) and project notes (18b). The decision journals (9c) moved out on 2026-11-19: they live in `.filo/` of each synced directory (9a).
-Filo never scans it, even inside a root. Each device writes only its own files there. Needs a change to the hard
-rule that Filo writes nothing outside its data directory, `--db` and `-o` files: one more place, chosen by the
-person.
+One directory per device, chosen by the person (for example `~/Sync/Filo`), shared across devices by any sync service,
+which Filo is allowed to write into. It carries snapshots (9d) and project notes (18b). The decision journals (9c) moved
+out on 2026-11-19: they live in `.filo/` of each synced directory (9a). Filo never scans it, even inside a root. Each
+device writes only its own files there. Needs a change to the hard rule that Filo writes nothing outside its data
+directory, `--db` and `-o` files: one more place, chosen by the person.
 
 ### 21. Script mode (V4, C7)
 For the cautious: instead of acting, Filo writes a script that does it, for the person to read and run (`filo delete
@@ -418,9 +422,9 @@ register to change shape. Open: the technology.
 
 ### Later d. Notes and tasks (V5, C9)
 Notes on a file; tasks, some with files and some without; possibly a productivity system built on the register (a
-recurring check on a file, such as an annual look at a seven-year record, is a task). A change of scope from "Filo
-owns lifecycle" that needs its own discussion first; by the direction above it may be a separate tool reading the
-register. Linking files to a project is a tag (18a). (Holds were dropped on 2026-11-12: a file that must be kept gets a later
+recurring check on a file, such as an annual look at a seven-year record, is a task). A change of scope from "Filo owns
+lifecycle" that needs its own discussion first; by the direction above it may be a separate tool reading the register.
+Linking files to a project is a tag (18a). (Holds were dropped on 2026-11-12: a file that must be kept gets a later
 retention or `forever`.)
 
 ### Later e. A watcher (V3, C8)
