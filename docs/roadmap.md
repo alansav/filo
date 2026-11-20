@@ -7,7 +7,7 @@ Everything Filo does not do: the work planned, ideas, open questions, deferred i
 Filo does today is in `design.md`; how it was built is in `history.md`. An item stays here while it is discussed and
 designed. When work on it starts, its design moves into `design.md` (the first commit of its branch); when it is
 complete, nothing of it is left here. Items keep their numbers, so gaps in the numbering are work already done, or ideas
-rejected (see Rejected, at the end: 14 is deleting to the trash). Last updated: 2026-11-19.
+rejected (see Rejected, at the end: 14 is deleting to the trash). Last updated: 2026-11-20.
 
 ## Direction
 
@@ -23,23 +23,41 @@ and getting rid of it safely when its time comes. The register is how it does th
   leaves the files untouched and the worst case is a wrong register, which the snapshots cover (principle 3, fail
   safe). It is also far more work.
 
+### The goal: finding files by tags, not by directories
+Agreed 2026-11-19/20 (the "virtual file system" of commit f3b092a; not a file system, see above). Received files
+land in one simple, stable structure (`received/YYYY/MM/YYYY-MM-DD British Gas Bill for October 2026.pdf`, 34). The
+person tags files in Filo (`sender:British Gas`, `type:bill`, `project:house sale`) and finds them by tag rather
+than by a directory tree, from the command line or through a list piped to standard tools. A project is a tag, and
+Filo can write a markdown note linking to its files. Tagging happens on any device: after a first pass that tags
+everything, the routine is to drop a file in the inbox, tag it, and move it to `received/YYYY/MM/`. **Everything
+about a file that is not in the file itself is shared between devices** (tags, retentions, file dates, rules,
+policies, deletes by Filo), while what each device observes (roots, inodes, scan history) stays its own.
+
+The pieces, in the order agreed: 19 finding files (`filo files`), 18a tags, then the sync items (9b device ID, 9a
+synced directories, 9c the journal, which also carries tags), then 20 the Filo directory and 18b project notes. Tags
+come before sync because the journal must start from the decisions that already exist in any case ("seeding": a
+directory can be tagged before it is marked synced, a device can join late), so tags made earlier cost the journal
+nothing extra; meanwhile tags are used on one device.
+
 ## Priority
 
-Provisional, agreed 2026-11-17; the value and complexity scores (1 to 10, Claude's estimates) are still to be
-settled with the person. Items 22 to 33 are not placed yet.
+Provisional, agreed 2026-11-17, with the first four reordered on 2026-11-20 for the goal above; the value and
+complexity scores (1 to 10, Claude's estimates) are still to be settled with the person. Items 22 to 33 are not
+placed yet.
 
-1. 19 search by name
-2. 9b device ID, 20 the Filo directory, 9a marking synced directories, 9c sharing decisions
-3. 5a progress line, 5b `--needing-retention`
-4. 13 removing empty directories
-5. 21 script mode, 34 received documents (needs 21 and 9a)
-6. 18a projects, 18b project package
-7. 6 one decision for all copies
-8. 16 undoing an update batch, 17 suggested rules
-9. 15 where the space goes
-10. 7a–7c verifying content, 8 backup awareness, 9d snapshots to the backup machine
-11. 10 a summary for scheduled scans
-12. Later a–e
+1. 19 finding files
+2. 18a tags
+3. 9b device ID, 9a marking synced directories, 9c sharing decisions
+4. 20 the Filo directory, 18b project notes
+5. 5a progress line, 5b `--needing-retention`
+6. 13 removing empty directories
+7. 21 script mode, 34 received documents (needs 21 and 9a)
+8. 6 one decision for all copies
+9. 16 undoing an update batch, 17 suggested rules
+10. 15 where the space goes
+11. 7a–7c verifying content, 8 backup awareness, 9d snapshots to the backup machine
+12. 10 a summary for scheduled scans
+13. Later a–e
 
 ## Items
 
