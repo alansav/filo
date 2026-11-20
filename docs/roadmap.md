@@ -536,6 +536,58 @@ the tool for many). Replaces "Later b, setting dates in place".
         0001.pdf                     15 MB   [!] undated
         0002.pdf                     15 MB   [!] undated
     ```
+- **`filo set`, the agreed output** (2026-11-20, for slices 3 and 4). It asks **only when it would replace a value
+  already stored** (a different `file_date` or retention, a clear, or a content's existing duplicates decision),
+  showing was and now for each field given, with `until` to show the effect on `keep_until`; giving a value to a
+  file that has none is not asked. `-y` answers yes; no terminal and no `-y` changes nothing. All or nothing: no
+  changes no file, not even those that had no value. `l` lists every file with its was and now values, as `filo
+  update` does. `--dry-run` prints the same title and tables and ends "Dry run: nothing was changed.", without
+  asking. Replacing a rule's policy is noted on the row ("set by rule *.pdf").
+
+  ```
+  Set   file_date 2024-03-31 . retention 7y . 3 files . ~/Documents/receipts
+
+  [!] 1 file has values that would be replaced:
+      file_date                  retention                until
+      was          now           was          now         was          now
+      2024-03-02   2024-03-31    bills (7y)   7y          2031-03-02   2031-03-31   lunch.pdf   (set by rule *.pdf)
+
+    - 1 file gets them for the first time: coffee.pdf
+    - 1 file already has them: taxi.pdf
+
+  Replace the values of 1 file and set 3? [y/N/l]
+  Done   file_date 2024-03-31 . retention 7y . 2 files changed . 1 unchanged . ~/Documents/receipts
+  ```
+
+  Nothing replaced, so no question:
+
+  ```
+  Done   retention bills (7y) . 1 file . ~/Documents/bills
+      retention        until
+      was     now      was    now
+      none    bills    none   2032-03-31   2025-03 Water.pdf
+  ```
+
+  A refusal writes nothing and lists every refused file:
+
+  ```
+  [refused] Nothing was changed: 1 of 3 files was refused
+    [refused] coffee.pdf   retention 7y needs a file_date to count from: add --file-date DATE
+
+  Next: filo set FILE --file-date DATE --retention 7y for that file, or leave it out
+  ```
+
+  A file left past its retention is listed after `Done` with the update's typo hint ("Check for a typo, such as 7d
+  for 7y"), then "Nothing has been deleted. Next: filo delete". Clearing (`--no-retention`) asks in the same shape,
+  adding "they will need a retention again". `--duplicates` names the content and every copy it covers:
+
+  ```
+  Done   always . 1 content . applies to 3 copies
+      ~/Projects/a/LICENSE   (named)
+      ~/Projects/b/LICENSE
+      ~/Projects/c/LICENSE
+    - these copies no longer count as duplicates; filo set FILE --duplicates counted undoes it
+  ```
 
 ### Docs
 
