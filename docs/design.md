@@ -1497,8 +1497,10 @@ file contents (see `roadmap.md`, Rejected, "Building search"); tags (18a) add `-
   disk is no error; it just holds no file present now), and searched with everything below it: finding is
   recursive by nature, so there is no `-r`. With no DIR, every root: the point is finding the file wherever it is,
   from wherever the person is, not the current directory as `find(1)` does. One DIR only: a search of two places is
-  two runs, as an OR is. A DIR outside every root, or a file given as DIR ("is a file: use filo show"), is a usage
-  error.
+  two runs, as an OR is. A DIR outside every root, a file given as DIR ("is a file: use filo show"), or a symlink
+  ("give the directory it points to") is a usage error. A path not on the disk that the register never held a file
+  under is an error, as for `filo show` (a review finding, 2026-11-21): a mistyped DIR must not read as a search that
+  found nothing.
 - **A scan first**, as every export does (see Lifespan, "A scan first"), for the same reason: a file saved since the
   last scan is found, and the incremental scan is the "is a scan needed?" check. It scans DIR when one is given
   (its root, when DIR is gone from the disk, so the files it held are found missing), otherwise every root. `--no-scan` skips it and lists from the register as it is; `--workers N` is passed to the
@@ -1512,7 +1514,9 @@ file contents (see `roadmap.md`, Rejected, "Building search"); tags (18a) add `-
 - **What is listed**: the regular files the last scan saw at their current paths, each once. Empty files are
   listed, and so are files that could not be read (noted `could not be read`: they are there, and only their hash
   is unknown). A possible move is listed at its new path. A file with hard links is one file: listed once, under one
-  of its paths, with its links noted (piped, that one path). Not listed: missing files, files deleted by Filo, and
+  of its paths, with its links noted (piped, that one path). Links are the paths in its root with the same inode,
+  size and modified time, counted over the whole root, not only DIR; the inode alone is not enough, since one kept
+  current in an unreadable directory may have been reused by another file (a review finding, 2026-11-21). Not listed: missing files, files deleted by Filo, and
   symlinks (the file a symlink points to is listed if it is inside a root; broken symlinks are in `filo report`).
 - **In a terminal**: a heading (how many files, their size, the search, where), then every match, never cut (the
   person's decision, 2026-11-21: a search shows all it found), through the file list component, ordered by root,
