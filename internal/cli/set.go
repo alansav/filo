@@ -76,9 +76,9 @@ func (e *env) set(ctx context.Context, dbBefore string, args []string) error {
 	asked := false
 	opt := store.SetOptions{DryRun: *dry || len(refused) > 0}
 	var askErr error
-	opt.Confirm = func(rows []store.SetRow) bool {
+	opt.Confirm = func(res store.SetResult) bool {
 		asked = true
-		ok, err := e.confirmSet(ctx, v, rows, *yes)
+		ok, err := e.confirmSet(ctx, v, res.Rows, *yes)
 		askErr = err
 		return ok
 	}

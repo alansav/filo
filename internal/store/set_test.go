@@ -19,7 +19,7 @@ func TestSetFiles(t *testing.T) {
 	}
 	id := func(p string) int64 { return k[p].FileID }
 	asked := 0
-	yes := SetOptions{Confirm: func([]SetRow) bool { asked++; return true }}
+	yes := SetOptions{Confirm: func(SetResult) bool { asked++; return true }}
 	set := func(ids []int64, v SetValues, opt SetOptions) SetResult {
 		t.Helper()
 		res, err := e.s.SetFiles(e.ctx, ids, v, now, "2026-11-20", opt)
@@ -47,7 +47,7 @@ func TestSetFiles(t *testing.T) {
 	}
 
 	// Replacing asks; declined, nothing changes, the first-time file c.pdf included (all or nothing).
-	no := SetOptions{Confirm: func(rows []SetRow) bool { asked++; return false }}
+	no := SetOptions{Confirm: func(SetResult) bool { asked++; return false }}
 	res = set([]int64{id("a.pdf"), id("c.pdf")}, SetValues{Retention: "bills", SetRetention: true,
 		FileDate: "2024-03-31", SetFileDate: true}, no)
 	if res.Applied || asked != 1 || !res.Rows[0].Replaces || res.Rows[1].Replaces {
@@ -157,11 +157,103 @@ func TestSetReplacesARulesPolicy(t *testing.T) {
 		t.Errorf("the rule was dropped by a file_date")
 	}
 	res, err = e.s.SetFiles(e.ctx, []int64{id}, SetValues{Retention: "forever", SetRetention: true}, now, "2026-11-20",
-		SetOptions{Confirm: func([]SetRow) bool { return true }})
+		SetOptions{Confirm: func(SetResult) bool { return true }})
 	if err != nil || !res.Applied || res.Rows[0].RulePath() != "bills/*.pdf" {
 		t.Fatalf("by hand: %+v, %v", res, err)
 	}
 	if it := e.files("2026-11-20")["bills/a.pdf"]; it.RuleID != 0 || it.Policy != "" || it.Retention != Forever {
 		t.Errorf("after: %+v", it)
+	}
+}
+
+// --duplicates (docs/design.md, Showing and setting a file's details): a decision about a content, asked when it
+// replaces or undoes one already stored, all or nothing with the rest.
+func TestSetDuplicates(t *testing.T) {
+	e := newReviewEnv(t)
+	now := time.Date(2026, 11, 20, 12, 0, 0, 0, time.UTC)
+	lic := func(p string) NewFile { return NewFile{Path: p, Kind: "file", Size: 3, MtimeNS: 1, Hash: "hl"} }
+	e.apply(Changes{New: []NewFile{lic("a/LICENSE"), lic("b/LICENSE"), lic("c/LICENSE"),
+		{Path: "terms20.pdf", Kind: "file", Size: 5, MtimeNS: 1, Hash: "ht"},
+		{Path: "terms21.pdf", Kind: "file", Size: 5, MtimeNS: 1, Hash: "ht"},
+		{Path: "empty", Kind: "file", Size: 0, MtimeNS: 1, Hash: "he"},
+		{Path: "link", Kind: "symlink", LinkTarget: "a/LICENSE"}}})
+	k := e.known()
+	id := func(p string) int64 { return k[p].FileID }
+	asked := 0
+	yes := SetOptions{Confirm: func(SetResult) bool { asked++; return true }}
+	set := func(ids []int64, want string, opt SetOptions) SetResult {
+		t.Helper()
+		res, err := e.s.SetFiles(e.ctx, ids, SetValues{Duplicates: want}, now, "2026-11-20", opt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return res
+	}
+	groups := func() int {
+		t.Helper()
+		n, err := e.s.GroupCount(e.ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	if groups() != 2 {
+		t.Fatalf("groups = %d, want 2", groups())
+	}
+
+	// always: the content, every copy listed; no question the first time.
+	res := set([]int64{id("a/LICENSE")}, DupAlways, yes)
+	if !res.Applied || asked != 0 || len(res.Dups) != 1 || len(res.Dups[0].Copies) != 3 || res.Dups[0].Was != DupCounted {
+		t.Errorf("always: %+v (asked %d)", res, asked)
+	}
+	if groups() != 1 {
+		t.Errorf("groups after always = %d, want 1", groups())
+	}
+	if res = set([]int64{id("b/LICENSE")}, DupAlways, yes); res.Applied || !res.Dups[0].Unchanged {
+		t.Errorf("always again: %+v", res)
+	}
+
+	// records: two copies named; then always over records asks; counted undoes it, asking.
+	res = set([]int64{id("terms20.pdf"), id("terms21.pdf")}, DupRecords, yes)
+	if !res.Applied || asked != 0 || groups() != 0 {
+		t.Errorf("records: %+v, groups %d", res, groups())
+	}
+	if res = set([]int64{id("terms21.pdf"), id("terms20.pdf")}, DupRecords, yes); res.Applied || !res.Dups[0].Unchanged {
+		t.Errorf("records again: %+v", res)
+	}
+	no := SetOptions{Confirm: func(SetResult) bool { asked++; return false }}
+	if res = set([]int64{id("terms20.pdf")}, DupAlways, no); res.Applied || asked != 1 || !res.Dups[0].Replaces ||
+		res.Dups[0].Was != DupRecords {
+		t.Errorf("always over records, declined: %+v", res)
+	}
+	if res = set([]int64{id("terms20.pdf")}, DupCounted, yes); !res.Applied || asked != 2 || groups() != 1 {
+		t.Errorf("counted: %+v, groups %d", res, groups())
+	}
+	if res = set([]int64{id("a/LICENSE")}, DupCounted, yes); !res.Applied || groups() != 2 {
+		t.Errorf("counted always: %+v, groups %d", res, groups())
+	}
+
+	// Refusals: one copy named for records, an empty file, a symlink.
+	for _, tt := range []struct {
+		ids  []int64
+		want string
+	}{
+		{[]int64{id("terms20.pdf")}, "records needs two or more copies"},
+		{[]int64{id("empty")}, "empty files are never duplicates"},
+		{[]int64{id("link")}, "only regular files have copies"},
+	} {
+		res = set(tt.ids, DupRecords, yes)
+		if res.Applied || len(res.Refusals) != 1 || !strings.Contains(res.Refusals[0].Reason, tt.want) {
+			t.Errorf("%v: %+v, want %q", tt.ids, res.Refusals, tt.want)
+		}
+	}
+	// With a retention in the same run: a refusal of one stops both.
+	res, err := e.s.SetFiles(e.ctx, []int64{id("terms20.pdf")}, SetValues{Duplicates: DupRecords, Retention: "forever",
+		SetRetention: true}, now, "2026-11-20", yes)
+	if err != nil || res.Applied {
+		t.Errorf("combined, refused: %+v, %v", res, err)
+	}
+	if it := e.files("2026-11-20")["terms20.pdf"]; it.Retention != "" {
+		t.Errorf("the retention was set though --duplicates was refused: %+v", it)
 	}
 }

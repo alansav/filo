@@ -17,11 +17,19 @@ import (
 type SetValues struct {
 	FileDate, Retention       string
 	SetFileDate, SetRetention bool
+	Duplicates                string // DupAlways, DupRecords or DupCounted; "" = not given
 }
+
+// The --duplicates values: a decision about a content, not one file (docs/design.md, Duplicates).
+const (
+	DupAlways  = "always"  // the content belongs everywhere: its copies are never a duplicate group
+	DupRecords = "records" // the files named, two or more copies of one content, are each a record
+	DupCounted = "counted" // no decision: its copies count as duplicates
+)
 
 // SetRow is one file filo set acts on: its values before and after.
 type SetRow struct {
-	FileID                       int64
+	FileID, RootID               int64
 	RootPath, Path               string
 	OldFileDate, FileDate        string
 	OldRetention, Retention      string // a policy's name, or the file's own retention; "" = none
@@ -32,6 +40,9 @@ type SetRow struct {
 	oldPolicy, policy, newPolicy bool   // the old and new retention are policies; the new one does not exist yet
 	policyID                     int64
 	hash                         sql.NullString
+	kind                         string
+	size                         int64
+	unreadable                   bool
 }
 
 // AbsPath is the row's file in full.
@@ -51,7 +62,37 @@ type SetResult struct {
 	// NewPolicies are the policies named that did not exist, by name: created with no value when the changes are
 	// written (so their files need a retention until they have one), or that would be.
 	NewPolicies []string
-	Applied     bool // the changes were written
+	Dups        []DupChange // with --duplicates: one per content named, ordered by its first path
+	Applied     bool        // the changes were written
+}
+
+// DupChange is what --duplicates does to one content: what it was and will be, and the copies it covers.
+type DupChange struct {
+	Hash                string
+	Size                int64
+	Named               []string // the files named with this content, absolute, in order
+	Copies              []string // every copy of the content (each hard link apart), absolute, in order
+	Was, Now            string   // DupAlways, DupRecords or DupCounted
+	Unchanged, Replaces bool     // nothing to do; a decision already stored is replaced or undone
+	fileIDs             []int64  // the files named
+	sets                []int64  // the sets of records the files named are in
+}
+
+// Replacing reports whether applying the result replaces a value already stored: a file's, or a content's decision.
+func (r SetResult) Replacing() bool {
+	return slices.ContainsFunc(r.Rows, func(row SetRow) bool { return row.Replaces }) ||
+		slices.ContainsFunc(r.Dups, func(d DupChange) bool { return d.Replaces })
+}
+
+// DupsChanged counts the contents --duplicates changes.
+func (r SetResult) DupsChanged() int {
+	n := 0
+	for _, d := range r.Dups {
+		if !d.Unchanged {
+			n++
+		}
+	}
+	return n
 }
 
 // Changed counts the rows that change.
@@ -65,11 +106,11 @@ func (r SetResult) Changed() int {
 	return n
 }
 
-// SetOptions are how filo set runs: a dry run writes nothing; Confirm, given every row, is asked when some row
+// SetOptions are how filo set runs: a dry run writes nothing; Confirm, given the result worked out, is asked when it
 // replaces a stored value (nil declines, as with no terminal) and is never asked in a dry run.
 type SetOptions struct {
 	DryRun  bool
-	Confirm func([]SetRow) bool
+	Confirm func(SetResult) bool
 }
 
 // SetFiles sets the file_date and the retention of the files, all or nothing, in one transaction, by the retention
@@ -117,11 +158,18 @@ func (s *Store) SetFiles(ctx context.Context, ids []int64, v SetValues, now time
 	})
 	slices.SortFunc(res.NowPast, func(a, b Past) int { return strings.Compare(a.Path, b.Path) })
 	slices.Sort(res.NewPolicies)
-	if len(res.Refusals) > 0 || opt.DryRun || res.Changed() == 0 {
+	if v.Duplicates != "" && len(res.Refusals) == 0 {
+		if err := checkDups(ctx, tx, v.Duplicates, &res); err != nil {
+			return res, err
+		}
+		slices.SortFunc(res.Refusals, func(a, b SetRefusal) int {
+			return strings.Compare(absPath(a.RootPath, a.Path), absPath(b.RootPath, b.Path))
+		})
+	}
+	if len(res.Refusals) > 0 || opt.DryRun || res.Changed()+res.DupsChanged() == 0 {
 		return res, nil
 	}
-	if slices.ContainsFunc(res.Rows, func(r SetRow) bool { return r.Replaces }) &&
-		(opt.Confirm == nil || !opt.Confirm(res.Rows)) {
+	if res.Replacing() && (opt.Confirm == nil || !opt.Confirm(res)) {
 		return res, nil
 	}
 
@@ -138,6 +186,9 @@ func (s *Store) SetFiles(ctx context.Context, ids []int64, v SetValues, now time
 		if created[name], err = addPolicy(ctx, tx, name, "", now); err != nil {
 			return res, err
 		}
+	}
+	if err := applyDups(ctx, tx, res.Dups, now); err != nil {
+		return res, err
 	}
 	for _, r := range res.Rows {
 		if r.Unchanged {
@@ -179,10 +230,11 @@ func checkSet(ctx context.Context, tx *sql.Tx, id int64, v SetValues, policies p
 	var ruleID int64
 	err := tx.QueryRowContext(ctx, `
 		SELECT f.hash, coalesce(f.file_date, ''), `+retentionColumns+`, coalesce(f.keep_until, ''), f.deleted_utc,
-		       coalesce(f.rule_id, 0), coalesce(ru.dir, ''), coalesce(ru.pattern, ''), f.policy_id IS NOT NULL
+		       coalesce(f.rule_id, 0), coalesce(ru.dir, ''), coalesce(ru.pattern, ''), f.policy_id IS NOT NULL,
+		       f.kind, f.size, f.unreadable_since_scan IS NOT NULL
 		FROM files f`+policyJoin+` LEFT JOIN rules ru ON ru.id = f.rule_id WHERE f.id = ?`, id).
 		Scan(&r.hash, &r.OldFileDate, &r.OldRetention, new(string), &r.OldPolicyValue, &r.OldKeepUntil, &deleted,
-			&ruleID, &r.RuleDir, &r.RulePattern, &r.oldPolicy)
+			&ruleID, &r.RuleDir, &r.RulePattern, &r.oldPolicy, &r.kind, &r.size, &r.unreadable)
 	if err != nil {
 		return r, "", fmt.Errorf("read file %d: %w", id, err)
 	}
@@ -191,10 +243,10 @@ func checkSet(ctx context.Context, tx *sql.Tx, id int64, v SetValues, policies p
 	}
 	// Its current path, else its last one, for the messages.
 	var current bool
-	err = tx.QueryRowContext(ctx, `SELECT ro.path, p.path, p.valid_to_scan IS NULL FROM paths p
+	err = tx.QueryRowContext(ctx, `SELECT p.root_id, ro.path, p.path, p.valid_to_scan IS NULL FROM paths p
 		JOIN roots ro ON ro.id = p.root_id WHERE p.file_id = ?
 		ORDER BY p.valid_to_scan IS NOT NULL, coalesce(p.valid_to_scan, 0) DESC, p.id DESC LIMIT 1`, id).
-		Scan(&r.RootPath, &r.Path, &current)
+		Scan(&r.RootID, &r.RootPath, &r.Path, &current)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return r, "", fmt.Errorf("read the path of file %d: %w", id, err)
 	}
@@ -205,6 +257,18 @@ func checkSet(ctx context.Context, tx *sql.Tx, id int64, v SetValues, policies p
 		return r, "missing: only present files are set (run filo scan if it was moved)", nil
 	}
 
+	if v.Duplicates != "" {
+		switch {
+		case r.kind != "file":
+			return r, "a symlink: only regular files have copies", nil
+		case r.size == 0:
+			return r, "empty: empty files are never duplicates", nil
+		case !r.hash.Valid || r.hash.String == "":
+			return r, "never read: its content is not known (run filo scan)", nil
+		case r.unreadable:
+			return r, "unreadable: its content cannot be checked", nil
+		}
+	}
 	r.FileDate, r.Retention = r.OldFileDate, r.OldRetention
 	if v.SetFileDate {
 		r.FileDate = v.FileDate
@@ -250,4 +314,162 @@ func (r SetRow) RulePath() string {
 		return ""
 	}
 	return path.Join(r.RuleDir, r.RulePattern)
+}
+
+// checkDups works out --duplicates for each content the rows name: what it was, what it will be, the copies it
+// covers. records needs two or more of the content's copies named (hard links are one copy); a file under an
+// excluded directory is no copy, so it cannot be one of them. Refusals go to res.
+func checkDups(ctx context.Context, tx *sql.Tx, want string, res *SetResult) error {
+	excluded, err := exclusions(ctx, tx)
+	if err != nil {
+		return err
+	}
+	byHash := map[string]*DupChange{}
+	var order []string
+	rowOf := map[string]SetRow{} // by absolute path, for refusals
+	for _, row := range res.Rows {
+		h := row.hash.String
+		d := byHash[h]
+		if d == nil {
+			d = &DupChange{Hash: h, Size: row.size, Now: want}
+			byHash[h] = d
+			order = append(order, h)
+		}
+		d.Named = append(d.Named, row.AbsPath())
+		d.fileIDs = append(d.fileIDs, row.FileID)
+		rowOf[row.AbsPath()] = row
+		if want == DupRecords && excluded.covers(row.RootID, row.Path) {
+			res.Refusals = append(res.Refusals, SetRefusal{RootPath: row.RootPath, Path: row.Path,
+				Reason: "under an excluded directory: it is not counted as a copy, so it cannot be a record"})
+		}
+	}
+	for _, h := range order {
+		d := byHash[h]
+		contents, err := loadContents(ctx, tx, `SELECT ?`, h)
+		if err != nil {
+			return err
+		}
+		always := false
+		if err := tx.QueryRowContext(ctx, `SELECT count(*) > 0 FROM always_hashes WHERE hash = ?`, h).
+			Scan(&always); err != nil {
+			return fmt.Errorf("read a content always: %w", err)
+		}
+		namedCopies := 0
+		if len(contents) == 1 {
+			for _, cp := range contents[0].Copies {
+				paths := append([]string{cp.AbsPath()}, cp.Links...)
+				hit := false
+				for _, p := range paths {
+					d.Copies = append(d.Copies, p)
+					hit = hit || slices.Contains(d.Named, p)
+				}
+				if hit {
+					namedCopies++
+				}
+			}
+		}
+		slices.Sort(d.Copies)
+		// The sets of records the files named are in, on their current content.
+		sets, err := queryAll(ctx, tx, func(rows *sql.Rows) (int64, error) {
+			var id int64
+			return id, rows.Scan(&id)
+		}, `SELECT DISTINCT set_id FROM duplicate_records WHERE hash = ? AND file_id IN (`+
+			strings.TrimSuffix(strings.Repeat("?,", len(d.fileIDs)), ",")+`) ORDER BY set_id`,
+			append([]any{h}, int64sToAny(d.fileIDs)...)...)
+		if err != nil {
+			return fmt.Errorf("read sets of records: %w", err)
+		}
+		d.sets = sets
+		var setMembers int
+		if len(sets) == 1 {
+			if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM duplicate_records WHERE set_id = ? AND hash = ?`,
+				sets[0], h).Scan(&setMembers); err != nil {
+				return fmt.Errorf("read a set of records: %w", err)
+			}
+		}
+		switch {
+		case always:
+			d.Was = DupAlways
+		case len(sets) > 0:
+			d.Was = DupRecords
+		default:
+			d.Was = DupCounted
+		}
+		switch want {
+		case DupRecords:
+			if namedCopies < 2 {
+				for _, p := range d.Named {
+					row := rowOf[p]
+					res.Refusals = append(res.Refusals, SetRefusal{RootPath: row.RootPath, Path: row.Path,
+						Reason: "records needs two or more copies of one content named: name its other copies too"})
+				}
+				continue
+			}
+			// Unchanged only if the files named are one whole set already, and the content is not always.
+			d.Unchanged = !always && len(sets) == 1 && setMembers == len(d.fileIDs)
+			d.Replaces = !d.Unchanged && d.Was != DupCounted
+		default:
+			d.Unchanged = d.Was == want
+			d.Replaces = !d.Unchanged && d.Was != DupCounted
+		}
+		res.Dups = append(res.Dups, *d)
+	}
+	slices.SortFunc(res.Dups, func(a, b DupChange) int { return strings.Compare(a.Named[0], b.Named[0]) })
+	return nil
+}
+
+// applyDups writes the --duplicates decisions: always replaces the content's sets of records; records makes the files
+// named one new set (moving them out of any other) and the content no longer always; counted undoes either, a set of
+// records as a whole.
+func applyDups(ctx context.Context, tx *sql.Tx, dups []DupChange, now time.Time) error {
+	for _, d := range dups {
+		if d.Unchanged {
+			continue
+		}
+		var err error
+		switch d.Now {
+		case DupAlways:
+			if _, err = tx.ExecContext(ctx, `DELETE FROM duplicate_records WHERE hash = ?`, d.Hash); err == nil {
+				_, err = tx.ExecContext(ctx, `INSERT INTO always_hashes (hash, added_utc) VALUES (?, ?)
+					ON CONFLICT (hash) DO NOTHING`, d.Hash, utc(now))
+			}
+		case DupRecords:
+			if _, err = tx.ExecContext(ctx, `DELETE FROM always_hashes WHERE hash = ?`, d.Hash); err != nil {
+				break
+			}
+			var set int64
+			if err = tx.QueryRowContext(ctx, `SELECT coalesce(max(set_id), 0) + 1 FROM duplicate_records`).
+				Scan(&set); err != nil {
+				break
+			}
+			for _, id := range d.fileIDs {
+				if _, err = tx.ExecContext(ctx, `INSERT INTO duplicate_records (file_id, hash, set_id, added_utc)
+					VALUES (?, ?, ?, ?) ON CONFLICT (file_id) DO UPDATE SET hash = excluded.hash,
+					set_id = excluded.set_id, added_utc = excluded.added_utc`, id, d.Hash, set, utc(now)); err != nil {
+					break
+				}
+			}
+		case DupCounted:
+			if _, err = tx.ExecContext(ctx, `DELETE FROM always_hashes WHERE hash = ?`, d.Hash); err != nil {
+				break
+			}
+			for _, set := range d.sets {
+				if _, err = tx.ExecContext(ctx, `DELETE FROM duplicate_records WHERE set_id = ?`, set); err != nil {
+					break
+				}
+			}
+		}
+		if err != nil {
+			return fmt.Errorf("record a duplicates decision: %w", err)
+		}
+	}
+	return nil
+}
+
+func int64sToAny(ids []int64) []any {
+	out := make([]any, len(ids))
+	for i, id := range ids {
+		out[i] = id
+	}
+	return out
 }
