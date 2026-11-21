@@ -97,3 +97,51 @@ func (r *Renderer) Fields(labelWidth int, fields []Field) {
 		r.write(spans...)
 	}
 }
+
+// ListRow is one entry of a directory's listing: a name, a size (or another short fact), and a status.
+type ListRow struct {
+	Name      string // shown as a name
+	Size      string // right-aligned in its column
+	Status    string
+	Attention bool // the status needs a decision: the ! marker before it
+}
+
+// List writes a directory's entries under a Part, indented by four, names and sizes in columns, then the status:
+// "    2019-04 Council Tax.pdf   88 KiB   [!] expired 2026-11-01".
+func (r *Renderer) List(rows []ListRow) {
+	nameW, sizeW := 0, 0
+	for _, row := range rows {
+		nameW = max(nameW, width(name(row.Name)))
+		sizeW = max(sizeW, width(plain(row.Size)))
+	}
+	for _, row := range rows {
+		spans := []span{spaces(4), name(row.Name), spaces(nameW - width(name(row.Name)) + 3),
+			spaces(sizeW - width(plain(row.Size))), plain(row.Size)}
+		if row.Status != "" || row.Attention {
+			spans = append(spans, spaces(3))
+		}
+		if row.Attention {
+			spans = append(spans, r.mark(Attention), plain(" "))
+		}
+		spans = append(spans, plain(row.Status))
+		r.write(spans...)
+	}
+}
+
+// Block writes the head of one directory's block in a recursive listing, indented by two: its path as a name, its
+// facts, and a note that needs attention: "  bills/scans/   2 files · ! 2 need a decision".
+func (r *Renderer) Block(path string, attention string, facts ...string) {
+	spans := []span{spaces(2), styledName(path, bold)}
+	if len(facts) > 0 {
+		spans = append(spans, plain("   "+r.Join(facts...)))
+	}
+	if attention != "" {
+		if len(facts) > 0 {
+			spans = append(spans, plain(r.sep()))
+		} else {
+			spans = append(spans, plain("   "))
+		}
+		spans = append(spans, r.mark(Attention), plain(" "+attention))
+	}
+	r.write(spans...)
+}

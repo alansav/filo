@@ -1,6 +1,9 @@
 package view
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // The parts of filo show: a title line, parts indented under it, fields lined up under each part.
 func TestSubjectPartFields(t *testing.T) {
@@ -66,5 +69,33 @@ func TestSubjectResetsTheRoot(t *testing.T) {
 	want := "Ready   /data\na   kept\n    /data/b/a   until 2029-01-31\n"
 	if b.String() != want {
 		t.Errorf("got\n%q\nwant\n%q", b.String(), want)
+	}
+}
+
+// A directory's listing: names and sizes in columns, the status after them, a recursive block's head.
+func TestListAndBlock(t *testing.T) {
+	r, b := plainView()
+	r.List([]ListRow{
+		{Name: "2023/", Size: "40 files . 1.9 MiB", Status: "1 needs a decision", Attention: true},
+		{Name: "scans/", Size: "2 files . 30 MiB"},
+	})
+	r.List([]ListRow{
+		{Name: "2019-04 Council Tax.pdf", Size: "88 KiB", Status: "expired 2026-11-01", Attention: true},
+		{Name: "terms.pdf", Size: "5 KiB", Status: "forever . a separate record"},
+		{Name: "a\x1b.pdf ", Size: "1 B"},
+	})
+	r.Block("bills/scans/", "2 need a decision", "2 files")
+	r.Block("bills/", "", "3 files")
+	r.Block("bills/2024/", "1 needs a decision")
+	want := "    2023/    40 files . 1.9 MiB   [!] 1 needs a decision\n" +
+		"    scans/     2 files . 30 MiB\n" +
+		"    2019-04 Council Tax.pdf   88 KiB   [!] expired 2026-11-01\n" +
+		"    terms.pdf                  5 KiB   forever . a separate record\n" +
+		"    a\\x1b.pdf\\x20" + strings.Repeat(" ", 16) + "1 B\n" +
+		"  bills/scans/   2 files . [!] 2 need a decision\n" +
+		"  bills/   3 files\n" +
+		"  bills/2024/   [!] 1 needs a decision\n"
+	if b.String() != want {
+		t.Errorf("got\n%s\nwant\n%s", b.String(), want)
 	}
 }
