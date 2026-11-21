@@ -1229,9 +1229,12 @@ Being built (roadmap item 37, branch `item-37`): the design agreed on 2026-11-20
 is marked built as its slice lands; until then it describes what is coming.
 
 **Built so far: slice 1, `filo show FILE`** (`internal/cli/show.go`, `internal/show`, `store.ShowFile`; the output
-is in `internal/cli/testdata/show.txt`). As agreed below, with these differences until the later slices: a directory
-or a root is refused ("is a directory: filo show takes files for now"); the `Next:` line pointing to `filo set` is
-not printed until `set` exists. Sizes are in binary units (`184 KiB`), as everywhere. A path that cannot be shown is
+is in `internal/cli/testdata/show.txt`), and **slice 2, `filo show DIR [-r]`** (`store.ShowDir`, `internal/show`
+`Dir`; `internal/cli/testdata/show-dir.txt`). As agreed below, with this difference until the later slices: the
+`Next:` line pointing to `filo set` is not printed until `set` exists. A directory gone from the disk is shown from
+the files the register still holds under it. Under `-r`, a directory holding no file of its own but one below it
+gets a block of its own ("no files"), as `ls -R` lists it; a rule set below the shown directory is a line under its
+block ("rule * -> bills (7y)"). Sizes are in binary units (`184 KiB`), as everywhere. A path that cannot be shown is
 an error line naming it and why (not in the register yet: run filo scan; outside every root; its root's settings
 skip it); the other paths are still shown, and the exit status is 1, as for `get`. Read-only: no snapshot.
 
