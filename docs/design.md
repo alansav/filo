@@ -1225,8 +1225,9 @@ Next: edit the action column, then filo delete '<work>/my d.csv'
   build to carry the marks out.
 
 ### Showing and setting a file's details
-Being built (roadmap item 37, branch `item-37`): the design agreed on 2026-11-20, moved here when work started. Each part
-is marked built as its slice lands; until then it describes what is coming.
+Built (roadmap item 37, branch `item-37`): the design agreed on 2026-11-20, moved here when work started; each
+slice's notes below say how what was built differs from the agreed design that follows them. The README's "One file
+at a time" and `filo help show`, `set` and `get` describe it for the person (slice 6).
 
 **Built so far: slice 1, `filo show FILE`** (`internal/cli/show.go`, `internal/show`, `store.ShowFile`; the output
 is in `internal/cli/testdata/show.txt`), and **slice 2, `filo show DIR [-r]`** (`store.ShowDir`, `internal/show`
