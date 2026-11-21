@@ -1263,9 +1263,13 @@ agreed below. The values are for scripts: as stored ("" for none), `status` by i
 `needs_file_date` …, or `missing`, `deleted`), `duplicates` the content's decision, `size` in bytes, `modified` in RFC
 3339 local time, `first_seen` a local date. Nothing is read from the disk. The layout follows what was asked (how
 many files and fields), not what was found, so a script sees one format when a path fails. Piped, a value or name is
-escaped as everywhere (a tab in a name shows as `\t`, so the tabs between fields are always Filo's). **`-0` writes
-names unescaped**, each row ended by a NUL, so `xargs -0` and `tar --null` get any name exactly: the one place Filo
-writes a name as it is, allowed because it goes only to a pipe or a file (refused at a terminal: "-0 is for a pipe"),
+escaped as everywhere (a tab in a name shows as `\t`, a trailing space as `\x20`, so the tabs between fields are
+always Filo's). `duplicates` is empty for a file with no content to decide on (a symlink, an empty file, one never
+read), and records when any copy of the content is one; `modified` is empty when not known. **With `-0`, every file
+is a row** (its values, then its path, ended by a NUL) however many files were given, and **the path is written
+unescaped**, the values still escaped; a script reads the rows with `read -r -d ''` and takes what follows the last
+tab as the path (the rows are not a list of bare names for `xargs -0`; `filo files -0`, item 19, gives that). It is
+the one place Filo writes a name as it is, allowed because it goes only to a pipe or a file (refused at a terminal: "-0 is for a pipe"),
 where it cannot act on a terminal, and a NUL cannot occur in a name.
 
 Agreed with the person on 2026-11-20. Everything Filo holds about a file, from the command line, and every decision
@@ -1495,8 +1499,8 @@ the tool for many). Replaces "Later b, setting dates in place".
   dropped from a line, but a space that ends a file name is shown as `\x20` (2026-11-16, from the code review), so
   `report ` and `report` never read the same; and a relative path that starts with `~` (a directory named `~` inside a
   root) is shown as `./~/…`, so it never reads as a path in the home directory. The CSV export guards against
-  spreadsheet formulas separately. One exception (2026-11-21): `filo get -0` writes names unescaped, NUL-ended, and
-  only when stdout is not a terminal (see Showing and setting a file's details).
+  spreadsheet formulas separately. One exception (2026-11-21): `filo get -0` writes the path of each row unescaped,
+  NUL-ended, and only when stdout is not a terminal (see Showing and setting a file's details).
 - **Prompts only in a terminal** (2026-11-12, replacing "no interactive prompts"). A command asks only where a person
   should look first: `filo update` before clearing dates, and `filo delete`. Declining, or having no
   terminal on standard input, is always the safe choice, so Filo still works the same from a script or a timer.
