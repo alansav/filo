@@ -29,6 +29,28 @@ func TestValue(t *testing.T) {
 	if f.Value("duplicates") != "records" {
 		t.Errorf("records: %q", f.Value("duplicates"))
 	}
+	// Another copy a record, this one not: the content's decision is records.
+	f.RecordSet = 0
+	f.Copies = []store.DupCopy{{RecordSet: 4}}
+	if f.Value("duplicates") != "records" {
+		t.Errorf("records through another copy: %q", f.Value("duplicates"))
+	}
+	f.Copies = nil
+	for _, tt := range []struct {
+		name string
+		mod  func(*File)
+	}{{"never read", func(g *File) { g.Hash = "" }}, {"empty", func(g *File) { g.Size = 0 }}} {
+		g := f
+		tt.mod(&g)
+		if g.Value("duplicates") != "" {
+			t.Errorf("%s: duplicates %q, want none", tt.name, g.Value("duplicates"))
+		}
+	}
+	g := f
+	g.MtimeNS = 0
+	if g.Value("modified") != "" {
+		t.Errorf("no mtime: %q", g.Value("modified"))
+	}
 	f.Present = false
 	if f.Value("status") != "missing" {
 		t.Errorf("missing: %q", f.Value("status"))

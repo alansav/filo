@@ -1,6 +1,7 @@
 package show
 
 import (
+	"slices"
 	"strconv"
 	"time"
 
@@ -24,7 +25,8 @@ var Fields = []struct{ Flag, Name string }{
 
 // Value is a field of the file for a script: as stored where it is one (a date YYYY-MM-DD, a retention as typed or a
 // policy's name), "" for none. status is the status's register name (kept, undated, needs_file_date …), or missing or
-// deleted for a file no longer present; duplicates is the content's decision (always, records or counted); size is in
+// deleted for a file no longer present; duplicates is the content's decision (always, records or counted; "" for a
+// symlink, an empty file or one never read); size is in
 // bytes; modified is RFC 3339 in local time; first_seen is the local date of the scan that first saw it.
 func (f File) Value(flag string) string {
 	switch flag {
@@ -43,18 +45,23 @@ func (f File) Value(flag string) string {
 		}
 		return string(f.Status)
 	case "duplicates":
+		// The content's decision, as filo set --duplicates reads it: records if any of its copies is one. A file
+		// with no content to decide on (a symlink, an empty file, one never read) has none.
 		switch {
-		case f.Kind != "file":
+		case f.Kind != "file" || f.Size == 0 || f.Hash == "":
 			return ""
 		case f.Always:
 			return store.DupAlways
-		case f.RecordSet != 0:
+		case f.RecordSet != 0 || slices.ContainsFunc(f.Copies, func(c store.DupCopy) bool { return c.RecordSet != 0 }):
 			return store.DupRecords
 		}
 		return store.DupCounted
 	case "size":
 		return itoa(f.Size)
 	case "modified":
+		if f.MtimeNS == 0 {
+			return "" // not known
+		}
 		return time.Unix(0, f.MtimeNS).Local().Format(time.RFC3339)
 	case "sha256":
 		return f.Hash
