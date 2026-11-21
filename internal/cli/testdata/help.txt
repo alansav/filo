@@ -38,6 +38,8 @@ Commands
                            remove a rule; the files it set a policy on keep it
   rules move OLD NEW       move the rules at OLD and below it to NEW (a rename)
   rules copy OLD NEW       copy the rules at OLD and below it to NEW
+  show PATH...             everything filo holds about a file: its retention,
+                           history and copies
   help [COMMAND]           this overview, or a command's flags and rules
 
 Every command accepts --db PATH (default: $FILO_DB, then the user data

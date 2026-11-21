@@ -47,6 +47,7 @@ var overview = struct {
 		{Name: "rules remove DIR [PATTERN]", Text: "remove a rule; the files it set a policy on keep it"},
 		{Name: "rules move OLD NEW", Text: "move the rules at OLD and below it to NEW (a rename)"},
 		{Name: "rules copy OLD NEW", Text: "copy the rules at OLD and below it to NEW"},
+		{Name: "show PATH...", Text: "everything filo holds about a file: its retention, history and copies"},
 		{Name: "help [COMMAND]", Text: "this overview, or a command's flags and rules"},
 	},
 	after: "Every command accepts --db PATH (default: $FILO_DB, then the user data directory).",
@@ -214,6 +215,22 @@ var commandHelps = map[string]commandHelp{
 		after: []string{
 			"A file kept until 2026-12-31 is past its retention on 2026-12-31: it is listed by the next filo " +
 				"delete, which asks before deleting anything.",
+		},
+	},
+	"show": {
+		usage: []string{"filo show PATH... [--history] [--verify]"},
+		before: []string{
+			"Shows everything the register holds about each file, one after another: what filo observed (its " +
+				"path and root, size, modified time, hash, when it was first seen, where it was before) and what " +
+				"was decided (its retention, file_date and keep_until, and when they were set), then the other " +
+				"files with the same content. Nothing is changed.",
+			"A path is looked up in the register, not on the disk, so a missing file is shown too, and a file " +
+				"deleted by filo is found by its last path. The modified line says whether the file on disk is " +
+				"still as the last scan saw it, from its size, modified time and inode, without reading it.",
+		},
+		flags: []view.Term{
+			{Name: "--history", Text: "list every path the file has had, newest first"},
+			{Name: "--verify", Text: "read the file and compare its content with the register's hash"},
 		},
 	},
 	"rules": {
