@@ -50,7 +50,14 @@ func (e *env) set(ctx context.Context, dbBefore string, args []string) error {
 	// The files, by their paths in the register; a path that names none is refused like a file that cannot be set.
 	var ids []int64
 	var refused []setRefusal
+	seenPath := map[string]bool{}
 	for _, arg := range pos {
+		if abs, err := filepath.Abs(arg); err == nil {
+			if seenPath[abs] {
+				continue // a path given twice is one file
+			}
+			seenPath[abs] = true
+		}
 		id, why, err := e.fileID(ctx, s, arg)
 		if err != nil {
 			if ctx.Err() != nil {
@@ -105,7 +112,9 @@ func (e *env) set(ctx context.Context, dbBefore string, args []string) error {
 	case *dry:
 		r.Heading("Dry run", view.Where{Roots: roots}, append(facts, report.Plural(int64(changed), "file", "files")+
 			" would change")...)
-		e.setTable(v, changedRows(res.Rows))
+		if changed > 0 {
+			e.setTable(v, changedRows(res.Rows))
+		}
 	case changed == 0:
 		r.Heading("Unchanged", view.Where{Roots: roots}, append(facts,
 			report.Plural(int64(len(res.Rows)), "file has", "files have")+" these values already")...)
@@ -204,7 +213,7 @@ func (e *env) fileID(ctx context.Context, s *store.Store, arg string) (int64, *s
 		return refuse("outside every root")
 	}
 	if err != nil {
-		return refuse(err.Error())
+		return 0, nil, err
 	}
 	if isDir {
 		return refuse("a directory: filo set takes files (filo rules gives a directory's files a policy)")
@@ -223,6 +232,12 @@ func (e *env) fileID(ctx context.Context, s *store.Store, arg string) (int64, *s
 	}
 	if err != nil {
 		return 0, nil, err
+	}
+	// The path finds the file there now, or the last one there if it has none since (missing, deleted: refused by
+	// the store). A file that has moved on is not set by its old path: that path names something else now, or
+	// nothing.
+	if sh.Present && (sh.RootID != root.ID || sh.Path != rel) {
+		return refuse("not at this path any more: it moved to " + sh.AbsPath())
 	}
 	return sh.FileID, nil, nil
 }
@@ -342,6 +357,12 @@ func (e *env) confirmSet(ctx context.Context, v store.SetValues, rows []store.Se
 		}
 	}
 	changed := len(replaced) + len(first)
+	clears := 0
+	for _, row := range rows {
+		if row.Clears {
+			clears++
+		}
+	}
 	r.Heading("Set", view.Where{Roots: rowRoots(rows)}, append(setFacts(v),
 		report.Plural(int64(len(rows)), "file", "files"))...)
 	r.Blank()
@@ -359,7 +380,7 @@ func (e *env) confirmSet(ctx context.Context, v store.SetValues, rows []store.Se
 		}
 		return joinAnd(out)
 	}
-	clearing := v.SetRetention && v.Retention == ""
+	clearing := clears > 0
 	if len(first) > 0 || len(already) > 0 || clearing {
 		r.Blank()
 	}
@@ -372,14 +393,14 @@ func (e *env) confirmSet(ctx context.Context, v store.SetValues, rows []store.Se
 			names(already))
 	}
 	if clearing {
-		r.Count(view.Neutral, pluralWord(changed, "it will need", "they will need")+" a retention again")
+		r.Count(view.Neutral, report.Plural(int64(clears), "file", "files")+" will need a retention again")
 	}
 	question := "Replace the values of " + report.Plural(int64(len(replaced)), "file", "files")
 	if changed > len(replaced) {
 		question += " and set " + strconv.Itoa(changed)
 	}
-	if clearing {
-		question = "Clear the retention of " + report.Plural(int64(changed), "file", "files")
+	if clearing && clears == changed {
+		question = "Clear the retention of " + report.Plural(int64(clears), "file", "files")
 	}
 	relist := func() { e.setTable(v, changedRows(rows)) }
 	return e.confirmChange(ctx, question+"?", yes, relist)

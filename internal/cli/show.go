@@ -40,9 +40,9 @@ func (e *env) show(ctx context.Context, dbBefore string, args []string) error {
 	defer e.closeStore(s)
 	o := showOptions{day: today(), history: *history, verify: *verify, recursive: recursive}
 	failed := false
-	shown, files := 0, 0
+	shown, files, dirs := 0, 0, 0
 	for i, arg := range pos {
-		render, isFile, err := e.lookUp(ctx, s, arg, o)
+		render, kind, err := e.lookUp(ctx, s, arg, o)
 		if err != nil {
 			if ctx.Err() != nil {
 				return ctx.Err()
@@ -56,15 +56,18 @@ func (e *env) show(ctx context.Context, dbBefore string, args []string) error {
 		}
 		render(i+1, len(pos))
 		shown++
-		if isFile {
+		switch kind {
+		case shownFile:
 			files++
+		case shownDir:
+			dirs++
 		}
 	}
 	switch {
 	case files > 0:
 		e.view.Blank()
 		e.view.Next("Next: filo set FILE --retention R or --file-date DATE (filo help set for more)")
-	case shown > 0:
+	case dirs > 0:
 		e.view.Blank()
 		e.view.Next("Next: filo show FILE for one file, filo set FILE... to change files (filo help set for more)")
 	}
@@ -74,6 +77,16 @@ func (e *env) show(ctx context.Context, dbBefore string, args []string) error {
 	return nil
 }
 
+// shownKind is what a path showed: a present file, a file no longer present, or a directory; it decides the Next
+// line.
+type shownKind int
+
+const (
+	shownGone shownKind = iota
+	shownFile
+	shownDir
+)
+
 // showOptions are filo show's flags, and the day its statuses are worked out for.
 type showOptions struct {
 	day                        string
@@ -81,24 +94,24 @@ type showOptions struct {
 }
 
 // lookUp finds the file or directory a typed path names in the register, looks at it on disk, and returns what
-// renders it as item n of total.
-func (e *env) lookUp(ctx context.Context, s *store.Store, arg string, o showOptions) (func(n, total int), bool,
+// renders it as item n of total, and what it is.
+func (e *env) lookUp(ctx context.Context, s *store.Store, arg string, o showOptions) (func(n, total int), shownKind,
 	error) {
 	p, err := filepath.Abs(arg)
 	if err != nil {
-		return nil, false, err
+		return nil, 0, err
 	}
 	root, rel, isDir, err := locatePath(ctx, s, p)
 	if err != nil {
-		return nil, false, err
+		return nil, 0, err
 	}
-	dir := func() (func(n, total int), bool, error) {
+	dir := func() (func(n, total int), shownKind, error) {
 		d, err := s.ShowDir(ctx, root.ID, rel, o.day, now())
 		if err != nil {
-			return nil, false, err
+			return nil, 0, err
 		}
 		shown := show.LookDir(d, root)
-		return func(n, total int) { shown.Render(e.view, n, total, o.recursive) }, false, nil
+		return func(n, total int) { shown.Render(e.view, n, total, o.recursive) }, shownDir, nil
 	}
 	unknown := func() error {
 		if skippedBy(rel, root.Settings) {
@@ -110,9 +123,9 @@ func (e *env) lookUp(ctx context.Context, s *store.Store, arg string, o showOpti
 		// A root is always shown; another directory only if the register holds a file under it, as for a file.
 		if rel != "" {
 			if has, err := s.HasFilesUnder(ctx, root.ID, rel); err != nil {
-				return nil, false, err
+				return nil, 0, err
 			} else if !has {
-				return nil, false, unknown()
+				return nil, 0, unknown()
 			}
 		}
 		return dir()
@@ -121,17 +134,21 @@ func (e *env) lookUp(ctx context.Context, s *store.Store, arg string, o showOpti
 	if errors.Is(err, store.ErrNotInRegister) {
 		// Not a file filo knows: a directory gone from the disk whose files it still holds, or not known at all.
 		if has, err := s.HasFilesUnder(ctx, root.ID, rel); err != nil {
-			return nil, false, err
+			return nil, 0, err
 		} else if has {
 			return dir()
 		}
-		return nil, false, unknown()
+		return nil, 0, unknown()
 	}
 	if err != nil {
-		return nil, false, err
+		return nil, 0, err
 	}
 	f := show.Look(ctx, sh, root, o.verify)
-	return func(n, total int) { f.Render(e.view, n, total, o.day, o.history) }, true, nil
+	kind := shownGone // a missing or deleted file: filo set does not take it
+	if sh.Present {
+		kind = shownFile
+	}
+	return func(n, total int) { f.Render(e.view, n, total, o.day, o.history) }, kind, nil
 }
 
 // locatePath maps an absolute path to its root and its path in it, and says whether it is a directory on disk (a

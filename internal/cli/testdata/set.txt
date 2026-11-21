@@ -62,7 +62,7 @@ Set   retention cleared . 2 files . <root>
     7y    none   2031-03-31   none   receipts/coffee.pdf
     7y    none   2031-03-31   none   receipts/taxi.pdf
 
-  - they will need a retention again
+  - 2 files will need a retention again
 
 Clear the retention of 2 files? [y/N/l] 
 

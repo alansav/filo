@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -72,6 +73,31 @@ func TestSet(t *testing.T) {
 	contains("still bills", filo(ExitOK, "", false, "show", taxi).stdout, "retention   bills (7y)\n")
 	contains("no such policy", filo(ExitError, "", false, "set", taxi, "--retention", "nope").stdout,
 		"no policy named nope (filo policies add nope VALUE creates one)")
+
+	// A file's old path does not set it; a path given twice counts once.
+	if err := os.Rename(in("receipts/coffee.pdf"), in("receipts/coffee-2024.pdf")); err != nil {
+		t.Fatal(err)
+	}
+	filo(ExitOK, "", false, "scan")
+	r = filo(ExitError, "", false, "set", in("receipts/coffee.pdf"), in("receipts"), in("receipts"), "--retention",
+		"forever")
+	contains("old path", r.stdout, "Nothing was changed: 2 of 2 files were refused",
+		"not at this path any more: it moved to "+in("receipts/coffee-2024.pdf"))
+	// A clear asked with a file_date given to another: the question names both.
+	filo(ExitOK, "", false, "set", in("receipts/lunch.pdf"), "--file-date", "2024-01-01")
+	out = filo(ExitOK, "", false, "set", taxi, in("receipts/coffee-2024.pdf"), "--no-retention", "--file-date",
+		"2024-03-31", "-y").stdout
+	contains("clear and set", out, "1 file will need a retention again")
+	// A dry run with nothing to change has no table.
+	out = filo(ExitOK, "", false, "set", taxi, "--file-date", "2024-03-31", "--dry-run").stdout
+	contains("empty dry run", out, "0 files would change")
+	lacks("empty dry run", out, "    was")
+	// show of a missing file does not point to filo set.
+	if err := os.Remove(in("receipts/coffee-2024.pdf")); err != nil {
+		t.Fatal(err)
+	}
+	filo(ExitOK, "", false, "scan")
+	lacks("missing, next", filo(ExitOK, "", false, "show", in("receipts/coffee-2024.pdf")).stdout, "Next:")
 
 	// Usage.
 	for _, args := range [][]string{{"set", taxi}, {"set", taxi, "--file-date", "2024-01-01", "--no-file-date"},
