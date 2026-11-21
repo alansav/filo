@@ -17,6 +17,7 @@ import (
 	"github.com/alansav/filo/internal/report"
 	"github.com/alansav/filo/internal/store"
 	"github.com/alansav/filo/internal/view"
+	"github.com/alansav/filo/internal/walk"
 )
 
 // Disk is what the quick look at the disk found at the file's path.
@@ -103,20 +104,23 @@ func Look(ctx context.Context, sh store.Shown, root store.Root, verify bool) Fil
 	return f
 }
 
-// same reports whether what lstat found is the file the register holds: the same kind, size and modified time, and
-// the same inode and change time where both are known; a symlink with the same target.
+// same reports whether what lstat found is the file the register holds, as a scan compares: a regular file with the
+// same size and modified time, and the same inode and change time where both are known; a symlink with the same
+// target and broken state (its change time is not compared, as a scan does not).
 func same(sh store.Shown, fi fs.FileInfo, abs string) bool {
-	switch sh.Kind {
-	case "symlink":
+	if sh.Kind == "symlink" {
 		if fi.Mode()&fs.ModeSymlink == 0 {
 			return false
 		}
 		target, err := os.Readlink(abs)
-		return err == nil && target == sh.LinkTarget
-	default:
-		if !fi.Mode().IsRegular() || fi.Size() != sh.Size || fi.ModTime().UnixNano() != sh.MtimeNS {
+		if err != nil || target != sh.LinkTarget {
 			return false
 		}
+		broken, err := walk.Broken(abs)
+		return err != nil || broken == sh.LinkBroken // cannot tell: as a scan, no change claimed
+	}
+	if !fi.Mode().IsRegular() || fi.Size() != sh.Size || fi.ModTime().UnixNano() != sh.MtimeNS {
+		return false
 	}
 	if id, ok := fsid.FromFileInfo(fi); ok && id.Ino != 0 && sh.Ino != 0 && id.Ino != sh.Ino {
 		return false
@@ -268,6 +272,9 @@ func (f File) fileFields(history bool) []view.Field {
 			modified.Note = "unchanged since the last scan"
 			if f.LastScanUTC != "" {
 				modified.Note += " (" + date(f.LastScanUTC) + ")"
+			}
+			if f.Kind == "file" && (f.Hash == "" || f.UnreadableSince != 0) {
+				modified.Note += "; the next scan reads it again" // as a scan would: no content on record to trust
 			}
 		case DiskChanged:
 			modified.Attention = "changed on disk since the last scan: run filo scan"

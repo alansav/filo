@@ -106,6 +106,22 @@ func TestLook(t *testing.T) {
 	if f := Look(ctx, link, r, false); f.Disk != DiskUnchanged {
 		t.Errorf("symlink: disk %v", f.Disk)
 	}
+	// Its ctime is not compared, as a scan does not: a chown -h changes nothing.
+	link.CtimeNS = 1
+	if f := Look(ctx, link, r, false); f.Disk != DiskUnchanged {
+		t.Errorf("symlink with another ctime: disk %v", f.Disk)
+	}
+	// Its target gone: broken now, so changed, as the next scan will record.
+	if err := os.Remove(filepath.Join(root, "a.txt")); err != nil {
+		t.Fatal(err)
+	}
+	if f := Look(ctx, link, r, false); f.Disk != DiskChanged {
+		t.Errorf("symlink broken since: disk %v", f.Disk)
+	}
+	link.LinkBroken = true
+	if f := Look(ctx, link, r, false); f.Disk != DiskUnchanged {
+		t.Errorf("symlink broken, as recorded: disk %v", f.Disk)
+	}
 	link.LinkTarget = "b.txt"
 	if f := Look(ctx, link, r, false); f.Disk != DiskChanged {
 		t.Errorf("retargeted symlink: disk %v", f.Disk)
@@ -189,6 +205,15 @@ func TestRender(t *testing.T) {
 		if strings.Contains(b.String(), n) {
 			t.Errorf("undated has %q:\n%s", n, b.String())
 		}
+	}
+
+	// No content on record to trust: the next scan reads it again, whatever the lstat says.
+	unread := kept
+	unread.Hash, unread.Copies, unread.Verify = "", nil, VerifyNotAsked
+	b.Reset()
+	unread.Render(v, 1, 1, "2026-11-20", false)
+	if w := "unchanged since the last scan (2026-11-20); the next scan reads it again"; !strings.Contains(b.String(), w) {
+		t.Errorf("unread lacks %q:\n%s", w, b.String())
 	}
 
 	expired := kept
