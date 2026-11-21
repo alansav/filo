@@ -91,6 +91,36 @@ func TestShow(t *testing.T) {
 		t.Errorf("show with errors shows other than one file:\n%s", r.stdout)
 	}
 
+	// A file in a directory filo cannot read is still shown from the register, the path line saying why.
+	ct.write("locked/a.txt", "locked")
+	filo(ExitOK, "", false, "scan")
+	if err := os.Chmod(in("locked"), 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(in("locked"), 0o755) })
+	if _, err := os.Lstat(in("locked/a.txt")); err == nil {
+		t.Log("running as root: the locked directory can be read anyway")
+	} else {
+		contains("locked", filo(ExitOK, "", false, "show", in("locked/a.txt")).stdout, "a.txt   [!] needs a retention",
+			"[!] cannot be checked: ")
+	}
+	if err := os.Chmod(in("locked"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Through a symlinked directory, a file is found whether it is on disk or gone.
+	alias := filepath.Join(ct.work, "alias")
+	if err := os.Symlink(ct.root, alias); err != nil {
+		t.Fatal(err)
+	}
+	via := filepath.Join(alias, "bills", "2025-03 Water.pdf")
+	contains("alias, on disk", filo(ExitOK, "", false, "show", via).stdout, "2025-03 Water.pdf   [!] needs a retention")
+	if err := os.Remove(in("bills/2025-03 Water.pdf")); err != nil {
+		t.Fatal(err)
+	}
+	filo(ExitOK, "", false, "scan")
+	contains("alias, missing", filo(ExitOK, "", false, "show", via).stdout, "2025-03 Water.pdf   [!] missing since")
+
 	// Usage.
 	filo(ExitUsage, "", false, "show")
 	contains("tilde", filo(ExitError, "", false, "show", "~/x").stderr, "starts with ~")

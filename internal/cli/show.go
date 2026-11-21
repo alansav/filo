@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"path"
 	"path/filepath"
@@ -86,14 +85,16 @@ func (e *env) lookUp(ctx context.Context, s *store.Store, arg, day string, verif
 }
 
 // locateFile maps an absolute path to its root and its path in it. A path on disk is found through its directory,
-// which resolves symlinks above it as a scan saw them; one no longer on disk (missing, deleted by filo) by the path
-// alone. A directory is refused: showing one is not built yet.
+// which resolves symlinks above it as a scan saw them. One not on disk (missing, deleted by filo), or that cannot be
+// looked at (in a directory filo cannot read), through the deepest directory above it that is on disk, resolved the
+// same way, so a symlinked or bind-mounted way into a root finds it either way; failing that, by the path alone. A
+// directory or a root is refused: showing one is not built yet.
 func locateFile(ctx context.Context, s *store.Store, p string) (store.Root, string, error) {
 	fi, err := os.Lstat(p)
-	switch {
-	case err == nil && fi.IsDir():
+	if err == nil && fi.IsDir() {
 		return store.Root{}, "", fmt.Errorf("%s is a directory: filo show takes files for now", p)
-	case err == nil:
+	}
+	if err == nil {
 		root, dir, err := s.Resolve(ctx, filepath.Dir(p))
 		if errors.Is(err, store.ErrNoRoot) {
 			return store.Root{}, "", fmt.Errorf("%s is not in the register (outside every root)", p)
@@ -102,16 +103,32 @@ func locateFile(ctx context.Context, s *store.Store, p string) (store.Root, stri
 			return store.Root{}, "", err
 		}
 		return root, path.Join(dir, filepath.Base(p)), nil
-	case errors.Is(err, fs.ErrNotExist):
-		root, rel, err := s.Locate(ctx, p)
-		if errors.Is(err, store.ErrNoRoot) {
-			return store.Root{}, "", fmt.Errorf("%s is not in the register (outside every root)", p)
-		}
-		if err == nil && rel == "" {
-			return store.Root{}, "", fmt.Errorf("%s is a root: filo show takes files for now", p)
-		}
-		return root, rel, err
-	default:
-		return store.Root{}, "", err
 	}
+	root, rel, err := locateGone(ctx, s, p)
+	if errors.Is(err, store.ErrNoRoot) {
+		return store.Root{}, "", fmt.Errorf("%s is not in the register (outside every root)", p)
+	}
+	if err == nil && rel == "" {
+		return store.Root{}, "", fmt.Errorf("%s is a root: filo show takes files for now", p)
+	}
+	return root, rel, err
+}
+
+// locateGone finds the root of a path not on disk: through the deepest directory above it that is, if that resolves
+// to a root, else by the path alone (store.Locate).
+func locateGone(ctx context.Context, s *store.Store, p string) (store.Root, string, error) {
+	rest := []string{filepath.Base(p)}
+	for dir := filepath.Dir(p); ; dir = filepath.Dir(dir) {
+		if fi, err := os.Stat(dir); err == nil && fi.IsDir() {
+			if root, rel, err := s.Resolve(ctx, dir); err == nil {
+				return root, path.Join(append([]string{rel}, rest...)...), nil
+			}
+			break
+		}
+		if filepath.Dir(dir) == dir {
+			break
+		}
+		rest = append([]string{filepath.Base(dir)}, rest...)
+	}
+	return s.Locate(ctx, p)
 }
