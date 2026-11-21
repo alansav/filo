@@ -17,8 +17,8 @@ filo show PATH... [-r] [--history] [--verify]
   status.
 
 Flags
-  -r, --recursive          a directory: list every directory below it too, each
+  -r, --recursive          directories: list every directory below it too, each
                            with its files
-  --history                list every path the file has had, newest first
-  --verify                 read the file and compare its content with the
+  --history                files: list every path the file has had, newest first
+  --verify                 files: read the file and compare its content with the
                            register's hash

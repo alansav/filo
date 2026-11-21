@@ -179,4 +179,16 @@ func TestShowDir(t *testing.T) {
 	ct.contains("--recursive", ct.filo(ExitOK, "", false, "show", "--recursive", ct.root).stdout,
 		"home and below   directory", "  home/bills/  ")
 	ct.filo(ExitError, "", false, "show", ct.in("never"))
+
+	// A directory on disk the register holds nothing under: an error, as for a file.
+	if err := os.MkdirAll(ct.in("new/empty"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	ct.write(".git/config", "x")
+	r := ct.filo(ExitError, "", false, "show", ct.in("new"), ct.in(".git"))
+	ct.contains("unknown directories", r.stderr, ct.in("new")+" is not in the register yet: run filo scan",
+		ct.in(".git")+" is not in the register: its root's settings skip it")
+	if r.stdout != "" {
+		t.Errorf("unknown directories shown:\n%s", r.stdout)
+	}
 }

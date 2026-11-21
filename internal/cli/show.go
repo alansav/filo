@@ -88,7 +88,21 @@ func (e *env) lookUp(ctx context.Context, s *store.Store, arg string, o showOpti
 		shown := show.LookDir(d, root)
 		return func(n, total int) { shown.Render(e.view, n, total, o.recursive) }, nil
 	}
+	unknown := func() error {
+		if skippedBy(rel, root.Settings) {
+			return fmt.Errorf("%s is not in the register: its root's settings skip it (filo roots lists them)", p)
+		}
+		return fmt.Errorf("%s is not in the register yet: run filo scan", p)
+	}
 	if isDir {
+		// A root is always shown; another directory only if the register holds a file under it, as for a file.
+		if rel != "" {
+			if has, err := s.HasFilesUnder(ctx, root.ID, rel); err != nil {
+				return nil, err
+			} else if !has {
+				return nil, unknown()
+			}
+		}
 		return dir()
 	}
 	sh, err := s.ShowFile(ctx, root.ID, rel, o.day)
@@ -99,10 +113,7 @@ func (e *env) lookUp(ctx context.Context, s *store.Store, arg string, o showOpti
 		} else if has {
 			return dir()
 		}
-		if skippedBy(rel, root.Settings) {
-			return nil, fmt.Errorf("%s is not in the register: its root's settings skip it (filo roots lists them)", p)
-		}
-		return nil, fmt.Errorf("%s is not in the register yet: run filo scan", p)
+		return nil, unknown()
 	}
 	if err != nil {
 		return nil, err

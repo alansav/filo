@@ -232,9 +232,9 @@ var commandHelps = map[string]commandHelp{
 				"of its own, with its size and status.",
 		},
 		flags: []view.Term{
-			{Name: "-r, --recursive", Text: "a directory: list every directory below it too, each with its files"},
-			{Name: "--history", Text: "list every path the file has had, newest first"},
-			{Name: "--verify", Text: "read the file and compare its content with the register's hash"},
+			{Name: "-r, --recursive", Text: "directories: list every directory below it too, each with its files"},
+			{Name: "--history", Text: "files: list every path the file has had, newest first"},
+			{Name: "--verify", Text: "files: read the file and compare its content with the register's hash"},
 		},
 	},
 	"rules": {
