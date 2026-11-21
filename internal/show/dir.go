@@ -98,16 +98,16 @@ func (d Dir) name() string {
 // recursive, the contents are its subdirectories (each with its whole subtree's counts) and its own files; with it,
 // a block per directory at it and below, each with its own files and the rules set on it.
 func (d Dir) Render(v *view.Renderer, n, total int, recursive bool) {
-	own := func(e store.DirEntry) bool { return parent(e.Path) == d.Dir }
-	var files []store.DirEntry // the files the title and the Directory part count
-	var size int64
-	for _, e := range d.Files {
-		if recursive || own(e) {
-			files = append(files, e)
-			size += e.Size
-		}
+	own, subtree := d.index()
+	files := own[d.Dir] // the files the title and the Directory part count
+	if recursive {
+		files = d.Files
 	}
-	dirs := d.subdirs(recursive)
+	var size int64
+	for _, e := range files {
+		size += e.Size
+	}
+	dirs := d.subdirs(recursive, subtree)
 	name, facts := d.name(), []string{}
 	if recursive {
 		name += " and below"
@@ -138,28 +138,28 @@ func (d Dir) Render(v *view.Renderer, n, total int, recursive bool) {
 		v.Part("Rules", "in the order tried")
 		v.HeadedTable(nil, ruleRows(v, d.RootPath, d.Rules))
 	}
+	var ties []store.RuleTie
+	for _, t := range d.Ties {
+		if recursive || parent(t.Path) == d.Dir {
+			ties = append(ties, t)
+		}
+	}
+	if len(ties) > 0 {
+		v.Count(view.Attention, report.Plural(int64(len(ties)), "file", "files")+": "+report.TieWhy(ties)+
+			", so no rule gives a policy (filo rules lists the ties)")
+	}
 
 	if recursive {
-		d.renderBlocks(v, dirs)
+		d.renderBlocks(v, dirs, own)
 		return
 	}
 	if len(dirs) > 0 {
 		v.Part("Directories", report.Count(int64(len(dirs))))
 		rows := make([]view.ListRow, len(dirs))
 		for i, sub := range dirs {
-			var count, attention int
-			var bytes int64
-			for _, e := range d.Files {
-				if store.IsAtOrUnder(e.Path, sub) {
-					count++
-					bytes += e.Size
-					if _, _, a := entryStatus(e); a {
-						attention++
-					}
-				}
-			}
-			rows[i] = view.ListRow{Name: path.Base(sub) + "/", Size: v.Join(report.Plural(int64(count), "file", "files"),
-				report.Size(bytes)), Status: decisions(attention), Attention: attention > 0}
+			t := subtree[sub]
+			rows[i] = view.ListRow{Name: path.Base(sub) + "/", Size: v.Join(report.Plural(int64(t.files), "file",
+				"files"), report.Size(t.bytes)), Status: decisions(t.attention), Attention: t.attention > 0}
 		}
 		v.List(rows)
 	}
@@ -171,25 +171,65 @@ func (d Dir) Render(v *view.Renderer, n, total int, recursive bool) {
 	v.List(listRows(v, files))
 }
 
-// subdirs is the directories below d that hold files: its own subdirectories (recursive false), or every directory
-// at any depth below it, those with no file of their own included where a deeper one has some (recursive true).
-// Ordered as ls -R lists them: a parent before the directories inside it.
-func (d Dir) subdirs(recursive bool) []string {
-	seen := map[string]bool{}
-	var out []string
+// tally is a subtree's files: how many, their size, and how many need a decision.
+type tally struct {
+	files, attention int
+	bytes            int64
+}
+
+// index groups the files once: each directory's own files, in path order, and the tally of each directory's whole
+// subtree, for every directory from a file's own up to d.
+func (d Dir) index() (map[string][]store.DirEntry, map[string]*tally) {
+	own := map[string][]store.DirEntry{}
+	subtree := map[string]*tally{}
 	for _, e := range d.Files {
 		p := parent(e.Path)
-		for p != d.Dir && store.IsAtOrUnder(p, d.Dir) {
-			if !recursive {
-				if parent(p) == d.Dir && !seen[p] {
-					seen[p] = true
-					out = append(out, p)
-				}
-			} else if !seen[p] {
+		own[p] = append(own[p], e)
+		_, _, a := entryStatus(e)
+		for {
+			t := subtree[p]
+			if t == nil {
+				t = &tally{}
+				subtree[p] = t
+			}
+			t.files++
+			t.bytes += e.Size
+			if a {
+				t.attention++
+			}
+			if p == d.Dir || !store.IsAtOrUnder(p, d.Dir) {
+				break
+			}
+			p = parent(p)
+		}
+	}
+	return own, subtree
+}
+
+// subdirs is the directories below d to list: its own subdirectories holding files (recursive false), or every
+// directory below it that holds a file or has a rule set on it, with the directories between it and them (recursive
+// true). Ordered as ls -R lists them: a parent before the directories inside it.
+func (d Dir) subdirs(recursive bool, subtree map[string]*tally) []string {
+	seen := map[string]bool{}
+	var out []string
+	add := func(p string) {
+		for p != d.Dir && store.IsAtOrUnder(p, d.Dir) && !seen[p] {
+			if recursive || parent(p) == d.Dir {
 				seen[p] = true
 				out = append(out, p)
 			}
+			if !recursive && parent(p) == d.Dir {
+				return
+			}
 			p = parent(p)
+		}
+	}
+	for p := range subtree {
+		add(p)
+	}
+	if recursive {
+		for _, r := range d.RulesBelow {
+			add(r.Dir)
 		}
 	}
 	slices.SortFunc(out, func(a, b string) int {
@@ -264,24 +304,22 @@ func listRows(v *view.Renderer, files []store.DirEntry) []view.ListRow {
 // renderBlocks writes a block per directory, d's own first, then every directory below it (dirs) as ls -R does:
 // each headed by its path from d's name, its file count and how many need a decision, then the rules set on it (d's
 // own are in the Rules part) and its own files.
-func (d Dir) renderBlocks(v *view.Renderer, dirs []string) {
+func (d Dir) renderBlocks(v *view.Renderer, dirs []string, own map[string][]store.DirEntry) {
 	for _, dir := range append([]string{d.Dir}, dirs...) {
-		var files []store.DirEntry
+		files := own[dir]
 		attention := 0
-		for _, e := range d.Files {
-			if parent(e.Path) == dir {
-				files = append(files, e)
-				if _, _, a := entryStatus(e); a {
-					attention++
-				}
+		for _, e := range files {
+			if _, _, a := entryStatus(e); a {
+				attention++
 			}
 		}
 		head := d.name() + "/"
-		if dir != d.Dir {
+		switch {
+		case dir == d.Dir:
+		case d.Dir == "":
+			head += dir + "/"
+		default:
 			head += strings.TrimPrefix(dir, d.Dir+"/") + "/"
-			if d.Dir == "" {
-				head = d.name() + "/" + dir + "/"
-			}
 		}
 		count := report.Plural(int64(len(files)), "file", "files")
 		if len(files) == 0 {

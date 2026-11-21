@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -95,6 +96,24 @@ func TestRenderDir(t *testing.T) {
 `
 	if b.String() != want {
 		t.Errorf("dir -r:\n%s\nwant:\n%s", b.String(), want)
+	}
+
+	// A rule set on a directory with no file yet gets its block under -r; a tie is said under the rules.
+	d.RulesBelow = append(d.RulesBelow, store.Rule{Dir: "bills/2027", Pattern: "*", Policy: "bills", PolicyValue: "7y"})
+	d.Ties = []store.RuleTie{{FileItem: store.FileItem{Path: "bills/2019-04 Council Tax.pdf"},
+		Rules: []store.Rule{{Pattern: "*.pdf"}, {Pattern: "bill*"}}}}
+	b.Reset()
+	d.Render(v, 1, 1, true)
+	for _, w := range []string{"  bills/2027/   no files\n    rule * -> bills (7y)\n",
+		"  [!] 1 file: two rules match it equally, so no rule gives a policy (filo rules lists the ties)\n"} {
+		if !strings.Contains(b.String(), w) {
+			t.Errorf("rule below and tie: lacks %q:\n%s", w, b.String())
+		}
+	}
+	b.Reset()
+	d.Render(v, 1, 1, false)
+	if strings.Contains(b.String(), "2027") || !strings.Contains(b.String(), "[!] 1 file:") {
+		t.Errorf("without -r, the rule-only directory is not listed, the tie is:\n%s", b.String())
 	}
 
 	// An unreachable root, no rules, no files.
