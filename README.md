@@ -42,6 +42,8 @@ moves, renames or deletes anything outside its own database. See [Roadmap](#road
   holds about a file (its paths over time, hash, retention, copies) or a directory (its rules and contents), `filo
   set` changes a file's `file_date`, retention or duplicates decision without a CSV, and `filo get` prints single
   fields for scripts. See [One file at a time](#one-file-at-a-time).
+- **Finds files by name**, wherever they are in your roots: `filo find --name '*gas bill*'` lists them, and piped it
+  gives their paths to other tools (`xargs`, `tar`). See [Finding files](#finding-files).
 - **Deletes what you confirm**, after reading each file again just before deleting it: a file that changed since its
   retention was set, moved, or can't be read is skipped, never deleted.
 - **Clears out duplicates you decide on**: export the groups of identical copies, write `keep` or `delete` against
@@ -481,6 +483,42 @@ Next: filo set FILE --retention R, --file-date DATE or --duplicates always|recor
   one file is its bare value, several fields of one file a name and value line each, several files a row each with
   the path last (tab-separated when piped). An empty value means none.
 
+## Finding files
+
+`filo find` lists the files in the register by name, under a directory or under every root:
+
+```sh
+filo find --name '*gas*'                          # every file whose name holds "gas", in every root
+filo find ~/Documents/received --name '*.pdf'     # under one directory only
+filo find --name '*.pdf' | less                   # piped: one absolute path per line
+filo find --name '*bill*' -0 | xargs -0 ls -l     # -0: any file name, safely, for xargs -0 or tar --null -T -
+```
+
+```
+$ filo find --name '*gas*'
+Scan   scan 12 · 5,310 files seen · 0.4 s · ~/Documents
+  ✓ no changes
+
+Found   3 files · 412 KiB · named *gas* · ~/Documents
+
+    modified        size
+    2025-01-14    48 KiB   house/gas safety certificate.pdf
+    2026-09-02   180 KiB   received/2026/09/2026-09-02 British Gas Bill for September 2026.pdf
+    2026-10-03   184 KiB   received/2026/10/2026-10-03 British Gas Bill for October 2026.pdf
+```
+
+- **`--name`** matches the file's name, not its directory, ignoring case. `*` matches any run of characters and is
+  the only wildcard: `?` and `[` match themselves, since they turn up in real names (`Q1 [draft].xlsx`). A name with
+  no `*` must match whole: `--name bill.pdf` finds files called `bill.pdf`. With no `--name`, every file.
+- **It scans first**, as an export does, so a file saved a moment ago is found; the scan only reads files that
+  changed. `--no-scan` lists from the register as it is. A root that can't be scanned (an unplugged disk) stops it,
+  so a list never looks complete when it isn't.
+- **It lists the files there now**: not missing files, files Filo deleted, or symlinks. A file with hard links is
+  listed once. In a terminal you see every file found; nothing is cut.
+- **Piped**, names are escaped as all of Filo's output is, so a name holding a newline or a backslash would not
+  match on disk; `filo find` then says so on stderr and exits 1. `-0` writes the names exactly, each ended by a NUL,
+  and works only through a pipe.
+
 ## Commands
 
 | Command | What it does |
@@ -513,6 +551,7 @@ Next: filo set FILE --retention R, --file-date DATE or --duplicates always|recor
 | `filo show PATH... [-r] [--history] [--verify]` | Everything Filo holds about each file or directory. See [One file at a time](#one-file-at-a-time). |
 | `filo set FILE... [flags]` | Set files' `file_date`, retention or duplicates decision; asks before replacing a value. |
 | `filo get FILE... --FIELD...` | Print fields of files, for scripts. |
+| `filo find [DIR] [--name PATTERN] [-0] [--no-scan] [--workers N]` | Scan, then list the files under `DIR` (or every root) whose name matches. See [Finding files](#finding-files). |
 | `filo help [COMMAND]` | Show usage. `-h` works on every command. |
 
 Options for `filo roots add` and `filo roots set`, which every scan of the root then uses:
@@ -549,7 +588,8 @@ Exit codes: `0` success (files that couldn't be read are reported but don't fail
 is not a failure), `1` an error, a root that failed during `filo scan` of every root, a CSV row that `filo update`
 refused, a file `filo delete` couldn't read or delete, a group of a duplicates CSV it refused, a path `filo show`
 or `filo get` couldn't show (not in the register, skipped by its root's settings, or for `get` a directory; the others
-are still shown), or a file `filo set` refused, `2` a usage error.
+are still shown), a file `filo set` refused, or a root `filo find` couldn't scan or a name it had to escape, `2` a
+usage error. `filo find` that finds nothing exits `0`.
 
 ## Roots
 
@@ -636,8 +676,9 @@ Enable it with `systemctl --user enable --now filo-scan.timer`.
 7. **Directory rules**: a policy for the files under a directory, applied by every scan. Done.
 8. **Show, set and get**: everything about a file or directory, and its decisions changed from the command line.
    Done.
-9. **Next**: what is planned, in order, is in [docs/roadmap.md](docs/roadmap.md): finding files by name, tags, bash
-   completion, sharing decisions between devices, and more.
+9. **Finding files** by name: `filo find`. Done.
+10. **Next**: what is planned, in order, is in [docs/roadmap.md](docs/roadmap.md): tags, pages listing files by tag,
+    bash completion, sharing decisions between devices, and more.
 
 Principles that won't change:
 - A retention is never a trigger: reaching its end makes a file a candidate you confirm.
