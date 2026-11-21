@@ -12,9 +12,10 @@ import (
 
 // Match reports whether name matches pattern: * matches any run of characters (none included), every other
 // character only itself, ignoring case (Unicode simple case folding, so "BILL" matches "bill"). A pattern with no *
-// matches the whole name exactly. ? and [ are ordinary characters.
+// matches the whole name exactly. ? and [ are ordinary characters. A byte that is not valid UTF-8 matches only the
+// same byte.
 func Match(pattern, name string) bool {
-	p, n := []rune(pattern), []rune(name)
+	p, n := chars(pattern), chars(name)
 	// The usual * backtracking: on a mismatch, let the last * take one more character.
 	pi, ni, star, mark := 0, 0, -1, 0
 	for ni < len(n) {
@@ -38,12 +39,28 @@ func Match(pattern, name string) bool {
 	return pi == len(p)
 }
 
-// sameFolded reports whether a and b are the same character ignoring case: equal under Unicode simple folding.
+// chars splits s into its characters, a byte that is not valid UTF-8 as its negative value minus one, so it is never
+// taken for U+FFFD or for another invalid byte.
+func chars(s string) []rune {
+	out := make([]rune, 0, len(s))
+	for len(s) > 0 {
+		r, size := utf8.DecodeRuneInString(s)
+		if r == utf8.RuneError && size <= 1 {
+			r = -rune(s[0]) - 1
+		}
+		out = append(out, r)
+		s = s[size:]
+	}
+	return out
+}
+
+// sameFolded reports whether a and b are the same character ignoring case: equal under Unicode simple folding. An
+// invalid byte (negative, see chars) is only itself.
 func sameFolded(a, b rune) bool {
 	if a == b {
 		return true
 	}
-	if a == utf8.RuneError || b == utf8.RuneError {
+	if a < 0 || b < 0 {
 		return false
 	}
 	for f := unicode.SimpleFold(a); f != a; f = unicode.SimpleFold(f) {
@@ -55,39 +72,31 @@ func sameFolded(a, b rune) bool {
 }
 
 // File is one file filo find lists: at the first of its paths that matched, with how many other paths it has (hard
-// links, in the same root), which are not listed.
+// links in the same root, store.FoundFile's Links), which are not listed.
 type File struct {
 	store.FoundFile
-	Links int
 }
 
 // Select returns the files among fs (one row per path, as store.FindFiles gives them, in its order) whose base name
-// matches pattern ("" matches every name), in the same order. Paths with the same inode in the same root are one
-// file: it is listed once, at its first path that matches, if any does, and its other paths are counted as Links.
+// matches pattern ("" matches every name), in the same order. Paths that are one file, hard links (the same inode,
+// size and modified time in the same root, as store.FindFiles counts them), are listed once, at the first that
+// matches, if any does. A stale inode reused by a file of another size or time is another file, listed too.
 func Select(fs []store.FoundFile, pattern string) []File {
-	type key struct{ root, ino int64 }
-	paths := map[key]int{}
-	for _, f := range fs {
-		if f.Inode != 0 {
-			paths[key{f.RootID, f.Inode}]++
-		}
-	}
+	type key struct{ root, ino, size, mtime int64 }
 	listed := map[key]bool{}
 	var out []File
 	for _, f := range fs {
 		if pattern != "" && !Match(pattern, path.Base(f.Rel)) {
 			continue
 		}
-		file := File{FoundFile: f}
-		if f.Inode != 0 {
-			k := key{f.RootID, f.Inode}
+		if f.Inode != 0 && f.Links > 0 {
+			k := key{f.RootID, f.Inode, f.Size, f.MtimeNS}
 			if listed[k] {
 				continue
 			}
 			listed[k] = true
-			file.Links = paths[k] - 1
 		}
-		out = append(out, file)
+		out = append(out, File{FoundFile: f})
 	}
 	return out
 }

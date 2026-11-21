@@ -35,6 +35,10 @@ func TestMatch(t *testing.T) {
 		{"straße*", "STRASSE.txt", false},      // simple folding: ß is not "ss"
 		{"*k", "the Kelvin sign \u212a", true}, // U+212A KELVIN SIGN folds with k
 		{"*é", "caf\xff", false},
+		{"caf\xfe", "caf\xff", false}, // two invalid bytes are not the same character
+		{"caf\xff", "caf\xff", true},
+		{"*\ufffd", "x\xff", false}, // nor is an invalid byte U+FFFD
+		{"*\ufffd", "x\ufffd", true},
 	} {
 		if got := Match(tc.pattern, tc.name); got != tc.want {
 			t.Errorf("Match(%q, %q) = %v, want %v", tc.pattern, tc.name, got, tc.want)
@@ -43,18 +47,22 @@ func TestMatch(t *testing.T) {
 }
 
 func TestSelect(t *testing.T) {
-	f := func(root int64, rel string, ino int64) store.FoundFile {
-		return store.FoundFile{RootID: root, Root: "/r", Rel: rel, Inode: ino}
+	f := func(root int64, rel string, ino int64, links int) store.FoundFile {
+		return store.FoundFile{RootID: root, Root: "/r", Rel: rel, Inode: ino, Size: 5, MtimeNS: 9, Links: links}
 	}
+	stale := f(1, "g/stale.pdf", 10, 0) // a stale inode: another file's size, so not one of a/bill.pdf's links
+	stale.Size = 6
 	fs := []store.FoundFile{
-		f(1, "a/bill.pdf", 10),
-		f(1, "a/other.txt", 0),
-		f(1, "b/copy of bill.pdf", 10), // a hard link of a/bill.pdf
-		f(1, "c/link.txt", 20),         // a hard link whose other path does not match *bill*
-		f(1, "d/bill-link.pdf", 20),
-		f(2, "x/bill.pdf", 10), // the same inode in another root: another file
-		f(1, "e/unknown.pdf", 0),
-		f(1, "f/unknown.pdf", 0), // no inode: never merged
+		f(1, "a/bill.pdf", 10, 1),
+		f(1, "a/other.txt", 0, 0),
+		f(1, "b/copy of bill.pdf", 10, 1), // a hard link of a/bill.pdf
+		f(1, "c/link.txt", 20, 1),         // a hard link whose other path does not match *bill*
+		f(1, "d/bill-link.pdf", 20, 1),
+		f(2, "x/bill.pdf", 10, 0), // the same inode in another root: another file
+		f(1, "e/unknown.pdf", 0, 0),
+		f(1, "f/unknown.pdf", 0, 0), // no inode: never merged
+		stale,
+		f(1, "h/outside link.pdf", 30, 1), // its link is outside the scope: listed, with the count
 	}
 	type row struct {
 		rel   string
@@ -65,11 +73,11 @@ func TestSelect(t *testing.T) {
 		want    []row
 	}{
 		{"", []row{{"a/bill.pdf", 1}, {"a/other.txt", 0}, {"c/link.txt", 1}, {"x/bill.pdf", 0},
-			{"e/unknown.pdf", 0}, {"f/unknown.pdf", 0}}},
+			{"e/unknown.pdf", 0}, {"f/unknown.pdf", 0}, {"g/stale.pdf", 0}, {"h/outside link.pdf", 1}}},
 		{"*bill*", []row{{"a/bill.pdf", 1}, {"d/bill-link.pdf", 1}, {"x/bill.pdf", 0}}},
 		{"copy*", []row{{"b/copy of bill.pdf", 1}}},
 		{"*.pdf", []row{{"a/bill.pdf", 1}, {"d/bill-link.pdf", 1}, {"x/bill.pdf", 0}, {"e/unknown.pdf", 0},
-			{"f/unknown.pdf", 0}}},
+			{"f/unknown.pdf", 0}, {"g/stale.pdf", 0}, {"h/outside link.pdf", 1}}},
 		{"a", nil}, // the base name only, never the directory
 	} {
 		var got []row
