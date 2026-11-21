@@ -450,6 +450,52 @@ is in `design.md` (Register, Scan, Disposal, Accepted risks).
 - Untested: everything on platforms other than Linux on amd64, and a real FAT or network filesystem (simulated by
   changing the directory's mode).
 
+## Showing and setting a file's details: how item 37 was built
+
+Designed with the person on 2026-11-20 (roadmap item 37, with the mockups of every output agreed first), built on
+branch `item-37` on 2026-11-21 in six slices, one PR, each slice reviewed once (`code-review`, medium).
+
+1. *`filo show FILE`* (`store.ShowFile`; `view.Subject`, `Part`, `Fields`; `internal/show`; `internal/cli/show.go`).
+   Review: five findings, four fixed: a file in a directory filo cannot read is shown from the register, the path
+   line saying why (it was an error); a symlink compared as a scan compares it (target and broken state, not ctime:
+   `walk.Broken`, shared with the walk); "unchanged" adds "the next scan reads it again" for a file with no hash or
+   flagged unreadable; a missing file found through a symlinked way into its root, as one on disk is. The fifth (the
+   view commit before the internal package that renders through it) changed CLAUDE.md instead: the view may come
+   first when a package renders through it.
+2. *`filo show DIR [-r]`* (`store.ShowDir`, `HasFilesUnder`; `view.List`, `Block`; `show.Dir`). Review: seven
+   findings, six fixed: a directory on disk the register holds nothing under is an error, as a file is (it showed as
+   empty); a directory whose files all moved out is not one with something to show; the files grouped once, not
+   gone through per directory (a large root with -r would have taken minutes); a rule on a directory with no file
+   yet gets its block under -r; rule ties shown under the rules; the help says which flags are for files and which
+   for directories. Kept: a path that is a symlink to a directory is the symlink, an entry of its own.
+3. *`filo set`, file date and retention* (`store.SetFiles`; `view.Over`; `internal/cli/set.go`). Review: seven
+   findings, five fixed: a moved file's old path no longer sets it ("not at this path any more"); only a path outside
+   every root is a refusal, other lookup errors are errors; the clear question counts only the retentions cleared; no
+   empty table in a dry run with nothing to change; `filo show` of a missing or deleted file no longer points to
+   `filo set`; a path given twice counts once. Kept: the question asked inside the transaction (`filo update` does the
+   same). Then the person decided that a policy not there yet is created with no value, without asking, and said so
+   (it was refused).
+4. *`filo set --duplicates`*. Review: eight findings, all fixed, five of them one cause: the decision was read from
+   the named files' own rows, when it belongs to the content as a whole. Rebuilt on that: it was always, or records if
+   any copy is one (hard links one copy), or counted; always and counted replace the content's sets of records, and
+   ask; records leaves exactly one set, the copies named, so no set of one is left. Also one refusal per file, no
+   empty review batch, and the Unchanged heading naming both kinds of flag.
+5. *`filo get`* (`show.Fields`, `File.Value`; `view.Line`, `Pairs`, `Record`; `internal/cli/get.go`). Review: nine
+   findings, eight fixed: `--duplicates` the content's decision, empty with no content to decide on; `--modified`
+   empty when not known; a path's trailing space as `\x20`; with -0 only the path raw. Then the person removed `-0`
+   (its rows were no list of names for `xargs -0`, and it was the one name written unescaped): everything `get`
+   prints is escaped; NUL-separated names wait for `filo files -0` (item 19).
+6. *README and help*: a section "One file at a time", the commands table, `filo set`'s options, the exit codes.
+   Review: five findings, all fixed (the exit codes, the get layouts, the item's section in design.md written as
+   "as built" notes rather than slices).
+
+Tests: store `TestShowFile`, `TestShowFileRule`, `TestShowDir`, `TestShowDirTies`, `TestSetFiles`,
+`TestSetReplacesARulesPolicy`, `TestSetDuplicates`, `TestSetDuplicatesWholeContent`; view `TestSubjectPartFields`,
+`TestSubjectResetsTheRoot`, `TestListAndBlock`, `TestFilesOver`, `TestGetOutput`; show `TestTimeLeft`, `TestLook`,
+`TestRender`, `TestRenderDir`, `TestLookDir`, `TestValue`; CLI `TestShowGolden` (`testdata/show.txt`), `TestShow`,
+`TestShowWritesNothing`, `TestShowDirGolden` (`show-dir.txt`), `TestShowDir`, `TestSetGolden` (`set.txt`), `TestSet`,
+`TestSetDuplicatesGolden` (`set-duplicates.txt`), `TestGet`, and the help pages.
+
 ## Notes on decisions
 
 Short notes taken out of `design.md` on 2026-11-17, by the section they were in.
@@ -508,6 +554,9 @@ Short notes taken out of `design.md` on 2026-11-17, by the section they were in.
 
 ### Commands
 
+- `filo show`, `set` and `get` (2026-11-20/21) replaced roadmap "Later b, setting dates in place", whose open question
+  (a command, the UI, or both) was answered for the command line. A bare `filo FILE` was considered and not taken: a
+  file named like a command would be guessed at.
 - Reshaped 2026-11-12: `review` and its subcommands `set-date`, `export` and `import` were replaced by `export lifespan`
   and `update`; "update" says that only existing files change, which "import" did not. `export lifespan` was renamed
   `export retention` the same day: the CSV's word names what is set in it, and the lifespan CSV became the retention CSV
