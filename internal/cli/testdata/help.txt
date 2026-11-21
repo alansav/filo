@@ -42,6 +42,8 @@ Commands
                            retention, history, copies
   set FILE... [flags]      set files' file_date, retention or duplicates
                            decision
+  get FILE... --FIELD...   print fields of files, for scripts: --retention,
+                           --keep-until …
   help [COMMAND]           this overview, or a command's flags and rules
 
 Every command accepts --db PATH (default: $FILO_DB, then the user data

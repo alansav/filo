@@ -49,6 +49,7 @@ var overview = struct {
 		{Name: "rules copy OLD NEW", Text: "copy the rules at OLD and below it to NEW"},
 		{Name: "show PATH...", Text: "everything filo holds about a file or directory: retention, history, copies"},
 		{Name: "set FILE... [flags]", Text: "set files' file_date, retention or duplicates decision"},
+		{Name: "get FILE... --FIELD...", Text: "print fields of files, for scripts: --retention, --keep-until …"},
 		{Name: "help [COMMAND]", Text: "this overview, or a command's flags and rules"},
 	},
 	after: "Every command accepts --db PATH (default: $FILO_DB, then the user data directory).",
@@ -216,6 +217,32 @@ var commandHelps = map[string]commandHelp{
 		after: []string{
 			"A file kept until 2026-12-31 is past its retention on 2026-12-31: it is listed by the next filo " +
 				"delete, which asks before deleting anything.",
+		},
+	},
+	"get": {
+		usage: []string{"filo get FILE... --FIELD... [-0]"},
+		before: []string{
+			"Prints fields of each file from the register, for scripts and quick checks, in the order the fields " +
+				"are given. One field of one file prints its bare value; several fields of one file print a name " +
+				"and value per line; several files print a row each, the values in order and the file last. A " +
+				"field with no value prints as empty. Nothing is changed, and nothing is read from the disk.",
+			"Piped, values are separated by tabs and the file is its absolute path, last, so a name holding a tab " +
+				"still splits right; -0 ends each row with a NUL instead of a newline and writes names exactly, " +
+				"for xargs -0 and tar --null.",
+		},
+		flags: []view.Term{
+			{Name: "--file-date", Text: "the date a period counts from (YYYY-MM-DD)"},
+			{Name: "--retention", Text: "as typed (7y, forever, a date) or a policy's name"},
+			{Name: "--keep-until", Text: "the date it is kept until, or forever"},
+			{Name: "--status", Text: "kept, forever, expired, changed, undated, needs_file_date, possible_move, " +
+				"unreadable; missing or deleted for a file not present"},
+			{Name: "--duplicates", Text: "the content's decision: always, records or counted"},
+			{Name: "--size", Text: "in bytes"},
+			{Name: "--modified", Text: "its modification time, RFC 3339, local time"},
+			{Name: "--sha256", Text: "its content's hash, as sha256sum prints it"},
+			{Name: "--root", Text: "the root it is in"},
+			{Name: "--first-seen", Text: "the date filo first saw it"},
+			{Name: "-0", Text: "end rows with NUL, names unescaped (for a pipe only)"},
 		},
 	},
 	"set": {
