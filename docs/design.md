@@ -1248,9 +1248,12 @@ not in the register is refused with the other files, all or nothing. Each change
 `Next: filo show FILE for one file, filo set FILE... to change files (filo help set for more)`).
 
 **Slice 4, `filo set --duplicates`** (`store.SetFiles` with `SetValues.Duplicates`; `internal/cli/testdata/
-set-duplicates.txt`), as agreed below, in the same transaction as the other flags. `always` also replaces the
-content's sets of records (asked, "was: a separate record"); `records` makes the files named one new set, moving them
-out of any other, and the content no longer always; `counted` undoes either, a set of records as a whole. Refused, all
+set-duplicates.txt`), as agreed below, in the same transaction as the other flags. A decision is the content's as a
+whole, read as the duplicate groups read it (hard links one copy; a copy is a record if any of its paths is), whichever
+copies are named: it was `always`, or records if any copy is one, or counted. `always` replaces the content's sets of
+records (asked, "was: a separate record"); `records` leaves the content exactly one set, the copies named (any other
+set of it goes, so no set of one is left behind), and the content no longer always; `counted` undoes both, so it is
+counted as a duplicate again. Refused, all
 or nothing: a symlink, an empty file, a file never read or unreadable, and for `records` a lone copy or a file under
 an excluded directory (not counted as a copy). The heading's fact is the decision ("always", "records", "counted as
 duplicates"), with how many contents and copies. `filo show`'s Next line names `--duplicates always|records`.
