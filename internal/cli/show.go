@@ -13,13 +13,16 @@ import (
 )
 
 // show is filo show PATH... (docs/design.md, Showing and setting a file's details): everything the register holds
-// about each file, one after another. Read-only. A path that cannot be shown is an error line on stderr; the others
-// are still shown, and the exit status is 1.
+// about each file or directory, one after another. Read-only. A path that cannot be shown is an error line on
+// stderr; the others are still shown, and the exit status is 1.
 func (e *env) show(ctx context.Context, dbBefore string, args []string) error {
 	fs := e.flags("show")
 	db := dbFlag(fs, dbBefore)
 	history := fs.Bool("history", false, "")
 	verify := fs.Bool("verify", false, "")
+	var recursive bool
+	fs.BoolVar(&recursive, "r", false, "")
+	fs.BoolVar(&recursive, "recursive", false, "")
 	pos, err := e.parse(fs, "show", args)
 	if err != nil {
 		return err
@@ -35,11 +38,11 @@ func (e *env) show(ctx context.Context, dbBefore string, args []string) error {
 		return err
 	}
 	defer e.closeStore(s)
-	day := today()
+	o := showOptions{day: today(), history: *history, verify: *verify, recursive: recursive}
 	failed := false
 	shown := 0
 	for i, arg := range pos {
-		f, err := e.lookUp(ctx, s, arg, day, *verify)
+		render, err := e.lookUp(ctx, s, arg, o)
 		if err != nil {
 			if ctx.Err() != nil {
 				return ctx.Err()
@@ -51,7 +54,7 @@ func (e *env) show(ctx context.Context, dbBefore string, args []string) error {
 		if shown > 0 {
 			e.view.Blank()
 		}
-		f.Render(e.view, i+1, len(pos), day, *history)
+		render(i+1, len(pos))
 		shown++
 	}
 	if failed {
@@ -60,58 +63,80 @@ func (e *env) show(ctx context.Context, dbBefore string, args []string) error {
 	return nil
 }
 
-// lookUp finds the file a typed path names in the register and looks at it on disk.
-func (e *env) lookUp(ctx context.Context, s *store.Store, arg, day string, verify bool) (show.File, error) {
-	p, err := filepath.Abs(arg)
-	if err != nil {
-		return show.File{}, err
-	}
-	root, rel, err := locateFile(ctx, s, p)
-	if err != nil {
-		return show.File{}, err
-	}
-	sh, err := s.ShowFile(ctx, root.ID, rel, day)
-	if errors.Is(err, store.ErrNotInRegister) {
-		if skippedBy(rel, root.Settings) {
-			return show.File{}, fmt.Errorf("%s is not in the register: its root's settings skip it (filo roots "+
-				"lists them)", p)
-		}
-		return show.File{}, fmt.Errorf("%s is not in the register yet: run filo scan", p)
-	}
-	if err != nil {
-		return show.File{}, err
-	}
-	return show.Look(ctx, sh, root, verify), nil
+// showOptions are filo show's flags, and the day its statuses are worked out for.
+type showOptions struct {
+	day                        string
+	history, verify, recursive bool
 }
 
-// locateFile maps an absolute path to its root and its path in it. A path on disk is found through its directory,
-// which resolves symlinks above it as a scan saw them. One not on disk (missing, deleted by filo), or that cannot be
-// looked at (in a directory filo cannot read), through the deepest directory above it that is on disk, resolved the
-// same way, so a symlinked or bind-mounted way into a root finds it either way; failing that, by the path alone. A
-// directory or a root is refused: showing one is not built yet.
-func locateFile(ctx context.Context, s *store.Store, p string) (store.Root, string, error) {
-	fi, err := os.Lstat(p)
-	if err == nil && fi.IsDir() {
-		return store.Root{}, "", fmt.Errorf("%s is a directory: filo show takes files for now", p)
+// lookUp finds the file or directory a typed path names in the register, looks at it on disk, and returns what
+// renders it as item n of total.
+func (e *env) lookUp(ctx context.Context, s *store.Store, arg string, o showOptions) (func(n, total int), error) {
+	p, err := filepath.Abs(arg)
+	if err != nil {
+		return nil, err
 	}
-	if err == nil {
-		root, dir, err := s.Resolve(ctx, filepath.Dir(p))
-		if errors.Is(err, store.ErrNoRoot) {
-			return store.Root{}, "", fmt.Errorf("%s is not in the register (outside every root)", p)
-		}
+	root, rel, isDir, err := locatePath(ctx, s, p)
+	if err != nil {
+		return nil, err
+	}
+	dir := func() (func(n, total int), error) {
+		d, err := s.ShowDir(ctx, root.ID, rel, o.day)
 		if err != nil {
-			return store.Root{}, "", err
+			return nil, err
 		}
-		return root, path.Join(dir, filepath.Base(p)), nil
+		shown := show.LookDir(d, root)
+		return func(n, total int) { shown.Render(e.view, n, total, o.recursive) }, nil
+	}
+	if isDir {
+		return dir()
+	}
+	sh, err := s.ShowFile(ctx, root.ID, rel, o.day)
+	if errors.Is(err, store.ErrNotInRegister) {
+		// Not a file filo knows: a directory gone from the disk whose files it still holds, or not known at all.
+		if has, err := s.HasFilesUnder(ctx, root.ID, rel); err != nil {
+			return nil, err
+		} else if has {
+			return dir()
+		}
+		if skippedBy(rel, root.Settings) {
+			return nil, fmt.Errorf("%s is not in the register: its root's settings skip it (filo roots lists them)", p)
+		}
+		return nil, fmt.Errorf("%s is not in the register yet: run filo scan", p)
+	}
+	if err != nil {
+		return nil, err
+	}
+	f := show.Look(ctx, sh, root, o.verify)
+	return func(n, total int) { f.Render(e.view, n, total, o.day, o.history) }, nil
+}
+
+// locatePath maps an absolute path to its root and its path in it, and says whether it is a directory on disk (a
+// root is one). A path on disk is found through its directory (itself, for a directory), which resolves symlinks
+// above it as a scan saw them. One not on disk (missing, deleted by filo), or that cannot be looked at (in a
+// directory filo cannot read), through the deepest directory above it that is on disk, resolved the same way, so a
+// symlinked or bind-mounted way into a root finds it either way; failing that, by the path alone.
+func locatePath(ctx context.Context, s *store.Store, p string) (store.Root, string, bool, error) {
+	outside := func(err error) error {
+		if errors.Is(err, store.ErrNoRoot) {
+			return fmt.Errorf("%s is not in the register (outside every root)", p)
+		}
+		return err
+	}
+	fi, err := os.Lstat(p)
+	switch {
+	case err == nil && fi.IsDir():
+		root, rel, err := s.Resolve(ctx, p)
+		return root, rel, true, outside(err)
+	case err == nil:
+		root, dir, err := s.Resolve(ctx, filepath.Dir(p))
+		if err != nil {
+			return store.Root{}, "", false, outside(err)
+		}
+		return root, path.Join(dir, filepath.Base(p)), false, nil
 	}
 	root, rel, err := locateGone(ctx, s, p)
-	if errors.Is(err, store.ErrNoRoot) {
-		return store.Root{}, "", fmt.Errorf("%s is not in the register (outside every root)", p)
-	}
-	if err == nil && rel == "" {
-		return store.Root{}, "", fmt.Errorf("%s is a root: filo show takes files for now", p)
-	}
-	return root, rel, err
+	return root, rel, rel == "" && err == nil, outside(err)
 }
 
 // locateGone finds the root of a path not on disk: through the deepest directory above it that is, if that resolves

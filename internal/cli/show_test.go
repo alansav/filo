@@ -78,15 +78,13 @@ func TestShow(t *testing.T) {
 	if err := os.WriteFile(outside, []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	r := filo(ExitError, "", false, "show", in("new.txt"), in("bills/2025-03 Water.pdf"), outside, in("bills"),
-		in(".hidden/a.txt"), in("gone/never.txt"), ct.root)
+	r := filo(ExitError, "", false, "show", in("new.txt"), in("bills/2025-03 Water.pdf"), outside,
+		in(".hidden/a.txt"), in("gone/never.txt"))
 	contains("errors", r.stderr, in("new.txt")+" is not in the register yet: run filo scan",
 		outside+" is not in the register (outside every root)",
-		in("bills")+" is a directory: filo show takes files for now",
 		in(".hidden/a.txt")+" is not in the register: its root's settings skip it",
-		in("gone/never.txt")+" is not in the register yet: run filo scan",
-		ct.root+" is a directory")
-	contains("the one shown", r.stdout, "[2/7] 2025-03 Water.pdf")
+		in("gone/never.txt")+" is not in the register yet: run filo scan")
+	contains("the one shown", r.stdout, "[2/5] 2025-03 Water.pdf")
 	if strings.Count(r.stdout, "  File\n") != 1 {
 		t.Errorf("show with errors shows other than one file:\n%s", r.stdout)
 	}
@@ -124,7 +122,7 @@ func TestShow(t *testing.T) {
 	// Usage.
 	filo(ExitUsage, "", false, "show")
 	contains("tilde", filo(ExitError, "", false, "show", "~/x").stderr, "starts with ~")
-	contains("-h", filo(ExitOK, "", false, "show", "-h").stdout, "filo show PATH... [--history] [--verify]")
+	contains("-h", filo(ExitOK, "", false, "show", "-h").stdout, "filo show PATH... [-r] [--history] [--verify]")
 }
 
 // TestShowWritesNothing: filo show leaves the register as it was: no snapshot, no change.
@@ -151,4 +149,34 @@ func TestShowWritesNothing(t *testing.T) {
 		t.Errorf("show wrote: snapshots %d -> %d, register %v/%d -> %v/%d", before, snaps(), info.ModTime(),
 			info.Size(), after.ModTime(), after.Size())
 	}
+}
+
+// TestShowDirGolden: filo show of a directory, then of the root with -r, plain.
+func TestShowDirGolden(t *testing.T) {
+	ct := newShowTest(t)
+	ct.write("bills/2023/2023-01 Gas.pdf", "gas 2023")
+	ct.filo(ExitOK, "", false, "rules", "add", ct.in("bills/2023"), "bills")
+	ct.filo(ExitOK, "", false, "scan")
+	var out string
+	for _, args := range [][]string{{"show", ct.in("bills")}, {"show", "-r", ct.root}} {
+		out += "$ filo " + strings.Join(args, " ") + "\n\n" + ct.filo(ExitOK, "", false, args...).stdout + "\n"
+	}
+	out = strings.ReplaceAll(out, time.Now().Format(time.DateOnly), "<today>")
+	out = strings.ReplaceAll(out, ct.root, "<root>") // the root first: it is inside the work directory
+	out = strings.ReplaceAll(out, ct.work, "<work>")
+	golden(t, "show-dir.txt", ct.root, out)
+}
+
+// TestShowDir: a directory gone from the disk is shown from the register; --recursive is -r.
+func TestShowDir(t *testing.T) {
+	ct := newShowTest(t)
+	if err := os.RemoveAll(ct.in("backup")); err != nil {
+		t.Fatal(err)
+	}
+	ct.filo(ExitOK, "", false, "scan")
+	ct.contains("gone", ct.filo(ExitOK, "", false, "show", ct.in("backup")).stdout, "backup   directory . 1 file",
+		"2022-01.pdf   8 B   [!] missing since")
+	ct.contains("--recursive", ct.filo(ExitOK, "", false, "show", "--recursive", ct.root).stdout,
+		"home and below   directory", "  home/bills/  ")
+	ct.filo(ExitError, "", false, "show", ct.in("never"))
 }
