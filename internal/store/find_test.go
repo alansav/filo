@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"maps"
 	"slices"
 	"testing"
 	"time"
@@ -96,5 +97,58 @@ func TestFindFiles(t *testing.T) {
 				t.Errorf("FindFiles = %v\nwant %v", rows, tc.want)
 			}
 		})
+	}
+}
+
+// TestFindFilesLinks: a file's hard links are the other current paths in its root with the same inode, size and
+// modified time, counted over the whole root whatever the scope; a file reusing a stale inode, one in another root,
+// one with no inode and a missing path are not links.
+func TestFindFilesLinks(t *testing.T) {
+	ctx := context.Background()
+	s := mustOpen(t, Options{DBPath: tempDB(t)})
+	defer mustClose(t, s)
+	a, err := s.AddRoot(ctx, tree(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := s.AddRoot(ctx, tree(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := func(p string, size, mtime int64, ino uint64) NewFile {
+		return NewFile{Path: p, Kind: "file", Size: size, MtimeNS: mtime, Hash: "h", Ino: ino}
+	}
+	for _, sc := range []struct {
+		root Root
+		new  []NewFile
+	}{
+		{a, []NewFile{f("in/x.pdf", 5, 9, 42), f("out/x link.pdf", 5, 9, 42), f("out/gone.pdf", 5, 9, 42),
+			f("in/stale.pdf", 6, 9, 42), f("in/no inode.pdf", 5, 9, 0), f("in/other no inode.pdf", 5, 9, 0)}},
+		{b, []NewFile{f("x.pdf", 5, 9, 42)}},
+	} {
+		if _, err := s.ApplyScan(ctx, ScanRecord{RootID: sc.root.ID, Started: time.Now()},
+			Changes{New: sc.new}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var gone int64
+	if err := s.db.QueryRowContext(ctx, `SELECT id FROM paths WHERE path = 'out/gone.pdf'`).Scan(&gone); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ApplyScan(ctx, ScanRecord{RootID: a.ID, Started: time.Now()},
+		Changes{Close: []int64{gone}}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.FindFiles(ctx, a.ID, "in")
+	if err != nil {
+		t.Fatal(err)
+	}
+	links := map[string]int{}
+	for _, r := range got {
+		links[r.Rel] = r.Links
+	}
+	want := map[string]int{"in/x.pdf": 1, "in/stale.pdf": 0, "in/no inode.pdf": 0, "in/other no inode.pdf": 0}
+	if !maps.Equal(links, want) {
+		t.Errorf("links = %v, want %v", links, want)
 	}
 }
