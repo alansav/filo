@@ -1463,9 +1463,8 @@ the tool for many). Replaces "Later b, setting dates in place".
   - One file, one field: the bare value, terminal or piped (`filo get tax.pdf --retention` prints `7y`).
   - One file, several fields: name and value lines (`retention    7y`); piped, a tab between them.
   - Several files: one row per file, values in the order given and the path last; in a terminal with a header
-    and `~`, piped with no header, tab-separated, the path absolute. The path is last because a file name may hold
-    a tab and a value cannot, so splitting on the first N tabs keeps the whole path; `-0` ends each row with NUL
-    instead of a newline, as in 19.
+    and `~`, piped with no header, tab-separated, the path absolute, last. (A `-0` was planned here and dropped when
+    built: see slice 5 above.)
 
     ```
     retention    keep_until
