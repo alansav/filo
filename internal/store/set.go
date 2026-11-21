@@ -75,7 +75,7 @@ type DupChange struct {
 	Was, Now            string   // DupAlways, DupRecords or DupCounted
 	Unchanged, Replaces bool     // nothing to do; a decision already stored is replaced or undone
 	fileIDs             []int64  // the files named
-	sets                []int64  // the sets of records the files named are in
+	sets                []int64  // the content's sets of records
 }
 
 // Replacing reports whether applying the result replaces a value already stored: a file's, or a content's decision.
@@ -177,9 +177,11 @@ func (s *Store) SetFiles(ctx context.Context, ids []int64, v SetValues, now time
 	if err != nil {
 		return res, err
 	}
-	batch, err := newBatch(ctx, tx, now, "set", "filo set")
-	if err != nil {
-		return res, err
+	var batch int64
+	if res.Changed() > 0 { // a batch holds reviews: --duplicates alone records none
+		if batch, err = newBatch(ctx, tx, now, "set", "filo set"); err != nil {
+			return res, err
+		}
 	}
 	created := map[string]int64{}
 	for _, name := range res.NewPolicies {
@@ -316,9 +318,11 @@ func (r SetRow) RulePath() string {
 	return path.Join(r.RuleDir, r.RulePattern)
 }
 
-// checkDups works out --duplicates for each content the rows name: what it was, what it will be, the copies it
-// covers. records needs two or more of the content's copies named (hard links are one copy); a file under an
-// excluded directory is no copy, so it cannot be one of them. Refusals go to res.
+// checkDups works out --duplicates for each content the rows name: what it was and will be, and the copies it covers.
+// A decision is about the content as a whole, read as the duplicate groups read it (loadContents: hard links one
+// copy, a copy a record if any of its paths is): it was always, or records if any of its copies is one, or counted.
+// records needs two or more of the content's copies named; a file under an excluded directory is no copy, so it
+// cannot be one of them. One refusal per file goes to res.
 func checkDups(ctx context.Context, tx *sql.Tx, want string, res *SetResult) error {
 	excluded, err := exclusions(ctx, tx)
 	if err != nil {
@@ -327,6 +331,13 @@ func checkDups(ctx context.Context, tx *sql.Tx, want string, res *SetResult) err
 	byHash := map[string]*DupChange{}
 	var order []string
 	rowOf := map[string]SetRow{} // by absolute path, for refusals
+	refused := map[string]bool{}
+	refuse := func(row SetRow, why string) {
+		if !refused[row.AbsPath()] {
+			refused[row.AbsPath()] = true
+			res.Refusals = append(res.Refusals, SetRefusal{RootPath: row.RootPath, Path: row.Path, Reason: why})
+		}
+	}
 	for _, row := range res.Rows {
 		h := row.hash.String
 		d := byHash[h]
@@ -339,8 +350,7 @@ func checkDups(ctx context.Context, tx *sql.Tx, want string, res *SetResult) err
 		d.fileIDs = append(d.fileIDs, row.FileID)
 		rowOf[row.AbsPath()] = row
 		if want == DupRecords && excluded.covers(row.RootID, row.Path) {
-			res.Refusals = append(res.Refusals, SetRefusal{RootPath: row.RootPath, Path: row.Path,
-				Reason: "under an excluded directory: it is not counted as a copy, so it cannot be a record"})
+			refuse(row, "under an excluded directory: it is not counted as a copy, so it cannot be a record")
 		}
 	}
 	for _, h := range order {
@@ -354,73 +364,65 @@ func checkDups(ctx context.Context, tx *sql.Tx, want string, res *SetResult) err
 			Scan(&always); err != nil {
 			return fmt.Errorf("read a content always: %w", err)
 		}
-		namedCopies := 0
+		// The content's sets of records, whoever is in them (an excluded copy's row too).
+		if d.sets, err = queryAll(ctx, tx, func(rows *sql.Rows) (int64, error) {
+			var id int64
+			return id, rows.Scan(&id)
+		}, `SELECT DISTINCT set_id FROM duplicate_records WHERE hash = ? ORDER BY set_id`, h); err != nil {
+			return fmt.Errorf("read sets of records: %w", err)
+		}
+		namedCopies, members, namedInSet := 0, 0, 0 // copies named; copies in the content's one set, and of those named
 		if len(contents) == 1 {
 			for _, cp := range contents[0].Copies {
 				paths := append([]string{cp.AbsPath()}, cp.Links...)
-				hit := false
+				named := false
 				for _, p := range paths {
 					d.Copies = append(d.Copies, p)
-					hit = hit || slices.Contains(d.Named, p)
+					named = named || slices.Contains(d.Named, p)
 				}
-				if hit {
+				if named {
 					namedCopies++
+				}
+				if len(d.sets) == 1 && cp.RecordSet == d.sets[0] {
+					members++
+					if named {
+						namedInSet++
+					}
 				}
 			}
 		}
 		slices.Sort(d.Copies)
-		// The sets of records the files named are in, on their current content.
-		sets, err := queryAll(ctx, tx, func(rows *sql.Rows) (int64, error) {
-			var id int64
-			return id, rows.Scan(&id)
-		}, `SELECT DISTINCT set_id FROM duplicate_records WHERE hash = ? AND file_id IN (`+
-			strings.TrimSuffix(strings.Repeat("?,", len(d.fileIDs)), ",")+`) ORDER BY set_id`,
-			append([]any{h}, int64sToAny(d.fileIDs)...)...)
-		if err != nil {
-			return fmt.Errorf("read sets of records: %w", err)
-		}
-		d.sets = sets
-		var setMembers int
-		if len(sets) == 1 {
-			if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM duplicate_records WHERE set_id = ? AND hash = ?`,
-				sets[0], h).Scan(&setMembers); err != nil {
-				return fmt.Errorf("read a set of records: %w", err)
-			}
-		}
 		switch {
 		case always:
 			d.Was = DupAlways
-		case len(sets) > 0:
+		case len(d.sets) > 0:
 			d.Was = DupRecords
 		default:
 			d.Was = DupCounted
 		}
-		switch want {
-		case DupRecords:
+		if want == DupRecords {
 			if namedCopies < 2 {
 				for _, p := range d.Named {
-					row := rowOf[p]
-					res.Refusals = append(res.Refusals, SetRefusal{RootPath: row.RootPath, Path: row.Path,
-						Reason: "records needs two or more copies of one content named: name its other copies too"})
+					refuse(rowOf[p], "records needs two or more copies of one content named: name its other copies "+
+						"too")
 				}
 				continue
 			}
-			// Unchanged only if the files named are one whole set already, and the content is not always.
-			d.Unchanged = !always && len(sets) == 1 && setMembers == len(d.fileIDs)
-			d.Replaces = !d.Unchanged && d.Was != DupCounted
-		default:
+			// Unchanged only if the content's one set is exactly the copies named.
+			d.Unchanged = !always && len(d.sets) == 1 && members == namedCopies && namedInSet == namedCopies
+		} else {
 			d.Unchanged = d.Was == want
-			d.Replaces = !d.Unchanged && d.Was != DupCounted
 		}
+		d.Replaces = !d.Unchanged && d.Was != DupCounted
 		res.Dups = append(res.Dups, *d)
 	}
 	slices.SortFunc(res.Dups, func(a, b DupChange) int { return strings.Compare(a.Named[0], b.Named[0]) })
 	return nil
 }
 
-// applyDups writes the --duplicates decisions: always replaces the content's sets of records; records makes the files
-// named one new set (moving them out of any other) and the content no longer always; counted undoes either, a set of
-// records as a whole.
+// applyDups writes the --duplicates decisions, each for the content as a whole: always replaces its sets of records;
+// records makes the copies named its one set (any other set of it goes, and it is no longer always); counted undoes
+// both.
 func applyDups(ctx context.Context, tx *sql.Tx, dups []DupChange, now time.Time) error {
 	for _, d := range dups {
 		if d.Unchanged {
@@ -437,6 +439,9 @@ func applyDups(ctx context.Context, tx *sql.Tx, dups []DupChange, now time.Time)
 			if _, err = tx.ExecContext(ctx, `DELETE FROM always_hashes WHERE hash = ?`, d.Hash); err != nil {
 				break
 			}
+			if _, err = tx.ExecContext(ctx, `DELETE FROM duplicate_records WHERE hash = ?`, d.Hash); err != nil {
+				break
+			}
 			var set int64
 			if err = tx.QueryRowContext(ctx, `SELECT coalesce(max(set_id), 0) + 1 FROM duplicate_records`).
 				Scan(&set); err != nil {
@@ -450,13 +455,8 @@ func applyDups(ctx context.Context, tx *sql.Tx, dups []DupChange, now time.Time)
 				}
 			}
 		case DupCounted:
-			if _, err = tx.ExecContext(ctx, `DELETE FROM always_hashes WHERE hash = ?`, d.Hash); err != nil {
-				break
-			}
-			for _, set := range d.sets {
-				if _, err = tx.ExecContext(ctx, `DELETE FROM duplicate_records WHERE set_id = ?`, set); err != nil {
-					break
-				}
+			if _, err = tx.ExecContext(ctx, `DELETE FROM always_hashes WHERE hash = ?`, d.Hash); err == nil {
+				_, err = tx.ExecContext(ctx, `DELETE FROM duplicate_records WHERE hash = ?`, d.Hash)
 			}
 		}
 		if err != nil {
@@ -464,12 +464,4 @@ func applyDups(ctx context.Context, tx *sql.Tx, dups []DupChange, now time.Time)
 		}
 	}
 	return nil
-}
-
-func int64sToAny(ids []int64) []any {
-	out := make([]any, len(ids))
-	for i, id := range ids {
-		out[i] = id
-	}
-	return out
 }
