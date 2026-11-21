@@ -128,11 +128,15 @@ func (e *env) set(ctx context.Context, dbBefore string, args []string) error {
 		e.dupLists(res.Dups, roots, true, true)
 		e.dupLists(res.Dups, roots, false, true)
 	case changed+dupChanged == 0:
-		what := report.Plural(int64(len(res.Rows)), "file has", "files have") + " these values already"
-		if !retFlags {
-			what = report.Plural(int64(len(res.Dups)), "content has", "contents have") + " this decision already"
+		var what []string
+		if retFlags {
+			what = append(what, report.Plural(int64(len(res.Rows)), "file has", "files have")+" these values already")
 		}
-		r.Heading("Unchanged", view.Where{Roots: roots}, append(facts, what)...)
+		if v.Duplicates != "" {
+			what = append(what, report.Plural(int64(len(res.Dups)), "content has", "contents have")+
+				" this decision already")
+		}
+		r.Heading("Unchanged", view.Where{Roots: roots}, append(facts, what...)...)
 		return nil
 	case !res.Applied:
 		return nil // declined, or no terminal to ask in: confirmSet said so

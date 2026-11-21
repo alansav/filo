@@ -141,6 +141,11 @@ func TestSetDuplicatesGolden(t *testing.T) {
 	golden(t, "set-duplicates.txt", ct.root, out)
 	ct.contains("duplicates after", ct.filo(ExitOK, "", false, "duplicates").stdout, "2 contents marked always")
 
+	// Both kinds given, nothing to change: the heading names both.
+	ct.filo(ExitOK, "", false, "set", in("projects/c/LICENSE"), "--retention", "forever")
+	ct.contains("unchanged, both", ct.filo(ExitOK, "", false, "set", in("projects/c/LICENSE"), "--retention",
+		"forever", "--duplicates", "always").stdout, "1 file has these values already . 1 content has this decision already")
+
 	// Usage: a value it does not know.
 	ct.contains("bad value", ct.filo(ExitUsage, "", false, "set", in("terms/2020.pdf"), "--duplicates", "x").stderr,
 		"use always")
