@@ -381,14 +381,10 @@ func (w *walker) symlink(rel, abs string, d *os.Root, name string, info fs.FileI
 		w.problem(rel, err)
 		return
 	}
-	broken := false
-	if _, err := os.Stat(abs); err != nil {
-		if errors.Is(err, fs.ErrNotExist) || isLoop(err) {
-			broken = true
-		} else {
-			// The target exists or not; we cannot tell. Record the link and say so rather than guess "broken".
-			w.problem(rel, fmt.Errorf("cannot check symlink target: %w", err))
-		}
+	broken, err := Broken(abs)
+	if err != nil {
+		// The target exists or not; we cannot tell. Record the link and say so rather than guess "broken".
+		w.problem(rel, fmt.Errorf("cannot check symlink target: %w", err))
 	}
 	w.res.Entries = append(w.res.Entries, Entry{
 		Path: rel, Kind: KindSymlink, Size: info.Size(), MtimeNS: info.ModTime().UnixNano(),
@@ -480,6 +476,20 @@ func absErr(err error, abs string) error {
 		return &fs.PathError{Op: strings.TrimSuffix(pe.Op, "at"), Path: abs, Err: pe.Err}
 	}
 	return err
+}
+
+// Broken reports whether the symlink at abs is broken: its target missing, or a loop. An error means it cannot be
+// told (the target exists or not); the link is then not broken, as far as anyone knows.
+func Broken(abs string) (bool, error) {
+	_, err := os.Stat(abs)
+	switch {
+	case err == nil:
+		return false, nil
+	case errors.Is(err, fs.ErrNotExist) || isLoop(err):
+		return true, nil
+	default:
+		return false, err
+	}
 }
 
 func inode(info fs.FileInfo) uint64 {

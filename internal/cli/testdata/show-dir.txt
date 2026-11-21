@@ -1,0 +1,37 @@
+$ filo show <root>/bills
+
+bills   directory . 1 directory . 2 files . 18 B . <root>
+  Directory
+    path   <root>/bills
+    root   <root>   reachable . last scan <today>
+    files  2 present
+  Rules   none
+  Directories   1
+    2023/   1 file . 8 B   [!] 1 needs a decision
+  Files   2
+    2022-01 British Gas.pdf    8 B   kept until 2029-01-31 . has copies
+    2025-03 Water.pdf         10 B   [!] undated
+
+Next: filo show FILE for one file, filo set FILE... to change files (filo help set for more)
+
+$ filo show -r <root>
+
+home and below   directory . 3 directories . 5 files . 39 B . <work>
+  Directory
+    path   <root>
+    root   <root>   reachable . last scan <today>
+    files  4 present . 1 missing
+  Rules   none
+  home/   1 file . [!] 1 needs a decision
+    notes.txt   5 B   [!] missing since <today>
+  home/backup/   1 file . [!] 1 needs a decision
+    2022-01.pdf   8 B   [!] undated . has copies
+  home/bills/   2 files . [!] 1 needs a decision
+    2022-01 British Gas.pdf    8 B   kept until 2029-01-31 . has copies
+    2025-03 Water.pdf         10 B   [!] undated
+  home/bills/2023/   1 file . [!] 1 needs a decision
+    rule * -> bills (7y)
+    2023-01 Gas.pdf   8 B   [!] needs a file_date
+
+Next: filo show FILE for one file, filo set FILE... to change files (filo help set for more)
+

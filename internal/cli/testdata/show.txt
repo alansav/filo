@@ -1,0 +1,43 @@
+[1/3] 2022-01 British Gas.pdf   kept until 2029-01-31 . 8 B . <root>/bills
+  File
+    path        <root>/bills/2022-01 British Gas.pdf
+    root        <root>
+    size        8 B
+    modified    <time>   unchanged since the last scan (<today>)
+    sha256      766c1dc754128cd5c2dc5ae2c3e850bb78b97dfb1200e8f938ae6bf5be443f16
+    first seen  <today> (scan 1)
+  Retention
+    status      kept
+    retention   bills (7y)
+    file_date   2022-01-31
+    keep_until  2029-01-31   in 2 years 2 months
+    reviewed    2026-11-20, by filo update, on this content
+  Copies   1 other file with the same content . counted as a duplicate
+    <root>/backup/2022-01.pdf   no retention
+
+[2/3] 2025-03 Water.pdf   [!] needs a retention . 10 B . <root>/bills
+  File
+    path        <root>/bills/2025-03 Water.pdf
+    root        <root>
+    size        10 B
+    modified    <time>   unchanged since the last scan (<today>)
+    sha256      53371c061d35adaa3481e9755fc8ff6f15d8017b7bd3bf73f32427484619bfc9
+    first seen  <today> (scan 1)
+    moved from  <root>/inbox/water.pdf   <today> to <today>
+  Retention
+    status      [!] undated: no retention
+    retention   none
+
+[3/3] notes.txt   [!] missing since <today> (scan 3) . 5 B . <root>
+  File
+    path        <root>/notes.txt
+    root        <root>
+    size        5 B
+    modified    <time>
+    sha256      ab5aa97074c454a0632057e704220d9a6678fbf773a0a5806fc09b8173b07309
+    first seen  <today> (scan 1)
+  Retention
+    status      [!] missing: run filo scan, if it was moved
+    retention   none
+
+Next: filo set FILE --retention R, --file-date DATE or --duplicates always|records (filo help set for more)

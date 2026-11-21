@@ -20,8 +20,9 @@ Everything `docs/design.md` describes is built and merged (schema 10): scan, reg
 the retention CSV (`filo export retention`, `filo update`); `filo delete [DIR] [-y]`, which deletes a file only after
 it is re-read and found unchanged; register snapshots; duplicates (`filo delete FILE.csv`, `filo duplicates`); the
 terminal output (every command prints through `internal/view`); named retention policies (`filo policies`); directory
-rules (`filo rules`). What is next is in `docs/roadmap.md`, Priority (provisional, reordered 2026-11-20: item 19,
-finding files, then 18a tags, then the sync items).
+rules (`filo rules`); showing and setting a file's details (`filo show`, `filo set`, `filo get`). What is next is in
+`docs/roadmap.md`, Priority (provisional, reordered 2026-11-20: item 19, finding files, then 18a tags, 36 bash
+completion, then the sync items).
 **`internal/dispose` is the only code allowed to delete the user's files**, and only from `filo delete`; everything
 else stays read-only on them, and nothing overwrites an existing file without asking (only an `-o` output file,
 see the hard rules). Stay inside the current piece of work.
@@ -87,7 +88,8 @@ branch, never on `main`:
 
 1. Commit as you go, lower layers first, each commit with its own tests: the design moved from `docs/roadmap.md` into
    `docs/design.md` alone first, then the store and schema, then the internal package(s), then the `internal/view`
-   output, then the `cmd/filo` wiring and end-to-end tests. Before each commit, `gofmt`, `go vet`, `staticcheck` and `go
+   output (before an internal package that renders through it), then the `cmd/filo` wiring and end-to-end tests.
+   Before each commit, `gofmt`, `go vet`, `staticcheck` and `go
    test ./...` must all pass, so every commit builds and is green on its own. Each commit is one atomic unit that does
    exactly what its message says; its size comes second (do not split or merge commits to reach a number of lines). Each
    message says what the commit adds and, if part of the work is still to come, what (for example "not called by any

@@ -1,0 +1,25 @@
+filo get FILE... --FIELD...
+
+  Prints fields of each file from the register, for scripts and quick checks, in
+  the order the fields are given. One field of one file prints its bare value;
+  several fields of one file print a name and value per line; several files
+  print a row each, the values in order and the file last. A field with no value
+  prints as empty. Nothing is changed, and nothing is read from the disk.
+
+  Piped, values are separated by tabs and the file is its absolute path, last; a
+  tab in a value or a name is shown escaped, so the tabs between fields are
+  always filo's.
+
+Flags
+  --file-date              the date a period counts from (YYYY-MM-DD)
+  --retention              as typed (7y, forever, a date) or a policy's name
+  --keep-until             the date it is kept until, or forever
+  --status                 kept, forever, expired, changed, undated,
+                           needs_file_date, possible_move, unreadable; missing
+                           or deleted for a file not present
+  --duplicates             the content's decision: always, records or counted
+  --size                   in bytes
+  --modified               its modification time, RFC 3339, local time
+  --sha256                 its content's hash, as sha256sum prints it
+  --root                   the root it is in
+  --first-seen             the date filo first saw it

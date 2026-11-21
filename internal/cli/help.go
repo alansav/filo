@@ -47,6 +47,9 @@ var overview = struct {
 		{Name: "rules remove DIR [PATTERN]", Text: "remove a rule; the files it set a policy on keep it"},
 		{Name: "rules move OLD NEW", Text: "move the rules at OLD and below it to NEW (a rename)"},
 		{Name: "rules copy OLD NEW", Text: "copy the rules at OLD and below it to NEW"},
+		{Name: "show PATH...", Text: "everything filo holds about a file or directory: retention, history, copies"},
+		{Name: "set FILE... [flags]", Text: "set files' file_date, retention or duplicates decision"},
+		{Name: "get FILE... --FIELD...", Text: "print fields of files, for scripts: --retention, --keep-until …"},
 		{Name: "help [COMMAND]", Text: "this overview, or a command's flags and rules"},
 	},
 	after: "Every command accepts --db PATH (default: $FILO_DB, then the user data directory).",
@@ -214,6 +217,81 @@ var commandHelps = map[string]commandHelp{
 		after: []string{
 			"A file kept until 2026-12-31 is past its retention on 2026-12-31: it is listed by the next filo " +
 				"delete, which asks before deleting anything.",
+		},
+	},
+	"get": {
+		usage: []string{"filo get FILE... --FIELD..."},
+		before: []string{
+			"Prints fields of each file from the register, for scripts and quick checks, in the order the fields " +
+				"are given. One field of one file prints its bare value; several fields of one file print a name " +
+				"and value per line; several files print a row each, the values in order and the file last. A " +
+				"field with no value prints as empty. Nothing is changed, and nothing is read from the disk.",
+			"Piped, values are separated by tabs and the file is its absolute path, last; a tab in a value or a " +
+				"name is shown escaped, so the tabs between fields are always filo's.",
+		},
+		flags: []view.Term{
+			{Name: "--file-date", Text: "the date a period counts from (YYYY-MM-DD)"},
+			{Name: "--retention", Text: "as typed (7y, forever, a date) or a policy's name"},
+			{Name: "--keep-until", Text: "the date it is kept until, or forever"},
+			{Name: "--status", Text: "kept, forever, expired, changed, undated, needs_file_date, possible_move, " +
+				"unreadable; missing or deleted for a file not present"},
+			{Name: "--duplicates", Text: "the content's decision: always, records or counted"},
+			{Name: "--size", Text: "in bytes"},
+			{Name: "--modified", Text: "its modification time, RFC 3339, local time"},
+			{Name: "--sha256", Text: "its content's hash, as sha256sum prints it"},
+			{Name: "--root", Text: "the root it is in"},
+			{Name: "--first-seen", Text: "the date filo first saw it"},
+		},
+	},
+	"set": {
+		usage: []string{"filo set FILE... [flags]"},
+		before: []string{
+			"Sets the file_date and the retention of each file, as the retention CSV does, for a few files at once: " +
+				"a retention is a period (7y, 18m, 6w, 30d, counted from file_date), forever, a date (YYYY-MM-DD) " +
+				"or a policy's name. Several flags can be given together. keep_until is worked out again.",
+			"All or nothing: if any file cannot be set (a period with no file_date, " +
+				"a file missing or not in the register), nothing changes and every refusal is listed. It asks " +
+				"only before replacing a value already stored, showing what each was and will be; a file given " +
+				"its first values is not asked about. A retention set here replaces a policy a directory rule set.",
+			"A policy name that is not a policy yet creates one with no value, and says so: its files need a " +
+				"retention until filo policies set NAME VALUE gives it one.",
+			"--duplicates is about a content, not one file: always means it belongs everywhere, so none of its " +
+				"copies is ever a duplicate; records means the files named, two or more copies of it, are each a " +
+				"record with its own retention; counted undoes either (as filo duplicates include FILE does). " +
+				"Each lists the copies it covers, and it asks before replacing or undoing a decision already made.",
+		},
+		flags: []view.Term{
+			{Name: "--file-date DATE", Text: "the date a period counts from"},
+			{Name: "--no-file-date", Text: "clear the file_date (refused where a period needs it)"},
+			{Name: "--retention R", Text: "a period, forever, a date or a policy's name"},
+			{Name: "--no-retention", Text: "clear the retention: the files need one again"},
+			{Name: "--duplicates D", Text: "always, records or counted: a decision about the files' content"},
+			{Name: "--dry-run", Text: "show what would change, and change nothing"},
+			{Name: "-y", Text: "replace values without asking"},
+		},
+		after: []string{
+			"A file left past its retention is listed, to check for a typo such as 7d for 7y; nothing is deleted " +
+				"until filo delete is run.",
+		},
+	},
+	"show": {
+		usage: []string{"filo show PATH... [-r] [--history] [--verify]"},
+		before: []string{
+			"Shows everything the register holds about each file, one after another: what filo observed (its " +
+				"path and root, size, modified time, hash, when it was first seen, where it was before) and what " +
+				"was decided (its retention, file_date and keep_until, and when they were set), then the other " +
+				"files with the same content. Nothing is changed: filo set changes what was decided.",
+			"A path is looked up in the register, not on the disk, so a missing file is shown too, and a file " +
+				"deleted by filo is found by its last path. The modified line says whether the file on disk is " +
+				"still as the last scan saw it, from its size, modified time and inode, without reading it.",
+			"A directory shows its root, its files by state, the directory rules tried for its files in the order " +
+				"they are tried, then its subdirectories (each with how many files need a decision) and every file " +
+				"of its own, with its size and status.",
+		},
+		flags: []view.Term{
+			{Name: "-r, --recursive", Text: "directories: list every directory below it too, each with its files"},
+			{Name: "--history", Text: "files: list every path the file has had, newest first"},
+			{Name: "--verify", Text: "files: read the file and compare its content with the register's hash"},
 		},
 	},
 	"rules": {

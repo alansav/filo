@@ -7,12 +7,13 @@ case someone asks").
 **Filo manages files; it is not, and never will be, a backup tool.** `filo delete` deletes files permanently, so keep
 backups of your files, and of Filo's register and its snapshots (see [Register snapshots](docs/design.md#register-snapshots)).
 
-**Status: scan, lifespan, delete, duplicates, retention policies and directory rules done.** You give every file a
-retention (how long to keep it, often through a named policy such as `bills = 7y`, which a directory rule can give the
-files under a directory as they arrive), and `filo delete` lists the files past theirs, asks, and deletes the ones you
-choose. For identical copies you decide which to keep in a spreadsheet, and `filo delete` carries that out the same
-careful way. Apart from that, Filo is **read-only on your files**: no other command modifies, moves, renames or deletes
-anything outside its own database. See [Roadmap](#roadmap) for what comes next.
+**Status: scan, lifespan, delete, duplicates, retention policies, directory rules, and show, set and get done.** You
+give every file a retention (how long to keep it, often through a named policy such as `bills = 7y`, which a directory
+rule can give the files under a directory as they arrive), and `filo delete` lists the files past theirs, asks, and
+deletes the ones you choose. For identical copies you decide which to keep in a spreadsheet, and `filo delete` carries
+that out the same careful way. `filo show` shows everything Filo holds about a file or directory, and `filo set` changes
+a few files from the command line. Apart from that, Filo is **read-only on your files**: no other command modifies,
+moves, renames or deletes anything outside its own database. See [Roadmap](#roadmap) for what comes next.
 
 ## What it does today
 
@@ -37,6 +38,10 @@ anything outside its own database. See [Roadmap](#roadmap) for what comes next.
 - **Gives new files a policy by directory**: a rule such as "files under `bank` matching `*Statement*` get
   `statements`" sets the policy of every file there with no retention, now and as each scan finds new ones. See
   [Directory rules](#directory-rules).
+- **Shows one file or directory at a time, and sets a few files by command**: `filo show` gives everything Filo
+  holds about a file (its paths over time, hash, retention, copies) or a directory (its rules and contents), `filo
+  set` changes a file's `file_date`, retention or duplicates decision without a CSV, and `filo get` prints single
+  fields for scripts. See [One file at a time](#one-file-at-a-time).
 - **Deletes what you confirm**, after reading each file again just before deleting it: a file that changed since its
   retention was set, moved, or can't be read is skipped, never deleted.
 - **Clears out duplicates you decide on**: export the groups of identical copies, write `keep` or `delete` against
@@ -138,6 +143,8 @@ Recent events                                                                non
 ```
 
 ## Setting retentions
+
+For a few files, `filo set` is quicker (see [One file at a time](#one-file-at-a-time)). For many, use the CSV:
 
 ```sh
 filo export retention ~/Documents -o docs.csv    # scan ~/Documents, then every file under it, with its retention
@@ -415,6 +422,65 @@ Excluded   ~/Backup
 Next: filo duplicates include /home/you/Backup to undo it
 ```
 
+## One file at a time
+
+For a few files, the CSV round is more than you need. `filo show` shows everything Filo holds about a file or a
+directory, `filo set` changes what was decided about files, and `filo get` prints single fields for scripts:
+
+```sh
+filo show ~/Documents/bills/2025-03\ Water.pdf                  # everything about one file
+filo set ~/Documents/bills/2025-03\ Water.pdf --retention bills  # give it a policy
+filo set ~/Documents/receipts/*.pdf --file-date 2024-03-31 --retention 7y
+filo show ~/Documents/bills                                      # a directory: its rules, subdirectories and files
+filo show -r ~/Documents/bills                                   # every directory below it too
+filo get ~/Documents/tax.pdf --keep-until                        # 2031-03-31
+```
+
+```
+$ filo show "$HOME/Documents/bills/2022-01 British Gas.pdf"
+
+2022-01 British Gas.pdf   kept until 2029-01-31 · 184 KiB · ~/Documents/bills
+  File
+    path        ~/Documents/bills/2022-01 British Gas.pdf
+    root        ~/Documents
+    size        184 KiB
+    modified    2022-02-03 09:14   unchanged since the last scan (2026-11-20)
+    sha256      3f9a1c0e8b2d47f6a9e0c5d1b7a3f2e8c4d6b0a9e1f3c5d7b9a2e4f6c8d0e21e
+    first seen  2026-11-12 (scan 3)
+    moved from  ~/Documents/inbox/british-gas.pdf   2026-11-12 to 2026-11-13
+  Retention
+    status      kept
+    retention   bills (7y), a policy set by rule bills/*
+    file_date   2022-01-31
+    keep_until  2029-01-31   in 2 years 2 months
+    reviewed    2026-11-14, by filo update, on this content
+  Copies   1 other file with the same content · counted as a duplicate
+    ~/Backup/bills/2022-01.pdf   until 2029-01-31
+
+Next: filo set FILE --retention R, --file-date DATE or --duplicates always|records (filo help set for more)
+```
+
+- **`filo show PATH...`** looks paths up in the register, not on the disk, so a missing file is shown too, and a
+  file deleted by Filo is found by its last path. What Filo observed (paths, size, hash, history, copies) is shown
+  and never edited: a scan corrects it. What you decided is shown and changed with `filo set`. The `modified` line
+  says whether the file on disk is still as the last scan saw it, without reading it; `--verify` reads it and
+  compares its hash, and `--history` lists every path it has had. A directory shows its files by state, the rules
+  tried for them in order, its subdirectories (with how many files need a decision) and every file of its own;
+  `-r` lists every directory below it, each with its files.
+- **`filo set FILE...`** takes `--file-date DATE` or `--no-file-date`, `--retention R` or `--no-retention`, and
+  `--duplicates always|records|counted`, several at once. It follows the CSV's rules (a period needs a `file_date`,
+  `keep_until` is worked out again) and is all or nothing: if any file can't be set, nothing changes and every
+  refusal is listed. It asks only before replacing a value already stored, showing what each was and will be;
+  `-y` answers yes, `--dry-run` changes nothing. A policy name that isn't a policy yet creates one with no value,
+  and says so. A retention set here replaces a policy a directory rule set.
+- **`--duplicates`** is about a file's content, not the one file: `always` means none of its copies is ever a
+  duplicate, `records` means the copies you name (two or more) are each a record with its own retention, and
+  `counted` undoes either. It lists every copy it covers.
+- **`filo get FILE... --FIELD...`** prints `--file-date`, `--retention`, `--keep-until`, `--status`,
+  `--duplicates`, `--size`, `--modified`, `--sha256`, `--root` or `--first-seen`, in the order given: one field of
+  one file is its bare value, several fields of one file a name and value line each, several files a row each with
+  the path last (tab-separated when piped). An empty value means none.
+
 ## Commands
 
 | Command | What it does |
@@ -444,6 +510,9 @@ Next: filo duplicates include /home/you/Backup to undo it
 | `filo rules remove DIR [PATTERN]` | Remove a rule; the files it set a policy on keep it. |
 | `filo rules move OLD NEW [--dry-run]` | Move the rules at `OLD` and below it to the same places under `NEW` (after a rename). |
 | `filo rules copy OLD NEW [--dry-run]` | Copy them, keeping them at `OLD`. |
+| `filo show PATH... [-r] [--history] [--verify]` | Everything Filo holds about each file or directory. See [One file at a time](#one-file-at-a-time). |
+| `filo set FILE... [flags]` | Set files' `file_date`, retention or duplicates decision; asks before replacing a value. |
+| `filo get FILE... --FIELD...` | Print fields of files, for scripts. |
 | `filo help [COMMAND]` | Show usage. `-h` works on every command. |
 
 Options for `filo roots add` and `filo roots set`, which every scan of the root then uses:
@@ -462,14 +531,25 @@ Options for `filo scan`:
 | `--workers N` | Files hashed in parallel, 1–64 (default 4; use 1 on a spinning disk). |
 | `--allow-empty` | Record a scan that finds no files on a mounted disk (normally refused as "probably the wrong disk"). |
 
+Options for `filo set`:
+
+| Option | Meaning |
+|---|---|
+| `--file-date DATE` / `--no-file-date` | Set or clear the date a period counts from. |
+| `--retention R` / `--no-retention` | Set (a period, `forever`, a date or a policy) or clear the retention. |
+| `--duplicates always\|records\|counted` | A decision about the files' content. |
+| `--dry-run` | Show what would change, change nothing. |
+| `-y` | Replace values without asking. |
+
 Every command accepts `--db PATH`. Options can come before or after `DIR`. A progress line is shown during long
 scans when the output is a terminal. The only questions Filo asks are in a terminal, and saying no (or running
 without a terminal, as a timer does) is always the safe choice.
 
 Exit codes: `0` success (files that couldn't be read are reported but don't fail the scan; saying no at a question
 is not a failure), `1` an error, a root that failed during `filo scan` of every root, a CSV row that `filo update`
-refused, a file `filo delete` couldn't read or delete, or a group of a duplicates CSV it refused, `2` a usage
-error.
+refused, a file `filo delete` couldn't read or delete, a group of a duplicates CSV it refused, a path `filo show`
+or `filo get` couldn't show (not in the register, skipped by its root's settings, or for `get` a directory; the others
+are still shown), or a file `filo set` refused, `2` a usage error.
 
 ## Roots
 
@@ -554,8 +634,10 @@ Enable it with `systemctl --user enable --now filo-scan.timer`.
    contents marked always and excluded directories. Done.
 6. **Retention policies**: a named retention typed in the CSV, changed in one place. Done.
 7. **Directory rules**: a policy for the files under a directory, applied by every scan. Done.
-8. **Next**: what is planned, in order, is in [docs/roadmap.md](docs/roadmap.md): finding files by name, sharing
-   decisions between devices, progress in the report, removing empty directories, and more.
+8. **Show, set and get**: everything about a file or directory, and its decisions changed from the command line.
+   Done.
+9. **Next**: what is planned, in order, is in [docs/roadmap.md](docs/roadmap.md): finding files by name, tags, bash
+   completion, sharing decisions between devices, and more.
 
 Principles that won't change:
 - A retention is never a trigger: reaching its end makes a file a candidate you confirm.

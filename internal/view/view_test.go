@@ -660,3 +660,20 @@ func TestHeadedTable(t *testing.T) {
 		t.Errorf("got\n%s\nwant\n%s", b.String(), want)
 	}
 }
+
+// A header over groups of columns lines up with the first column of its group.
+func TestFilesOver(t *testing.T) {
+	r, b := plainView()
+	r.Files(FileList{
+		Columns: []Column{{Header: "was"}, {Header: "now"}, {Header: "was"}, {Header: "now"}},
+		Over:    []Over{{Header: "file_date", Columns: 2}, {Header: "retention", Columns: 2}},
+		Rows: []FileRow{{Root: "/r", Rel: "lunch.pdf", Cells: []string{"2024-03-02", "2024-03-31", "bills (7y)", "7y"},
+			Note: "(set by rule *.pdf)"}},
+	})
+	want := "    file_date                 retention\n" +
+		"    was          now          was          now\n" +
+		"    2024-03-02   2024-03-31   bills (7y)   7y    /r/lunch.pdf   (set by rule *.pdf)\n"
+	if b.String() != want {
+		t.Errorf("got\n%s\nwant\n%s", b.String(), want)
+	}
+}

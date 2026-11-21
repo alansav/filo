@@ -1,0 +1,152 @@
+package cli
+
+import (
+	"os"
+	"strings"
+	"testing"
+	"time"
+)
+
+// newSetTest is a register of receipts, one of them given a policy by a rule.
+func newSetTest(t *testing.T) *cliTest {
+	t.Helper()
+	ct := newCLITest(t)
+	setNow(t, time.Date(2026, 11, 20, 12, 0, 0, 0, time.Local))
+	for _, name := range []string{"coffee", "lunch", "taxi"} {
+		ct.write("receipts/"+name+".pdf", name)
+	}
+	ct.write("old/2015 phone.pdf", "phone")
+	ct.filo(ExitOK, "", false, "roots", "add", ct.root)
+	ct.filo(ExitOK, "", false, "policies", "add", "bills", "7y")
+	ct.filo(ExitOK, "", false, "rules", "add", ct.in("receipts"), "*lunch*", "bills")
+	return ct
+}
+
+// TestSetGolden: filo set's output for the designed cases, plain: first values (no question), values replaced
+// (asked, at a terminal), a refusal, a file left past its retention, a clear, and a dry run.
+func TestSetGolden(t *testing.T) {
+	ct := newSetTest(t)
+	in := ct.in
+	var out string
+	run := func(code int, stdin string, terminal bool, args ...string) {
+		r := ct.filo(code, stdin, terminal, args...)
+		out += "$ filo " + strings.Join(args, " ") + "\n\n" + r.stdout + r.stderr + "\n"
+	}
+	run(ExitOK, "", false, "set", in("receipts/taxi.pdf"), "--file-date", "2024-03-31", "--retention", "7y")
+	run(ExitError, "", false, "set", in("receipts/coffee.pdf"), in("receipts/lunch.pdf"), in("receipts/taxi.pdf"),
+		"--retention", "7y")
+	run(ExitOK, "y\n", true, "set", in("receipts/coffee.pdf"), in("receipts/lunch.pdf"), in("receipts/taxi.pdf"),
+		"--file-date", "2024-03-31", "--retention", "7y")
+	run(ExitOK, "", false, "set", in("old/2015 phone.pdf"), "--file-date", "2015-02-01", "--retention", "7d")
+	run(ExitOK, "", false, "set", in("receipts/taxi.pdf"), "--retention", "forever", "--dry-run")
+	run(ExitOK, "y\n", true, "set", in("receipts/coffee.pdf"), in("receipts/taxi.pdf"), "--no-retention")
+	golden(t, "set.txt", ct.root, out)
+}
+
+// TestSet: what it changes, the questions, and the refusals.
+func TestSet(t *testing.T) {
+	ct := newSetTest(t)
+	in, filo, contains, lacks := ct.in, ct.filo, ct.contains, ct.lacks
+	taxi := in("receipts/taxi.pdf")
+	filo(ExitOK, "", false, "set", taxi, "--file-date", "2024-03-31", "--retention", "bills")
+	contains("show after set", filo(ExitOK, "", false, "show", taxi).stdout, "kept until 2031-03-31",
+		"retention   bills (7y)\n", "file_date   2024-03-31", "by filo set, on this content")
+
+	// Replacing without a terminal changes nothing, and says so; declined at a terminal, the same.
+	contains("no terminal", filo(ExitOK, "", false, "set", taxi, "--retention", "10y").stdout,
+		"Nothing changed: there is no terminal to ask in")
+	contains("declined", filo(ExitOK, "n\n", true, "set", taxi, "--retention", "10y").stdout, "Nothing changed.")
+	contains("still bills", filo(ExitOK, "", false, "show", taxi).stdout, "retention   bills (7y)\n")
+	// l lists every file before asking again.
+	contains("list", filo(ExitOK, "l\nn\n", true, "set", taxi, "--retention", "10y").stdout, "[y/N/l]")
+
+	// The same values: nothing to do, no question.
+	out := filo(ExitOK, "", false, "set", taxi, "--retention", "bills").stdout
+	contains("unchanged", out, "Unchanged   retention bills . 1 file has these values already")
+	lacks("unchanged", out, "Replace")
+
+	// Refused paths: a directory, one not in the register, one outside every root; nothing changes.
+	ct.write("new.txt", "new")
+	r := filo(ExitError, "", false, "set", in("receipts"), in("new.txt"), taxi, "/", "--retention", "forever")
+	contains("refusals", r.stdout, "Nothing was changed: 3 of 4 files were refused",
+		in("receipts")+"   a directory", in("new.txt")+"   not in the register yet", "/   outside every root")
+	contains("still bills", filo(ExitOK, "", false, "show", taxi).stdout, "retention   bills (7y)\n")
+	// A policy that does not exist yet is created with no value, and said so (not in a dry run).
+	ct.write("tax/2024.pdf", "tax")
+	filo(ExitOK, "", false, "scan")
+	out = filo(ExitOK, "", false, "set", in("tax/2024.pdf"), "--retention", "tax", "--dry-run").stdout
+	contains("new policy, dry run", out, "policy tax would be created with no value")
+	lacks("new policy, dry run", filo(ExitOK, "", false, "policies").stdout, "tax")
+	out = filo(ExitOK, "", false, "set", in("tax/2024.pdf"), "--retention", "tax").stdout
+	contains("new policy", out, "none   tax (no value yet)",
+		"policy tax was created with no value: its files need a retention until it has one",
+		"Next: filo policies set tax VALUE")
+	contains("policies", filo(ExitOK, "", false, "policies").stdout, "tax", "no value")
+
+	// A file's old path does not set it; a path given twice counts once.
+	if err := os.Rename(in("receipts/coffee.pdf"), in("receipts/coffee-2024.pdf")); err != nil {
+		t.Fatal(err)
+	}
+	filo(ExitOK, "", false, "scan")
+	r = filo(ExitError, "", false, "set", in("receipts/coffee.pdf"), in("receipts"), in("receipts"), "--retention",
+		"forever")
+	contains("old path", r.stdout, "Nothing was changed: 2 of 2 files were refused",
+		"not at this path any more: it moved to "+in("receipts/coffee-2024.pdf"))
+	// A clear asked with a file_date given to another: the question names both.
+	filo(ExitOK, "", false, "set", in("receipts/lunch.pdf"), "--file-date", "2024-01-01")
+	out = filo(ExitOK, "", false, "set", taxi, in("receipts/coffee-2024.pdf"), "--no-retention", "--file-date",
+		"2024-03-31", "-y").stdout
+	contains("clear and set", out, "1 file will need a retention again")
+	// A dry run with nothing to change has no table.
+	out = filo(ExitOK, "", false, "set", taxi, "--file-date", "2024-03-31", "--dry-run").stdout
+	contains("empty dry run", out, "0 files would change")
+	lacks("empty dry run", out, "    was")
+	// show of a missing file does not point to filo set.
+	if err := os.Remove(in("receipts/coffee-2024.pdf")); err != nil {
+		t.Fatal(err)
+	}
+	filo(ExitOK, "", false, "scan")
+	lacks("missing, next", filo(ExitOK, "", false, "show", in("receipts/coffee-2024.pdf")).stdout, "Next:")
+
+	// Usage.
+	for _, args := range [][]string{{"set", taxi}, {"set", taxi, "--file-date", "2024-01-01", "--no-file-date"},
+		{"set", taxi, "--retention", "7y", "--no-retention"}, {"set", taxi, "--retention", "7q"},
+		{"set", taxi, "--file-date", "31/03/2024"}, {"set", taxi, "--file-date", ""}, {"set", "--retention", "7y"}} {
+		filo(ExitUsage, "", false, args...)
+	}
+	contains("-h", filo(ExitOK, "", false, "set", "-h").stdout, "filo set FILE... [flags]", "--no-file-date")
+}
+
+// TestSetDuplicatesGolden: --duplicates, plain: always (no question the first time), records, always over records
+// (asked at a terminal), a lone copy for records refused, counted in a dry run.
+func TestSetDuplicatesGolden(t *testing.T) {
+	ct := newCLITest(t)
+	for _, p := range []string{"a", "b", "c"} {
+		ct.write("projects/"+p+"/LICENSE", "MIT")
+	}
+	ct.write("terms/2020.pdf", "terms")
+	ct.write("terms/2021.pdf", "terms")
+	ct.filo(ExitOK, "", false, "roots", "add", ct.root)
+	in := ct.in
+	var out string
+	run := func(code int, stdin string, terminal bool, args ...string) {
+		r := ct.filo(code, stdin, terminal, args...)
+		out += "$ filo " + strings.Join(args, " ") + "\n\n" + r.stdout + r.stderr + "\n"
+	}
+	run(ExitOK, "", false, "set", in("projects/a/LICENSE"), "--duplicates", "always")
+	run(ExitOK, "", false, "set", in("terms/2020.pdf"), in("terms/2021.pdf"), "--duplicates", "records")
+	run(ExitOK, "y\n", true, "set", in("terms/2020.pdf"), "--duplicates", "always")
+	run(ExitError, "", false, "set", in("projects/b/LICENSE"), "--duplicates", "records")
+	run(ExitOK, "", false, "set", in("projects/b/LICENSE"), "--duplicates", "counted", "--dry-run")
+	golden(t, "set-duplicates.txt", ct.root, out)
+	ct.contains("duplicates after", ct.filo(ExitOK, "", false, "duplicates").stdout, "2 contents marked always")
+
+	// Both kinds given, nothing to change: the heading names both.
+	ct.filo(ExitOK, "", false, "set", in("projects/c/LICENSE"), "--retention", "forever")
+	ct.contains("unchanged, both", ct.filo(ExitOK, "", false, "set", in("projects/c/LICENSE"), "--retention",
+		"forever", "--duplicates", "always").stdout, "1 file has these values already . 1 content has this decision already")
+
+	// Usage: a value it does not know.
+	ct.contains("bad value", ct.filo(ExitUsage, "", false, "set", in("terms/2020.pdf"), "--duplicates", "x").stderr,
+		"use always")
+}
