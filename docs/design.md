@@ -1522,10 +1522,10 @@ file contents (see `roadmap.md`, Rejected, "Building search"); tags (18a) add `-
   ```
   Found   3 files . 412 KiB . named *gas* . ~/Documents
 
-      modified       size
-      2026-10-03   184 KiB   received/2026/10/2026-10-03 British Gas Bill for October 2026.pdf
-      2026-09-02   180 KiB   received/2026/09/2026-09-02 British Gas Bill for September 2026.pdf
+      modified        size
       2025-01-14    48 KiB   house/gas safety certificate.pdf
+      2026-09-02   180 KiB   received/2026/09/2026-09-02 British Gas Bill for September 2026.pdf
+      2026-10-03   184 KiB   received/2026/10/2026-10-03 British Gas Bill for October 2026.pdf
   ```
 - **Piped**: one absolute path per line, escaped as all output is (see Commands and scheduling, "Output cannot act
   on the terminal"), since a piped list often ends in a terminal (`| less`). Almost every name is unchanged by it.
