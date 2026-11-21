@@ -40,4 +40,4 @@
     status      [!] missing: run filo scan, if it was moved
     retention   none
 
-Next: filo set FILE --retention R or --file-date DATE (filo help set for more)
+Next: filo set FILE --retention R, --file-date DATE or --duplicates always|records (filo help set for more)

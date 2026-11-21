@@ -40,8 +40,8 @@ Commands
   rules copy OLD NEW       copy the rules at OLD and below it to NEW
   show PATH...             everything filo holds about a file or directory:
                            retention, history, copies
-  set FILE... [flags]      set files' file_date or retention, asking before
-                           replacing one
+  set FILE... [flags]      set files' file_date, retention or duplicates
+                           decision
   help [COMMAND]           this overview, or a command's flags and rules
 
 Every command accepts --db PATH (default: $FILO_DB, then the user data

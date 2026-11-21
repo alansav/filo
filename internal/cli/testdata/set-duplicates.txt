@@ -1,0 +1,46 @@
+$ filo set <root>/projects/a/LICENSE --duplicates always
+
+Done   always . 1 content . applies to 3 copies . <root>
+    projects/a/LICENSE   (named)
+    projects/b/LICENSE
+    projects/c/LICENSE
+  - these copies no longer count as duplicates; filo set FILE --duplicates counted undoes it
+
+$ filo set <root>/terms/2020.pdf <root>/terms/2021.pdf --duplicates records
+
+Done   records . 1 content . applies to 2 copies . <root>
+    terms/2020.pdf   (named)
+    terms/2021.pdf   (named)
+  - the copies named are kept as separate records, each with its own retention; filo set FILE --duplicates counted undoes it
+
+$ filo set <root>/terms/2020.pdf --duplicates always
+
+Set   always . 1 file . <root>
+
+[!] 1 content has a duplicates decision that would be replaced:
+    duplicates
+    was                 now
+    a separate record   always   terms/2020.pdf
+  - about the content: it applies to 2 copies
+
+Replace the duplicates decision of 1 content? [y/N/l] 
+
+Done   always . 1 content . applies to 2 copies
+
+$ filo set <root>/projects/b/LICENSE --duplicates records
+
+[refused] Nothing was changed: 1 of 1 file was refused
+  [refused] <root>/projects/b/LICENSE   records needs two or more copies of one content named: name its other copies too
+
+Next: fix the files above, or leave them out, and run filo set again
+
+$ filo set <root>/projects/b/LICENSE --duplicates counted --dry-run
+
+Dry run   counted as duplicates . 1 content would change . <root>
+    projects/a/LICENSE
+    projects/b/LICENSE   (named)
+    projects/c/LICENSE
+  - these copies would count as duplicates again
+
+Dry run: nothing was changed.
+

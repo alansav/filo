@@ -48,7 +48,7 @@ var overview = struct {
 		{Name: "rules move OLD NEW", Text: "move the rules at OLD and below it to NEW (a rename)"},
 		{Name: "rules copy OLD NEW", Text: "copy the rules at OLD and below it to NEW"},
 		{Name: "show PATH...", Text: "everything filo holds about a file or directory: retention, history, copies"},
-		{Name: "set FILE... [flags]", Text: "set files' file_date or retention, asking before replacing one"},
+		{Name: "set FILE... [flags]", Text: "set files' file_date, retention or duplicates decision"},
 		{Name: "help [COMMAND]", Text: "this overview, or a command's flags and rules"},
 	},
 	after: "Every command accepts --db PATH (default: $FILO_DB, then the user data directory).",
@@ -230,12 +230,17 @@ var commandHelps = map[string]commandHelp{
 				"its first values is not asked about. A retention set here replaces a policy a directory rule set.",
 			"A policy name that is not a policy yet creates one with no value, and says so: its files need a " +
 				"retention until filo policies set NAME VALUE gives it one.",
+			"--duplicates is about a content, not one file: always means it belongs everywhere, so none of its " +
+				"copies is ever a duplicate; records means the files named, two or more copies of it, are each a " +
+				"record with its own retention; counted undoes either (as filo duplicates include FILE does). " +
+				"Each lists the copies it covers, and it asks before replacing or undoing a decision already made.",
 		},
 		flags: []view.Term{
 			{Name: "--file-date DATE", Text: "the date a period counts from"},
 			{Name: "--no-file-date", Text: "clear the file_date (refused where a period needs it)"},
 			{Name: "--retention R", Text: "a period, forever, a date or a policy's name"},
 			{Name: "--no-retention", Text: "clear the retention: the files need one again"},
+			{Name: "--duplicates D", Text: "always, records or counted: a decision about the files' content"},
 			{Name: "--dry-run", Text: "show what would change, and change nothing"},
 			{Name: "-y", Text: "replace values without asking"},
 		},

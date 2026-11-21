@@ -66,7 +66,8 @@ func (e *env) show(ctx context.Context, dbBefore string, args []string) error {
 	switch {
 	case files > 0:
 		e.view.Blank()
-		e.view.Next("Next: filo set FILE --retention R or --file-date DATE (filo help set for more)")
+		e.view.Next("Next: filo set FILE --retention R, --file-date DATE or --duplicates always|records " +
+			"(filo help set for more)")
 	case dirs > 0:
 		e.view.Blank()
 		e.view.Next("Next: filo show FILE for one file, filo set FILE... to change files (filo help set for more)")

@@ -14,11 +14,20 @@ filo set FILE... [flags]
   A policy name that is not a policy yet creates one with no value, and says so:
   its files need a retention until filo policies set NAME VALUE gives it one.
 
+  --duplicates is about a content, not one file: always means it belongs
+  everywhere, so none of its copies is ever a duplicate; records means the files
+  named, two or more copies of it, are each a record with its own retention;
+  counted undoes either (as filo duplicates include FILE does). Each lists the
+  copies it covers, and it asks before replacing or undoing a decision already
+  made.
+
 Flags
   --file-date DATE         the date a period counts from
   --no-file-date           clear the file_date (refused where a period needs it)
   --retention R            a period, forever, a date or a policy's name
   --no-retention           clear the retention: the files need one again
+  --duplicates D           always, records or counted: a decision about the
+                           files' content
   --dry-run                show what would change, and change nothing
   -y                       replace values without asking
 

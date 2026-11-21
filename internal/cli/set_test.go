@@ -116,3 +116,32 @@ func TestSet(t *testing.T) {
 	}
 	contains("-h", filo(ExitOK, "", false, "set", "-h").stdout, "filo set FILE... [flags]", "--no-file-date")
 }
+
+// TestSetDuplicatesGolden: --duplicates, plain: always (no question the first time), records, always over records
+// (asked at a terminal), a lone copy for records refused, counted in a dry run.
+func TestSetDuplicatesGolden(t *testing.T) {
+	ct := newCLITest(t)
+	for _, p := range []string{"a", "b", "c"} {
+		ct.write("projects/"+p+"/LICENSE", "MIT")
+	}
+	ct.write("terms/2020.pdf", "terms")
+	ct.write("terms/2021.pdf", "terms")
+	ct.filo(ExitOK, "", false, "roots", "add", ct.root)
+	in := ct.in
+	var out string
+	run := func(code int, stdin string, terminal bool, args ...string) {
+		r := ct.filo(code, stdin, terminal, args...)
+		out += "$ filo " + strings.Join(args, " ") + "\n\n" + r.stdout + r.stderr + "\n"
+	}
+	run(ExitOK, "", false, "set", in("projects/a/LICENSE"), "--duplicates", "always")
+	run(ExitOK, "", false, "set", in("terms/2020.pdf"), in("terms/2021.pdf"), "--duplicates", "records")
+	run(ExitOK, "y\n", true, "set", in("terms/2020.pdf"), "--duplicates", "always")
+	run(ExitError, "", false, "set", in("projects/b/LICENSE"), "--duplicates", "records")
+	run(ExitOK, "", false, "set", in("projects/b/LICENSE"), "--duplicates", "counted", "--dry-run")
+	golden(t, "set-duplicates.txt", ct.root, out)
+	ct.contains("duplicates after", ct.filo(ExitOK, "", false, "duplicates").stdout, "2 contents marked always")
+
+	// Usage: a value it does not know.
+	ct.contains("bad value", ct.filo(ExitUsage, "", false, "set", in("terms/2020.pdf"), "--duplicates", "x").stderr,
+		"use always")
+}
