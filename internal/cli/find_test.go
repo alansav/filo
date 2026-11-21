@@ -132,6 +132,12 @@ func TestFindPiped(t *testing.T) {
 func TestFindRefusals(t *testing.T) {
 	ct := newFindTest(t)
 	filo, in, contains := ct.filo, ct.in, ct.contains
+	if err := os.Symlink("notes", in("notes link")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(ct.root, ct.root+" link"); err != nil {
+		t.Fatal(err)
+	}
 	for _, tc := range []struct {
 		args []string
 		term bool
@@ -144,6 +150,8 @@ func TestFindRefusals(t *testing.T) {
 		{[]string{"find", "--no-scan", "--workers", "2"}, false, "give one or the other"},
 		{[]string{"find", "--workers", "0"}, false, "--workers must be between 1 and 64"},
 		{[]string{"find", "--nope"}, false, ""},
+		{[]string{"find", in("notes link")}, false, "is a symlink: give the directory it points to"},
+		{[]string{"find", ct.root + " link"}, false, "is a symlink"},
 	} {
 		contains(strings.Join(tc.args, " "), filo(ExitUsage, "", tc.term, tc.args...).stderr, tc.want)
 	}
@@ -156,10 +164,15 @@ func TestFindRefusals(t *testing.T) {
 		t.Fatal(err)
 	}
 	contains("missing file", filo(ExitUsage, "", false, "find", in("notes/empty.txt")).stderr, "is a file")
+	r := filo(ExitError, "", false, "find", in("recieved")) // mistyped: never in the register
+	contains("mistyped", r.stderr, in("recieved")+" is not in the register: it is not on the disk")
+	if r.stdout != "" {
+		t.Errorf("mistyped DIR listed:\n%s", r.stdout)
+	}
 	if err := os.RemoveAll(in("received")); err != nil {
 		t.Fatal(err)
 	}
-	r := filo(ExitOK, "", true, "find", in("received"))
+	r = filo(ExitOK, "", true, "find", in("received"))
 	contains("gone directory", r.stdout, "  - 3 missing", "missing   received/2026/10/2026-10-03 British Gas Bill.pdf",
 		"Found   no files . "+ct.root+", under received/")
 

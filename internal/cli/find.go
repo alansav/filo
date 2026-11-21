@@ -94,9 +94,11 @@ type findWhere struct {
 	scan   string
 }
 
-// findPlace looks DIR up in the register as filo show does: a directory on disk, or one gone from it (which just
-// holds no file present now), inside a root. With no DIR, every root. A DIR outside every root, or a file, is a usage
-// error. A DIR gone from the disk is scanned through its root, so its files are found missing.
+// findPlace looks DIR up in the register as filo show does: a directory on disk, or one gone from it whose files the
+// register still holds (none of them present now, once its root's scan has found them missing), inside a root. With
+// no DIR, every root. A DIR outside every root, a file or a symlink is a usage error; a path gone from the disk that
+// the register never held a file under is an error, as for filo show, so a mistyped DIR never reads as a search that
+// found nothing.
 func findPlace(ctx context.Context, s *store.Store, pos []string) (findWhere, error) {
 	if len(pos) == 0 {
 		roots, err := s.Roots(ctx)
@@ -112,6 +114,9 @@ func findPlace(ctx context.Context, s *store.Store, pos []string) (findWhere, er
 	p, err := filepath.Abs(pos[0])
 	if err != nil {
 		return findWhere{}, err
+	}
+	if fi, err := os.Lstat(p); err == nil && fi.Mode()&os.ModeSymlink != 0 {
+		return findWhere{}, usageError{p + " is a symlink: give the directory it points to"}
 	}
 	root, rel, isDir, err := locatePath(ctx, s, p)
 	var outside outsideError
@@ -133,6 +138,12 @@ func findPlace(ctx context.Context, s *store.Store, pos []string) (findWhere, er
 		return findWhere{}, usageError{p + " is a file: use filo show"}
 	} else if !errors.Is(err, store.ErrNotInRegister) {
 		return findWhere{}, err
+	}
+	if has, err := s.HasFilesUnder(ctx, root.ID, rel); err != nil {
+		return findWhere{}, err
+	} else if !has {
+		return findWhere{}, fmt.Errorf("%s is not in the register: it is not on the disk, and no file was ever "+
+			"found under it (check the path)", p)
 	}
 	place.scan = root.Path // gone from the disk: its root's scan finds its files missing
 	return place, nil
