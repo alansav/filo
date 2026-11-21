@@ -8,12 +8,12 @@ case someone asks").
 backups of your files, and of Filo's register and its snapshots (see [Register snapshots](docs/design.md#register-snapshots)).
 
 **Status: scan, lifespan, delete, duplicates, retention policies, directory rules, and show, set and get done.** You
-give every file a retention (how long to keep it, often through a named policy such as `bills = 7y`, which a directory rule can give the
-files under a directory as they arrive), and `filo delete` lists the files past theirs, asks, and deletes the ones you
-choose. For identical copies you decide which to keep in a spreadsheet, and `filo delete` carries that out the same
-careful way. `filo show` shows everything Filo holds about a file or directory, and `filo set` changes a few files
-from the command line. Apart from that, Filo is **read-only on your files**: no other command modifies, moves, renames or deletes
-anything outside its own database. See [Roadmap](#roadmap) for what comes next.
+give every file a retention (how long to keep it, often through a named policy such as `bills = 7y`, which a directory
+rule can give the files under a directory as they arrive), and `filo delete` lists the files past theirs, asks, and
+deletes the ones you choose. For identical copies you decide which to keep in a spreadsheet, and `filo delete` carries
+that out the same careful way. `filo show` shows everything Filo holds about a file or directory, and `filo set` changes
+a few files from the command line. Apart from that, Filo is **read-only on your files**: no other command modifies,
+moves, renames or deletes anything outside its own database. See [Roadmap](#roadmap) for what comes next.
 
 ## What it does today
 
@@ -478,8 +478,8 @@ Next: filo set FILE --retention R, --file-date DATE or --duplicates always|recor
   `counted` undoes either. It lists every copy it covers.
 - **`filo get FILE... --FIELD...`** prints `--file-date`, `--retention`, `--keep-until`, `--status`,
   `--duplicates`, `--size`, `--modified`, `--sha256`, `--root` or `--first-seen`, in the order given: one field of
-  one file is its bare value, several files a row each with the path last (tab-separated when piped). An empty value
-  means none.
+  one file is its bare value, several fields of one file a name and value line each, several files a row each with
+  the path last (tab-separated when piped). An empty value means none.
 
 ## Commands
 
@@ -548,8 +548,8 @@ without a terminal, as a timer does) is always the safe choice.
 Exit codes: `0` success (files that couldn't be read are reported but don't fail the scan; saying no at a question
 is not a failure), `1` an error, a root that failed during `filo scan` of every root, a CSV row that `filo update`
 refused, a file `filo delete` couldn't read or delete, a group of a duplicates CSV it refused, a path `filo show`
-or `filo get` couldn't find in the register (the others are still shown), or a file `filo set` refused, `2` a usage
-error.
+or `filo get` couldn't show (not in the register, skipped by its root's settings, or for `get` a directory; the others
+are still shown), or a file `filo set` refused, `2` a usage error.
 
 ## Roots
 
