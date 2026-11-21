@@ -53,13 +53,23 @@ type Field struct {
 	Attention string // after the value (or in its place), under the ! marker: "changed on disk since the last scan"
 }
 
-// Fields writes a Part's fields, labels indented by four and values lined up after the longest label:
-// "    modified    2022-02-03 09:14   unchanged since the last scan (2026-11-20)".
-func (r *Renderer) Fields(fields []Field) {
+// LabelWidth is the width of the longest label in the field lists: what Fields lines values up after, so the parts
+// of one thing line up with each other.
+func LabelWidth(lists ...[]Field) int {
 	w := 0
-	for _, f := range fields {
-		w = max(w, width(plain(f.Label)))
+	for _, fields := range lists {
+		for _, f := range fields {
+			w = max(w, width(plain(f.Label)))
+		}
 	}
+	return w
+}
+
+// Fields writes a Part's fields, labels indented by four and values lined up two columns after labelWidth
+// (LabelWidth of every part shown together), or after the longest label here, if longer:
+// "    modified    2022-02-03 09:14   unchanged since the last scan (2026-11-20)".
+func (r *Renderer) Fields(labelWidth int, fields []Field) {
+	w := max(labelWidth, LabelWidth(fields))
 	for _, f := range fields {
 		spans := []span{spaces(4), plain(f.Label), spaces(w - width(plain(f.Label)) + 2)}
 		gap := false // something written after the label, so what follows needs three spaces

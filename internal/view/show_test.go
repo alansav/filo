@@ -25,7 +25,7 @@ func TestSubjectPartFields(t *testing.T) {
 			r.Part("Copies", "1 other file with the same content", "counted as a duplicate")
 		}, "  File\n  Copies   1 other file with the same content . counted as a duplicate\n"},
 		{"fields line up after the longest label", func(r *Renderer) {
-			r.Fields([]Field{
+			r.Fields(0, []Field{
 				{Label: "path", Value: "/home/u/Documents/gas.pdf", Path: true, Attention: "not on disk"},
 				{Label: "modified", Value: "2022-02-03 09:14", Note: "unchanged since the last scan (2026-11-20)"},
 				{Label: "first seen", Value: "2026-11-12 (scan 3)"},
@@ -37,8 +37,13 @@ func TestSubjectPartFields(t *testing.T) {
 			"    first seen  2026-11-12 (scan 3)\n" +
 			"    status      [!] undated: no retention\n" +
 			"    keep_until  2020-01-31   x   [!] 1 year ago\n"},
+		{"lined up with another part", func(r *Renderer) {
+			a, b := []Field{{Label: "status", Value: "kept"}}, []Field{{Label: "first seen", Value: "today"}}
+			r.Fields(LabelWidth(a, b), a)
+			r.Fields(LabelWidth(a, b), b)
+		}, "    status      kept\n    first seen  today\n"},
 		{"a path value is escaped as a name", func(r *Renderer) {
-			r.Fields([]Field{{Label: "path", Value: "/x/a\x1b[2Jb", Path: true}})
+			r.Fields(0, []Field{{Label: "path", Value: "/x/a\x1b[2Jb", Path: true}})
 		}, `    path  /x/a\x1b[2Jb` + "\n"},
 	}
 	for _, tt := range tests {
