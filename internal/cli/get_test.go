@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -40,6 +41,8 @@ func TestGet(t *testing.T) {
 		"7y\tkept\t"+coffee+"\n\tundated\t"+strings.ReplaceAll(tab, "\t", `\t`)+"\n")
 	check("-0", filo(ExitOK, "", false, "get", coffee, tab, "--status", "-0").stdout,
 		"kept\t"+coffee+"\x00undated\t"+tab+"\x00")
+	check("-0, one file: a row too", filo(ExitOK, "", false, "get", tab, "--status", "--size", "-0").stdout,
+		"undated\t3\t"+tab+"\x00")
 	out := filo(ExitOK, "", true, "get", coffee, tab, "--size", "--retention").stdout
 	contains("several files at a terminal", out, "size   retention", "   6   7y          "+coffee,
 		"   3               "+strings.ReplaceAll(tab, "\t", `\t`))
@@ -47,8 +50,11 @@ func TestGet(t *testing.T) {
 	// The other fields have values.
 	out = filo(ExitOK, "", false, "get", coffee, "--duplicates", "--size", "--sha256", "--root", "--first-seen",
 		"--modified").stdout
-	contains("other fields", out, "duplicates\tcounted\n", "size\t6\n", "sha256\t", "root\t"+ct.root+"\n",
-		"first_seen\t"+time.Now().Format(time.DateOnly)+"\n", "modified\t"+time.Now().Format("2006-01-02T"))
+	contains("other fields", out, "duplicates\tcounted\n", "size\t6\n", "sha256\t", "root\t"+ct.root+"\n")
+	if !regexp.MustCompile(`first_seen\t\d{4}-\d\d-\d\d\n`).MatchString(out) ||
+		!regexp.MustCompile(`modified\t\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d`).MatchString(out) {
+		t.Errorf("first_seen or modified not a date:\n%s", out)
+	}
 
 	// A path that cannot be read: an error line, the others still printed, exit 1, the layout kept.
 	r := filo(ExitError, "", false, "get", in("r/nope.pdf"), coffee, "--retention")

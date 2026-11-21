@@ -226,9 +226,10 @@ var commandHelps = map[string]commandHelp{
 				"are given. One field of one file prints its bare value; several fields of one file print a name " +
 				"and value per line; several files print a row each, the values in order and the file last. A " +
 				"field with no value prints as empty. Nothing is changed, and nothing is read from the disk.",
-			"Piped, values are separated by tabs and the file is its absolute path, last, so a name holding a tab " +
-				"still splits right; -0 ends each row with a NUL instead of a newline and writes names exactly, " +
-				"for xargs -0 and tar --null.",
+			"Piped, values are separated by tabs and the file is its absolute path, last; a tab in a value or a " +
+				"name is shown escaped, so the tabs between fields are always filo's. With -0, every file (one too) " +
+				"is such a row, ended by a NUL instead of a newline, with its path written exactly: read the rows " +
+				"with read -r -d '' and split each on its tabs; the path is what follows the last one.",
 		},
 		flags: []view.Term{
 			{Name: "--file-date", Text: "the date a period counts from (YYYY-MM-DD)"},
@@ -242,7 +243,7 @@ var commandHelps = map[string]commandHelp{
 			{Name: "--sha256", Text: "its content's hash, as sha256sum prints it"},
 			{Name: "--root", Text: "the root it is in"},
 			{Name: "--first-seen", Text: "the date filo first saw it"},
-			{Name: "-0", Text: "end rows with NUL, names unescaped (for a pipe only)"},
+			{Name: "-0", Text: "a row per file, ended by NUL, its path exact (for a pipe only)"},
 		},
 	},
 	"set": {

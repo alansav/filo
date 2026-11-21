@@ -16,7 +16,8 @@ import (
 // get is filo get FILE... --FIELD... (docs/design.md, Showing and setting a file's details): the read-only pair of
 // filo set, for scripts and quick checks. The fields come out in the order given. One field of one file is its bare
 // value; several fields of one file are name and value lines; several files are one row each, the values in order
-// and the path last (piped: tab-separated, the path absolute; with -0, rows end in NUL and names are not escaped). A
+// and the path last (piped: tab-separated, the path absolute). With -0, every file is such a row, ended by a NUL, its
+// path unescaped. A
 // path that cannot be read is an error line; the others are still printed, and the exit status is 1.
 func (e *env) get(ctx context.Context, dbBefore string, args []string) error {
 	fs := e.flags("get")
@@ -66,24 +67,15 @@ func (e *env) get(ctx context.Context, dbBefore string, args []string) error {
 		i := slices.IndexFunc(show.Fields, func(f struct{ Flag, Name string }) bool { return f.Flag == flag })
 		return show.Fields[i].Name
 	}
-	// The layout follows what was asked, not what was found, so a script sees one format whatever fails.
+	// The layout follows what was asked, not what was found, so a script sees one format whatever fails; with -0 it
+	// is always a row per file, the path last, however many files.
 	switch {
-	case len(pos) == 1 && len(order) == 1:
+	case len(pos) == 1 && len(order) == 1 && !*nul:
 		for _, f := range files {
-			if *nul {
-				r.Record(nil, f.Value(order[0]), true)
-			} else {
-				r.Line(f.Value(order[0]))
-			}
+			r.Line(f.Value(order[0]))
 		}
-	case len(pos) == 1:
+	case len(pos) == 1 && !*nul:
 		for _, f := range files {
-			if *nul {
-				for _, fl := range order {
-					r.Record([]string{name(fl)}, f.Value(fl), true)
-				}
-				continue
-			}
 			pairs := make([][2]string, len(order))
 			for i, fl := range order {
 				pairs[i] = [2]string{name(fl), f.Value(fl)}

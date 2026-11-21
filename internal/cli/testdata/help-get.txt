@@ -6,9 +6,11 @@ filo get FILE... --FIELD... [-0]
   print a row each, the values in order and the file last. A field with no value
   prints as empty. Nothing is changed, and nothing is read from the disk.
 
-  Piped, values are separated by tabs and the file is its absolute path, last,
-  so a name holding a tab still splits right; -0 ends each row with a NUL
-  instead of a newline and writes names exactly, for xargs -0 and tar --null.
+  Piped, values are separated by tabs and the file is its absolute path, last; a
+  tab in a value or a name is shown escaped, so the tabs between fields are
+  always filo's. With -0, every file (one too) is such a row, ended by a NUL
+  instead of a newline, with its path written exactly: read the rows with read
+  -r -d '' and split each on its tabs; the path is what follows the last one.
 
 Flags
   --file-date              the date a period counts from (YYYY-MM-DD)
@@ -23,4 +25,5 @@ Flags
   --sha256                 its content's hash, as sha256sum prints it
   --root                   the root it is in
   --first-seen             the date filo first saw it
-  -0                       end rows with NUL, names unescaped (for a pipe only)
+  -0                       a row per file, ended by NUL, its path exact (for a
+                           pipe only)
