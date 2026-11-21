@@ -87,7 +87,8 @@ branch, never on `main`:
 
 1. Commit as you go, lower layers first, each commit with its own tests: the design moved from `docs/roadmap.md` into
    `docs/design.md` alone first, then the store and schema, then the internal package(s), then the `internal/view`
-   output, then the `cmd/filo` wiring and end-to-end tests. Before each commit, `gofmt`, `go vet`, `staticcheck` and `go
+   output (before an internal package that renders through it), then the `cmd/filo` wiring and end-to-end tests.
+   Before each commit, `gofmt`, `go vet`, `staticcheck` and `go
    test ./...` must all pass, so every commit builds and is green on its own. Each commit is one atomic unit that does
    exactly what its message says; its size comes second (do not split or merge commits to reach a number of lines). Each
    message says what the commit adds and, if part of the work is still to come, what (for example "not called by any
