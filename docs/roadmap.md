@@ -36,7 +36,8 @@ what each device observes (roots, inodes, scan history) stays its own. Tags and 
 on the other device: a retention by content hash (an edited file needs a new decision), a tag by hash and then path
 (an edit keeps it; see 9c and 18a).
 
-The pieces, in the order agreed: 19 finding files (`filo files`), 18a tags, 36 bash completion, then the sync items
+The pieces, in the order agreed: 19 finding files (`filo find`), 18a tags, 38 the tag index pages, 36 bash
+completion, then the sync items
 (9b device ID, 9a synced directories, 9c the journal, which also carries tags), then 20 the Filo directory and 18b
 project notes and packages. 36 comes after tags so that its completion covers tag names from the start (reordered
 2026-11-20).
@@ -52,18 +53,19 @@ complexity scores (1 to 10, Claude's estimates) are still to be settled with the
 
 1. 19 finding files
 2. 18a tags
-3. 36 bash completion
-4. 9b device ID, 9a marking synced directories, 9c sharing decisions
-5. 20 the Filo directory, 18b project notes and packages
-6. 5a progress line, 5b `--needing-retention`
-7. 13 removing empty directories
-8. 21 script mode, 34 received documents (needs 21 and 9a)
-9. 6 one decision for all copies
-10. 16 undoing an update batch, 17 suggested rules
-11. 15 where the space goes
-12. 7a–7c verifying content, 8 backup awareness, 9d snapshots to the backup machine
-13. 10 a summary for scheduled scans
-14. Later a and c–e
+3. 38 tag index pages (placed 2026-11-21)
+4. 36 bash completion
+5. 9b device ID, 9a marking synced directories, 9c sharing decisions
+6. 20 the Filo directory, 18b project notes and packages
+7. 5a progress line, 5b `--needing-retention`
+8. 13 removing empty directories
+9. 21 script mode, 34 received documents (needs 21 and 9a)
+10. 6 one decision for all copies
+11. 16 undoing an update batch, 17 suggested rules
+12. 15 where the space goes
+13. 7a–7c verifying content, 8 backup awareness, 9d snapshots to the backup machine
+14. 10 a summary for scheduled scans
+15. Later a and c–e
 
 ## Items
 
@@ -201,7 +203,7 @@ empty (today it does not); and that some programs need their empty directories (
 does.
 
 ### 15. Where the space goes (V5, C3)
-A report section, or `filo files --sort size`, showing the largest directories and files and how much of it is past
+A report section, or `filo find --sort size`, showing the largest directories and files and how much of it is past
 retention or in duplicates, so the person knows which directory to date first.
 
 ### 16. Undoing an update batch (V5, C6)
@@ -235,7 +237,7 @@ tag; a project is a tag.
 - **Commands** (the first version): `filo tag FILE... TAG...` and `filo untag FILE... TAG...`; `filo tags`, tags with
   their file counts; `filo tags rename OLD NEW`, across every file, which fixes a typo in the key or the value, and
   may also change only the case (`british gas` to `British Gas`); `filo export tags [DIR] -o FILE` and `filo update
-  FILE` (a separate CSV from retention, told apart by its header). Finding files: `filo files --tag` and `--no-tag`
+  FILE` (a separate CSV from retention, told apart by its header). Finding files: `filo find --tag` and `--no-tag`
   (19).
 - **The tags CSV** has a `tags` cell per file, tags separated by `;`, filled at export with the file's current tags.
   The cell replaces the file's tags: a tag not in it is removed, so an untouched cell changes nothing and an emptied
@@ -254,7 +256,7 @@ tag; a project is a tag.
   new file and renaming it into place (new inode, new content) stays a reported possible move, never paired; the
   report says the old file had tags.
 - **Slices** (one PR): the register (a schema version, a tags table on file ids) and the spelling rules; `filo tag`
-  and `untag` with single-file registration and copies' tags in scans; `filo tags` and rename; `filo files --tag`;
+  and `untag` with single-file registration and copies' tags in scans; `filo tags` and rename; `filo find --tag`;
   `filo export tags` and `filo update`; README and help. Each output mocked and agreed before its slice. Tags are
   stored so each change can be written to the journal later (9c) without rework.
 - **Later:** rules that tag by name pattern (`*British Gas*` under `received` gives `sender:British Gas`), once tags
@@ -264,7 +266,7 @@ tag; a project is a tag.
 
 ### 18b. Project notes and packages (V5, C5)
 Pull a project's files together. By the direction above, Filo writes the list and a standard tool does the copying
-(`filo files --tag "project:trip" -0 | tar --null -T - -czf trip.tgz`), or Filo writes a copy script (21). Filo itself
+(`filo find --tag "project:trip" -0 | tar --null -T - -czf trip.tgz`), or Filo writes a copy script (21). Filo itself
 never copies files into the scanned trees: the copies would come back as new files and new duplicate groups.
 Project notes (proposed 2026-11-19): Filo could also write one markdown note per project, with a link to each
 file, into the Filo directory (20), never into a scanned tree, where each regeneration would show as a changed
@@ -273,7 +275,7 @@ devices never make conflict copies. A relative link works on a device only if th
 same synced directory. It is Filo's first write beside the register, so it comes after the delete work.
 
 ### 19. Finding files (V8, C2)
-`filo files [DIR] [--name GLOB] [-0]`: find files in the register by name; read-only. The first slice of the query
+`filo find [DIR] [--name GLOB] [-0]`: find files in the register by name; read-only. The first slice of the query
 view (Later a), and what tags (18a) build on: they add `--tag TAG` and `--no-tag TAG` (agreed 2026-11-19).
 - Conditions combine with AND only; an OR is two runs. `key:` means any value of that key (only in a search: a tag
   always has a value), `*` in a value matches any run of characters (`sender:British*`; the only wildcard, and a tag
@@ -401,6 +403,16 @@ Agreed with the person on 2026-11-20. Tab completes Filo's commands, flags and a
 - Bash only at first (zsh can load bash completions). No framework: Cobra would be a new dependency and a rewrite of
   every command's parsing.
 
+### 38. Tag index pages (V6, C4)
+Proposed by the person on 2026-11-21, to come straight after 18a: Filo writes a set of HTML pages that list files
+by tag, to browse and click instead of typing searches. A main page links to one page per tag key (`sender`), which
+lists its values (each sender) with links to a page of each value's files, each file a link that opens it. A
+read-only view of the register written out as static pages, far cheaper than a UI (Later c). Overlaps 18b's
+markdown project notes and may replace them (to settle when it is designed). Known questions, from 18b: where the
+pages are written (more than one `-o` file; the Filo directory, 20, or a directory named by the person); a link to a
+file works on another device only when page and file share a synced directory; file names and tags are untrusted,
+so every text is escaped for HTML; the output is deterministic so syncing it makes no conflict copies.
+
 ### Docs
 
 Improvements to the three documents themselves, suggested on 2026-11-17 after the split.
@@ -425,15 +437,16 @@ An item holds its value and complexity and a few lines of what and why; detailed
 once it is chosen, so the roadmap stays a list that can be scanned and reordered. Some items above already hold
 more (carried over from the old open questions); they are trimmed when reviewed. A rule for `CLAUDE.md`, no code.
 
-### Later a. `filo files`, the query view (V6, C3)
-Viewing the register: `filo files [DIR] [--name GLOB] [--larger SIZE] [--smaller SIZE] [--modified-before DATE]
+### Later a. `filo find`, the query view (V6, C3)
+Viewing the register: `filo find [DIR] [--name GLOB] [--larger SIZE] [--smaller SIZE] [--modified-before DATE]
 [--modified-after DATE] [--status S] [--empty] [--sort size|modified|keep_until]`, cut at N rows in a terminal with
 "… N more", all rows when piped. It filters on what the register holds: size, mtime, `file_date`, `keep_until`,
 status, and first seen (`first_seen_scan`, the register's own date, which a copy or restore cannot reset). Not on
 creation time (many filesystems do not record it, and a copy, restore or sync resets it) or access time (not stored;
 `relatime` and `noatime` mounts make it unreliable, and Filo reads with `O_NOATIME` so as not to disturb it). Empty
 files are shown through it (`--empty`); until then a count line in `filo report` would keep them visible. `--name`
-is item 19.
+is item 19. Also later (proposed 2026-11-21): `--include-missing` and `--include-deleted`, since `filo find` lists
+only files present now.
 
 ### Later c. A UI in place of the CSV (V8, C10)
 Including viewing and editing the register in place. Everything hangs off the stable file ID, so none of it needs the
