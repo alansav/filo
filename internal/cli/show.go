@@ -81,7 +81,7 @@ func (e *env) lookUp(ctx context.Context, s *store.Store, arg string, o showOpti
 		return nil, err
 	}
 	dir := func() (func(n, total int), error) {
-		d, err := s.ShowDir(ctx, root.ID, rel, o.day)
+		d, err := s.ShowDir(ctx, root.ID, rel, o.day, now())
 		if err != nil {
 			return nil, err
 		}

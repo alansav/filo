@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/alansav/filo/internal/rules"
 )
@@ -21,6 +22,7 @@ type DirShown struct {
 	Deleted     []string   // the last paths, relative to the root, of the files filo deleted at Dir and below
 	Rules       []Rule     // the rules tried for a file directly in Dir, in the order they are tried
 	RulesBelow  []Rule     // the rules set on directories below Dir, a parent before the directories inside it
+	Ties        []RuleTie  // the present files at Dir and below that two or more rules match equally, by path
 	LastScanUTC string     // when the latest finished scan covering Dir finished; "" = none
 }
 
@@ -45,21 +47,27 @@ const (
 // IsAtOrUnder reports whether a '/'-separated path inside a root is dir or below it ("" is the root itself).
 func IsAtOrUnder(rel, dir string) bool { return isAtOrUnder(rel, dir) }
 
-// HasFilesUnder reports whether the register has any file, present or not, at dir or below it in a root: whether
-// dir is, or was, a directory filo knows.
+// HasFilesUnder reports whether the register has a file below dir in a root, as ShowDir finds them: at its current
+// path, or, for one with none (missing, deleted by filo), at its last path. Whether dir is, or was, a directory filo
+// knows with something to show; a file since moved out of it does not count.
 func (s *Store) HasFilesUnder(ctx context.Context, rootID int64, dir string) (bool, error) {
 	cond, args := Filter{RootID: rootID, Scope: dir}.scopeSQL()
 	var n int
 	err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM (SELECT 1 FROM paths p JOIN files f ON f.id = p.file_id
-		WHERE p.path <> ?`+cond+` LIMIT 1)`, append([]any{dir}, args...)...).Scan(&n)
+		WHERE p.path <> ?`+cond+` AND (p.valid_to_scan IS NULL OR (
+		  NOT EXISTS (SELECT 1 FROM paths cp WHERE cp.file_id = f.id AND cp.valid_to_scan IS NULL)
+		  AND p.id = (SELECT lp.id FROM paths lp WHERE lp.file_id = f.id
+		              ORDER BY lp.valid_to_scan DESC, lp.id DESC LIMIT 1)))
+		LIMIT 1)`, append([]any{dir}, args...)...).Scan(&n)
 	if err != nil {
 		return false, fmt.Errorf("read %s: %w", dir, err)
 	}
 	return n > 0, nil
 }
 
-// ShowDir returns what the register holds at dir and below it in a root. today (YYYY-MM-DD) decides the statuses.
-func (s *Store) ShowDir(ctx context.Context, rootID int64, dir, today string) (DirShown, error) {
+// ShowDir returns what the register holds at dir and below it in a root. today (YYYY-MM-DD) decides the statuses;
+// now is for working out the rule ties, which writes nothing.
+func (s *Store) ShowDir(ctx context.Context, rootID int64, dir, today string, now time.Time) (DirShown, error) {
 	d := DirShown{RootID: rootID, Dir: dir}
 	if err := s.db.QueryRowContext(ctx, `SELECT path FROM roots WHERE id = ?`, rootID).Scan(&d.RootPath); err != nil {
 		return d, fmt.Errorf("read root %d: %w", rootID, err)
@@ -121,6 +129,15 @@ func (s *Store) ShowDir(ctx context.Context, rootID int64, dir, today string) (D
 	}
 	if d.Rules, d.RulesBelow, err = s.dirRules(ctx, rootID, dir); err != nil {
 		return d, err
+	}
+	ties, err := s.RuleTies(ctx, rootID, today, now)
+	if err != nil {
+		return d, err
+	}
+	for _, t := range ties {
+		if t.Path != dir && isAtOrUnder(t.Path, dir) {
+			d.Ties = append(d.Ties, t)
+		}
 	}
 	d.LastScanUTC, err = s.LastScanCovering(ctx, rootID, dir)
 	return d, err

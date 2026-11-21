@@ -36,7 +36,7 @@ func TestShowDir(t *testing.T) {
 		}
 	}
 
-	d, err := e.s.ShowDir(e.ctx, e.root.ID, "bills", "2026-11-20")
+	d, err := e.s.ShowDir(e.ctx, e.root.ID, "bills", "2026-11-20", now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +79,7 @@ func TestShowDir(t *testing.T) {
 	if err := e.s.AddAlways(e.ctx, "ha", now); err != nil {
 		t.Fatal(err)
 	}
-	d, err = e.s.ShowDir(e.ctx, e.root.ID, "bills", "2026-11-20")
+	d, err = e.s.ShowDir(e.ctx, e.root.ID, "bills", "2026-11-20", now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,12 +89,42 @@ func TestShowDir(t *testing.T) {
 		}
 	}
 
+	// A directory whose files all moved out of it has nothing to show.
+	k = e.known()
+	e.apply(Changes{Close: []int64{k["billsx/d.pdf"].PathID}, Open: []OpenPath{{FileID: k["billsx/d.pdf"].FileID,
+		Path: "moved/d.pdf"}}})
 	for _, tt := range []struct {
 		dir  string
 		want bool
-	}{{"bills", true}, {"bills/2023", true}, {"bills/2023/c.pdf", false}, {"bil", false}, {"", true}} {
+	}{{"bills", true}, {"bills/2023", true}, {"bills/2023/c.pdf", false}, {"bil", false}, {"", true},
+		{"billsx", false}, {"moved", true}} {
 		if has, err := e.s.HasFilesUnder(e.ctx, e.root.ID, tt.dir); err != nil || has != tt.want {
 			t.Errorf("HasFilesUnder(%q) = %v, %v; want %v", tt.dir, has, err, tt.want)
+		}
+	}
+}
+
+// Two rules of one directory as long, both matching a file: a tie, listed for the directory and above it only.
+func TestShowDirTies(t *testing.T) {
+	e := newReviewEnv(t)
+	now := time.Date(2026, 11, 20, 12, 0, 0, 0, time.UTC)
+	e.apply(Changes{New: []NewFile{f("other/x.pdf", "hb")}})
+	for p, policy := range map[string]string{"*.pdf": "pdfs", "bill*": "billing"} {
+		if _, _, _, err := e.s.AddRule(e.ctx, e.root.ID, "bills", p, policy, "2026-11-20", now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	e.apply(Changes{New: []NewFile{f("bills/bill.pdf", "ha")}}) // arrives after both rules: they tie on it
+	for _, tt := range []struct {
+		dir  string
+		ties int
+	}{{"bills", 1}, {"", 1}, {"other", 0}} {
+		d, err := e.s.ShowDir(e.ctx, e.root.ID, tt.dir, "2026-11-20", now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(d.Ties) != tt.ties {
+			t.Errorf("%q: ties %+v, want %d", tt.dir, d.Ties, tt.ties)
 		}
 	}
 }
