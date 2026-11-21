@@ -23,20 +23,11 @@ func (r *Renderer) Pairs(pairs [][2]string) {
 
 // Record writes one row for a pipe: values, then a file's path, joined by tabs and ended by a newline. The values are
 // escaped as everywhere (a tab in one shows as \t, so the tabs between fields are always filo's own), and the path as
-// a name (a trailing space as \x20). With nul the row is ended by a NUL instead and the path is written as it is,
-// unescaped, so a script reading NUL-ended rows gets any file name exactly; a NUL cannot occur in a name, and this goes
-// only to a pipe or a file (at a terminal the path is escaped too, and the caller refuses -0 there), where nothing
-// written can act on a terminal.
-func (r *Renderer) Record(values []string, path string, nul bool) {
+// a name (a trailing space as \x20).
+func (r *Renderer) Record(values []string, path string) {
 	fields := make([]string, 0, len(values)+1)
 	for _, v := range values {
 		fields = append(fields, Escape(v))
 	}
-	switch {
-	case !nul || r.o.Terminal:
-		fields = append(fields, name(path).out)
-		r.out(strings.Join(fields, "\t") + "\n")
-	default:
-		r.out(strings.Join(append(fields, path), "\t") + "\x00")
-	}
+	r.out(strings.Join(append(fields, name(path).out), "\t") + "\n")
 }

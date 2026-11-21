@@ -16,8 +16,7 @@ import (
 // get is filo get FILE... --FIELD... (docs/design.md, Showing and setting a file's details): the read-only pair of
 // filo set, for scripts and quick checks. The fields come out in the order given. One field of one file is its bare
 // value; several fields of one file are name and value lines; several files are one row each, the values in order
-// and the path last (piped: tab-separated, the path absolute). With -0, every file is such a row, ended by a NUL, its
-// path unescaped. A
+// and the path last (piped: tab-separated, the path absolute). Everything is escaped, as everywhere. A
 // path that cannot be read is an error line; the others are still printed, and the exit status is 1.
 func (e *env) get(ctx context.Context, dbBefore string, args []string) error {
 	fs := e.flags("get")
@@ -26,7 +25,6 @@ func (e *env) get(ctx context.Context, dbBefore string, args []string) error {
 	for _, f := range show.Fields {
 		fs.Var(&fieldFlag{flag: f.Flag, order: &order}, f.Flag, "")
 	}
-	nul := fs.Bool("0", false, "")
 	pos, err := e.parse(fs, "get", args)
 	if err != nil {
 		return err
@@ -36,8 +34,6 @@ func (e *env) get(ctx context.Context, dbBefore string, args []string) error {
 		return usageError{"get needs one field or more, such as --retention or --keep-until"}
 	case len(pos) == 0:
 		return usageError{"get takes one FILE or more"}
-	case *nul && e.view.Terminal():
-		return usageError{"-0 is for a pipe (xargs -0, tar --null); at a terminal, leave it out"}
 	}
 	if err := checkTildes("FILE", pos...); err != nil {
 		return err
@@ -67,14 +63,13 @@ func (e *env) get(ctx context.Context, dbBefore string, args []string) error {
 		i := slices.IndexFunc(show.Fields, func(f struct{ Flag, Name string }) bool { return f.Flag == flag })
 		return show.Fields[i].Name
 	}
-	// The layout follows what was asked, not what was found, so a script sees one format whatever fails; with -0 it
-	// is always a row per file, the path last, however many files.
+	// The layout follows what was asked, not what was found, so a script sees one format whatever fails.
 	switch {
-	case len(pos) == 1 && len(order) == 1 && !*nul:
+	case len(pos) == 1 && len(order) == 1:
 		for _, f := range files {
 			r.Line(f.Value(order[0]))
 		}
-	case len(pos) == 1 && !*nul:
+	case len(pos) == 1:
 		for _, f := range files {
 			pairs := make([][2]string, len(order))
 			for i, fl := range order {
@@ -88,7 +83,7 @@ func (e *env) get(ctx context.Context, dbBefore string, args []string) error {
 			for _, fl := range order {
 				rec = append(rec, f.Value(fl))
 			}
-			r.Record(rec, f.AbsPath(), *nul)
+			r.Record(rec, f.AbsPath())
 		}
 	default:
 		cols := make([]view.Column, len(order))

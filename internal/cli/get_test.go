@@ -19,7 +19,7 @@ func newGetTest(t *testing.T) *cliTest {
 	return ct
 }
 
-// TestGet: the layouts, piped and at a terminal, the order of the fields, -0, and the errors.
+// TestGet: the layouts, piped and at a terminal, the order of the fields, and the errors.
 func TestGet(t *testing.T) {
 	ct := newGetTest(t)
 	in, filo, contains := ct.in, ct.filo, ct.contains
@@ -39,10 +39,6 @@ func TestGet(t *testing.T) {
 		"retention    7y\nkeep_until   2031-03-31\n")
 	check("several files, piped", filo(ExitOK, "", false, "get", coffee, tab, "--retention", "--status").stdout,
 		"7y\tkept\t"+coffee+"\n\tundated\t"+strings.ReplaceAll(tab, "\t", `\t`)+"\n")
-	check("-0", filo(ExitOK, "", false, "get", coffee, tab, "--status", "-0").stdout,
-		"kept\t"+coffee+"\x00undated\t"+tab+"\x00")
-	check("-0, one file: a row too", filo(ExitOK, "", false, "get", tab, "--status", "--size", "-0").stdout,
-		"undated\t3\t"+tab+"\x00")
 	out := filo(ExitOK, "", true, "get", coffee, tab, "--size", "--retention").stdout
 	contains("several files at a terminal", out, "size   retention", "   6   7y          "+coffee,
 		"   3               "+strings.ReplaceAll(tab, "\t", `\t`))
@@ -66,6 +62,6 @@ func TestGet(t *testing.T) {
 	for _, args := range [][]string{{"get", coffee}, {"get", "--retention"}, {"get", coffee, "--nope"}} {
 		filo(ExitUsage, "", false, args...)
 	}
-	contains("-0 at a terminal", filo(ExitUsage, "", true, "get", coffee, "--size", "-0").stderr, "-0 is for a pipe")
-	contains("-h", filo(ExitOK, "", false, "get", "-h").stdout, "filo get FILE... --FIELD... [-0]")
+	filo(ExitUsage, "", false, "get", coffee, "--size", "-0") // no -0: names are always escaped
+	contains("-h", filo(ExitOK, "", false, "get", "-h").stdout, "filo get FILE... --FIELD...")
 }

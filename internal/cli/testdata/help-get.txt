@@ -1,4 +1,4 @@
-filo get FILE... --FIELD... [-0]
+filo get FILE... --FIELD...
 
   Prints fields of each file from the register, for scripts and quick checks, in
   the order the fields are given. One field of one file prints its bare value;
@@ -8,9 +8,7 @@ filo get FILE... --FIELD... [-0]
 
   Piped, values are separated by tabs and the file is its absolute path, last; a
   tab in a value or a name is shown escaped, so the tabs between fields are
-  always filo's. With -0, every file (one too) is such a row, ended by a NUL
-  instead of a newline, with its path written exactly: read the rows with read
-  -r -d '' and split each on its tabs; the path is what follows the last one.
+  always filo's.
 
 Flags
   --file-date              the date a period counts from (YYYY-MM-DD)
@@ -25,5 +23,3 @@ Flags
   --sha256                 its content's hash, as sha256sum prints it
   --root                   the root it is in
   --first-seen             the date filo first saw it
-  -0                       a row per file, ended by NUL, its path exact (for a
-                           pipe only)
