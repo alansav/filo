@@ -11,8 +11,8 @@ import (
 )
 
 // TestSnapshots checks the register snapshots through the commands: written after commands that change the
-// register, never recorded by a scan even with the database inside the root, shown by the report, and a warning
-// (not a failure) when one cannot be written.
+// register, never recorded by a scan even with the database inside the root, none after a scan that found nothing,
+// shown by the report, and a warning (not a failure) when one cannot be written.
 func TestSnapshots(t *testing.T) {
 	skipWindows(t)
 	sameDevice(t, nil)
@@ -37,8 +37,9 @@ func TestSnapshots(t *testing.T) {
 	if !strings.Contains(r.stdout, "1 file seen") || !strings.Contains(r.stdout, "[ok] no changes") {
 		t.Errorf("the scan saw the database or its snapshots:\n%s", r.stdout)
 	}
+	// That scan found nothing, so the one snapshot is still roots add's.
 	r = filo(ExitOK, "report")
-	if !strings.Contains(r.stdout, "Register snapshots   2, latest ") || !strings.Contains(r.stdout,
+	if !strings.Contains(r.stdout, "Register snapshots   1, latest ") || !strings.Contains(r.stdout,
 		"    "+store.SnapshotDir(db)+"\n") {
 		t.Errorf("report lacks the snapshot line:\n%s", r.stdout)
 	}
@@ -46,11 +47,15 @@ func TestSnapshots(t *testing.T) {
 		t.Errorf("report warns though the latest snapshot follows the latest write:\n%s", r.stdout)
 	}
 
-	// The snapshot directory's place is taken: the scan still succeeds, with a warning, and the report says so.
+	// The snapshot directory's place is taken: a scan that finds a new file still succeeds, with a warning, and the
+	// report says so.
 	if err := os.RemoveAll(store.SnapshotDir(db)); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(store.SnapshotDir(db), []byte("in the way"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "b.txt"), []byte("b"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	r = filo(ExitOK, "scan")

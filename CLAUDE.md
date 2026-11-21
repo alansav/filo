@@ -20,9 +20,9 @@ Everything `docs/design.md` describes is built and merged (schema 10): scan, reg
 the retention CSV (`filo export retention`, `filo update`); `filo delete [DIR] [-y]`, which deletes a file only after
 it is re-read and found unchanged; register snapshots; duplicates (`filo delete FILE.csv`, `filo duplicates`); the
 terminal output (every command prints through `internal/view`); named retention policies (`filo policies`); directory
-rules (`filo rules`); showing and setting a file's details (`filo show`, `filo set`, `filo get`). What is next is in
-`docs/roadmap.md`, Priority (provisional, reordered 2026-11-20: item 19, finding files, then 18a tags, 36 bash
-completion, then the sync items).
+rules (`filo rules`); showing and setting a file's details (`filo show`, `filo set`, `filo get`); finding files
+(`filo find`). What is next is in `docs/roadmap.md`, Priority (provisional, reordered 2026-11-21: 18a tags, 38 tag
+index pages, 36 bash completion, then the sync items).
 **`internal/dispose` is the only code allowed to delete the user's files**, and only from `filo delete`; everything
 else stays read-only on them, and nothing overwrites an existing file without asking (only an `-o` output file,
 see the hard rules). Stay inside the current piece of work.
@@ -36,12 +36,15 @@ see the hard rules). Stay inside the current piece of work.
   will do and asks first (or needs `-y`).
 - Treat file names and the register as untrusted input: delete only inside a root (`internal/dispose` checks), and
   print through `internal/view` (its Renderer escapes every text it is given with `view.Escape`, then adds only its
-  own colour codes); stderr only through the CLI's `errorLine` (each line escaped, `filo: ` before it), and the
+  own colour codes; the one exception is `filo find -0`'s raw path list, written by the Renderer and refused when
+  stdout is a terminal); stderr only through the CLI's `errorLine` (each line escaped, `filo: ` before it), and the
   progress line. Never write text straight to `os.Stdout` or `os.Stderr` (`TestOutputGoesThroughTheRenderer` guards
   it). Write each line of output with one call (a newline inside a write is escaped, since only a file name puts one
   there).
 - In `internal/store`, every write goes through `s.commit(tx)` or `s.exec`, so a run that changes the register gets
-  its snapshot (`TestWritesGoThroughTheHelpers` guards it).
+  its snapshot (`TestWritesGoThroughTheHelpers` guards it). The one exception is `s.commitRecord(tx)`, used only by a
+  scan that found nothing (its record is all it writes, so it takes no snapshot; see `docs/design.md`, Register
+  snapshots).
 - Fail safe: a file with missing or ambiguous data is "new, needs a date", never "eligible for deletion". Reaching a
   keep-until date makes a file a candidate that the person confirms, never a trigger. A file is deleted only if it
   can be read and is still exactly the content its retention was set on; one that cannot be read is never deleted.

@@ -1,0 +1,49 @@
+$ filo find --name '*gas*'
+Scan   scan 2 . 6 files seen . under 0.1 s . <root>
+  [ok] no changes
+
+Found   3 files . 37 B . named *gas* . <root>
+
+    modified     size
+    2026-10-14   11 B   house/gas safety certificate.pdf
+    2026-10-02   14 B   received/2026/09/2026-09-02 British Gas Bill.pdf
+    2026-10-03   12 B   received/2026/10/2026-10-03 British Gas Bill.pdf
+
+$ filo find received
+Scan   scan 3 . 2 files seen . under 0.1 s . <root>, under received/
+  [ok] no changes
+
+Found   2 files . 26 B . <root>, under received/
+
+    modified     size
+    2026-10-02   14 B   received/2026/09/2026-09-02 British Gas Bill.pdf
+    2026-10-03   12 B   received/2026/10/2026-10-03 British Gas Bill.pdf
+
+$ filo find --name '*gaz*'
+Scan   scan 4 . 6 files seen . under 0.1 s . <root>
+  [ok] no changes
+
+Found   no files . named *gaz* . <root>
+
+Next: check the name: * matches any run of characters, and case is ignored
+
+$ filo find notes --no-scan
+Found   2 files . 5 B . <root>, under notes/
+  - not scanned first: as of the last scan, <time>
+
+    modified     size
+    2026-10-21    0 B   notes/empty.txt
+    2026-10-20    5 B   notes/ideas.txt
+
+$ filo find --name '*.PDF' (two roots)
+Found   4 files . 43 B . named *.PDF . 2 roots
+  - not scanned first: as of the last scan, <time>
+
+    modified     size
+  <work>/archive
+    2019-04-30    6 B   tax/2018 return.pdf
+  <root>
+    2026-10-14   11 B   house/gas safety certificate.pdf
+    2026-10-02   14 B   received/2026/09/2026-09-02 British Gas Bill.pdf
+    2026-10-03   12 B   received/2026/10/2026-10-03 British Gas Bill.pdf
+

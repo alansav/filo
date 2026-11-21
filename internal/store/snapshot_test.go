@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -237,7 +238,8 @@ func TestNoSnapshotForARolledBackRun(t *testing.T) {
 
 // TestWritesGoThroughTheHelpers guards the rule that every write in this package goes through commit or exec, so a
 // run that changes the register always gets its snapshot. Creating and upgrading the database (store.go) and Close's
-// own record of the write time (snapshot.go) are the exceptions.
+// own record of the write time (snapshot.go) are the exceptions, and commitRecord, which notes no change, is used only
+// by a scan that found nothing (scan.go).
 func TestWritesGoThroughTheHelpers(t *testing.T) {
 	files, err := filepath.Glob("*.go")
 	if err != nil {
@@ -257,6 +259,9 @@ func TestWritesGoThroughTheHelpers(t *testing.T) {
 		}
 		if n := strings.Count(src, "s.db.ExecContext("); n > 0 && f != "store.go" && !(f == "snapshot.go" && n == 1) {
 			t.Errorf("%s writes with s.db.ExecContext; use s.exec", f)
+		}
+		if n := strings.Count(src, "s.commitRecord"); n > 0 && f != "store.go" && !(f == "scan.go" && n == 1) {
+			t.Errorf("%s commits with s.commitRecord, which takes no snapshot; use s.commit", f)
 		}
 	}
 }
@@ -290,5 +295,56 @@ func TestPruneReportsRemovalErrors(t *testing.T) {
 	have := []time.Time{gone, now.Add(-3 * time.Hour), now.Add(-2 * time.Hour), now.Add(-time.Hour)}
 	if err := prune(t.TempDir(), have, now, time.UTC); err == nil {
 		t.Error("prune returned no error for a snapshot it could not remove")
+	}
+}
+
+// TestNoSnapshotForAScanThatFoundNothing: a scan whose record is all it writes (nothing found, or only a directory on
+// another filesystem, found again by every scan) is committed but takes no snapshot and leaves last_write_utc alone;
+// a scan that found anything, an error included, takes one (docs/design.md, Register snapshots, "When").
+func TestNoSnapshotForAScanThatFoundNothing(t *testing.T) {
+	ctx := context.Background()
+	for _, tc := range []struct {
+		name     string
+		ch       Changes
+		snapshot bool
+	}{
+		{"nothing", Changes{}, false},
+		{"another filesystem", Changes{Events: []Event{{Kind: EventOtherFS, Path: "mnt"}}}, false},
+		{"an error", Changes{Events: []Event{{Kind: "error", Path: "locked", Detail: "permission denied"}}}, true},
+		{"a new file", Changes{New: []NewFile{{Path: "b.txt", Kind: "file", Size: 1, Hash: "hb"}}}, true},
+		{"an unreadable file", Changes{Unreadable: []int64{1}}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db := tempDB(t)
+			s := mustOpen(t, Options{DBPath: db})
+			root, err := s.AddRoot(ctx, tree(t))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := s.ApplyScan(ctx, ScanRecord{RootID: root.ID, Started: time.Now()}, Changes{New: []NewFile{
+				{Path: "a.txt", Kind: "file", Size: 1, Hash: "ha"}}}); err != nil {
+				t.Fatal(err)
+			}
+			mustClose(t, s)
+			before, wrote := snapshotNames(t, db), rawQueryString(t, db, `SELECT value FROM meta WHERE key = 'last_write_utc'`)
+
+			s = mustOpen(t, Options{DBPath: db})
+			id, err := s.ApplyScan(ctx, ScanRecord{RootID: root.ID, Started: time.Now()}, tc.ch)
+			if err != nil {
+				t.Fatal(err)
+			}
+			mustClose(t, s)
+			if got := rawQueryString(t, db, fmt.Sprintf(`SELECT count(*) FROM scans WHERE id = %d`, id)); got != "1" {
+				t.Errorf("scan %d recorded %s times, want once", id, got)
+			}
+			after := snapshotNames(t, db)
+			if got := len(after) > len(before); got != tc.snapshot {
+				t.Errorf("snapshot taken = %v (before %v, after %v), want %v", got, before, after, tc.snapshot)
+			}
+			nowWrote := rawQueryString(t, db, `SELECT value FROM meta WHERE key = 'last_write_utc'`)
+			if moved := nowWrote != wrote; moved != tc.snapshot {
+				t.Errorf("last_write_utc moved = %v (%s to %s), want %v", moved, wrote, nowWrote, tc.snapshot)
+			}
+		})
 	}
 }

@@ -496,6 +496,34 @@ Tests: store `TestShowFile`, `TestShowFileRule`, `TestShowDir`, `TestShowDirTies
 `TestShowWritesNothing`, `TestShowDirGolden` (`show-dir.txt`), `TestShowDir`, `TestSetGolden` (`set.txt`), `TestSet`,
 `TestSetDuplicatesGolden` (`set-duplicates.txt`), `TestGet`, and the help pages.
 
+## Finding files: how item 19 was built
+
+Designed with the person on 2026-11-21, topic by topic (the name, what `--name` matches, DIR, piped output and
+escaping, the terminal list, what is listed, the exit status, the scan first), built on branch `find` the same day in
+one slice, one PR, reviewed once (`code-review`, medium). Changed from the roadmap's version of 2026-11-19: the command
+is `filo find`, not `filo files` (the person's choice); a terminal shows every match, not 10 and "… N more"; it scans
+first, as exports do; and a scan that found nothing now takes no snapshot, so a `find` (or an hourly timer) does not
+leave a copy of the register each time. A new item came out of the session: 38, HTML pages listing files by tag,
+placed straight after 18a.
+
+Commits, lower layers first: the roadmap (the name, item 38); the design moved in; the store (`commitRecord`, so a
+scan that found nothing takes no snapshot; `FindFiles`); `internal/find` (`Match`, `Select`, then `Render`);
+`view.PathLines` and `RawPaths`, the second the one unescaped output; `internal/cli/find.go` (`lastScanLine` now
+takes a filter, for exports and find); the README.
+
+Review: seven findings, six fixed. A mistyped DIR (a path never in the register) is an error, as for `filo show`
+(it scanned its root and printed "no files", exit 0); a symlink given as DIR is refused with what to give instead (it
+was called a file); hard links are matched on inode, size and modified time (a stale inode reused by another file hid
+it) and counted over the whole root, not only DIR; a byte that is not valid UTF-8 matches only itself in a pattern;
+CLAUDE.md and `TestWritesGoThroughTheHelpers` name `commitRecord` as the one commit that takes no snapshot. Not
+changed: a failed write to stdout already exits 1 for every command (`Run` checks stdout's first error).
+
+Tests: store `TestNoSnapshotForAScanThatFoundNothing`, `TestFindFiles`, `TestFindFilesLinks`; find `TestMatch`,
+`TestSelect`, `TestRender`; view `TestPathLines`, `TestRawPaths`; CLI `TestFindGolden` (`testdata/find.txt`),
+`TestFindPiped`, `TestFindRefusals`, `TestSnapshots` (no snapshot after a scan with no changes), and the help pages.
+Run by hand on a throwaway tree (`scripts/testtree.sh`): piped, `-0 | xargs -0 ls -l`, a terminal through `script`,
+an unreadable directory, and the snapshot count after a `find` with nothing changed.
+
 ## Notes on decisions
 
 Short notes taken out of `design.md` on 2026-11-17, by the section they were in.

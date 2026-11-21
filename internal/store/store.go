@@ -60,6 +60,11 @@ func (s *Store) commit(tx *sql.Tx) error {
 	return nil
 }
 
+// commitRecord commits tx, whose only write is the record of a run that changed nothing else (a scan that found
+// nothing), without noting a change: such a run takes no snapshot and leaves meta.last_write_utc alone
+// (docs/design.md, Register snapshots, "When").
+func (s *Store) commitRecord(tx *sql.Tx) error { return tx.Commit() }
+
 // exec runs one write statement in its own transaction and notes the change if it changed a row.
 func (s *Store) exec(ctx context.Context, q string, args ...any) (sql.Result, error) {
 	res, err := s.db.ExecContext(ctx, q, args...)

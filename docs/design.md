@@ -3,7 +3,7 @@
 **The present.** Of three documents, this is the present: `design.md` (what Filo is), `roadmap.md` (the future:
 what it is not yet) and `history.md` (the past: how it got here).
 
-Filo as built: schema version 10. Last updated: 2026-11-17.
+Filo as built: schema version 10. Last updated: 2026-11-21.
 
 This file records what Filo does and why, as built. Work not done yet, ideas, open questions and ideas rejected are
 in `roadmap.md`, where designs are worked out; a design moves here, in its own commit, when work on it starts (see
@@ -101,7 +101,12 @@ the database, on the same disk. Copying the register's snapshots to a separate p
   transaction; copying `filo.db` instead could miss commits still in the WAL file or catch a page being written. It
   is a copy, not a compaction of the live database.
 - **When.** At the end of every run that committed a change to the register, in `Store.Close`, while the lock is
-  held; so no list of writing commands is kept. Every write in the store goes through two helpers (`commit` and
+  held; so no list of writing commands is kept. A scan that found nothing (no new, changed, moved or missing file,
+  no error, no rule that set a policy) is not a change (2026-11-21, with `filo find`): its record is committed, but
+  it takes no snapshot and leaves `meta.last_write_utc` alone. Snapshots protect decisions, and such a scan alters
+  none, nor any file's record; a restored snapshot lacking a few of those scan records loses nothing the next scan
+  does not write again. So an hourly timer, or a `find` (which scans first), does not leave a copy each time. An error
+  found again (a directory still unreadable) records an event, so it counts as a change. Every write in the store goes through two helpers (`commit` and
   `exec`) that note the change only once it is committed (a test guards that rule), plus creating or upgrading the
   database. A run that only read takes none, and nor does one whose write was rolled back (a failed or interrupted
   scan; `total_changes()`, used at first, also counted those). An interrupted run that committed something takes
@@ -1266,7 +1271,7 @@ always Filo's). `duplicates` is empty for a file with no content to decide on (a
 read), and records when any copy of the content is one; `modified` is empty when not known. **No `-0`** (decided
 2026-11-21): `get`'s rows carry values as well as the path, so they are no list of names for `xargs -0`, and a raw
 name would have been the one exception to escaping. Everything `get` prints is escaped; NUL-separated names belong
-to `filo files -0` (item 19), whose output is the list of files.
+to `filo find -0` (see Finding files), whose output is the list of files.
 
 Agreed with the person on 2026-11-20. Everything Filo holds about a file, from the command line, and every decision
 it shows can be changed by a command: quicker than an export, edit and update round for a few files (the CSV stays
@@ -1470,10 +1475,81 @@ the tool for many). Replaces "Later b, setting dates in place".
     ```
   - A path the register does not know: the error line on stderr, the other files still printed, exit status 1.
 
+### Finding files
+`filo find` (roadmap item 19). Agreed with the person on 2026-11-21. Finds files in the register by name, to read
+in a terminal or to hand to standard tools (`xargs`, `tar`) through a pipe. It covers what the register holds, not
+file contents (see `roadmap.md`, Rejected, "Building search"); tags (18a) add `--tag` and `--no-tag`.
+
+- **`filo find [DIR] [--name PATTERN] [-0] [--no-scan] [--workers N]`.** Conditions combine with AND only; an OR is
+  two runs. With no `--name`, every file under DIR.
+- **`--name`** matches the file's base name, never its directory (that is DIR's job), ignoring case (Unicode case
+  folding, so `bill`, `Bill` and `BILL` match alike), and `*`, matching any run of characters, is the only wildcard:
+  `?` and `[` occur in real names (`Q1 [draft].xlsx`) and match themselves, as they do in a tag search. A pattern
+  with no `*` matches the whole name exactly.
+
+  | `--name` | finds | does not find |
+  |---|---|---|
+  | `*gas*` | `2026-10-03 British Gas Bill.pdf` | `gas/notes.txt` (the directory) |
+  | `*.PDF` | `bill.pdf`, `Bill.Pdf` | `bill.pdf.bak` |
+  | `Q1 [draft]*` | `Q1 [draft] budget.xlsx` | |
+  | `report?.pdf` | only `report?.pdf` | `report1.pdf` |
+- **DIR** is one directory, looked up in the register as `filo show` looks a path up (so a directory gone from the
+  disk is no error; it just holds no file present now), and searched with everything below it: finding is
+  recursive by nature, so there is no `-r`. With no DIR, every root: the point is finding the file wherever it is,
+  from wherever the person is, not the current directory as `find(1)` does. One DIR only: a search of two places is
+  two runs, as an OR is. A DIR outside every root, a file given as DIR ("is a file: use filo show"), or a symlink
+  ("give the directory it points to") is a usage error. A path not on the disk that the register never held a file
+  under is an error, as for `filo show` (a review finding, 2026-11-21): a mistyped DIR must not read as a search that
+  found nothing.
+- **A scan first**, as every export does (see Lifespan, "A scan first"), for the same reason: a file saved since the
+  last scan is found, and the incremental scan is the "is a scan needed?" check. It scans DIR when one is given
+  (its root, when DIR is gone from the disk, so the files it held are found missing), otherwise every root. `--no-scan` skips it and lists from the register as it is; `--workers N` is passed to the
+  scan and refused with `--no-scan`. In a terminal the scan's block comes first, as before an export (two lines when
+  nothing changed). Piped, the scan prints nothing on stdout, so the list stays a list of paths. A root that fails
+  to scan stops the command with nothing listed and exit status 1, as an export stops, so a missing disk never
+  gives a list that looks complete: in a terminal its block says why, piped one `filo:` line on stderr does.
+  With `--no-scan` in a terminal, one `·` line names when the last scan of the place finished, as an export's does.
+  Since a scan that found nothing takes no snapshot (see Register snapshots), a `find` leaves none unless its scan
+  found something.
+- **What is listed**: the regular files the last scan saw at their current paths, each once. Empty files are
+  listed, and so are files that could not be read (noted `could not be read`: they are there, and only their hash
+  is unknown). A possible move is listed at its new path. A file with hard links is one file: listed once, under one
+  of its paths, with its links noted (piped, that one path). Links are the paths in its root with the same inode,
+  size and modified time, counted over the whole root, not only DIR; the inode alone is not enough, since one kept
+  current in an unreadable directory may have been reused by another file (a review finding, 2026-11-21). Not listed: missing files, files deleted by Filo, and
+  symlinks (the file a symlink points to is listed if it is inside a root; broken symlinks are in `filo report`).
+- **In a terminal**: a heading (how many files, their size, the search, where), then every match, never cut (the
+  person's decision, 2026-11-21: a search shows all it found), through the file list component, ordered by root,
+  then by path; with several roots, a sub-heading per root. Columns: modified date and size, then the path. Nothing
+  found: the heading and a Next line about the name.
+
+  ```
+  Found   3 files . 412 KiB . named *gas* . ~/Documents
+
+      modified        size
+      2025-01-14    48 KiB   house/gas safety certificate.pdf
+      2026-09-02   180 KiB   received/2026/09/2026-09-02 British Gas Bill for September 2026.pdf
+      2026-10-03   184 KiB   received/2026/10/2026-10-03 British Gas Bill for October 2026.pdf
+  ```
+- **Piped**: one absolute path per line, escaped as all output is (see Commands and scheduling, "Output cannot act
+  on the terminal"), since a piped list often ends in a terminal (`| less`). Almost every name is unchanged by it.
+  A space that ends a name stays a space (not `\x20`, as elsewhere): the line is for a tool, which needs the bytes.
+  When escaping changed a name, the list is still written and then one stderr line says so,
+  `filo: 1 name was escaped and will not match on disk; use -0`, with exit status 1, so a script does not skip a
+  file unnoticed. Nothing found: no output.
+- **`-0`**: the absolute paths as they are, byte for byte, each followed by a NUL, which no path can hold, for
+  `xargs -0` and `tar --null -T -`. It is **the one output not escaped**: a list of names for a tool must be the
+  names. It is refused when stdout is a terminal (a usage error, "-0 writes raw names for a pipe, such as xargs
+  -0"), so raw names never go to the screen directly; `filo find -0 | cat` still can (see Accepted risks).
+- **Exit status**: 0 when it searched, matches or none (a script tests for empty output; exit 1 means something
+  went wrong, as everywhere in Filo); 1 on an error, a root that failed to scan, or a piped name changed by
+  escaping; 2 on a usage error.
+- **Read-only on the files**, like every command but `filo delete`; it writes the register only through its scan.
+
 ### Commands and scheduling
 - Plain names, easy to remember: `roots`, `scan`, `report`, `export`, `update`, `delete`, `duplicates` (added
   2026-11-16, see Duplicates), `policies` and `rules` (both 2026-11-16, see Lifespan), `show` (2026-11-21, see Showing and setting a file's
-  details). No
+  details), `find` (2026-11-21, see Finding files). No
   themed subcommands. There is no `restore`: a file restored from a backup comes back as a new file. "Update" says
   that only existing files change; `filo review` only says it was replaced by `export retention` and `update`.
 - **Keep flags and options to a minimum** (2026-11-11). Prefer a safe default and clear output over a flag; prefer
@@ -1487,7 +1563,9 @@ the tool for many). Replaces "Later b, setting dates in place".
   invented lines to that list. Tabs are shown as `\t` and a backslash as `\\`, so an escape cannot be confused with a
   name holding the same text. The Renderer (see Terminal output) escapes every text it is given this way (`view.Escape`)
   and then adds only its own colour codes; it is the only way to stdout, and stderr has one too, `errorLine` (each line
-  escaped, `filo: ` before it), besides the progress line's own control codes. A test
+  escaped, `filo: ` before it), besides the progress line's own control codes. The one exception is `filo find -0`,
+  a NUL-separated list of names for a tool, written as they are by the Renderer's raw path writer and refused when
+  stdout is a terminal (see Finding files). A test
   (`TestOutputGoesThroughTheRenderer`) fails on any other write in the CLI (see Help and errors). Trailing alignment is
   dropped from a line, but a space that ends a file name is shown as `\x20` (2026-11-16, from the code review), so
   `report ` and `report` never read the same; and a relative path that starts with `~` (a directory named `~` inside a
@@ -1508,6 +1586,7 @@ the tool for many). Replaces "Later b, setting dates in place".
   scans first unless `--no-scan` is given (see Lifespan, "A scan first"), with `--workers` as for `filo scan`
   (refused with `--no-scan`). The word after `export`
   names the CSV, so a later CSV is a new word, not a new command; `update` tells the kind from the CSV's header.
+- `filo find [DIR] [--name PATTERN] [-0] [--no-scan] [--workers N]`: see Finding files.
 - `filo delete [DIR] [-y]`: lists the files past their keep-until date and deletes the ones chosen (see Disposal).
 - `filo delete FILE.csv [-y]`: carries out a duplicates CSV (see Duplicates). An argument that is a directory is
   DIR; anything else is a CSV.
@@ -1602,7 +1681,7 @@ command's output with them. The examples here are excerpts of them.
   grouped by root; wrapping; `… N more`), `Table`, `Groups` and `HeadedTable`, `Dup` and `Dups` (a `DupGroup`:
   `contract.pdf · 8 MB each` with its keep and delete lines and symlink notes), `Problems` (line, file, reason and
   what to do; repeats collapsed), `Ask` and `Choose` (prompts), `Item` and `ItemPath` (a select-mode item and its
-  result), `Paragraph` and `Terms` (help), and `Next`. Commands build the
+  result), `Paragraph` and `Terms` (help), `PathLines` and `RawPaths` (`filo find`'s lists for a pipe), and `Next`. Commands build the
   data and hand it to components; they never format output themselves or decide plain or rich, relative or full
   paths. Each component writes whole lines, one write per line.
 - **Scope: every command** (roots, scan, report, export, update, delete, help and errors).
@@ -2123,9 +2202,11 @@ parses a database before Filo checks it is one of its own (kept small by staying
 snapshot directory, and of the database's directory, is not checked on non-Unix platforms; and the directories above
 the database's directory are not checked (one that others can write to lets them move the database's directory aside
 and put another in its place). From the code review of the snapshots: Ctrl-C cannot interrupt
-a snapshot being written (milliseconds for a register of a few MB), and every run that writes copies the whole register,
-timer scans that found nothing included (fine at a few MB). From the code review of 2026-11-13: a snapshot is renamed
+a snapshot being written (milliseconds for a register of a few MB), and every run that writes copies the whole register
+(fine at a few MB; a scan that found nothing takes none since 2026-11-21). From the code review of 2026-11-13: a snapshot is renamed
 into place after a check that the name is free, and a program not taking Filo's lock could create that name in between
 and be overwritten (the directory is private to the user; an atomic no-replace rename needs `golang.org/x/sys`); and the
 directories on a deleted file's path are checked by name, not held open, so a directory swapped in the microseconds
-after the last look is followed.
+after the last look is followed. `filo find -0` writes file names unescaped (see Finding files): it is refused when
+stdout is a terminal, but a pipe that ends in one (`filo find -0 | cat`) shows the raw names, as `find -print0 | cat`
+does; a list of names for `xargs -0` has to be the names.

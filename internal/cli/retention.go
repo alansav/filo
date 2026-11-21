@@ -104,7 +104,11 @@ func (e *env) export(ctx context.Context, dbBefore string, args []string) error 
 	// A scan first, so the CSV holds the files as they are now (docs/design.md, Lifespan, "A scan first").
 	var notScanned string
 	if *noScan {
-		if notScanned, err = lastScanLine(ctx, s, kind, f); err != nil {
+		held := f // a retention export holds DIR; a duplicates export every root (a group's copies can be anywhere)
+		if kind == "duplicates" {
+			held = store.Filter{}
+		}
+		if notScanned, err = lastScanLine(ctx, s, held); err != nil {
 			return err
 		}
 	} else {
@@ -196,11 +200,10 @@ func (e *env) scanFirst(ctx context.Context, s *store.Store, kind string, pos []
 	return false, fmt.Errorf("nothing exported: %w", err)
 }
 
-// lastScanLine is the line an export with --no-scan shows: the CSV is as of the last scan that covered what it holds
-// (the oldest of them, when it holds several roots), or says that one was never scanned. A retention export of DIR
-// holds DIR; any other export holds every root (a duplicate group's copies can be anywhere). A scan of a directory
-// inside a root covers only that directory.
-func lastScanLine(ctx context.Context, s *store.Store, kind string, f store.Filter) (string, error) {
+// lastScanLine is the line an export or filo find with --no-scan shows: what it shows is as of the last scan that
+// covered the place f names, a directory in a root or every root (the oldest of them, when there are several), or
+// says that one was never scanned. A scan of a directory inside a root covers only that directory.
+func lastScanLine(ctx context.Context, s *store.Store, f store.Filter) (string, error) {
 	roots, err := s.Roots(ctx)
 	if err != nil {
 		return "", err
@@ -208,7 +211,7 @@ func lastScanLine(ctx context.Context, s *store.Store, kind string, f store.Filt
 	oldest := ""
 	for _, r := range roots {
 		scope := ""
-		if kind == "retention" && f.RootID != 0 {
+		if f.RootID != 0 {
 			if r.ID != f.RootID {
 				continue
 			}

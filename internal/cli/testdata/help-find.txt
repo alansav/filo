@@ -1,0 +1,22 @@
+filo find [DIR] [--name PATTERN] [-0] [--no-scan] [--workers N]
+
+  Lists the files under DIR, a directory inside a root, or under every root,
+  whose name matches PATTERN; with no --name, every file. Scans first, so a file
+  saved since the last scan is found. Lists the files present now: not missing
+  files, files deleted by filo or symlinks. A file with hard links is listed
+  once.
+
+  In a terminal, every file found, with its modified date and size. Piped, one
+  absolute path per line, escaped as all output is (a name holding a newline or
+  a backslash is shown escaped, says so on stderr and exits 1); use -0 to pass
+  any name to xargs -0 or tar --null -T -.
+
+Flags
+  --name PATTERN           the file's name, not its directory, ignoring case; *
+                           matches any run of characters, and is the only
+                           wildcard (? and [ match themselves)
+  -0                       piped only: the paths as they are, each ended by a
+                           NUL, for xargs -0
+  --no-scan                skip the scan: list from the register as it is
+  --workers N              for the scan: files hashed in parallel, 1-64 (default
+                           4; use 1 on a spinning disk)
