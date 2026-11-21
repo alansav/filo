@@ -71,7 +71,7 @@ func (e *env) get(ctx context.Context, dbBefore string, args []string) error {
 	case len(pos) == 1 && len(order) == 1:
 		for _, f := range files {
 			if *nul {
-				r.Record([]string{f.Value(order[0])}, true)
+				r.Record(nil, f.Value(order[0]), true)
 			} else {
 				r.Line(f.Value(order[0]))
 			}
@@ -80,7 +80,7 @@ func (e *env) get(ctx context.Context, dbBefore string, args []string) error {
 		for _, f := range files {
 			if *nul {
 				for _, fl := range order {
-					r.Record([]string{name(fl), f.Value(fl)}, true)
+					r.Record([]string{name(fl)}, f.Value(fl), true)
 				}
 				continue
 			}
@@ -96,7 +96,7 @@ func (e *env) get(ctx context.Context, dbBefore string, args []string) error {
 			for _, fl := range order {
 				rec = append(rec, f.Value(fl))
 			}
-			r.Record(append(rec, f.AbsPath()), *nul)
+			r.Record(rec, f.AbsPath(), *nul)
 		}
 	default:
 		cols := make([]view.Column, len(order))

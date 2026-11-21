@@ -21,22 +21,22 @@ func (r *Renderer) Pairs(pairs [][2]string) {
 	}
 }
 
-// Record writes one record for a pipe: its fields joined by tabs, each escaped as everywhere, ended by a newline. With
-// nul it is ended by a NUL instead and its fields are written as they are, unescaped, for xargs -0 and tar --null to
-// get any file name exactly; a NUL cannot occur in a name, and only a pipe or a file gets this (at a terminal it
-// is escaped, and the caller refuses -0 there), so nothing written can act on one.
-func (r *Renderer) Record(fields []string, nul bool) {
-	if !nul {
-		esc := make([]string, len(fields))
-		for i, f := range fields {
-			esc[i] = Escape(f)
-		}
-		r.out(strings.Join(esc, "\t") + "\n")
-		return
+// Record writes one row for a pipe: values, then a file's path, joined by tabs and ended by a newline. The values are
+// escaped as everywhere (a tab in one shows as \t, so the tabs between fields are always filo's own), and the path as
+// a name (a trailing space as \x20). With nul the row is ended by a NUL instead and the path is written as it is,
+// unescaped, so a script reading NUL-ended rows gets any file name exactly; a NUL cannot occur in a name, and this goes
+// only to a pipe or a file (at a terminal the path is escaped too, and the caller refuses -0 there), where nothing
+// written can act on a terminal.
+func (r *Renderer) Record(values []string, path string, nul bool) {
+	fields := make([]string, 0, len(values)+1)
+	for _, v := range values {
+		fields = append(fields, Escape(v))
 	}
-	if r.o.Terminal {
-		r.write(plain(strings.Join(fields, "\t"))) // never raw at a terminal: the caller refuses -0 there
-		return
+	switch {
+	case !nul || r.o.Terminal:
+		fields = append(fields, name(path).out)
+		r.out(strings.Join(fields, "\t") + "\n")
+	default:
+		r.out(strings.Join(append(fields, path), "\t") + "\x00")
 	}
-	r.out(strings.Join(fields, "\t") + "\x00")
 }
