@@ -1225,21 +1225,19 @@ Next: edit the action column, then filo delete '<work>/my d.csv'
   build to carry the marks out.
 
 ### Showing and setting a file's details
-Built (roadmap item 37, branch `item-37`): the design agreed on 2026-11-20, moved here when work started; each
-slice's notes below say how what was built differs from the agreed design that follows them. The README's "One file
-at a time" and `filo help show`, `set` and `get` describe it for the person (slice 6).
+`filo show`, `filo set` and `filo get` (roadmap item 37). The notes first say how each command was built where it
+differs from, or adds to, the design agreed on 2026-11-20 that follows them. The README's "One file at a time" and
+`filo help show`, `set` and `get` describe it for the person.
 
-**Built so far: slice 1, `filo show FILE`** (`internal/cli/show.go`, `internal/show`, `store.ShowFile`; the output
-is in `internal/cli/testdata/show.txt`), and **slice 2, `filo show DIR [-r]`** (`store.ShowDir`, `internal/show`
-`Dir`; `internal/cli/testdata/show-dir.txt`). As agreed below. A directory gone from the disk is shown from
+**`filo show`, as built** (`internal/cli/show.go`, `internal/show`, `store.ShowFile` and `ShowDir`; the output is in
+`internal/cli/testdata/show.txt` and `show-dir.txt`). A directory gone from the disk is shown from
 the files the register still holds under it. Under `-r`, a directory holding no file of its own but one below it
 gets a block of its own ("no files"), as `ls -R` lists it; a rule set below the shown directory is a line under its
 block ("rule * -> bills (7y)"). Sizes are in binary units (`184 KiB`), as everywhere. A path that cannot be shown is
 an error line naming it and why (not in the register yet: run filo scan; outside every root; its root's settings
 skip it); the other paths are still shown, and the exit status is 1, as for `get`. Read-only: no snapshot.
 
-**Slice 3, `filo set` for file date and retention** (`store.SetFiles`, `internal/cli/set.go`;
-`internal/cli/testdata/set.txt`), as agreed below, and: a policy name that is not a policy yet creates it with no
+**`filo set`, as built** (`store.SetFiles`, `internal/cli/set.go`; `internal/cli/testdata/set.txt`): a policy name that is not a policy yet creates it with no
 value, without asking (the person's decision, 2026-11-21; the CSV asks first), and says so: "policy tax was created
 with no value: its files need a retention until it has one", then `Next: filo policies set tax VALUE`; a dry run says
 it would be. The usage line is `filo set FILE... [flags]`, the flags listed under it. A directory or a path
@@ -1248,8 +1246,8 @@ not in the register is refused with the other files, all or nothing. Each change
 `Next: filo set FILE --retention R or --file-date DATE (filo help set for more)` (for a run of directories only,
 `Next: filo show FILE for one file, filo set FILE... to change files (filo help set for more)`).
 
-**Slice 4, `filo set --duplicates`** (`store.SetFiles` with `SetValues.Duplicates`; `internal/cli/testdata/
-set-duplicates.txt`), as agreed below, in the same transaction as the other flags. A decision is the content's as a
+**`filo set --duplicates`, as built** (`SetValues.Duplicates`; `internal/cli/testdata/set-duplicates.txt`), in the same
+transaction as the other flags. A decision is the content's as a
 whole, read as the duplicate groups read it (hard links one copy; a copy is a record if any of its paths is), whichever
 copies are named: it was `always`, or records if any copy is one, or counted. `always` replaces the content's sets of
 records (asked, "was: a separate record"); `records` leaves the content exactly one set, the copies named (any other
@@ -1259,8 +1257,7 @@ or nothing: a symlink, an empty file, a file never read or unreadable, and for `
 an excluded directory (not counted as a copy). The heading's fact is the decision ("always", "records", "counted as
 duplicates"), with how many contents and copies. `filo show`'s Next line names `--duplicates always|records`.
 
-**Slice 5, `filo get`** (`internal/cli/get.go`, `show.Fields` and `File.Value`; `view.Line`, `Pairs`, `Record`), as
-agreed below. The values are for scripts: as stored ("" for none), `status` by its register name (`kept`,
+**`filo get`, as built** (`internal/cli/get.go`, `show.Fields` and `File.Value`; `view.Line`, `Pairs`, `Record`). The values are for scripts: as stored ("" for none), `status` by its register name (`kept`,
 `needs_file_date` …, or `missing`, `deleted`), `duplicates` the content's decision, `size` in bytes, `modified` in RFC
 3339 local time, `first_seen` a local date. Nothing is read from the disk. The layout follows what was asked (how
 many files and fields), not what was found, so a script sees one format when a path fails. Piped, a value or name is
@@ -1304,9 +1301,7 @@ the tool for many). Replaces "Later b, setting dates in place".
   quick checks, with the same flag names plus read-only fields (`--keep-until`, `--hash`, `--size`). One flag on one
   file prints the bare value. The layout for several files and fields (file names are untrusted when piped) is
   settled with the mockups.
-- **Slices** (one PR), each output mocked and agreed before its slice: `show FILE`, with the path lookup; `show DIR`
-  and `-r`; `set` for file date and retention; `set --duplicates`; `get`; README and help.
-- **`filo show FILE`, the agreed output** (2026-11-20, for slice 1). Each file starts with a title line: the name,
+- **`filo show FILE`, the agreed output** (2026-11-20). Each file starts with a title line: the name,
   then a summary (status, size, directory); several files are shown in full one after another, each title with a
   bold `[n/total]` in front (as `filo delete` numbers its files; no counter for one file), and the sections indented
   under it, so only titles start at the left edge. Order: File, Retention, Copies. One `Next:` line at the end.
@@ -1350,7 +1345,7 @@ the tool for many). Replaces "Later b, setting dates in place".
     lists every path newest first, each with its from and to dates.
   - A missing file and a file deleted by Filo are shown from the register, with their status in the title. A path
     the register does not know is an error: "not in the register yet: run filo scan", or "outside every root".
-- **`filo show DIR`, the agreed output** (2026-11-20, for slice 2). The same shape: a title line with a summary,
+- **`filo show DIR`, the agreed output** (2026-11-20). The same shape: a title line with a summary,
   sections indented under it, one `Next:` line. No retention or copies counts: the contents are listed instead.
 
   ```
@@ -1405,7 +1400,7 @@ the tool for many). Replaces "Later b, setting dates in place".
         0001.pdf                     15 MB   [!] undated
         0002.pdf                     15 MB   [!] undated
     ```
-- **`filo set`, the agreed output** (2026-11-20, for slices 3 and 4). It asks **only when it would replace a value
+- **`filo set`, the agreed output** (2026-11-20). It asks **only when it would replace a value
   already stored** (a different `file_date` or retention, a clear, or a content's existing duplicates decision),
   showing was and now for each field given, with `until` to show the effect on `keep_until`; giving a value to a
   file that has none is not asked. `-y` answers yes; no terminal and no `-y` changes nothing. All or nothing: no
@@ -1457,7 +1452,7 @@ the tool for many). Replaces "Later b, setting dates in place".
       ~/Projects/c/LICENSE
     - these copies no longer count as duplicates; filo set FILE --duplicates counted undoes it
   ```
-- **`filo get`, the agreed output** (2026-11-20, for slice 5). Read-only, for scripts and quick checks. Fields are
+- **`filo get`, the agreed output** (2026-11-20). Read-only, for scripts and quick checks. Fields are
   `set`'s plus the read-only ones (`--file-date`, `--retention`, `--keep-until`, `--status`, `--duplicates`, `--size`,
   `--modified`, `--sha256`, `--root`, `--first-seen`), printed in the order given; no `--all` (that is `show`). A
   field with no value prints as empty, never "none" (a policy may be named `none`; a script tests for empty).
@@ -1465,7 +1460,7 @@ the tool for many). Replaces "Later b, setting dates in place".
   - One file, several fields: name and value lines (`retention    7y`); piped, a tab between them.
   - Several files: one row per file, values in the order given and the path last; in a terminal with a header
     and `~`, piped with no header, tab-separated, the path absolute, last. (A `-0` was planned here and dropped when
-    built: see slice 5 above.)
+    built: see `filo get`, as built, above.)
 
     ```
     retention    keep_until
