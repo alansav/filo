@@ -289,10 +289,29 @@ func (s *Store) ApplyScanRules(ctx context.Context, rec ScanRecord, ch Changes) 
 		finished); err != nil {
 		return 0, run, fmt.Errorf("apply directory rules: %w", err)
 	}
-	if err := s.commit(tx); err != nil {
+	commit := s.commit
+	if ch.onlyRecord() && len(run.Dated) == 0 {
+		commit = s.commitRecord
+	}
+	if err := commit(tx); err != nil {
 		return 0, run, fmt.Errorf("commit scan: %w", err)
 	}
 	return scanID, run, nil
+}
+
+// onlyRecord reports whether the scan found nothing: no path or file to write, and no event but a directory on
+// another filesystem, which every scan finds again. Its scan record is then all it writes, so it takes no snapshot
+// (docs/design.md, Register snapshots, "When"). An error found again does count: it records an event.
+func (ch Changes) onlyRecord() bool {
+	if len(ch.Close) > 0 || len(ch.Updates) > 0 || len(ch.Open) > 0 || len(ch.New) > 0 || len(ch.Unreadable) > 0 {
+		return false
+	}
+	for _, e := range ch.Events {
+		if e.Kind != EventOtherFS {
+			return false
+		}
+	}
+	return true
 }
 
 // eachStmt prepares q once and runs fn for each of n items.
