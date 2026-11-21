@@ -42,7 +42,9 @@ see the hard rules). Stay inside the current piece of work.
   it). Write each line of output with one call (a newline inside a write is escaped, since only a file name puts one
   there).
 - In `internal/store`, every write goes through `s.commit(tx)` or `s.exec`, so a run that changes the register gets
-  its snapshot (`TestWritesGoThroughTheHelpers` guards it).
+  its snapshot (`TestWritesGoThroughTheHelpers` guards it). The one exception is `s.commitRecord(tx)`, used only by a
+  scan that found nothing (its record is all it writes, so it takes no snapshot; see `docs/design.md`, Register
+  snapshots).
 - Fail safe: a file with missing or ambiguous data is "new, needs a date", never "eligible for deletion". Reaching a
   keep-until date makes a file a candidate that the person confirms, never a trigger. A file is deleted only if it
   can be read and is still exactly the content its retention was set on; one that cannot be read is never deleted.

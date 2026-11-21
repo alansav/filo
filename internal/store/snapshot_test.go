@@ -238,7 +238,8 @@ func TestNoSnapshotForARolledBackRun(t *testing.T) {
 
 // TestWritesGoThroughTheHelpers guards the rule that every write in this package goes through commit or exec, so a
 // run that changes the register always gets its snapshot. Creating and upgrading the database (store.go) and Close's
-// own record of the write time (snapshot.go) are the exceptions.
+// own record of the write time (snapshot.go) are the exceptions, and commitRecord, which notes no change, is used only
+// by a scan that found nothing (scan.go).
 func TestWritesGoThroughTheHelpers(t *testing.T) {
 	files, err := filepath.Glob("*.go")
 	if err != nil {
@@ -258,6 +259,9 @@ func TestWritesGoThroughTheHelpers(t *testing.T) {
 		}
 		if n := strings.Count(src, "s.db.ExecContext("); n > 0 && f != "store.go" && !(f == "snapshot.go" && n == 1) {
 			t.Errorf("%s writes with s.db.ExecContext; use s.exec", f)
+		}
+		if n := strings.Count(src, "s.commitRecord"); n > 0 && f != "store.go" && !(f == "scan.go" && n == 1) {
+			t.Errorf("%s commits with s.commitRecord, which takes no snapshot; use s.commit", f)
 		}
 	}
 }
