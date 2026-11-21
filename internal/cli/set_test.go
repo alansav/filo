@@ -71,8 +71,17 @@ func TestSet(t *testing.T) {
 	contains("refusals", r.stdout, "Nothing was changed: 3 of 4 files were refused",
 		in("receipts")+"   a directory", in("new.txt")+"   not in the register yet", "/   outside every root")
 	contains("still bills", filo(ExitOK, "", false, "show", taxi).stdout, "retention   bills (7y)\n")
-	contains("no such policy", filo(ExitError, "", false, "set", taxi, "--retention", "nope").stdout,
-		"no policy named nope (filo policies add nope VALUE creates one)")
+	// A policy that does not exist yet is created with no value, and said so (not in a dry run).
+	ct.write("tax/2024.pdf", "tax")
+	filo(ExitOK, "", false, "scan")
+	out = filo(ExitOK, "", false, "set", in("tax/2024.pdf"), "--retention", "tax", "--dry-run").stdout
+	contains("new policy, dry run", out, "policy tax would be created with no value")
+	lacks("new policy, dry run", filo(ExitOK, "", false, "policies").stdout, "tax")
+	out = filo(ExitOK, "", false, "set", in("tax/2024.pdf"), "--retention", "tax").stdout
+	contains("new policy", out, "none   tax (no value yet)",
+		"policy tax was created with no value: its files need a retention until it has one",
+		"Next: filo policies set tax VALUE")
+	contains("policies", filo(ExitOK, "", false, "policies").stdout, "tax", "no value")
 
 	// A file's old path does not set it; a path given twice counts once.
 	if err := os.Rename(in("receipts/coffee.pdf"), in("receipts/coffee-2024.pdf")); err != nil {

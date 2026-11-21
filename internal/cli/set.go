@@ -134,6 +134,15 @@ func (e *env) set(ctx context.Context, dbBefore string, args []string) error {
 			e.setTable(v, changedRows(res.Rows))
 		}
 	}
+	for _, name := range res.NewPolicies {
+		if *dry {
+			r.Count(view.Attention, "policy "+name+" would be created with no value: its files would need a "+
+				"retention until it has one")
+		} else {
+			r.Count(view.Attention, "policy "+name+" was created with no value: its files need a retention until "+
+				"it has one")
+		}
+	}
 	if n := len(res.NowPast); n > 0 {
 		rows := make([]view.FileRow, n)
 		for i, p := range res.NowPast {
@@ -152,6 +161,16 @@ func (e *env) set(ctx context.Context, dbBefore string, args []string) error {
 	case *dry:
 		r.Blank()
 		r.Next("Dry run: nothing was changed.")
+	case len(res.NewPolicies) > 0:
+		r.Blank()
+		next := "Next: filo policies set " + res.NewPolicies[0] + " VALUE"
+		if len(res.NewPolicies) > 1 {
+			next = "Next: filo policies set NAME VALUE for each"
+		}
+		if len(res.NowPast) > 0 {
+			next = "Nothing has been deleted. " + next
+		}
+		r.Next(next)
 	case len(res.NowPast) > 0:
 		r.Blank()
 		r.Next("Nothing has been deleted. Next: filo delete")

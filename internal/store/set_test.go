@@ -94,13 +94,32 @@ func TestSetFiles(t *testing.T) {
 		v    SetValues
 		want string
 	}{
-		{SetValues{Retention: "nope", SetRetention: true}, "no policy named nope"},
 		{SetValues{SetFileDate: true}, "--no-file-date cannot clear it"},
 	} {
 		res = set([]int64{id("b.pdf")}, tt.v, yes)
 		if len(res.Refusals) != 1 || !strings.Contains(res.Refusals[0].Reason, tt.want) {
 			t.Errorf("%+v: %+v, want %q", tt.v, res.Refusals, tt.want)
 		}
+	}
+
+	// A policy that does not exist yet: listed in a dry run and not created; created with no value when written,
+	// its files then needing a retention.
+	res = set([]int64{id("c.pdf")}, SetValues{Retention: "tax", SetRetention: true}, SetOptions{DryRun: true})
+	if res.Applied || len(res.NewPolicies) != 1 || res.NewPolicies[0] != "tax" {
+		t.Errorf("new policy, dry run: %+v", res)
+	}
+	if _, err := e.s.Policy(e.ctx, "tax"); err == nil {
+		t.Errorf("a dry run created the policy")
+	}
+	res = set([]int64{id("c.pdf")}, SetValues{Retention: "tax", SetRetention: true}, yes)
+	if !res.Applied || len(res.NewPolicies) != 1 || res.Rows[0].KeepUntil != "" {
+		t.Errorf("new policy: %+v", res)
+	}
+	if p, err := e.s.Policy(e.ctx, "tax"); err != nil || p.Value != "" {
+		t.Errorf("tax = %+v, %v; want created with no value", p, err)
+	}
+	if c := e.files("2026-11-20")["c.pdf"]; c.Policy != "tax" || c.Status != StatusUndated {
+		t.Errorf("c.pdf on tax = %+v", c)
 	}
 
 	// A new file_date works a period out again; a past date is listed.

@@ -21,17 +21,17 @@ type SetValues struct {
 
 // SetRow is one file filo set acts on: its values before and after.
 type SetRow struct {
-	FileID                      int64
-	RootPath, Path              string
-	OldFileDate, FileDate       string
-	OldRetention, Retention     string // a policy's name, or the file's own retention; "" = none
-	OldPolicyValue, PolicyValue string // when the retention is a policy: its value, "" for none yet
-	OldKeepUntil, KeepUntil     string
-	RuleDir, RulePattern        string // the rule that set the old policy, which the new retention replaces
-	Unchanged, Replaces, Clears bool   // nothing to do; a stored value replaced; the retention cleared
-	oldPolicy, policy           bool
-	policyID                    int64
-	hash                        sql.NullString
+	FileID                       int64
+	RootPath, Path               string
+	OldFileDate, FileDate        string
+	OldRetention, Retention      string // a policy's name, or the file's own retention; "" = none
+	OldPolicyValue, PolicyValue  string // when the retention is a policy: its value, "" for none yet
+	OldKeepUntil, KeepUntil      string
+	RuleDir, RulePattern         string // the rule that set the old policy, which the new retention replaces
+	Unchanged, Replaces, Clears  bool   // nothing to do; a stored value replaced; the retention cleared
+	oldPolicy, policy, newPolicy bool   // the old and new retention are policies; the new one does not exist yet
+	policyID                     int64
+	hash                         sql.NullString
 }
 
 // AbsPath is the row's file in full.
@@ -48,7 +48,10 @@ type SetResult struct {
 	Rows     []SetRow     // every file, ordered by path; Unchanged ones included
 	Refusals []SetRefusal // when any, nothing is written
 	NowPast  []Past       // of the changed files: those whose keep_until is today or earlier
-	Applied  bool         // the changes were written
+	// NewPolicies are the policies named that did not exist, by name: created with no value when the changes are
+	// written (so their files need a retention until they have one), or that would be.
+	NewPolicies []string
+	Applied     bool // the changes were written
 }
 
 // Changed counts the rows that change.
@@ -70,7 +73,8 @@ type SetOptions struct {
 }
 
 // SetFiles sets the file_date and the retention of the files, all or nothing, in one transaction, by the retention
-// CSV's rules: a period needs a file_date, a policy must exist, keep_until is worked out again. A file not present,
+// CSV's rules: a period needs a file_date, keep_until is worked out again, and a policy that does not exist yet is
+// created with no value (without asking: the caller says so). A file not present,
 // or whose values cannot stand, refuses the whole run (every refusal is returned). Each change is recorded as a
 // review of a batch of command "set", on the file's current content; a retention given by hand replaces a rule's
 // policy, as the CSV's does. today (YYYY-MM-DD) decides which files are left past their retention.
@@ -98,6 +102,9 @@ func (s *Store) SetFiles(ctx context.Context, ids []int64, v SetValues, now time
 			continue
 		}
 		res.Rows = append(res.Rows, row)
+		if row.newPolicy && !slices.Contains(res.NewPolicies, row.Retention) {
+			res.NewPolicies = append(res.NewPolicies, row.Retention)
+		}
 		if !row.Unchanged && row.KeepUntil != "" && row.KeepUntil != Forever && row.KeepUntil <= today {
 			res.NowPast = append(res.NowPast, Past{Path: row.AbsPath(), Retention: row.Retention,
 				KeepUntil: row.KeepUntil})
@@ -109,6 +116,7 @@ func (s *Store) SetFiles(ctx context.Context, ids []int64, v SetValues, now time
 		return strings.Compare(absPath(a.RootPath, a.Path), absPath(b.RootPath, b.Path))
 	})
 	slices.SortFunc(res.NowPast, func(a, b Past) int { return strings.Compare(a.Path, b.Path) })
+	slices.Sort(res.NewPolicies)
 	if len(res.Refusals) > 0 || opt.DryRun || res.Changed() == 0 {
 		return res, nil
 	}
@@ -125,6 +133,12 @@ func (s *Store) SetFiles(ctx context.Context, ids []int64, v SetValues, now time
 	if err != nil {
 		return res, err
 	}
+	created := map[string]int64{}
+	for _, name := range res.NewPolicies {
+		if created[name], err = addPolicy(ctx, tx, name, "", now); err != nil {
+			return res, err
+		}
+	}
 	for _, r := range res.Rows {
 		if r.Unchanged {
 			continue
@@ -139,6 +153,9 @@ func (s *Store) SetFiles(ctx context.Context, ids []int64, v SetValues, now time
 		own, policy := nullString(r.Retention), sql.NullInt64{}
 		if r.policy {
 			own, policy = sql.NullString{}, sql.NullInt64{Int64: r.policyID, Valid: true}
+			if r.newPolicy {
+				policy.Int64 = created[r.Retention]
+			}
 		}
 		if _, err := tx.ExecContext(ctx, `UPDATE files SET file_date = ?, retention = ?, policy_id = ?,
 			keep_until = ?, reviewed_utc = ?, reviewed_after_scan = ?, reviewed_hash = ?,
@@ -201,11 +218,8 @@ func checkSet(ctx context.Context, tx *sql.Tx, id int64, v SetValues, policies p
 		if err != nil {
 			return r, "", err
 		}
-		if p.id == 0 {
-			return r, fmt.Sprintf("no policy named %s (filo policies add %s VALUE creates one)", r.Retention,
-				r.Retention), nil
-		}
-		r.policyID, r.PolicyValue, value = p.id, p.value, p.value
+		// A policy that does not exist yet is created with no value (SetResult.NewPolicies), as the CSV's is.
+		r.policyID, r.PolicyValue, value, r.newPolicy = p.id, p.value, p.value, p.id == 0
 	}
 	if IsPeriod(value) && r.FileDate == "" {
 		what := "retention " + r.Retention

@@ -224,10 +224,12 @@ var commandHelps = map[string]commandHelp{
 			"Sets the file_date and the retention of each file, as the retention CSV does, for a few files at once: " +
 				"a retention is a period (7y, 18m, 6w, 30d, counted from file_date), forever, a date (YYYY-MM-DD) " +
 				"or a policy's name. Several flags can be given together. keep_until is worked out again.",
-			"All or nothing: if any file cannot be set (a period with no file_date, a policy that does not exist, " +
+			"All or nothing: if any file cannot be set (a period with no file_date, " +
 				"a file missing or not in the register), nothing changes and every refusal is listed. It asks " +
 				"only before replacing a value already stored, showing what each was and will be; a file given " +
 				"its first values is not asked about. A retention set here replaces a policy a directory rule set.",
+			"A policy name that is not a policy yet creates one with no value, and says so: its files need a " +
+				"retention until filo policies set NAME VALUE gives it one.",
 		},
 		flags: []view.Term{
 			{Name: "--file-date DATE", Text: "the date a period counts from"},
