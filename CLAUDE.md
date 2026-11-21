@@ -36,7 +36,8 @@ see the hard rules). Stay inside the current piece of work.
   will do and asks first (or needs `-y`).
 - Treat file names and the register as untrusted input: delete only inside a root (`internal/dispose` checks), and
   print through `internal/view` (its Renderer escapes every text it is given with `view.Escape`, then adds only its
-  own colour codes); stderr only through the CLI's `errorLine` (each line escaped, `filo: ` before it), and the
+  own colour codes; the one exception is `filo find -0`'s raw path list, written by the Renderer and refused when
+  stdout is a terminal); stderr only through the CLI's `errorLine` (each line escaped, `filo: ` before it), and the
   progress line. Never write text straight to `os.Stdout` or `os.Stderr` (`TestOutputGoesThroughTheRenderer` guards
   it). Write each line of output with one call (a newline inside a write is escaped, since only a file name puts one
   there).

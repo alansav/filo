@@ -275,16 +275,8 @@ devices never make conflict copies. A relative link works on a device only if th
 same synced directory. It is Filo's first write beside the register, so it comes after the delete work.
 
 ### 19. Finding files (V8, C2)
-`filo find [DIR] [--name GLOB] [-0]`: find files in the register by name; read-only. The first slice of the query
-view (Later a), and what tags (18a) build on: they add `--tag TAG` and `--no-tag TAG` (agreed 2026-11-19).
-- Conditions combine with AND only; an OR is two runs. `key:` means any value of that key (only in a search: a tag
-  always has a value), `*` in a value matches any run of characters (`sender:British*`; the only wildcard, and a tag
-  cannot contain it, so an exact search is always possible; `?` and `[` match themselves), and `--no-tag sender:`
-  lists the files with no sender.
-- In a terminal: each file with its path (and, with 18a, its tags), cut at 10 with `… N more`. Piped: one absolute
-  path per line, or NUL-separated with `-0`, so `tar`, `xargs` and the like work with any file name.
-- Only files present now: not deleted, not missing.
-- It covers what the register holds (name, status, tags), not file contents; see Rejected, "Building search".
+Being built on branch `find`; its design moved to `design.md`, "Finding files", on 2026-11-21, with the
+command named `filo find`.
 
 ### 20. The Filo directory (V6, C4)
 One directory per device, chosen by the person (for example `~/Sync/Filo`), shared across devices by any sync service,
