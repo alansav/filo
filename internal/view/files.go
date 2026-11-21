@@ -18,9 +18,16 @@ type FileRow struct {
 	Note      string
 }
 
+// Over is a header over several columns of a file list, on a line above theirs: "file_date" over "was" and "now".
+type Over struct {
+	Header  string
+	Columns int // how many columns it spans, from the one after the previous Over
+}
+
 // FileList is a list of files under a section.
 type FileList struct {
 	Columns []Column
+	Over    []Over // headers over groups of columns, on a line above the columns' own; none = no such line
 	Rows    []FileRow
 	ByRoot  bool   // the rows are ordered by root (then path): sub-headings per root; never guessed from the rows
 	Max     int    // show at most this many, then "… N more <More>"; 0 = all
@@ -111,6 +118,25 @@ func (r *Renderer) Files(l FileList) {
 			return []span{name(from), plain(" -> "), name(show(row.Rel))}
 		}
 		return []span{name(show(row.Rel))}
+	}
+	if len(l.Over) > 0 {
+		spans := []span{spaces(indent)}
+		col := 0
+		for i, o := range l.Over {
+			w := 0 // the width the group's columns take, with the gaps between them
+			for j := col; j < col+o.Columns && j < len(widths); j++ {
+				if j > col {
+					w += 3
+				}
+				w += widths[j]
+			}
+			if i > 0 {
+				spans = append(spans, spaces(3))
+			}
+			spans = append(spans, styled(o.Header, dim), spaces(w-width(plain(o.Header))))
+			col += o.Columns
+		}
+		r.write(spans...)
 	}
 	if headed {
 		headers := make([]string, len(l.Columns))
