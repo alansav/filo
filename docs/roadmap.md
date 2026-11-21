@@ -36,8 +36,8 @@ what each device observes (roots, inodes, scan history) stays its own. Tags and 
 on the other device: a retention by content hash (an edited file needs a new decision), a tag by hash and then path
 (an edit keeps it; see 9c and 18a).
 
-The pieces, in the order agreed: 19 finding files (`filo find`), 18a tags, 38 the tag index pages, 36 bash
-completion, then the sync items
+The pieces, in the order agreed: finding files (`filo find`, item 19, built 2026-11-21), 18a tags, 38 the tag index
+pages, 36 bash completion, then the sync items
 (9b device ID, 9a synced directories, 9c the journal, which also carries tags), then 20 the Filo directory and 18b
 project notes and packages. 36 comes after tags so that its completion covers tag names from the start (reordered
 2026-11-20).
@@ -51,21 +51,20 @@ Provisional, agreed 2026-11-17, with the first places reordered on 2026-11-20 fo
 complexity scores (1 to 10, Claude's estimates) are still to be settled with the person. Items 22 to 33, and
 35, are not placed yet.
 
-1. 19 finding files
-2. 18a tags
-3. 38 tag index pages (placed 2026-11-21)
-4. 36 bash completion
-5. 9b device ID, 9a marking synced directories, 9c sharing decisions
-6. 20 the Filo directory, 18b project notes and packages
-7. 5a progress line, 5b `--needing-retention`
-8. 13 removing empty directories
-9. 21 script mode, 34 received documents (needs 21 and 9a)
-10. 6 one decision for all copies
-11. 16 undoing an update batch, 17 suggested rules
-12. 15 where the space goes
-13. 7a–7c verifying content, 8 backup awareness, 9d snapshots to the backup machine
-14. 10 a summary for scheduled scans
-15. Later a and c–e
+1. 18a tags
+2. 38 tag index pages (placed 2026-11-21)
+3. 36 bash completion
+4. 9b device ID, 9a marking synced directories, 9c sharing decisions
+5. 20 the Filo directory, 18b project notes and packages
+6. 5a progress line, 5b `--needing-retention`
+7. 13 removing empty directories
+8. 21 script mode, 34 received documents (needs 21 and 9a)
+9. 6 one decision for all copies
+10. 16 undoing an update batch, 17 suggested rules
+11. 15 where the space goes
+12. 7a–7c verifying content, 8 backup awareness, 9d snapshots to the backup machine
+13. 10 a summary for scheduled scans
+14. Later a and c–e
 
 ## Items
 
@@ -230,15 +229,18 @@ tag; a project is a tag.
   ignoring case (`sender:british gas` finds `British Gas`). Keys are lowercase whatever is typed, have no spaces
   (letters, digits, `-`, `_`) and at least one letter. The first colon separates the key when what is before it is
   a valid key, so `project:trip: Paris 2027` is key `project`, and `10:30 call` is a bare tag; `re: invoice` is key
-  `re`, odd but logical. A tag cannot hold `;` (the CSV's separator) or `*` (the one wildcard in a search, 19), so
+  `re`, odd but logical. A tag cannot hold `;` (the CSV's separator) or `*` (the one wildcard in a search, as in
+  `filo find --name`), so
   `filo tag` refuses both and says why; `?` and `[` are ordinary characters (`urgent?`, `Q1 [draft]`). A tag needs a
   value: `filo tag FILE sender:` is refused ("give a value"), since `key:` alone is only a search (agreed
   2026-11-20).
 - **Commands** (the first version): `filo tag FILE... TAG...` and `filo untag FILE... TAG...`; `filo tags`, tags with
   their file counts; `filo tags rename OLD NEW`, across every file, which fixes a typo in the key or the value, and
   may also change only the case (`british gas` to `British Gas`); `filo export tags [DIR] -o FILE` and `filo update
-  FILE` (a separate CSV from retention, told apart by its header). Finding files: `filo find --tag` and `--no-tag`
-  (19).
+  FILE` (a separate CSV from retention, told apart by its header). Finding files: `filo find --tag` and `--no-tag`,
+  with the search rules agreed for 19 (2026-11-19): `key:` means any value of that key (only in a search: a tag
+  always has a value), `*` in a value matches any run of characters, and `--no-tag sender:` lists the files with no
+  sender. In a terminal, `filo find` shows a file's tags after its path.
 - **The tags CSV** has a `tags` cell per file, tags separated by `;`, filled at export with the file's current tags.
   The cell replaces the file's tags: a tag not in it is removed, so an untouched cell changes nothing and an emptied
   one removes all. A file whose tags changed since the export (tagged by command meanwhile) is refused for that row,
@@ -273,10 +275,6 @@ file, into the Filo directory (20), never into a scanned tree, where each regene
 file needing a decision. The output is deterministic (sorted, no timestamps, written only when it changed) so two
 devices never make conflict copies. A relative link works on a device only if the note and its targets are in the
 same synced directory. It is Filo's first write beside the register, so it comes after the delete work.
-
-### 19. Finding files (V8, C2)
-Being built on branch `find`; its design moved to `design.md`, "Finding files", on 2026-11-21, with the
-command named `filo find`.
 
 ### 20. The Filo directory (V6, C4)
 One directory per device, chosen by the person (for example `~/Sync/Filo`), shared across devices by any sync service,
@@ -436,8 +434,8 @@ Viewing the register: `filo find [DIR] [--name GLOB] [--larger SIZE] [--smaller 
 status, and first seen (`first_seen_scan`, the register's own date, which a copy or restore cannot reset). Not on
 creation time (many filesystems do not record it, and a copy, restore or sync resets it) or access time (not stored;
 `relatime` and `noatime` mounts make it unreliable, and Filo reads with `O_NOATIME` so as not to disturb it). Empty
-files are shown through it (`--empty`); until then a count line in `filo report` would keep them visible. `--name`
-is item 19. Also later (proposed 2026-11-21): `--include-missing` and `--include-deleted`, since `filo find` lists
+files are shown through it (`--empty`); until then a count line in `filo report` would keep them visible. `filo
+find` with `--name` is built (see `design.md`, Finding files); this adds the other filters. Also later (proposed 2026-11-21): `--include-missing` and `--include-deleted`, since `filo find` lists
 only files present now.
 
 ### Later c. A UI in place of the CSV (V8, C10)
@@ -518,4 +516,4 @@ contradicts one of them is a discussion when the roadmap is reviewed.
 - **Themed command and project names** (the earlier "dirge" idea, funeral-style subcommands). Plain names win.
 - **Building search: Filo does not index file contents** (narrowed 2026-11-20). Existing indexers and document
   managers (Paperless-ngx for received documents, desktop indexers) already search inside files. Finding files by
-  name and tag over what the register holds (19, 18a) is a lookup, not search, and is the goal (see Direction).
+  name and tag over what the register holds (`filo find`, 18a) is a lookup, not search, and is the goal (see Direction).
