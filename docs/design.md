@@ -1245,8 +1245,15 @@ it would be. The usage line is `filo set FILE... [flags]`, the flags listed unde
 not in the register is refused with the other files, all or nothing. Each change is a review of a batch of command
 `set` on the file's current content, so `filo show` says "by filo set". `filo show` ends with
 `Next: filo set FILE --retention R or --file-date DATE (filo help set for more)` (for a run of directories only,
-`Next: filo show FILE for one file, filo set FILE... to change files (filo help set for more)`); `--duplicates` joins
-it with slice 4.
+`Next: filo show FILE for one file, filo set FILE... to change files (filo help set for more)`).
+
+**Slice 4, `filo set --duplicates`** (`store.SetFiles` with `SetValues.Duplicates`; `internal/cli/testdata/
+set-duplicates.txt`), as agreed below, in the same transaction as the other flags. `always` also replaces the
+content's sets of records (asked, "was: a separate record"); `records` makes the files named one new set, moving them
+out of any other, and the content no longer always; `counted` undoes either, a set of records as a whole. Refused, all
+or nothing: a symlink, an empty file, a file never read or unreadable, and for `records` a lone copy or a file under
+an excluded directory (not counted as a copy). The heading's fact is the decision ("always", "records", "counted as
+duplicates"), with how many contents and copies. `filo show`'s Next line names `--duplicates always|records`.
 
 Agreed with the person on 2026-11-20. Everything Filo holds about a file, from the command line, and every decision
 it shows can be changed by a command: quicker than an export, edit and update round for a few files (the CSV stays
