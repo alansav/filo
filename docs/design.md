@@ -1228,6 +1228,13 @@ Next: edit the action column, then filo delete '<work>/my d.csv'
 Being built (roadmap item 37, branch `item-37`): the design agreed on 2026-11-20, moved here when work started. Each part
 is marked built as its slice lands; until then it describes what is coming.
 
+**Built so far: slice 1, `filo show FILE`** (`internal/cli/show.go`, `internal/show`, `store.ShowFile`; the output
+is in `internal/cli/testdata/show.txt`). As agreed below, with these differences until the later slices: a directory
+or a root is refused ("is a directory: filo show takes files for now"); the `Next:` line pointing to `filo set` is
+not printed until `set` exists. Sizes are in binary units (`184 KiB`), as everywhere. A path that cannot be shown is
+an error line naming it and why (not in the register yet: run filo scan; outside every root; its root's settings
+skip it); the other paths are still shown, and the exit status is 1, as for `get`. Read-only: no snapshot.
+
 Agreed with the person on 2026-11-20. Everything Filo holds about a file, from the command line, and every decision
 it shows can be changed by a command: quicker than an export, edit and update round for a few files (the CSV stays
 the tool for many). Replaces "Later b, setting dates in place".
@@ -1435,7 +1442,8 @@ the tool for many). Replaces "Later b, setting dates in place".
 
 ### Commands and scheduling
 - Plain names, easy to remember: `roots`, `scan`, `report`, `export`, `update`, `delete`, `duplicates` (added
-  2026-11-16, see Duplicates), `policies` and `rules` (both 2026-11-16, see Lifespan). No
+  2026-11-16, see Duplicates), `policies` and `rules` (both 2026-11-16, see Lifespan), `show` (2026-11-21, see Showing and setting a file's
+  details). No
   themed subcommands. There is no `restore`: a file restored from a backup comes back as a new file. "Update" says
   that only existing files change; `filo review` only says it was replaced by `export retention` and `update`.
 - **Keep flags and options to a minimum** (2026-11-11). Prefer a safe default and clear output over a flag; prefer
