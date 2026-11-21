@@ -280,7 +280,7 @@ var commandHelps = map[string]commandHelp{
 			"Shows everything the register holds about each file, one after another: what filo observed (its " +
 				"path and root, size, modified time, hash, when it was first seen, where it was before) and what " +
 				"was decided (its retention, file_date and keep_until, and when they were set), then the other " +
-				"files with the same content. Nothing is changed.",
+				"files with the same content. Nothing is changed: filo set changes what was decided.",
 			"A path is looked up in the register, not on the disk, so a missing file is shown too, and a file " +
 				"deleted by filo is found by its last path. The modified line says whether the file on disk is " +
 				"still as the last scan saw it, from its size, modified time and inode, without reading it.",
