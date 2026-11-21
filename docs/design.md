@@ -1238,9 +1238,10 @@ an error line naming it and why (not in the register yet: run filo scan; outside
 skip it); the other paths are still shown, and the exit status is 1, as for `get`. Read-only: no snapshot.
 
 **Slice 3, `filo set` for file date and retention** (`store.SetFiles`, `internal/cli/set.go`;
-`internal/cli/testdata/set.txt`), as agreed below, and: a policy name that is not a policy yet is refused ("no policy
-named nope (filo policies add nope VALUE creates one)"), where the CSV creates it after asking: a command typed by
-hand names what exists. The usage line is `filo set FILE... [flags]`, the flags listed under it. A directory or a path
+`internal/cli/testdata/set.txt`), as agreed below, and: a policy name that is not a policy yet creates it with no
+value, without asking (the person's decision, 2026-11-21; the CSV asks first), and says so: "policy tax was created
+with no value: its files need a retention until it has one", then `Next: filo policies set tax VALUE`; a dry run says
+it would be. The usage line is `filo set FILE... [flags]`, the flags listed under it. A directory or a path
 not in the register is refused with the other files, all or nothing. Each change is a review of a batch of command
 `set` on the file's current content, so `filo show` says "by filo set". `filo show` ends with
 `Next: filo set FILE --retention R or --file-date DATE (filo help set for more)` (for a run of directories only,
