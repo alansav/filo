@@ -1500,8 +1500,8 @@ file contents (see `roadmap.md`, Rejected, "Building search"); tags (18a) add `-
   two runs, as an OR is. A DIR outside every root, or a file given as DIR ("is a file: use filo show"), is a usage
   error.
 - **A scan first**, as every export does (see Lifespan, "A scan first"), for the same reason: a file saved since the
-  last scan is found, and the incremental scan is the "is a scan needed?" check. It scans DIR when one is given,
-  otherwise every root. `--no-scan` skips it and lists from the register as it is; `--workers N` is passed to the
+  last scan is found, and the incremental scan is the "is a scan needed?" check. It scans DIR when one is given
+  (its root, when DIR is gone from the disk, so the files it held are found missing), otherwise every root. `--no-scan` skips it and lists from the register as it is; `--workers N` is passed to the
   scan and refused with `--no-scan`. In a terminal the scan's block comes first, as before an export (two lines when
   nothing changed). Piped, the scan prints nothing on stdout, so the list stays a list of paths. A root that fails
   to scan stops the command with nothing listed and exit status 1, as an export stops, so a missing disk never

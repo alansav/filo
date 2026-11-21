@@ -50,6 +50,7 @@ var overview = struct {
 		{Name: "show PATH...", Text: "everything filo holds about a file or directory: retention, history, copies"},
 		{Name: "set FILE... [flags]", Text: "set files' file_date, retention or duplicates decision"},
 		{Name: "get FILE... --FIELD...", Text: "print fields of files, for scripts: --retention, --keep-until …"},
+		{Name: "find [DIR] [flags]", Text: "list the files under DIR (or every root), by name: --name '*bill*'"},
 		{Name: "help [COMMAND]", Text: "this overview, or a command's flags and rules"},
 	},
 	after: "Every command accepts --db PATH (default: $FILO_DB, then the user data directory).",
@@ -217,6 +218,25 @@ var commandHelps = map[string]commandHelp{
 		after: []string{
 			"A file kept until 2026-12-31 is past its retention on 2026-12-31: it is listed by the next filo " +
 				"delete, which asks before deleting anything.",
+		},
+	},
+	"find": {
+		usage: []string{"filo find [DIR] [--name PATTERN] [-0] [--no-scan] [--workers N]"},
+		before: []string{
+			"Lists the files under DIR, a directory inside a root, or under every root, whose name matches " +
+				"PATTERN; with no --name, every file. Scans first, so a file saved since the last scan is found. " +
+				"Lists the files present now: not missing files, files deleted by filo or symlinks. A file with " +
+				"hard links is listed once.",
+			"In a terminal, every file found, with its modified date and size. Piped, one absolute path per line, " +
+				"escaped as all output is (a name holding a newline or a backslash is shown escaped, says so on " +
+				"stderr and exits 1); use -0 to pass any name to xargs -0 or tar --null -T -.",
+		},
+		flags: []view.Term{
+			{Name: "--name PATTERN", Text: "the file's name, not its directory, ignoring case; * matches any run " +
+				"of characters, and is the only wildcard (? and [ match themselves)"},
+			{Name: "-0", Text: "piped only: the paths as they are, each ended by a NUL, for xargs -0"},
+			{Name: "--no-scan", Text: "skip the scan: list from the register as it is"},
+			{Name: "--workers N", Text: "for the scan: files hashed in parallel, 1-64 (default 4; use 1 on a spinning disk)"},
 		},
 	},
 	"get": {

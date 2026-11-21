@@ -9,9 +9,10 @@ import (
 
 // Render writes what filo find found, for reading in a terminal (docs/design.md, Finding files): a heading (how many
 // files, their size, the search, where), then every file, never cut, by root and then path, with its modified date
-// and size. where names the roots searched and, with one, the directory under it. Nothing found: the heading and,
-// for a name search, a Next line about the name.
-func Render(v *view.Renderer, files []File, pattern string, where view.Where) {
+// and size. where names the roots searched and, with one, the directory under it; notScanned, if not "", is the line
+// under the heading that says the list is as of an earlier scan (--no-scan). Nothing found: the heading and, for a
+// name search, a Next line about the name.
+func Render(v *view.Renderer, files []File, pattern string, where view.Where, notScanned string) {
 	var facts []string
 	if len(files) == 0 {
 		facts = append(facts, "no files")
@@ -26,6 +27,9 @@ func Render(v *view.Renderer, files []File, pattern string, where view.Where) {
 		facts = append(facts, "named "+pattern)
 	}
 	v.Heading("Found", where, facts...)
+	if notScanned != "" {
+		v.Count(view.Neutral, notScanned)
+	}
 	v.Blank()
 	if len(files) == 0 {
 		if pattern != "" {

@@ -44,6 +44,8 @@ Commands
                            decision
   get FILE... --FIELD...   print fields of files, for scripts: --retention,
                            --keep-until …
+  find [DIR] [flags]       list the files under DIR (or every root), by name:
+                           --name '*bill*'
   help [COMMAND]           this overview, or a command's flags and rules
 
 Every command accepts --db PATH (default: $FILO_DB, then the user data
