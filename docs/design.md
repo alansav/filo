@@ -1230,13 +1230,22 @@ is marked built as its slice lands; until then it describes what is coming.
 
 **Built so far: slice 1, `filo show FILE`** (`internal/cli/show.go`, `internal/show`, `store.ShowFile`; the output
 is in `internal/cli/testdata/show.txt`), and **slice 2, `filo show DIR [-r]`** (`store.ShowDir`, `internal/show`
-`Dir`; `internal/cli/testdata/show-dir.txt`). As agreed below, with this difference until the later slices: the
-`Next:` line pointing to `filo set` is not printed until `set` exists. A directory gone from the disk is shown from
+`Dir`; `internal/cli/testdata/show-dir.txt`). As agreed below. A directory gone from the disk is shown from
 the files the register still holds under it. Under `-r`, a directory holding no file of its own but one below it
 gets a block of its own ("no files"), as `ls -R` lists it; a rule set below the shown directory is a line under its
 block ("rule * -> bills (7y)"). Sizes are in binary units (`184 KiB`), as everywhere. A path that cannot be shown is
 an error line naming it and why (not in the register yet: run filo scan; outside every root; its root's settings
 skip it); the other paths are still shown, and the exit status is 1, as for `get`. Read-only: no snapshot.
+
+**Slice 3, `filo set` for file date and retention** (`store.SetFiles`, `internal/cli/set.go`;
+`internal/cli/testdata/set.txt`), as agreed below, and: a policy name that is not a policy yet is refused ("no policy
+named nope (filo policies add nope VALUE creates one)"), where the CSV creates it after asking: a command typed by
+hand names what exists. The usage line is `filo set FILE... [flags]`, the flags listed under it. A directory or a path
+not in the register is refused with the other files, all or nothing. Each change is a review of a batch of command
+`set` on the file's current content, so `filo show` says "by filo set". `filo show` ends with
+`Next: filo set FILE --retention R or --file-date DATE (filo help set for more)` (for a run of directories only,
+`Next: filo show FILE for one file, filo set FILE... to change files (filo help set for more)`); `--duplicates` joins
+it with slice 4.
 
 Agreed with the person on 2026-11-20. Everything Filo holds about a file, from the command line, and every decision
 it shows can be changed by a command: quicker than an export, edit and update round for a few files (the CSV stays
@@ -1983,7 +1992,7 @@ CREATE TABLE review_batches (
     id INTEGER PRIMARY KEY, created_utc TEXT NOT NULL,
     command TEXT NOT NULL,              -- 'update'; 'delete' for a retention typed at filo delete's prompt;
                                         -- 'policies' (a move or rename); 'rules add', 'rules move', 'rules copy'
-                                        -- and 'scan' (policies set by rules)
+                                        -- 'scan' (policies set by rules) and 'set' (filo set)
     detail TEXT);                       -- the CSV read, or what the command did
 CREATE TABLE reviews (                  -- append-only: every retention ever set or cleared
     id INTEGER PRIMARY KEY, batch_id INTEGER NOT NULL REFERENCES review_batches(id),
