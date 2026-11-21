@@ -40,9 +40,9 @@ func (e *env) show(ctx context.Context, dbBefore string, args []string) error {
 	defer e.closeStore(s)
 	o := showOptions{day: today(), history: *history, verify: *verify, recursive: recursive}
 	failed := false
-	shown := 0
+	shown, files := 0, 0
 	for i, arg := range pos {
-		render, err := e.lookUp(ctx, s, arg, o)
+		render, isFile, err := e.lookUp(ctx, s, arg, o)
 		if err != nil {
 			if ctx.Err() != nil {
 				return ctx.Err()
@@ -56,6 +56,17 @@ func (e *env) show(ctx context.Context, dbBefore string, args []string) error {
 		}
 		render(i+1, len(pos))
 		shown++
+		if isFile {
+			files++
+		}
+	}
+	switch {
+	case files > 0:
+		e.view.Blank()
+		e.view.Next("Next: filo set FILE --retention R or --file-date DATE (filo help set for more)")
+	case shown > 0:
+		e.view.Blank()
+		e.view.Next("Next: filo show FILE for one file, filo set FILE... to change files (filo help set for more)")
 	}
 	if failed {
 		return errReported
@@ -71,22 +82,23 @@ type showOptions struct {
 
 // lookUp finds the file or directory a typed path names in the register, looks at it on disk, and returns what
 // renders it as item n of total.
-func (e *env) lookUp(ctx context.Context, s *store.Store, arg string, o showOptions) (func(n, total int), error) {
+func (e *env) lookUp(ctx context.Context, s *store.Store, arg string, o showOptions) (func(n, total int), bool,
+	error) {
 	p, err := filepath.Abs(arg)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	root, rel, isDir, err := locatePath(ctx, s, p)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	dir := func() (func(n, total int), error) {
+	dir := func() (func(n, total int), bool, error) {
 		d, err := s.ShowDir(ctx, root.ID, rel, o.day, now())
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		shown := show.LookDir(d, root)
-		return func(n, total int) { shown.Render(e.view, n, total, o.recursive) }, nil
+		return func(n, total int) { shown.Render(e.view, n, total, o.recursive) }, false, nil
 	}
 	unknown := func() error {
 		if skippedBy(rel, root.Settings) {
@@ -98,9 +110,9 @@ func (e *env) lookUp(ctx context.Context, s *store.Store, arg string, o showOpti
 		// A root is always shown; another directory only if the register holds a file under it, as for a file.
 		if rel != "" {
 			if has, err := s.HasFilesUnder(ctx, root.ID, rel); err != nil {
-				return nil, err
+				return nil, false, err
 			} else if !has {
-				return nil, unknown()
+				return nil, false, unknown()
 			}
 		}
 		return dir()
@@ -109,17 +121,17 @@ func (e *env) lookUp(ctx context.Context, s *store.Store, arg string, o showOpti
 	if errors.Is(err, store.ErrNotInRegister) {
 		// Not a file filo knows: a directory gone from the disk whose files it still holds, or not known at all.
 		if has, err := s.HasFilesUnder(ctx, root.ID, rel); err != nil {
-			return nil, err
+			return nil, false, err
 		} else if has {
 			return dir()
 		}
-		return nil, unknown()
+		return nil, false, unknown()
 	}
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	f := show.Look(ctx, sh, root, o.verify)
-	return func(n, total int) { f.Render(e.view, n, total, o.day, o.history) }, nil
+	return func(n, total int) { f.Render(e.view, n, total, o.day, o.history) }, true, nil
 }
 
 // locatePath maps an absolute path to its root and its path in it, and says whether it is a directory on disk (a
@@ -130,7 +142,7 @@ func (e *env) lookUp(ctx context.Context, s *store.Store, arg string, o showOpti
 func locatePath(ctx context.Context, s *store.Store, p string) (store.Root, string, bool, error) {
 	outside := func(err error) error {
 		if errors.Is(err, store.ErrNoRoot) {
-			return fmt.Errorf("%s is not in the register (outside every root)", p)
+			return outsideError{p}
 		}
 		return err
 	}
@@ -168,3 +180,8 @@ func locateGone(ctx context.Context, s *store.Store, p string) (store.Root, stri
 	}
 	return s.Locate(ctx, p)
 }
+
+// outsideError is a path in no root.
+type outsideError struct{ path string }
+
+func (e outsideError) Error() string { return e.path + " is not in the register (outside every root)" }

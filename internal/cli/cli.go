@@ -170,6 +170,8 @@ func (e *env) run(ctx context.Context, args []string) error {
 		return e.rules(ctx, *db, rest)
 	case "show":
 		return e.show(ctx, *db, rest)
+	case "set":
+		return e.set(ctx, *db, rest)
 	case "review":
 		return usageError{"review was replaced by export retention and update; see filo help"}
 	default:

@@ -12,6 +12,8 @@ bills   directory . 1 directory . 2 files . 18 B . <root>
     2022-01 British Gas.pdf    8 B   kept until 2029-01-31 . has copies
     2025-03 Water.pdf         10 B   [!] undated
 
+Next: filo show FILE for one file, filo set FILE... to change files (filo help set for more)
+
 $ filo show -r <root>
 
 home and below   directory . 3 directories . 5 files . 39 B . <work>
@@ -30,4 +32,6 @@ home and below   directory . 3 directories . 5 files . 39 B . <work>
   home/bills/2023/   1 file . [!] 1 needs a decision
     rule * -> bills (7y)
     2023-01 Gas.pdf   8 B   [!] needs a file_date
+
+Next: filo show FILE for one file, filo set FILE... to change files (filo help set for more)
 

@@ -1,0 +1,70 @@
+$ filo set <root>/receipts/taxi.pdf --file-date 2024-03-31 --retention 7y
+
+Done   file_date 2024-03-31 . retention 7y . 1 file changed . <root>
+    file_date           retention    until
+    was    now          was    now   was    now
+    none   2024-03-31   none   7y    none   2031-03-31   receipts/taxi.pdf
+
+$ filo set <root>/receipts/coffee.pdf <root>/receipts/lunch.pdf <root>/receipts/taxi.pdf --retention 7y
+
+[refused] Nothing was changed: 2 of 3 files were refused
+  [refused] <root>/receipts/coffee.pdf   retention 7y needs a file_date to count from: add --file-date DATE
+  [refused] <root>/receipts/lunch.pdf   retention 7y needs a file_date to count from: add --file-date DATE
+
+Next: fix the files above, or leave them out, and run filo set again
+
+$ filo set <root>/receipts/coffee.pdf <root>/receipts/lunch.pdf <root>/receipts/taxi.pdf --file-date 2024-03-31 --retention 7y
+
+Set   file_date 2024-03-31 . retention 7y . 3 files . <root>
+
+[!] 1 file has values that would be replaced:
+    file_date           retention          until
+    was    now          was          now   was    now
+    none   2024-03-31   bills (7y)   7y    none   2031-03-31
+      receipts/lunch.pdf   (set by rule receipts/*lunch*)
+
+  - 1 file gets them for the first time: coffee.pdf
+  - 1 file has them already: taxi.pdf
+
+Replace the values of 1 file and set 2? [y/N/l] 
+
+Done   file_date 2024-03-31 . retention 7y . 2 files changed . 1 unchanged
+
+$ filo set <root>/old/2015 phone.pdf --file-date 2015-02-01 --retention 7d
+
+Done   file_date 2015-02-01 . retention 7d . 1 file changed . <root>
+    file_date           retention    until
+    was    now          was    now   was    now
+    none   2015-02-01   none   7d    none   2015-02-08   old/2015 phone.pdf
+
+[!] 1 file is now past its retention. Check for a typo, such as 7d for 7y:
+    retention   until
+    7d          2015-02-08   old/2015 phone.pdf
+
+Nothing has been deleted. Next: filo delete
+
+$ filo set <root>/receipts/taxi.pdf --retention forever --dry-run
+
+Dry run   retention forever . 1 file would change . <root>
+    retention       until
+    was   now       was          now
+    7y    forever   2031-03-31   forever   receipts/taxi.pdf
+
+Dry run: nothing was changed.
+
+$ filo set <root>/receipts/coffee.pdf <root>/receipts/taxi.pdf --no-retention
+
+Set   retention cleared . 2 files . <root>
+
+[!] 2 files have values that would be replaced:
+    retention    until
+    was   now    was          now
+    7y    none   2031-03-31   none   receipts/coffee.pdf
+    7y    none   2031-03-31   none   receipts/taxi.pdf
+
+  - they will need a retention again
+
+Clear the retention of 2 files? [y/N/l] 
+
+Done   retention cleared . 2 files changed
+

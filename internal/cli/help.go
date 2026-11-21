@@ -48,6 +48,7 @@ var overview = struct {
 		{Name: "rules move OLD NEW", Text: "move the rules at OLD and below it to NEW (a rename)"},
 		{Name: "rules copy OLD NEW", Text: "copy the rules at OLD and below it to NEW"},
 		{Name: "show PATH...", Text: "everything filo holds about a file or directory: retention, history, copies"},
+		{Name: "set FILE... [flags]", Text: "set files' file_date or retention, asking before replacing one"},
 		{Name: "help [COMMAND]", Text: "this overview, or a command's flags and rules"},
 	},
 	after: "Every command accepts --db PATH (default: $FILO_DB, then the user data directory).",
@@ -215,6 +216,30 @@ var commandHelps = map[string]commandHelp{
 		after: []string{
 			"A file kept until 2026-12-31 is past its retention on 2026-12-31: it is listed by the next filo " +
 				"delete, which asks before deleting anything.",
+		},
+	},
+	"set": {
+		usage: []string{"filo set FILE... [flags]"},
+		before: []string{
+			"Sets the file_date and the retention of each file, as the retention CSV does, for a few files at once: " +
+				"a retention is a period (7y, 18m, 6w, 30d, counted from file_date), forever, a date (YYYY-MM-DD) " +
+				"or a policy's name. Several flags can be given together. keep_until is worked out again.",
+			"All or nothing: if any file cannot be set (a period with no file_date, a policy that does not exist, " +
+				"a file missing or not in the register), nothing changes and every refusal is listed. It asks " +
+				"only before replacing a value already stored, showing what each was and will be; a file given " +
+				"its first values is not asked about. A retention set here replaces a policy a directory rule set.",
+		},
+		flags: []view.Term{
+			{Name: "--file-date DATE", Text: "the date a period counts from"},
+			{Name: "--no-file-date", Text: "clear the file_date (refused where a period needs it)"},
+			{Name: "--retention R", Text: "a period, forever, a date or a policy's name"},
+			{Name: "--no-retention", Text: "clear the retention: the files need one again"},
+			{Name: "--dry-run", Text: "show what would change, and change nothing"},
+			{Name: "-y", Text: "replace values without asking"},
+		},
+		after: []string{
+			"A file left past its retention is listed, to check for a typo such as 7d for 7y; nothing is deleted " +
+				"until filo delete is run.",
 		},
 	},
 	"show": {
