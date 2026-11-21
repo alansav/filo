@@ -1529,6 +1529,7 @@ file contents (see `roadmap.md`, Rejected, "Building search"); tags (18a) add `-
   ```
 - **Piped**: one absolute path per line, escaped as all output is (see Commands and scheduling, "Output cannot act
   on the terminal"), since a piped list often ends in a terminal (`| less`). Almost every name is unchanged by it.
+  A space that ends a name stays a space (not `\x20`, as elsewhere): the line is for a tool, which needs the bytes.
   When escaping changed a name, the list is still written and then one stderr line says so,
   `filo: 1 name was escaped and will not match on disk; use -0`, with exit status 1, so a script does not skip a
   file unnoticed. Nothing found: no output.
@@ -1676,7 +1677,7 @@ command's output with them. The examples here are excerpts of them.
   grouped by root; wrapping; `… N more`), `Table`, `Groups` and `HeadedTable`, `Dup` and `Dups` (a `DupGroup`:
   `contract.pdf · 8 MB each` with its keep and delete lines and symlink notes), `Problems` (line, file, reason and
   what to do; repeats collapsed), `Ask` and `Choose` (prompts), `Item` and `ItemPath` (a select-mode item and its
-  result), `Paragraph` and `Terms` (help), and `Next`. Commands build the
+  result), `Paragraph` and `Terms` (help), `PathLines` and `RawPaths` (`filo find`'s lists for a pipe), and `Next`. Commands build the
   data and hand it to components; they never format output themselves or decide plain or rich, relative or full
   paths. Each component writes whole lines, one write per line.
 - **Scope: every command** (roots, scan, report, export, update, delete, help and errors).
