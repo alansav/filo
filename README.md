@@ -7,13 +7,15 @@ case someone asks").
 **Filo manages files; it is not, and never will be, a backup tool.** `filo delete` deletes files permanently, so keep
 backups of your files, and of Filo's register and its snapshots (see [Register snapshots](docs/design.md#register-snapshots)).
 
-**Status: scan, lifespan, delete, duplicates, retention policies, directory rules, and show, set and get done.** You
-give every file a retention (how long to keep it, often through a named policy such as `bills = 7y`, which a directory
-rule can give the files under a directory as they arrive), and `filo delete` lists the files past theirs, asks, and
-deletes the ones you choose. For identical copies you decide which to keep in a spreadsheet, and `filo delete` carries
+**Status: scan, lifespan, delete, duplicates, retention policies, directory rules, show, set and get, finding files,
+tags and tag index pages done.** You give every file a retention (how long to keep it, often through a named policy
+such as `bills = 7y`, which a directory rule can give the files under a directory as they arrive), and `filo delete`
+lists the files past theirs, asks, and deletes the ones you choose. For identical copies you decide which to keep in a spreadsheet, and `filo delete` carries
 that out the same careful way. `filo show` shows everything Filo holds about a file or directory, and `filo set` changes
 a few files from the command line. Apart from that, Filo is **read-only on your files**: no other command modifies,
-moves, renames or deletes anything outside its own database. See [Roadmap](#roadmap) for what comes next.
+moves, renames or deletes anything outside its own database, besides the files you ask it to write (an export's
+`-o` file, and the pages of a [tag index](#tag-index-pages), which it replaces only while they are as it wrote them).
+See [Roadmap](#roadmap) for what comes next.
 
 ## What it does today
 
@@ -48,6 +50,8 @@ moves, renames or deletes anything outside its own database. See [Roadmap](#road
 - **Tags files**, so you find them by what they are rather than where they are: `filo tag bill.pdf 'sender:British
   Gas' type:bill`. A project is a tag (`project:house sale`). Tags follow a file when it moves or is edited, and a
   new copy of a tagged file takes its tags. See [Tags](#tags).
+- **Writes pages to browse files by tag**: `filo indexes add ~/Documents/bills` writes HTML pages listing the files
+  under it by tag, each file a link that opens it, and keeps them up to date. See [Tag index pages](#tag-index-pages).
 - **Deletes what you confirm**, after reading each file again just before deleting it: a file that changed since its
   retention was set, moved, or can't be read is skipped, never deleted.
 - **Clears out duplicates you decide on**: export the groups of identical copies, write `keep` or `delete` against
@@ -561,6 +565,38 @@ Tagged   1 file · sender:British Gas · type:bill · ~/Documents
   before removing any (`-y` answers yes, for a script).
 - In a terminal, `filo find` shows each file's tags after its path, and `filo show` lists them.
 
+## Tag index pages
+
+A tag index is a set of HTML pages listing the files under a directory by tag, to browse and tap instead of typing
+searches: a main page of keys (`sender`, `type`), a page per key of its values, a page per tag of its files, and the
+files with no tags (or none for a key: the tagging to-do list). Each file name opens the file, and each of its tags
+leads to that tag's page.
+
+```sh
+filo indexes add ~/Documents/bills                 # writes bills/index.html and bills/.index/
+filo indexes add ~/Documents/records --name tags   # writes records/tags.html and records/.tags/
+filo indexes                                       # the indexes, and what is wrong with any
+filo indexes refresh ~/Documents/records           # write its pages again
+filo indexes remove ~/Documents/bills              # stop keeping it, and remove its pages (asks first)
+```
+
+```
+$ filo indexes add ~/Documents/bills
+Index added   bills/index.html · 214 files · 9 tags · 38 pages · ~/Documents
+  · its pages are in bills/.index/; scans skip both
+
+Next: open ~/Documents/bills/index.html in a browser
+```
+
+- **Kept up to date.** Every command that changes the register (a scan, a tag, a deletion) brings the pages up to
+  date, and says nothing unless it cannot. Only the pages that changed are written.
+- **The links are relative**, so the pages work on any device that syncs the directory, a phone included, and
+  nothing is fetched from the network: the stylesheet is a local file, and there is no JavaScript.
+- **Only Filo's own files.** Filo replaces or removes a page only while it is exactly as Filo wrote it. A page you
+  edit, or a file you put in `.index/`, is left alone and reported, and the command exits 1: move it aside, then
+  `filo indexes refresh`. `add` refuses a directory where `index.html` or `.index` already exists (`--name` picks
+  another name).
+
 ## Commands
 
 | Command | What it does |
@@ -599,6 +635,10 @@ Tagged   1 file · sender:British Gas · type:bill · ~/Documents
 | `filo untag FILE... TAG...` | Remove tags from files (`key:` for every value of the key). |
 | `filo tags` | List the tags in use, with how many files have each. |
 | `filo tags rename OLD NEW` | Rename a tag, or a key (`sendr: sender:`), on every file that has it. |
+| `filo indexes` | List the tag indexes, and what is wrong with any. See [Tag index pages](#tag-index-pages). |
+| `filo indexes add [DIR] [--name NAME]` | Write HTML pages of the files under `DIR` (the current directory) by tag, kept up to date from then on. |
+| `filo indexes remove [DIR] [--name NAME] [-y]` | Stop keeping an index, and remove its pages; asks first. |
+| `filo indexes refresh [DIR] [--name NAME]` | Write an index's pages again (every index's, with no `DIR`). |
 | `filo help [COMMAND]` | Show usage. `-h` works on every command. |
 
 Options for `filo roots add` and `filo roots set`, which every scan of the root then uses:
@@ -636,7 +676,8 @@ is not a failure), `1` an error, a root that failed during `filo scan` of every 
 refused, a file `filo delete` couldn't read or delete, a group of a duplicates CSV it refused, a path `filo show`
 or `filo get` couldn't show (not in the register, skipped by its root's settings, or for `get` a directory; the others
 are still shown), a file `filo set`, `filo tag` or `filo untag` refused, a tag `filo tags rename` found on no file,
-or a root `filo find` couldn't scan or a name it had to escape, `2` a usage error. `filo find` that finds nothing exits `0`.
+a root `filo find` couldn't scan or a name it had to escape, or a tag index whose pages couldn't be brought up to date
+(or that `filo indexes remove` had to leave files of), `2` a usage error. `filo find` that finds nothing exits `0`.
 
 ## Roots
 
@@ -661,7 +702,7 @@ or a root `filo find` couldn't scan or a name it had to escape, `2` a usage erro
 - `node_modules`, `__pycache__`, `.filo`, and `bin`/`obj` next to a `.csproj` or `.fsproj` file.
 - Anything the root ignores (`--ignore`).
 - Other filesystems mounted inside the root (each can be its own root).
-- Filo's own database files.
+- Filo's own database files, and the pages of its tag indexes.
 - FIFOs, sockets and devices.
 
 Symlinks are recorded with their target and whether they're broken, but never followed.
@@ -725,8 +766,9 @@ Enable it with `systemctl --user enable --now filo-scan.timer`.
    Done.
 9. **Finding files** by name: `filo find`. Done.
 10. **Tags**: `filo tag`, `untag`, `tags`, finding by tag, and the tags CSV. Done.
-11. **Next**: what is planned, in order, is in [docs/roadmap.md](docs/roadmap.md): pages listing files by tag, bash
-    completion, sharing decisions between devices, and more.
+11. **Tag index pages**: HTML pages listing a directory's files by tag, kept up to date. Done.
+12. **Next**: what is planned, in order, is in [docs/roadmap.md](docs/roadmap.md): bash completion, sharing decisions
+    between devices, and more.
 
 Principles that won't change:
 - A retention is never a trigger: reaching its end makes a file a candidate you confirm.
