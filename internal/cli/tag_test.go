@@ -40,10 +40,20 @@ func TestTagGolden(t *testing.T) {
 	step("untag SEP project:", "untag", sep, "project:")
 	step("tag SEP type:bill", "tag", sep, "type:bill")
 	step("tag SEP NOTE urgent", "tag", sep, in("notes/ideas.txt"), "urgent")
+	ct.write("inbox/copy.pdf", "october bill")
+	step("tag INBOX/COPY urgent (not seen yet, with its copies' tag)", "tag", in("inbox/copy.pdf"), "urgent")
+	if err := os.Symlink(in("inbox"), in("inbox link")); err != nil {
+		t.Fatal(err)
+	}
+	ct.write("inbox/twice.pdf", "twice")
+	step("tag INBOX/TWICE 'INBOX LINK/TWICE' urgent (one file by two paths)", "tag", in("inbox/twice.pdf"),
+		in("inbox link/twice.pdf"), "urgent")
 	golden(t, "tag.txt", ct.root, out.String())
 
-	// The registered file is known to the next scan, which finds nothing.
-	ct.contains("scan after", filo(ExitOK, "", false, "scan").stdout, "no changes")
+	// The registered files are known to the next scan, which finds only the symlink new.
+	after := filo(ExitOK, "", false, "scan").stdout
+	ct.contains("scan after", after, "- 1 new")
+	ct.lacks("scan after", after, "moved", "missing", "changed")
 }
 
 // TestTagRefusals: all or nothing: a file that cannot be tagged is listed, and no file changes; nor is a new file

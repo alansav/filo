@@ -40,3 +40,16 @@ Tagged   1 file . urgent . 1 had it already . <root>
 
     received/2026/09/2026-09-02 British Gas Bill.pdf   urgent; sender:British Gas; type:bill
 
+$ filo tag INBOX/COPY urgent (not seen yet, with its copies' tag)
+Tagged   1 file . urgent . <root>
+
+    inbox/copy.pdf   urgent; project:house; sender:British Gas; type:bill
+  - registered 1 new file
+  [!] it took the tags of copies that differed as well: check with filo show
+
+$ filo tag INBOX/TWICE 'INBOX LINK/TWICE' urgent (one file by two paths)
+Tagged   1 file . urgent . <root>
+
+    inbox/twice.pdf   urgent
+  - registered 1 new file
+

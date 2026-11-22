@@ -79,16 +79,27 @@ func (e *env) tagFiles(ctx context.Context, dbBefore string, args []string, add 
 	var targets []tagTarget
 	var refused []setRefusal
 	seen := map[string]bool{}
+	type place struct {
+		root int64
+		rel  string
+	}
+	at := map[place]bool{} // a file given twice, even by two paths (a symlinked directory), is one file
 	for _, arg := range files {
 		p, err := filepath.Abs(arg)
 		if err != nil {
 			return err
 		}
 		if seen[p] {
-			continue // a path given twice is one file
+			continue
 		}
 		seen[p] = true
 		t, why, err := tagTargetOf(ctx, s, p, add)
+		if why == "" && err == nil {
+			if at[place{t.root.ID, t.rel}] {
+				continue
+			}
+			at[place{t.root.ID, t.rel}] = true
+		}
 		if err != nil {
 			if ctx.Err() != nil {
 				return ctx.Err()
@@ -144,6 +155,11 @@ func (e *env) tagFiles(ctx context.Context, dbBefore string, args []string, add 
 	}
 	if err != nil {
 		return err
+	}
+	for _, t := range targets {
+		if t.pending != nil {
+			res.Changed[t.id] = true // new to the register, with its tags (some perhaps its copies')
+		}
 	}
 	current, err := s.FileTags(ctx, ids)
 	if err != nil {
@@ -205,8 +221,11 @@ func (e *env) tagFiles(ctx context.Context, dbBefore string, args []string, add 
 		r.Count(view.Neutral, "registered "+report.Plural(int64(registered), "new file", "new files"))
 	}
 	if copyTags > 0 {
-		r.Count(view.Attention, pluralWord(copyTags, "it", "they")+" took the tags of copies that differed: check "+
-			"with filo show")
+		who := report.Count(int64(copyTags)) + " of them"
+		if registered == 1 {
+			who = "it"
+		}
+		r.Count(view.Attention, who+" took the tags of copies that differed as well: check with filo show")
 	}
 	return nil
 }

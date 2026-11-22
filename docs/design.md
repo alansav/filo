@@ -1607,8 +1607,11 @@ so files can be found by tag; a project is a tag (`project:house sale`).
   treats it as known. The same inode as a file the register has at another path now: refused, "looks moved from X;
   run filo scan" (never guess; a scan pairs it). Outside every root, or where the root's settings skip it (hidden,
   ignored): refused, saying why. Otherwise it is registered as a new file (hashed; its copies' tags taken, below;
-  directory rules apply, as in any scan), and the output says `· registered 1 new file`. `untag` registers nothing:
-  a file not in the register has no tags to remove.
+  directory rules apply, as in any scan), and the output says `· registered 1 new file`; it counts among the files
+  tagged even when its copies gave it the tags already. Each file is registered in its own transaction before the
+  tags are written: should the run fail after that (interrupted), the file stays registered, untagged, as a scan
+  would have left it. One file given by two paths (through a symlinked directory) is one file. `untag` registers
+  nothing: a file not in the register has no tags to remove.
 - **Tags follow the file**, as the register tracks it, not its path or content: kept through a move or rename (the
   inbox routine), an edit (unlike retention, which asks again), and while missing. A file deleted by Filo keeps its
   rows in the register but drops out of every listing, count and search. **A copy keeps the tags:** a new file
