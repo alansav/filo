@@ -1682,10 +1682,123 @@ so files can be found by tag; a project is a tag (`project:house sale`).
   and `tag_changes`, the history of every tag added or removed and by which command, so each change can be written
   to the journal later (9c) without rework. `export_rows` gain `tags`, the cell as exported.
 
+### Tag index pages
+Roadmap item 38, designed with the person on 2026-11-22. Filo writes HTML pages that list files by tag, to browse
+and tap instead of typing searches: a read-only view of the register written out as static pages, far cheaper than
+a UI. An index is declared once on a directory (one per role, say) and kept up to date by Filo, so its links are
+relative: on any device that syncs the directory, the pages and the files are side by side (a relative link tested
+on the person's phone opens the file).
+
+- **`filo indexes add [DIR] [--name NAME]`** declares an index on DIR (the current directory when not given) and
+  writes its pages: `DIR/NAME.html`, and the other pages and `style.css` in `DIR/.NAME/`. NAME is `index` unless
+  given; it holds letters, digits, `-` and `_`, and starts with a letter or digit. Refused, with why, and nothing
+  created: DIR not a directory in a root, or skipped by the root's settings (hidden, ignored), or `NAME.html` or
+  `.NAME` there already (anything at those paths, Filo's or not).
+
+  ```
+  Index added   bills/index.html · 214 files · 9 tags · 38 pages · ~/Documents
+    · its pages are in bills/.index/; scans skip both
+    · 11 files have no tags: they are listed on the page "no tags"
+
+  Next: open ~/Documents/bills/index.html in a browser
+  ```
+
+  ```
+  filo: bills/index.html exists already: give another name with --name
+  ```
+- **`filo indexes`** lists them, by root and then path, with their files, tags and when their pages were last
+  written; one whose last writing failed is flagged with why.
+
+  ```
+  Indexes   2 · 1 needs attention · ~/Documents
+
+    bills/index.html    214 files   9 tags   written 2026-11-22 14:03
+    records/tags.html    88 files   4 tags   written 2026-11-21 09:12   ! not up to date
+      ! .tags/sender.html was changed since Filo wrote it: not replaced
+
+  Next: move records/.tags/sender.html aside, then filo indexes refresh ~/Documents/records
+  ```
+- **`filo indexes remove [DIR] [--name NAME] [-y]`** stops keeping an index and removes its files, after listing
+  them and asking (`-y` answers; no terminal and no `-y`: refused, as `filo delete` is). A file that is not Filo's
+  (below) is left, and so is the directory holding it: the output says so and the exit code is 1, since the person
+  needs to look at it. The index is removed from the register either way.
+
+  ```
+  Remove index   records/tags.html · 12 files · ~/Documents
+
+      records/tags.html
+      records/.tags/       11 files: its pages and style.css
+    ! records/.tags/notes.txt is not Filo's: it stays, and so does records/.tags/
+
+  Remove the index and its 12 files? [y/N] y
+  Done   removed 12 files · records/.tags/ kept, with the 1 file that is not Filo's
+  ```
+- **`filo indexes refresh [DIR] [--name NAME]`** (no DIR: every index) renders the pages again even when the data
+  is unchanged, and writes those that differ, for example after a page Filo refused to replace was moved aside.
+  `remove` and `refresh` given a DIR with more than one index and no `--name` are refused, listing the names.
+
+  ```
+  Refreshed   2 indexes · ~/Documents
+    · bills/index.html    up to date
+    ✓ records/tags.html   3 pages written · 1 removed
+  ```
+- **Scans skip them.** The two paths of each index (`NAME.html` and `.NAME/`) are among the register's own paths,
+  which no scan records, whatever the root's hidden setting; not through the root's ignore names, which match a
+  name anywhere in the root and would hide every real `index.html` in it. `filo tag` refuses them as it refuses the
+  database.
+- **Filo's own files.** Filo keeps the hash of every file it writes in an index, and replaces or removes one only
+  while it is still exactly what Filo wrote; a file at a path Filo has not written is never replaced. Anything else
+  (a page edited by hand, a file dropped into `.NAME/`, a symlink) is left alone and reported. This is the one place
+  outside its data directory, `--db` and `-o` files where Filo writes, besides `filo delete`: the files of a tag
+  index, created only where nothing exists, replaced or removed only while still what Filo wrote, and a whole index
+  removed only by `filo indexes remove`. `internal/tagindex` is the only code that writes or removes them. They are
+  Filo's files, not the person's: `internal/dispose` stays the only code that deletes the person's files.
+- **When the pages are written.** At the end of every run that committed a change to the register (as the snapshot
+  is, so no list of commands is kept), before the snapshot, and by `add` and `refresh`. A run that only read writes
+  none. Data first (the person's idea): Filo builds each index's data, hashes it (with the version of the pages'
+  layout) and does nothing when that hash is the one stored; otherwise it renders the pages, writes only those whose
+  content changed (each to a temporary file in its directory, renamed into place), and removes the pages no longer
+  needed, and the directories it made that are left empty. It says nothing when that works. When it fails (a page
+  not Filo's, a directory that cannot be reached or written), one line on stderr, `filo: <what the command did>, but
+  bills/index.html was not brought up to date: <why>`, and exit 1; the command's own change stands, and the next run
+  that commits tries again. Only a fully written index records its new data hash.
+- **Rendering.** Go's `html/template`, with the templates and stylesheet embedded in the binary; no dependency and
+  no JavaScript. Not XSLT: Go has none (a cgo binding would be a dependency and break the static build, and
+  `xsltproc` would have to be installed on every device), and `html/template` escapes each value for where it lands
+  (text, attribute, link), as untrusted file names and tags need. Links are relative, each part of the path
+  URL-encoded (`%20` for a space, so a `#` or `?` in a name cannot break one). The output is deterministic (sorted,
+  no times), so syncing it makes no conflict copies.
+- **Pages.** Each has a trail at the top (`bills › sender › British Gas`).
+  - `NAME.html`: each key with its number of values and files; "other tags", the bare tags; and in a section of
+    its own, "11 files have no tags", linking to `.NAME/_untagged.html`.
+  - `.NAME/<key>/index.html`: the key's values, each with its number of files; and in a section of its own, "34
+    files have no sender tag", linking to `.NAME/<key>/_none.html`. The bare tags have `.NAME/_/index.html`: a key
+    has a letter, so none is named `_`.
+  - `.NAME/<key>/<slug>-<hash>.html`: one value's files. The slug holds only `a-z`, `0-9` and `-` (at most 40), the
+    hash is eight hex digits of the key and the folded value. The slug alone would make different tags one name
+    (`British Gas` and `British-Gas`, values with no Latin letters, values too long for a file name); with the hash
+    a tag's page has the same name on every run and device, and keeps it when only its case is renamed, so
+    bookmarks keep working. Two tags of one key with the same name (never seen; the hash makes it unlikely) fail the
+    writing, never overwrite each other.
+  - A tag can be spelled almost any way (`sender:no sender` is one), so the "no …" pages are told apart from tags
+    by their place and wording, and by names no tag page has (`_` first; a slug never starts with one).
+  - Each file row: its name (a link that opens the file), its directory, its date, and its other tags, each a link
+    to its tag's page. No size, retention, keep-until or duplicates: the pages are for finding files.
+  - The files: regular files in the register, present now, under DIR at any depth, each path its own row (a hard
+    link too); newest first by `file_date`, else modification time, then path. A link is as fresh as the last scan.
+    Indexes nested in one another are independent.
+- **Look.** One local stylesheet, `.NAME/style.css`: system fonts and nothing remote (it works offline), a viewport
+  meta tag, one column, rows as cards on a narrow screen, tap targets of at least 44px, tags as chips, dark mode by
+  `prefers-color-scheme`.
+- **Register (schema version 12)**: `tag_indexes` (root, directory, name, the data hash of the last full write,
+  when, and the last problem) and `tag_index_files` (each file and directory Filo wrote in an index, with the file's
+  hash).
+
 ### Commands and scheduling
 - Plain names, easy to remember: `roots`, `scan`, `report`, `export`, `update`, `delete`, `duplicates` (added
   2026-11-16, see Duplicates), `policies` and `rules` (both 2026-11-16, see Lifespan), `show` (2026-11-21, see Showing and setting a file's
-  details), `find` (2026-11-21, see Finding files), `tag`, `untag` and `tags` (2026-11-22, see Tags). No
+  details), `find` (2026-11-21, see Finding files), `tag`, `untag` and `tags` (2026-11-22, see Tags), `indexes`
+  (2026-11-22, see Tag index pages). No
   themed subcommands. There is no `restore`: a file restored from a backup comes back as a new file. "Update" says
   that only existing files change; `filo review` only says it was replaced by `export retention` and `update`.
 - **Keep flags and options to a minimum** (2026-11-11). Prefer a safe default and clear output over a flag; prefer
@@ -1726,6 +1839,8 @@ so files can be found by tag; a project is a tag (`project:house sale`).
   files and Tags.
 - `filo tag FILE... TAG...`, `filo untag FILE... TAG...`, `filo tags`, `filo tags rename OLD NEW`, and `filo export
   tags [DIR] -o FILE [--no-scan] [--workers N]`, read back by `filo update`: see Tags.
+- `filo indexes`, `filo indexes add [DIR] [--name NAME]`, `filo indexes remove [DIR] [--name NAME] [-y]` and `filo
+  indexes refresh [DIR] [--name NAME]`: see Tag index pages.
 - `filo delete [DIR] [-y]`: lists the files past their keep-until date and deletes the ones chosen (see Disposal).
 - `filo delete FILE.csv [-y]`: carries out a duplicates CSV (see Duplicates). An argument that is a directory is
   DIR; anything else is a CSV.
@@ -2143,7 +2258,7 @@ $ filo roots add
 filo: roots add takes exactly one DIR (see filo help roots)
 ```
 
-## 3. Data model (schema version 11)
+## 3. Data model (schema version 12)
 
 The register as `internal/store/schema.go` creates it (`schemaSQL`), with the meaning of each column. Keep the
 interval history and the partial unique index.
@@ -2299,6 +2414,23 @@ CREATE TABLE tag_changes (              -- append-only: every tag added or remov
     command TEXT NOT NULL,              -- 'tag', 'untag', 'rename', 'update', or 'scan' (taken from copies)
     changed_utc TEXT NOT NULL);
 CREATE INDEX ix_tag_changes_file ON tag_changes(file_id);
+
+-- tag index pages (see Tag index pages)
+CREATE TABLE tag_indexes (
+    id INTEGER PRIMARY KEY,
+    root_id INTEGER NOT NULL REFERENCES roots(id),
+    dir TEXT NOT NULL,                  -- relative to the root; '' = the root itself
+    name TEXT NOT NULL,                 -- NAME.html and .NAME/
+    added_utc TEXT NOT NULL,
+    data_hash TEXT,                     -- the data of the last full write; NULL = never written in full
+    written_utc TEXT,                   -- when its pages were last brought up to date
+    problem TEXT,                       -- why the last writing failed; NULL = it did not
+    UNIQUE (root_id, dir, name));
+CREATE TABLE tag_index_files (          -- every file and directory Filo wrote in an index
+    index_id INTEGER NOT NULL REFERENCES tag_indexes(id),
+    path TEXT NOT NULL,                 -- relative to the index's directory: 'index.html', '.index/_/index.html'
+    hash TEXT,                          -- the file's SHA-256 as written; NULL = a directory
+    PRIMARY KEY (index_id, path));
 ```
 
 "Present" means a file has a path interval with `valid_to_scan IS NULL`; there is no status column. "New" means
