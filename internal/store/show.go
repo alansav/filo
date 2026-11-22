@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"path"
 	"slices"
+
+	"github.com/alansav/filo/internal/tags"
 )
 
 // Shown is everything the register holds about one file, for filo show (docs/design.md, Showing and setting a
@@ -36,6 +38,7 @@ type Shown struct {
 	Copies         []DupCopy
 	OneRecordSet   bool // its copies, and it, are all records of its set
 	CopiesInGroups bool // its content is a duplicate group
+	Tags           []tags.Tag
 }
 
 // ShownPath is one of a file's paths, with the scans it was seen there in.
@@ -166,5 +169,10 @@ func (s *Store) showFile(ctx context.Context, id int64, today string) (Shown, er
 			}
 		}
 	}
+	ts, err := s.FileTags(ctx, []int64{id})
+	if err != nil {
+		return Shown{}, err
+	}
+	sh.Tags = ts[id]
 	return sh, nil
 }

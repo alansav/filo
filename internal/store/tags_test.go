@@ -291,3 +291,36 @@ func TestCopies(t *testing.T) {
 		t.Errorf("history = %q", h)
 	}
 }
+
+// TestFoundAndShownTags: filo find's rows carry their file's id, so its tags can be read, and filo show's record has
+// the file's tags.
+func TestFoundAndShownTags(t *testing.T) {
+	e := newReviewEnv(t)
+	e.apply(Changes{New: []NewFile{f("a", "ha"), f("b", "hb")}})
+	k := e.known()
+	if _, err := e.s.TagFiles(e.ctx, []int64{k["a"].FileID}, []tags.Tag{mustTag(t, "type:bill")}, tagNow); err != nil {
+		t.Fatal(err)
+	}
+	found, err := e.s.FindFiles(e.ctx, 0, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range found {
+		if f.FileID != k[f.Rel].FileID {
+			t.Errorf("%s: FileID %d, want %d", f.Rel, f.FileID, k[f.Rel].FileID)
+		}
+	}
+	for rel, want := range map[string]string{"a": "type:bill", "b": ""} {
+		sh, err := e.s.ShowFile(e.ctx, e.root.ID, rel, "2026-11-22")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got []string
+		for _, tg := range sh.Tags {
+			got = append(got, tg.String())
+		}
+		if strings.Join(got, "; ") != want {
+			t.Errorf("%s: Tags %v, want %q", rel, got, want)
+		}
+	}
+}

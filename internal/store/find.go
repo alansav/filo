@@ -8,6 +8,7 @@ import (
 
 // FoundFile is one regular file at its current path, as filo find lists it (docs/design.md, Finding files).
 type FoundFile struct {
+	FileID     int64
 	RootID     int64
 	Root       string // the root it is in, absolute
 	Rel        string // the path relative to the root, '/' separators
@@ -32,9 +33,9 @@ func (s *Store) FindFiles(ctx context.Context, rootID int64, scope string) ([]Fo
 	cond, args := Filter{RootID: rootID, Scope: scope}.scopeSQL()
 	out, err := queryAll(ctx, s.db, func(rs *sql.Rows) (FoundFile, error) {
 		var f FoundFile
-		return f, rs.Scan(&f.RootID, &f.Root, &f.Rel, &f.Size, &f.MtimeNS, &f.Inode, &f.Unreadable, &f.Links)
+		return f, rs.Scan(&f.FileID, &f.RootID, &f.Root, &f.Rel, &f.Size, &f.MtimeNS, &f.Inode, &f.Unreadable, &f.Links)
 	}, `
-		SELECT p.root_id, r.path, p.path, f.size, f.mtime_ns, coalesce(f.inode, 0), f.unreadable_since_scan IS NOT NULL,
+		SELECT f.id, p.root_id, r.path, p.path, f.size, f.mtime_ns, coalesce(f.inode, 0), f.unreadable_since_scan IS NOT NULL,
 			CASE WHEN f.inode IS NULL THEN 0 ELSE (
 				SELECT count(*) FROM files lf JOIN paths lp ON lp.file_id = lf.id
 				WHERE lf.inode = f.inode AND lf.size = f.size AND lf.mtime_ns = f.mtime_ns AND lf.kind = 'file'
