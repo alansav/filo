@@ -110,10 +110,10 @@ type TagUpdateResult struct {
 
 // UpdateTags checks each row of a tags CSV against the register and applies the ones that pass, in one transaction
 // (docs/design.md, Tags, "The tags CSV"): the cell replaces the file's tags, a tag added with the spelling it has
-// already (one in the cell in another case than the file's is no change). A cell with the tags the file has is
-// unchanged, so a CSV applied twice changes nothing the second time. A row of another kind of export, of a file not
-// in it, of a file deleted by filo, or whose file's tags changed since the export (to others than the cell's), is
-// refused. A change that
+// already (one in the cell in another case than the file's is no change). A cell left as exported is unchanged,
+// whatever happened to the file since, and so is a cell with the tags the file has (a CSV applied twice changes
+// nothing the second time). A row of another kind of export, of a file not in it, of a file deleted by filo, or
+// whose file's tags changed since the export (to others than the cell's), is refused. A change that
 // removes a tag is made only if ConfirmRemovals, given every such change once, returns true; otherwise those rows
 // are left alone, and the others still apply.
 func (s *Store) UpdateTags(ctx context.Context, rows []TagRow, now time.Time, opt TagUpdateOptions) (TagUpdateResult,
@@ -176,7 +176,7 @@ func (s *Store) UpdateTags(ctx context.Context, rows []TagRow, now time.Time, op
 			}
 		}
 		for j, t := range ch.Added {
-			sp, err := spelling(ctx, tx, t)
+			sp, err := spelling(ctx, tx, t) // again: an earlier row may have removed the tag's only other spelling
 			if err != nil {
 				return res, err
 			}
@@ -214,6 +214,10 @@ func checkTagRow(ctx context.Context, tx *sql.Tx, r TagRow, ex exportInfo) (TagC
 	if err != nil {
 		return ch, "", fmt.Errorf("read export %d: %w", r.ExportID, err)
 	}
+	// A cell left as exported is not a decision, whatever happened to the file since (as for a retention CSV).
+	if sameTags(splitCell(exported.String), r.Tags) {
+		return ch, "", nil
+	}
 	var deleted sql.NullString
 	if err := tx.QueryRowContext(ctx, `SELECT deleted_utc FROM files WHERE id = ?`, r.FileID).Scan(&deleted); err != nil {
 		return ch, "", fmt.Errorf("read file %d: %w", r.FileID, err)
@@ -242,7 +246,11 @@ func checkTagRow(ctx context.Context, tx *sql.Tx, r TagRow, ex exportInfo) (TagC
 	}
 	for _, t := range r.Tags {
 		if !slices.ContainsFunc(have, t.Same) {
-			ch.Added = append(ch.Added, t)
+			sp, err := spelling(ctx, tx, t) // as the run gives it, so a dry run shows the same
+			if err != nil {
+				return ch, "", err
+			}
+			ch.Added = append(ch.Added, sp)
 		}
 	}
 	for _, t := range have {
@@ -251,6 +259,17 @@ func checkTagRow(ctx context.Context, tx *sql.Tx, r TagRow, ex exportInfo) (TagC
 		}
 	}
 	return ch, "", nil
+}
+
+// splitCell reads a tags cell as export_rows keeps it (JoinTags of tags that were stored, so each parses).
+func splitCell(cell string) []tags.Tag {
+	var out []tags.Tag
+	for _, part := range strings.Split(cell, ";") {
+		if t, err := tags.Parse(part); err == nil {
+			out = append(out, t)
+		}
+	}
+	return out
 }
 
 // sameTags reports whether a and b hold the same tags, in any case and order (each holds a tag once).

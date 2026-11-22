@@ -136,13 +136,17 @@ func TestUpdateTags(t *testing.T) {
 		}
 	})
 
-	t.Run("a dry run writes nothing", func(t *testing.T) {
+	t.Run("a dry run writes nothing, and shows the spelling the run would give", func(t *testing.T) {
 		e, id, k := setup(t)
 		e.s.changed = false
-		res, err := e.s.UpdateTags(e.ctx, []TagRow{{Line: 2, ExportID: id, FileID: k["a"].FileID}}, tagNow,
+		res, err := e.s.UpdateTags(e.ctx, []TagRow{{Line: 2, ExportID: id, FileID: k["a"].FileID},
+			{Line: 3, ExportID: id, FileID: k["b"].FileID, Tags: cell(t, "TYPE:BILL")}}, tagNow,
 			TagUpdateOptions{DryRun: true, ConfirmRemovals: func([]TagChange) bool { t.Error("asked"); return true }})
-		if err != nil || len(res.Changed) != 1 || res.Removing != 1 || e.s.changed {
+		if err != nil || len(res.Changed) != 2 || res.Removing != 1 || e.s.changed {
 			t.Errorf("dry run: %+v, %v, changed %v", res, err, e.s.changed)
+		}
+		if got := JoinTags(res.Changed[1].Added); got != "type:bill" {
+			t.Errorf("dry run adds %q, want type:bill", got)
 		}
 		if got := e.tagList(k["a"].FileID); got != "sender:British Gas; type:bill" {
 			t.Errorf("a's tags = %q", got)
@@ -164,6 +168,8 @@ func TestUpdateTags(t *testing.T) {
 		res, err := e.s.UpdateTags(e.ctx, []TagRow{
 			{Line: 2, ExportID: id, FileID: k["b"].FileID, Tags: cell(t, "x")},
 			{Line: 3, ExportID: id, FileID: k["c"].FileID, Tags: cell(t, "x")},
+			{Line: 7, ExportID: id, FileID: k["b"].FileID}, // left as exported: unchanged, though b was tagged since
+			{Line: 8, ExportID: id, FileID: k["c"].FileID}, // and though c was deleted since
 			{Line: 4, ExportID: 99, FileID: k["a"].FileID, Tags: cell(t, "x")},
 			{Line: 5, ExportID: retID, FileID: k["a"].FileID, Tags: cell(t, "x")},
 			{Line: 6, ExportID: id, FileID: 999, Tags: cell(t, "x")},
@@ -182,7 +188,7 @@ func TestUpdateTags(t *testing.T) {
 		for _, rf := range res.Refusals {
 			got = append(got, rf.Reason)
 		}
-		if strings.Join(got, "\n") != strings.Join(want, "\n") || len(res.Changed) != 0 {
+		if strings.Join(got, "\n") != strings.Join(want, "\n") || len(res.Changed) != 0 || res.Unchanged != 2 {
 			t.Errorf("refusals:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 		}
 	})
