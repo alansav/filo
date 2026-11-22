@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/alansav/filo/internal/tags"
@@ -64,9 +65,15 @@ func (s *Store) TagFiles(ctx context.Context, ids []int64, add []tags.Tag, now t
 		return res, err
 	}
 	defer tx.Rollback()
+	if err := checkNotDeleted(ctx, tx, ids); err != nil {
+		return res, err
+	}
 	var spelled []tags.Tag
 	for _, t := range add {
-		if containsTag(spelled, t) {
+		if i := slices.IndexFunc(spelled, t.Same); i >= 0 {
+			if spelled[i].Value != t.Value { // typed twice, in two spellings: the first is kept
+				res.Respelled = append(res.Respelled, Respelled{Typed: t, Spelled: spelled[i]})
+			}
 			continue
 		}
 		sp, err := spelling(ctx, tx, t)
@@ -107,6 +114,9 @@ func (s *Store) UntagFiles(ctx context.Context, ids []int64, remove []tags.Searc
 		return res, err
 	}
 	defer tx.Rollback()
+	if err := checkNotDeleted(ctx, tx, ids); err != nil {
+		return res, err
+	}
 	for _, id := range ids {
 		for _, q := range remove {
 			n, err := removeTags(ctx, tx, id, q, tagByUntag, now)
@@ -190,12 +200,26 @@ func recordTagChange(ctx context.Context, tx *sql.Tx, kind string, fileID int64,
 	return nil
 }
 
-// containsTag reports whether ts has t, in any case.
-func containsTag(ts []tags.Tag, t tags.Tag) bool {
-	for _, o := range ts {
-		if o.Same(t) {
-			return true
+// checkNotDeleted refuses ids that name no file, or a file filo deleted, whose tags no listing shows.
+func checkNotDeleted(ctx context.Context, tx *sql.Tx, ids []int64) error {
+	return inBatches(ids, func(in string, args []any) error {
+		var n int
+		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM files WHERE id IN (`+in+`) AND deleted_utc IS NULL`,
+			args...).Scan(&n); err != nil {
+			return fmt.Errorf("check files: %w", err)
 		}
+		if n != len(uniq(args)) {
+			return fmt.Errorf("tag files: a file is not in the register or was deleted by filo")
+		}
+		return nil
+	})
+}
+
+// uniq is args with each value once.
+func uniq(args []any) map[any]bool {
+	m := make(map[any]bool, len(args))
+	for _, a := range args {
+		m[a] = true
 	}
-	return false
+	return m
 }

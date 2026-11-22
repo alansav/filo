@@ -235,7 +235,7 @@ ALTER TABLE export_rows ADD COLUMN tags TEXT;
 }
 
 // tagsSQL is the tags, added in schema version 11. A file has a tag while it has a row in tags: its key (lower case;
-// ” for a bare tag), its value as spelled, and the value folded (tags.Fold), which it is matched on, so a file has
+// the empty string for a bare tag), its value as spelled, and the value folded (tags.Fold), which it is matched on, so a file has
 // each tag once in any case. The spelling is the tag's, the same for every file (the store gives a new file the
 // spelling the tag has already). Rows of a file deleted by filo stay, and are left out of every listing. tag_changes
 // is the history: every tag added or removed, by which command ('tag', 'untag', 'rename', 'update', 'scan' for the

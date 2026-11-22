@@ -100,8 +100,8 @@ func TestTagFiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(res.Changed) != 2 || len(res.Respelled) != 0 {
-		t.Errorf("first tagging: %+v", res)
+	if len(res.Changed) != 2 || len(res.Respelled) != 1 || res.Respelled[0].Spelled.Value != "bill" {
+		t.Errorf("first tagging: %+v", res) // TYPE:Bill is type:bill, typed first
 	}
 	if got := e.tagList(a); got != "sender:British Gas; type:bill" {
 		t.Errorf("a's tags = %q", got)
@@ -136,6 +136,22 @@ func TestTagFiles(t *testing.T) {
 		}
 	})
 
+	t.Run("a tag typed twice in two spellings is one, the first", func(t *testing.T) {
+		res, err := e.s.TagFiles(e.ctx, []int64{c}, []tags.Tag{mustTag(t, "kind:Gas"), mustTag(t, "kind:GAS")}, tagNow)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := e.tagList(c); got != "urgent; kind:Gas; sender:British Gas" {
+			t.Errorf("c's tags = %q", got)
+		}
+		if len(res.Respelled) != 1 || res.Respelled[0].Typed.Value != "GAS" || res.Respelled[0].Spelled.Value != "Gas" {
+			t.Errorf("Respelled = %+v", res.Respelled)
+		}
+		if _, err := e.s.UntagFiles(e.ctx, []int64{c}, []tags.Search{mustRemoval(t, "kind:")}, tagNow); err != nil {
+			t.Fatal(err)
+		}
+	})
+
 	t.Run("a deleted file's spelling is not the tag's", func(t *testing.T) {
 		if _, err := e.s.TagFiles(e.ctx, []int64{a}, []tags.Tag{mustTag(t, "project:Old")}, tagNow); err != nil {
 			t.Fatal(err)
@@ -152,10 +168,25 @@ func TestTagFiles(t *testing.T) {
 		}
 	})
 
+	t.Run("a file deleted by filo, or not in the register, is refused", func(t *testing.T) {
+		for _, ids := range [][]int64{{b, a}, {b, 999}} {
+			if _, err := e.s.TagFiles(e.ctx, ids, []tags.Tag{mustTag(t, "x")}, tagNow); err == nil {
+				t.Errorf("TagFiles(%v) succeeded", ids)
+			}
+			if _, err := e.s.UntagFiles(e.ctx, ids, []tags.Search{mustRemoval(t, "x")}, tagNow); err == nil {
+				t.Errorf("UntagFiles(%v) succeeded", ids)
+			}
+		}
+		if got := e.tagList(b); got != "project:OLD; sender:British Gas; type:bill" {
+			t.Errorf("b's tags = %q after a refusal", got)
+		}
+	})
+
 	want := []string{
 		"add tag sender:British Gas " + strconv.FormatInt(a, 10), "add tag type:bill " + strconv.FormatInt(a, 10),
 		"add tag sender:British Gas " + strconv.FormatInt(b, 10), "add tag type:bill " + strconv.FormatInt(b, 10),
 		"add tag sender:British Gas " + strconv.FormatInt(c, 10), "add tag urgent " + strconv.FormatInt(c, 10),
+		"add tag kind:Gas " + strconv.FormatInt(c, 10), "remove untag kind:Gas " + strconv.FormatInt(c, 10),
 		"add tag project:Old " + strconv.FormatInt(a, 10), "add tag project:OLD " + strconv.FormatInt(b, 10),
 	}
 	if got := e.tagHistory(); strings.Join(got, "\n") != strings.Join(want, "\n") {
