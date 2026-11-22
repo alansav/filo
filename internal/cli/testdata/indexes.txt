@@ -46,8 +46,7 @@ Remove index   tags.html . 10 files . <root>
   [!] .tags/notes.txt is not Filo's: it stays, and so does .tags/
 
 Remove the index and its 10 files? [y/N] 
-Done   removed 10 files
-  [!] .tags holds files that are not Filo's: it stays
+Done   removed 10 files . .tags/ kept, with the 1 file that is not Filo's
 
 $ filo indexes remove received
 Remove index   received/index.html . 8 files . <root>

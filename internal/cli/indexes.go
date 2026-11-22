@@ -153,11 +153,11 @@ func (e *env) indexAdd(ctx context.Context, s *store.Store, arg, name string) er
 // indexProblems lists what writing or removing an index's files left alone.
 func (e *env) indexProblems(ps []tagindex.Problem, ix store.TagIndex) {
 	for _, p := range ps {
-		where := ix.Rel(p.Path)
+		where, why := ix.Rel(p.Path), p.Why
 		if p.Path == "" {
-			where = e.indexPath(ix.RootPath, ix.Rel(ix.Page()))
+			where, why = e.indexPath(ix.RootPath, ix.Rel(ix.Page())), "not written: "+p.Why
 		}
-		e.view.Count(view.Attention, where+" "+p.Why)
+		e.view.Count(view.Attention, where+" "+why)
 	}
 }
 
@@ -190,19 +190,23 @@ func (e *env) indexList(ctx context.Context, s *store.Store) error {
 		if err != nil {
 			return err
 		}
-		d, err := tagindex.Build(ix, files)
-		if err != nil {
-			return err
-		}
 		written := "never written"
 		if ix.WrittenUTC != "" {
 			written = "written " + report.Time(ix.WrittenUTC)
 		}
-		row := view.TableRow{Cells: []string{report.Plural(int64(len(d.Files)), "file", "files"),
-			report.Plural(int64(d.Tags()), "tag", "tags"), written}}
-		if ix.Problem != "" {
+		problem := ix.Problem
+		tagCount := ""
+		// An index whose data cannot be built (two tags with one page) is listed all the same, with why: this is the
+		// list that says what is wrong.
+		if d, err := tagindex.Build(ix, files); err != nil {
+			problem = err.Error()
+		} else {
+			tagCount = report.Plural(int64(d.Tags()), "tag", "tags")
+		}
+		row := view.TableRow{Cells: []string{report.Plural(int64(len(files)), "file", "files"), tagCount, written}}
+		if problem != "" {
 			row.Attention = "not up to date"
-			row.Below = []string{ix.Problem}
+			row.Below = []string{problem}
 			flagged = append(flagged, ix)
 		}
 		rows = append(rows, row)
@@ -322,8 +326,29 @@ func (e *env) indexRemove(ctx context.Context, s *store.Store, arg, name string,
 		r.Outcome("Done", "removed "+r.Path(ix.RootPath, ix.Rel(ix.Page()))+" and "+r.Path(ix.RootPath, pagesDir)+"/")
 		return nil
 	}
-	r.Outcome("Done", "removed "+report.Plural(int64(res.Removed), "file", "files"))
-	e.indexProblems(res.Problems, ix)
+	// "Done   removed 12 files · records/.tags/ kept, with the 1 file that is not Filo's" (docs/design.md, Tag index
+	// pages): a directory kept is named with what kept it, listed above the question; anything else left is listed.
+	facts := []string{"removed " + report.Plural(int64(res.Removed), "file", "files")}
+	var rest []tagindex.Problem
+	for _, p := range res.Problems {
+		if p.Path == "" || ix.Files[p.Path] != "" || !strings.HasPrefix(p.Why, "holds files") {
+			rest = append(rest, p)
+			continue
+		}
+		n := 0
+		for _, l := range left {
+			if strings.HasPrefix(l.Path, p.Path+"/") {
+				n++
+			}
+		}
+		kept := r.Path(ix.RootPath, ix.Rel(p.Path)) + "/ kept"
+		if n > 0 {
+			kept += ", with the " + report.Plural(int64(n), "file that is", "files that are") + " not Filo's"
+		}
+		facts = append(facts, kept)
+	}
+	r.Outcome("Done", facts...)
+	e.indexProblems(rest, ix)
 	return errReported
 }
 
