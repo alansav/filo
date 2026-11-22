@@ -99,6 +99,7 @@ func TestKinds(t *testing.T) {
 		{"id,export,directory,name,size,modified,file_date,retention,keep_until,tags", false, false},
 		{"id,export,group,directory,name,action,tags", false, false},
 		{"a,b,c", false, false},
+		{"id,export,directory,name,size,modified,keep_until", false, false}, // a retention CSV of an older filo
 	} {
 		data := []byte(tc.header + "\n")
 		if IsTagsCSV(data) != tc.tags || LostTags(data) != tc.lost {

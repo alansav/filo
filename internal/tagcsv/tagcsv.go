@@ -38,10 +38,19 @@ func IsTagsCSV(data []byte) bool {
 }
 
 // LostTags reports whether data looks like a tags CSV whose tags column was lost: the columns of one but tags, and
-// none of a retention or duplicates CSV's own (file_date, retention, group).
+// none of a retention or duplicates CSV's own, of this design or an older one (file_date, retention, keep_until,
+// review_date, group).
 func LostTags(data []byte) bool {
 	sh, _ := sheet.Open(data, "id", "export", "directory", "name", "modified")
-	return sh != nil && !sh.Has("tags") && !sh.Has("file_date") && !sh.Has("retention") && !sh.Has("group")
+	if sh == nil || sh.Has("tags") {
+		return false
+	}
+	for _, other := range []string{"file_date", "retention", "keep_until", "review_date", "group"} {
+		if sh.Has(other) {
+			return false
+		}
+	}
+	return true
 }
 
 // WriteCSV writes items as one export, each with its tags cell. Times are shown in loc.
