@@ -450,7 +450,11 @@ func Scan(ctx context.Context, s *store.Store, opt Options) (Summary, error) {
 	}
 
 	// A new file takes its copies' tags.
-	if sum.CopyTags, err = copiesTags(ctx, s, &ch); err != nil {
+	missingNow := map[int64]bool{} // the files this scan finds missing: no longer present, so no copies
+	for _, g := range leftGone {
+		missingNow[g.fileID] = true
+	}
+	if sum.CopyTags, err = copiesTags(ctx, s, &ch, missingNow); err != nil {
 		return Summary{}, err
 	}
 
@@ -569,9 +573,10 @@ func linkText(target string, broken bool) string {
 
 // copiesTags gives each new regular file in ch the tags of the files present with its content, their union, once
 // (docs/design.md, Tags, "A copy keeps the tags"). A file whose content this scan changed is not a copy of what it
-// held. When the copies' tags differ, the new file gets a CopyTags event naming what it took; it returns how many
-// did.
-func copiesTags(ctx context.Context, s *store.Store, ch *store.Changes) (int, error) {
+// held, and a file in gone (found missing by this scan) is not present: a new file never takes the tags of a file it
+// may have been moved from, which a scan reports but never guesses. When the copies' tags differ, the new file gets
+// a CopyTags event naming what it took; it returns how many did.
+func copiesTags(ctx context.Context, s *store.Store, ch *store.Changes, gone map[int64]bool) (int, error) {
 	var hashes []string
 	seen := map[string]bool{}
 	for _, n := range ch.New {
@@ -599,7 +604,7 @@ func copiesTags(ctx context.Context, s *store.Store, ch *store.Changes) (int, er
 		}
 		var sets [][]tags.Tag
 		for _, c := range copies[n.Hash] {
-			if h, ok := nowHolds[c.FileID]; ok && h != n.Hash {
+			if h, ok := nowHolds[c.FileID]; (ok && h != n.Hash) || gone[c.FileID] {
 				continue
 			}
 			sets = append(sets, c.Tags)

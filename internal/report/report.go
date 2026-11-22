@@ -536,8 +536,10 @@ func EventParts(e store.Event) (word, from string) {
 		return "possible move", e.OtherPath
 	case store.EventDeleted:
 		return "deleted", ""
-	case store.EventSameAsDeleted, store.EventCopyTags:
+	case store.EventSameAsDeleted:
 		return "new", ""
+	case store.EventCopyTags:
+		return "took tags", ""
 	case store.EventOtherFS:
 		return "other filesystem", ""
 	}

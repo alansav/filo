@@ -81,7 +81,7 @@ func PrepareFile(ctx context.Context, s *store.Store, root store.Root, rel strin
 	p := &Pending{root: root, rel: rel, started: started}
 	p.ch.New = []store.NewFile{{Path: rel, Kind: string(walk.KindFile), Size: o.Size, MtimeNS: o.MtimeNS,
 		CtimeNS: o.CtimeNS, Hash: string(o.Sum), Ino: o.Ino}}
-	if p.copies, err = copiesTags(ctx, s, &p.ch); err != nil {
+	if p.copies, err = copiesTags(ctx, s, &p.ch, nil); err != nil {
 		return nil, "", err
 	}
 	if o.Size > 0 {

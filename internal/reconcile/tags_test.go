@@ -86,6 +86,11 @@ func TestScanCopiesTags(t *testing.T) {
 		{"a moved file keeps its own tags, and gives none", func(e *env) {
 			e.mv("a.pdf", "moved.pdf")
 		}, "moved.pdf", "sender:British Gas; type:bill", 0},
+		{"a file this scan finds missing gives none, even when the move is not paired", func(e *env) {
+			e.write("b/a.pdf", "bill")
+			e.write("c/a.pdf", "bill")
+			e.rm("a.pdf") // two places it may have gone: a scan never guesses which
+		}, "b/a.pdf", "", 0},
 		{"an empty file is no copy", func(e *env) {
 			e.write("empty1", "")
 			e.scan()
@@ -113,9 +118,8 @@ func TestScanCopiesTags(t *testing.T) {
 					t.Errorf("event = %+v", ev)
 				}
 			}
-			if got := e.tagsOf("a.pdf"); e.known()["a.pdf"].FileID != 0 && tt.rel != "moved.pdf" &&
-				!strings.Contains(got, "type:bill") {
-				t.Errorf("the original's tags = %q", got)
+			if _, ok := e.known()["a.pdf"]; ok && !strings.Contains(e.tagsOf("a.pdf"), "type:bill") {
+				t.Errorf("the original's tags = %q", e.tagsOf("a.pdf"))
 			}
 		})
 	}
