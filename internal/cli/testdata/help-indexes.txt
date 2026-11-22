@@ -1,0 +1,31 @@
+filo indexes
+filo indexes add [DIR] [--name NAME]
+filo indexes remove [DIR] [--name NAME] [-y]
+filo indexes refresh [DIR] [--name NAME]
+
+  A tag index is a set of HTML pages that list the files under a directory, at
+  any depth, by tag, to browse and tap instead of typing searches: a main page
+  of keys, a page per key of its values, a page per tag of its files, and the
+  files with no tags. Each file opens from its page. The links are relative, so
+  the pages work on any device that syncs the directory, and nothing is fetched
+  from the network.
+
+  add declares an index on DIR (the current directory if not given) and writes
+  its pages: NAME.html in DIR, and the other pages and a stylesheet in
+  DIR/.NAME/ (NAME is index unless given). From then on every command that
+  changes the register brings them up to date, and says nothing unless it
+  cannot. Scans skip both paths.
+
+  Filo replaces or removes only the files it wrote, and only while they are as
+  it wrote them: a page edited by hand, or a file put in .NAME/, is left alone
+  and reported, and the command exits 1. Move it aside, then refresh writes the
+  pages again. filo indexes lists the indexes and what is wrong with each.
+
+  remove lists what it will remove and asks first. A file that is not Filo's
+  stays, and so does the directory holding it; remove then exits 1.
+
+Flags
+  --name NAME              add: the pages' name (letters, digits, - and _);
+                           remove and refresh: which index of DIR, when it has
+                           several
+  -y                       remove: remove without asking
