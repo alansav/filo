@@ -342,14 +342,65 @@ Agreed with the person on 2026-11-20. Tab completes Filo's commands, flags and a
   every command's parsing.
 
 ### 38. Tag index pages (V6, C4)
-Proposed by the person on 2026-11-21, to come straight after tags (18a, built 2026-11-22): Filo writes a set of
-HTML pages that list files by tag, to browse and click instead of typing searches. A main page links to one page per tag key (`sender`), which
-lists its values (each sender) with links to a page of each value's files, each file a link that opens it. A
-read-only view of the register written out as static pages, far cheaper than a UI (Later c). Overlaps 18b's
-markdown project notes and may replace them (to settle when it is designed). Known questions, from 18b: where the
-pages are written (more than one `-o` file; the Filo directory, 20, or a directory named by the person); a link to a
-file works on another device only when page and file share a synced directory; file names and tags are untrusted,
-so every text is escaped for HTML; the output is deterministic so syncing it makes no conflict copies.
+Proposed by the person on 2026-11-21, to come straight after tags (18a, built 2026-11-22); designed with the person
+on 2026-11-22. Filo writes HTML pages that list files by tag, to browse and tap instead of typing searches: a
+read-only view of the register written out as static pages, far cheaper than a UI (Later c). An index is declared
+once on a directory (one per role, say) and kept up to date by Filo, so its links can be relative: on any device
+that syncs the directory, the pages and the files are side by side (a relative link tested on the person's phone
+opens the file). It may replace 18b's markdown project notes (to settle with 18b).
+
+- **Declaring.** `filo indexes add [DIR] [--name NAME]` (DIR defaults to the current directory, NAME to `index`)
+  creates `DIR/NAME.html` and `DIR/.NAME/` (the other pages and `style.css`), and writes the pages. Refused if
+  either already exists, or if DIR is not in a root. The index is stored in the register. `filo indexes` lists them
+  (directory, name, files, tags, last written). `filo indexes remove [DIR] [--name NAME]` removes an index and its
+  files, after showing what it will remove and asking (or `-y`). `filo indexes refresh [DIR] [--name NAME]` (no DIR:
+  every index) renders the pages again even when the data is unchanged, for example after moving aside a page Filo
+  refused to replace.
+- **Scans skip them.** The two exact paths of each index are skipped by every scan, whatever the root's hidden
+  setting. Not through the root's ignore names: those match a name anywhere in the root, and would hide every real
+  `index.html` in it.
+- **Ownership.** Filo keeps the hash of every file it writes, and replaces or removes one only while it is still
+  exactly what Filo wrote. A file that is not (a page edited by hand, a file dropped into `.NAME/`) is left alone and
+  listed, and the command exits 1.
+- **The hard rule** gains one exception: the files of a tag index, created only where nothing exists, replaced or
+  removed only while still exactly what Filo wrote, and a whole index removed only by `filo indexes remove`. One
+  package, `internal/tagindex`, is the only code that writes them (a guard test, as for the output). These are
+  Filo's files, not the person's, so `internal/dispose` stays the only code that deletes the person's files.
+- **When.** After every command that commits a change to the register (choosing the commands would be easy to get
+  wrong when one is added). Data first (the person's idea): Filo builds the index's data, hashes it in a fixed
+  encoding and renders nothing when the hash is the one stored; otherwise it writes only the pages whose content
+  changed (a temporary file renamed over), and removes the pages no longer needed. Commands that only read never
+  write. A failure, or an index directory that cannot be reached, gives one `filo:` line saying the command's own
+  change was made but the index was not written, and exit 1; the next command that commits tries again.
+- **Rendering.** Go's `html/template`, its templates and the stylesheet embedded in the binary. Not XSLT: Go has
+  none (a cgo binding would be a dependency and break the static build; `xsltproc` would have to be installed on
+  every device), and `html/template` escapes each value for where it lands, as untrusted names and tags need. The
+  output is deterministic (sorted, no timestamps), so syncing it makes no conflict copies. No JavaScript.
+- **Pages.**
+  - `NAME.html`: each key with its number of values and files; "other tags" (the bare tags); and, in a section of
+    its own, "11 files have no tags", linking to `.NAME/_untagged.html`.
+  - `.NAME/<key>.html`: the key's values, each with its number of files; and, in a section of its own, "34 files
+    have no sender tag", linking to `.NAME/<key>/_none.html`. A tag can be spelled almost any way (`sender:no
+    sender` is one), so these are told apart by their place and wording, and by page names no tag page has.
+  - `.NAME/<key>/<slug>-<hash>.html`: the value's files. The slug holds only `a-z`, `0-9` and `-`; the hash is a
+    short one of the key and the folded value. The slug alone would make different tags one name (`British Gas`
+    and `British-Gas`; values with no Latin letters; values too long for a file name); with the hash, a tag's page
+    has the same name on every run and device, and keeps it when only its case is renamed, so bookmarks keep
+    working.
+  - Each file row: its name (a relative link, each part URL-encoded, that opens the file), its directory, its date,
+    and its other tags, each a link to that tag's page. No size, retention, keep-until or duplicates: the pages are
+    for finding files. A trail at the top of each page (bills › sender › British Gas).
+  - The files: those in the register, present now, under DIR at any depth (each path of a hard link its own row);
+    newest first by `file_date`, else modification time, then path. A link is as fresh as the last scan. Indexes
+    nested in one another are independent.
+- **Look.** One local stylesheet: system fonts, nothing remote (it works offline), a viewport meta tag, one column,
+  rows as cards on a narrow screen, tap targets of at least 44px, tags as chips, dark mode by
+  `prefers-color-scheme`.
+- **Slices** (proposed): 1. the register (schema 12: indexes, the files written and the data hash) and
+  `filo indexes add`, list and `remove`, with scans skipping index paths; 2. `internal/tagindex`: the data, its hash,
+  the pages and stylesheet (golden HTML files), the ownership checks; 3. writing after every command that commits,
+  `filo indexes refresh`, the hard-rule text, README and help. The output of `filo indexes` is mocked with the
+  person before its slice.
 
 ### Docs
 
