@@ -1658,7 +1658,8 @@ so files can be found by tag; a project is a tag (`project:house sale`).
   notes come after them in brackets, so no tag reads as one (`could not be read`); piped and with `-0`, the list is
   paths only, as before. A file with hard links is one file to `find` (see Finding files), and the register keeps
   each link as a file of its own, each with its own tags: `find` takes the tags of all its links together, so a file
-  tagged through one link is tagged. `filo show FILE` lists the file's tags.
+  tagged through one link is tagged. `filo show FILE` has a Tags part: how many, then one tag a line (or `none`), so
+  a tag named `none` cannot be mistaken; a file deleted by Filo shows the tags it had, `as when it was deleted`.
 - **The tags CSV**: `filo export tags [DIR] -o FILE [--no-scan] [--workers N]`, a scan first as every export, and
   read back by `filo update FILE [--dry-run]`, which tells it from a retention or duplicates CSV by its header.
   Columns: `id, export, directory, name, size, modified, tags`; every present file under DIR (every root with no

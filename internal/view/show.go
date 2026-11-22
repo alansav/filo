@@ -107,7 +107,8 @@ type ListRow struct {
 }
 
 // List writes a directory's entries under a Part, indented by four, names and sizes in columns, then the status:
-// "    2019-04 Council Tax.pdf   88 KiB   [!] expired 2026-11-01".
+// "    2019-04 Council Tax.pdf   88 KiB   [!] expired 2026-11-01". Names with no size and no status (a file's tags)
+// are written alone.
 func (r *Renderer) List(rows []ListRow) {
 	nameW, sizeW := 0, 0
 	for _, row := range rows {
@@ -115,8 +116,13 @@ func (r *Renderer) List(rows []ListRow) {
 		sizeW = max(sizeW, width(plain(row.Size)))
 	}
 	for _, row := range rows {
-		spans := []span{spaces(4), name(row.Name), spaces(nameW - width(name(row.Name)) + 3),
-			spaces(sizeW - width(plain(row.Size))), plain(row.Size)}
+		spans := []span{spaces(4), name(row.Name)}
+		if sizeW == 0 && row.Status == "" && !row.Attention {
+			r.write(spans...) // names alone (a file's tags): no columns to line up after them
+			continue
+		}
+		spans = append(spans, spaces(nameW-width(name(row.Name))+3), spaces(sizeW-width(plain(row.Size))),
+			plain(row.Size))
 		if row.Status != "" || row.Attention {
 			spans = append(spans, spaces(3))
 		}

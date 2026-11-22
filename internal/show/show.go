@@ -236,17 +236,24 @@ func (f File) Render(v *view.Renderer, n, total int, today string, history bool)
 	}
 }
 
-// renderTags writes the file's tags as the facts of a part: "Tags   sender:British Gas · type:bill", or "none".
+// renderTags writes the file's tags: a part counting them ("Tags   2 tags", or "none"), then one tag a line, so a
+// tag that holds the separator, or reads "none", cannot be mistaken. A file filo deleted keeps them in the register,
+// though no listing shows them: the part says so.
 func (f File) renderTags(v *view.Renderer) {
 	if len(f.Tags) == 0 {
 		v.Part("Tags", "none")
 		return
 	}
-	names := make([]string, len(f.Tags))
-	for i, t := range f.Tags {
-		names[i] = t.String()
+	facts := []string{view.Plural(int64(len(f.Tags)), "tag", "tags")}
+	if f.DeletedUTC != "" {
+		facts = append(facts, "as when it was deleted")
 	}
-	v.Part("Tags", names...)
+	v.Part("Tags", facts...)
+	rows := make([]view.ListRow, len(f.Tags))
+	for i, t := range f.Tags {
+		rows[i] = view.ListRow{Name: t.String()}
+	}
+	v.List(rows)
 }
 
 // seen is when Filo saw a file at a path: "2026-11-12 to 2026-11-13", or "2026-11-13 to now".
