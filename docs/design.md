@@ -1666,11 +1666,17 @@ so files can be found by tag; a project is a tag (`project:house sale`).
   DIR). The `tags` cell holds the file's tags, separated by `; `, in the order `filo tags` lists them. **The cell
   replaces the file's tags:** a tag not in it is removed, so an untouched cell changes nothing and an emptied one
   removes all. Cells are read with the spelling rules, so `type:Bill` on a file tagged `type:bill` changes nothing
-  (the first spelling stays: `filo tags rename` changes it), and a tag typed twice is one. A row whose file's tags
-  changed since the export (tagged by command meanwhile) is refused, as a changed file is for retention, and so is a
-  row with a tag that breaks the spelling rules; the other rows still apply. An update that removes tags asks first
-  in a terminal (`Remove them? [y/N]`, `-y` answers yes; no terminal: nothing changes), since an emptied column
-  (a spreadsheet that lost it on a save) would remove every tag at once.
+  (the first spelling stays: `filo tags rename` changes it), and a tag typed twice is one. A cell left as exported
+  is no decision, whatever happened to the file since, and a cell with the tags the file has already changes nothing
+  (a CSV applied twice). A row whose file's tags changed since the export (by `tag`, `untag` or `tags rename`) to
+  others than the cell's is refused, as a changed file is for retention, and so are a row with a tag that breaks the
+  spelling rules, a file deleted by Filo since, and a file listed twice (even under two exports); the other rows still
+  apply. A cell that starts with a character a spreadsheet would read as a formula (`=`, `+`, `-`, `@`), or with an
+  apostrophe, is written after an apostrophe, which the update drops. An update that removes tags lists those rows
+  and asks first (`Remove them? [y/N/l]`), as clearing a retention does, since an emptied column (a spreadsheet that
+  lost it on a save) would remove every tag at once; there is no `-y`, as there is none for clearing a retention. No,
+  or no terminal, leaves those rows as they were; the other rows are recorded either way. Ctrl-C at the question
+  records nothing.
 - **Register (schema version 11)**: a `tags` table on file ids (the key, the value as spelled and its folded form),
   and `tag_changes`, the history of every tag added or removed and by which command, so each change can be written
   to the journal later (9c) without rework. `export_rows` gain `tags`, the cell as exported.
