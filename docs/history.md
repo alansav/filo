@@ -540,7 +540,8 @@ arguments on the disk, so a tag that names something in the current directory is
 all or nothing and do not ask; `untag` and `tags rename` take `key:` for every value; a bare search finds bare tags
 only; a file not seen yet is registered as a scan whose scope is the file; the scan says so only when copies' tags
 differed; `filo tags` is laid out as `filo policies`; `filo show` lists the tags; `filo update` asks before removing
-tags, with no `-y`, as for clearing a retention.
+tags. It had no `-y` at first, as clearing a retention has none; once the item was done the person asked for one
+(2026-11-22), and `-y` now answers that question only (with a retention CSV it is a usage error).
 
 Slices and commits, lower layers first:
 1. *The register and the spelling rules*: the design moved in; `internal/tags` (`Parse`, `ParseSearch`,
