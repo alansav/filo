@@ -1,0 +1,10 @@
+filo tags
+filo tags rename OLD NEW
+
+  Lists every tag in use with how many files have it (files deleted by filo do
+  not count), and how many files have a tag and how many none.
+
+  tags rename gives every file that has OLD the tag NEW instead, spelled as
+  typed: it fixes a typo in a key or a value, or changes only the case
+  (sender:british gas to sender:British Gas). With key: for both (sendr:
+  sender:) it renames the key of every value. A file that has both keeps one.

@@ -3,7 +3,7 @@ package store
 // SchemaVersion is the schema this build reads and writes. It is stored in meta.schema_version when a database is
 // created. An older database with a migration in migrations is upgraded when it is opened; any other version is
 // refused.
-const SchemaVersion = 10
+const SchemaVersion = 11
 
 // Meta keys.
 const (
@@ -89,9 +89,9 @@ CREATE TABLE events (
     other_path TEXT,
     detail TEXT
 );
-` + reviewSQL + duplicatesSQL + policiesSQL + rulesSQL
+` + reviewSQL + duplicatesSQL + policiesSQL + rulesSQL + tagsSQL
 
-// reviewSQL is the export and review tables, as of schema version 8.
+// reviewSQL is the export and review tables, as of schema version 11.
 const reviewSQL = `
 CREATE TABLE exports (
     id INTEGER PRIMARY KEY,
@@ -110,6 +110,7 @@ CREATE TABLE export_rows (
     retention TEXT,
     dup_group INTEGER,                      -- duplicates exports: the group number in the CSV
     path_id INTEGER REFERENCES paths(id),   -- duplicates exports: the path shown
+    tags TEXT,                              -- tags exports: the cell as exported
     PRIMARY KEY (export_id, file_id)
 );
 
@@ -227,7 +228,40 @@ ALTER TABLE files ADD COLUMN policy_id INTEGER;
 ALTER TABLE files ADD COLUMN rule_id INTEGER;
 ALTER TABLE files ADD COLUMN rule_dated_utc TEXT;
 ` + rulesSQL,
+	// 10 -> 11: tags (docs/design.md, Tags). Only new tables and a column: no file has a tag yet.
+	10: `
+ALTER TABLE export_rows ADD COLUMN tags TEXT;
+` + tagsSQL,
 }
+
+// tagsSQL is the tags, added in schema version 11. A file has a tag while it has a row in tags: its key (lower case;
+// the empty string for a bare tag), its value as spelled, and the value folded (tags.Fold), which it is matched on, so a file has
+// each tag once in any case. The spelling is the tag's, the same for every file (the store gives a new file the
+// spelling the tag has already). Rows of a file deleted by filo stay, and are left out of every listing. tag_changes
+// is the history: every tag added or removed, by which command ('tag', 'untag', 'rename', 'update', 'scan' for the
+// tags a new file took from its copies), for the journal of decisions shared between devices (roadmap item 9c).
+const tagsSQL = `
+CREATE TABLE tags (
+    file_id INTEGER NOT NULL REFERENCES files(id),
+    key TEXT NOT NULL,
+    value TEXT NOT NULL,
+    folded TEXT NOT NULL,
+    added_utc TEXT NOT NULL,
+    PRIMARY KEY (file_id, key, folded)
+);
+CREATE INDEX ix_tags_tag ON tags(key, folded);
+
+CREATE TABLE tag_changes (
+    id INTEGER PRIMARY KEY,
+    kind TEXT NOT NULL,                     -- 'add' or 'remove'
+    file_id INTEGER NOT NULL REFERENCES files(id),
+    key TEXT NOT NULL,
+    value TEXT NOT NULL,                    -- as spelled
+    command TEXT NOT NULL,
+    changed_utc TEXT NOT NULL
+);
+CREATE INDEX ix_tag_changes_file ON tag_changes(file_id);
+`
 
 // rulesSQL is the directory rules, added in schema version 10. A rule names a policy for the files under a directory
 // of a root ('/'-separated, relative to the root, the empty path for the root itself) whose name matches its pattern

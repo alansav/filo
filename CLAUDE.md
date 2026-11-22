@@ -16,13 +16,14 @@ done, and `design.md` only what exists.
 
 ## Current state
 
-Everything `docs/design.md` describes is built and merged (schema 10): scan, register and report; retention through
+Everything `docs/design.md` describes is built and merged (schema 11): scan, register and report; retention through
 the retention CSV (`filo export retention`, `filo update`); `filo delete [DIR] [-y]`, which deletes a file only after
 it is re-read and found unchanged; register snapshots; duplicates (`filo delete FILE.csv`, `filo duplicates`); the
 terminal output (every command prints through `internal/view`); named retention policies (`filo policies`); directory
 rules (`filo rules`); showing and setting a file's details (`filo show`, `filo set`, `filo get`); finding files
-(`filo find`). What is next is in `docs/roadmap.md`, Priority (provisional, reordered 2026-11-21: 18a tags, 38 tag
-index pages, 36 bash completion, then the sync items).
+(`filo find`); tags (`filo tag`, `untag`, `tags`, `find --tag`, the tags CSV; on branch `tags` until merged). What is
+next is in `docs/roadmap.md`, Priority (provisional, reordered 2026-11-21: 38 tag index pages, 36 bash completion,
+then the sync items).
 **`internal/dispose` is the only code allowed to delete the user's files**, and only from `filo delete`; everything
 else stays read-only on them, and nothing overwrites an existing file without asking (only an `-o` output file,
 see the hard rules). Stay inside the current piece of work.

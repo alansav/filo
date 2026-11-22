@@ -1,0 +1,40 @@
+$ filo find --tag 'sender:british gas' --no-scan
+Found   2 files . 26 B . tagged sender:british gas . <root>
+  - not scanned first: as of the last scan, <time>
+
+    modified     size
+    2026-10-02   14 B
+      received/2026/09/2026-09-02 British Gas Bill.pdf   sender:British Gas; type:bill
+    2026-10-03   12 B
+      received/2026/10/2026-10-03 British Gas Bill.pdf   urgent; sender:British Gas; type:bill
+
+$ filo find --tag type: --no-tag urgent --no-scan
+Found   1 file . 14 B . tagged type: . not tagged urgent . <root>
+  - not scanned first: as of the last scan, <time>
+
+    modified     size
+    2026-10-02   14 B
+      received/2026/09/2026-09-02 British Gas Bill.pdf   sender:British Gas; type:bill
+
+$ filo find --no-tag sender: --no-scan
+Found   3 files . 16 B . not tagged sender: . <root>
+  - not scanned first: as of the last scan, <time>
+
+    modified     size
+    2026-10-14   11 B   house/gas safety certificate.pdf   project:house
+    2026-10-21    0 B   notes/empty.txt
+    2026-10-20    5 B   notes/ideas.txt
+
+$ filo find --name '*gas*' --tag 'project:*' --no-scan
+Found   1 file . 11 B . named *gas* . tagged project:* . <root>
+  - not scanned first: as of the last scan, <time>
+
+    modified     size
+    2026-10-14   11 B   house/gas safety certificate.pdf   project:house
+
+$ filo find --tag type:invoice --no-scan
+Found   no files . tagged type:invoice . <root>
+  - not scanned first: as of the last scan, <time>
+
+Next: check the tags: filo tags lists them; key: finds any value, and * any run of characters
+

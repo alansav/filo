@@ -2,6 +2,8 @@ package walk
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -31,4 +33,40 @@ func CheckIgnore(name string) error {
 		return fmt.Errorf("ignore %q: must be a plain file or directory name", name)
 	}
 	return nil
+}
+
+// SkipsPath reports whether a walk of root with these settings never records the file at rel ('/'-separated,
+// relative to root): a name on the way that Skips, a directory filo delete left behind (DeletingPrefix), or bin or
+// obj in a directory that holds a project file. A directory that cannot be listed counts as holding none.
+func SkipsPath(root, rel string, includeHidden bool, ignore []string) bool {
+	names := strings.Split(rel, "/")
+	dir := root
+	for i, name := range names {
+		if Skips(name, includeHidden, ignore) {
+			return true
+		}
+		last := i == len(names)-1
+		if !last && strings.HasPrefix(name, DeletingPrefix) {
+			return true
+		}
+		if !last && (name == "bin" || name == "obj") && holdsProject(dir) {
+			return true
+		}
+		dir = filepath.Join(dir, name)
+	}
+	return false
+}
+
+// holdsProject reports whether the directory holds a project file (.csproj, .fsproj), whose bin and obj a walk skips.
+func holdsProject(dir string) bool {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false
+	}
+	for _, de := range entries {
+		if de.Type().IsRegular() && isProjectFile(de.Name()) {
+			return true
+		}
+	}
+	return false
 }

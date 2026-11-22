@@ -206,8 +206,8 @@ func (f File) status() (string, bool) {
 	return string(f.Status), false
 }
 
-// Render writes the file: its title line (with [n/total] when total > 1), then its File, Retention and Copies parts,
-// and with history every path it has had. today (YYYY-MM-DD) is for the time left.
+// Render writes the file: its title line (with [n/total] when total > 1), then its File, Retention, Tags (a regular
+// file) and Copies parts, and with history every path it has had. today (YYYY-MM-DD) is for the time left.
 func (f File) Render(v *view.Renderer, n, total int, today string, history bool) {
 	st, attention := f.status()
 	dir := path.Dir(f.Path)
@@ -222,6 +222,9 @@ func (f File) Render(v *view.Renderer, n, total int, today string, history bool)
 	v.Fields(w, file)
 	v.Part("Retention")
 	v.Fields(w, retention)
+	if f.Kind == "file" {
+		f.renderTags(v)
+	}
 	f.renderCopies(v)
 	if history {
 		v.Part("Paths", view.Plural(int64(len(f.Paths)), "path", "paths")+", newest first")
@@ -231,6 +234,26 @@ func (f File) Render(v *view.Renderer, n, total int, today string, history bool)
 		}
 		v.Files(view.FileList{Rows: rows})
 	}
+}
+
+// renderTags writes the file's tags: a part counting them ("Tags   2 tags", or "none"), then one tag a line, so a
+// tag that holds the separator, or reads "none", cannot be mistaken. A file filo deleted keeps them in the register,
+// though no listing shows them: the part says so.
+func (f File) renderTags(v *view.Renderer) {
+	if len(f.Tags) == 0 {
+		v.Part("Tags", "none")
+		return
+	}
+	facts := []string{view.Plural(int64(len(f.Tags)), "tag", "tags")}
+	if f.DeletedUTC != "" {
+		facts = append(facts, "as when it was deleted")
+	}
+	v.Part("Tags", facts...)
+	rows := make([]view.ListRow, len(f.Tags))
+	for i, t := range f.Tags {
+		rows[i] = view.ListRow{Name: t.String()}
+	}
+	v.List(rows)
 }
 
 // seen is when Filo saw a file at a path: "2026-11-12 to 2026-11-13", or "2026-11-13 to now".

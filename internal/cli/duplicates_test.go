@@ -70,7 +70,7 @@ func TestUpdateRefusesDuplicatesCSV(t *testing.T) {
 	ct.filo(ExitOK, "", false, "export", "duplicates", "-o", dcsv)
 	editCSV(t, dcsv, setAction(map[string]string{ct.in("a/contract.pdf"): "keep", ct.in("b/contract.pdf"): "delete"}))
 	r := ct.filo(ExitError, "", false, "update", dcsv)
-	if want := "filo: " + dcsv + " is a duplicates CSV: filo update records retentions only; carry it out with " +
+	if want := "filo: " + dcsv + " is a duplicates CSV: filo update records retentions and tags only; carry it out with " +
 		"filo delete " + dcsv + "\n"; r.stderr != want || r.stdout != "" {
 		t.Errorf("stdout %q, stderr %q; want only %q", r.stdout, r.stderr, want)
 	}

@@ -28,8 +28,8 @@ func TestMigrateFromV9(t *testing.T) {
 			VALUES (1, 'file', 3, 1, 'a', 1, '2020-01-01', 1, '2027-01-01')`)
 	s := mustOpen(t, Options{DBPath: db})
 	defer mustClose(t, s)
-	if v := readMeta(t, s)[metaSchemaVersion]; v != strconv.Itoa(SchemaVersion) || SchemaVersion != 10 {
-		t.Fatalf("schema_version = %s after upgrade, want 10", v)
+	if v := readMeta(t, s)[metaSchemaVersion]; v != strconv.Itoa(SchemaVersion) {
+		t.Fatalf("schema_version = %s after upgrade, want %d", v, SchemaVersion)
 	}
 	var policy, keep string
 	var rule, dated *string

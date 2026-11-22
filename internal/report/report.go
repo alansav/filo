@@ -538,6 +538,8 @@ func EventParts(e store.Event) (word, from string) {
 		return "deleted", ""
 	case store.EventSameAsDeleted:
 		return "new", ""
+	case store.EventCopyTags:
+		return "took tags", ""
 	case store.EventOtherFS:
 		return "other filesystem", ""
 	}

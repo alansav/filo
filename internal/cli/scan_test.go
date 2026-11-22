@@ -8,6 +8,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/alansav/filo/internal/store"
+	"github.com/alansav/filo/internal/tags"
 )
 
 // took matches how long a scan took, which differs between runs.
@@ -93,4 +96,46 @@ func TestDuration(t *testing.T) {
 			t.Errorf("duration(%d ms) = %q, want %q", tc.ms, got, tc.want)
 		}
 	}
+}
+
+// TestScanCopyTags: a new file that took the tags of copies whose tags differed is counted and listed with what it
+// took; one that took matching tags is not (docs/design.md, Tags, "A copy keeps the tags").
+func TestScanCopyTags(t *testing.T) {
+	ct := newCLITest(t)
+	ct.write("a.pdf", "bill")
+	ct.write("b.pdf", "bill")
+	ct.write("c.txt", "note")
+	ct.filo(ExitOK, "", false, "roots", "add", ct.root)
+	s, err := store.Open(ct.ctx, store.Options{DBPath: ct.db})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ks, err := s.Known(ct.ctx, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := map[string]int64{}
+	for _, k := range ks {
+		ids[k.Path] = k.FileID
+	}
+	add := func(rel, tag string) {
+		tg, err := tags.Parse(tag)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.TagFiles(ct.ctx, []int64{ids[rel]}, []tags.Tag{tg}, time.Now()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	add("a.pdf", "type:bill")
+	add("c.txt", "type:note")
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	ct.write("inbox/copy.pdf", "bill")
+	ct.write("inbox/copy.txt", "note")
+	out := ct.filo(ExitOK, "", false, "scan").stdout
+	ct.contains("scan", out, "1 new file took the tags of copies that differed: check with filo show",
+		"inbox/copy.pdf   took the tags of copies that differed: type:bill")
+	ct.lacks("scan", out, "inbox/copy.txt   took")
 }
