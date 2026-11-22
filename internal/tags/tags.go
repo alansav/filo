@@ -132,6 +132,7 @@ func split(s string) (Tag, error) {
 		}
 	}
 	if key, value, ok := strings.Cut(text, ":"); ok && ValidKey(key) {
+		// strings.ToLower maps each letter to one letter (İ to i), so the key stays a valid key.
 		return Tag{Key: strings.ToLower(key), Value: strings.TrimSpace(value)}, nil
 	}
 	return Tag{Value: text}, nil
@@ -180,10 +181,12 @@ func foldRune(r rune) rune {
 	return least
 }
 
-// Match reports whether value matches pattern ignoring case: * matches any run of characters (none included), every
-// other character only itself in any case. A pattern with no * matches the whole value exactly.
-func Match(pattern, value string) bool {
-	p, n := []rune(Fold(pattern)), []rune(Fold(value))
+// Match reports whether name matches pattern ignoring case: * matches any run of characters (none included), every
+// other character only itself in any case (Unicode simple case folding, so "BILL" matches "bill", as Fold compares).
+// A pattern with no * matches the whole name exactly. ? and [ are ordinary characters. A byte that is not valid UTF-8
+// matches only the same byte. It is the one matcher of filo find, for --name and --tag alike.
+func Match(pattern, name string) bool {
+	p, n := chars(pattern), chars(name)
 	// The usual * backtracking: on a mismatch, let the last * take one more character.
 	pi, ni, star, mark := 0, 0, -1, 0
 	for ni < len(n) {
@@ -191,7 +194,7 @@ func Match(pattern, value string) bool {
 		case pi < len(p) && p[pi] == '*':
 			star, mark = pi, ni
 			pi++
-		case pi < len(p) && p[pi] == n[ni]:
+		case pi < len(p) && sameFolded(p[pi], n[ni]):
 			pi++
 			ni++
 		case star >= 0:
@@ -205,4 +208,31 @@ func Match(pattern, value string) bool {
 		pi++
 	}
 	return pi == len(p)
+}
+
+// chars splits s into its characters, a byte that is not valid UTF-8 as its negative value minus one, so it is never
+// taken for U+FFFD or for another invalid byte.
+func chars(s string) []rune {
+	out := make([]rune, 0, len(s))
+	for len(s) > 0 {
+		r, size := utf8.DecodeRuneInString(s)
+		if r == utf8.RuneError && size <= 1 {
+			r = -rune(s[0]) - 1
+		}
+		out = append(out, r)
+		s = s[size:]
+	}
+	return out
+}
+
+// sameFolded reports whether a and b are the same character ignoring case: in one Unicode simple folding orbit, so
+// exactly when foldRune gives them the same form. An invalid byte (negative, see chars) is only itself.
+func sameFolded(a, b rune) bool {
+	if a == b {
+		return true
+	}
+	if a < 0 || b < 0 {
+		return false
+	}
+	return foldRune(a) == foldRune(b)
 }

@@ -4,72 +4,16 @@ package find
 
 import (
 	"path"
-	"unicode"
-	"unicode/utf8"
 
 	"github.com/alansav/filo/internal/store"
+	"github.com/alansav/filo/internal/tags"
 )
 
 // Match reports whether name matches pattern: * matches any run of characters (none included), every other
 // character only itself, ignoring case (Unicode simple case folding, so "BILL" matches "bill"). A pattern with no *
 // matches the whole name exactly. ? and [ are ordinary characters. A byte that is not valid UTF-8 matches only the
-// same byte.
-func Match(pattern, name string) bool {
-	p, n := chars(pattern), chars(name)
-	// The usual * backtracking: on a mismatch, let the last * take one more character.
-	pi, ni, star, mark := 0, 0, -1, 0
-	for ni < len(n) {
-		switch {
-		case pi < len(p) && p[pi] == '*':
-			star, mark = pi, ni
-			pi++
-		case pi < len(p) && sameFolded(p[pi], n[ni]):
-			pi++
-			ni++
-		case star >= 0:
-			mark++
-			pi, ni = star+1, mark
-		default:
-			return false
-		}
-	}
-	for pi < len(p) && p[pi] == '*' {
-		pi++
-	}
-	return pi == len(p)
-}
-
-// chars splits s into its characters, a byte that is not valid UTF-8 as its negative value minus one, so it is never
-// taken for U+FFFD or for another invalid byte.
-func chars(s string) []rune {
-	out := make([]rune, 0, len(s))
-	for len(s) > 0 {
-		r, size := utf8.DecodeRuneInString(s)
-		if r == utf8.RuneError && size <= 1 {
-			r = -rune(s[0]) - 1
-		}
-		out = append(out, r)
-		s = s[size:]
-	}
-	return out
-}
-
-// sameFolded reports whether a and b are the same character ignoring case: equal under Unicode simple folding. An
-// invalid byte (negative, see chars) is only itself.
-func sameFolded(a, b rune) bool {
-	if a == b {
-		return true
-	}
-	if a < 0 || b < 0 {
-		return false
-	}
-	for f := unicode.SimpleFold(a); f != a; f = unicode.SimpleFold(f) {
-		if f == b {
-			return true
-		}
-	}
-	return false
-}
+// same byte. It is tags.Match, so --name and --tag match alike.
+func Match(pattern, name string) bool { return tags.Match(pattern, name) }
 
 // File is one file filo find lists: at the first of its paths that matched, with how many other paths it has (hard
 // links in the same root, store.FoundFile's Links), which are not listed.

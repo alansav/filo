@@ -25,7 +25,8 @@ func TestParse(t *testing.T) {
 		{"my key:x", Tag{"", "my key:x"}, nil},       // a space: not a key
 		{"2026:report", Tag{"", "2026:report"}, nil}, // no letter: not a key
 		{":x", Tag{"", ":x"}, nil},                   // nothing before the colon
-		{"a.b:x", Tag{"", "a.b:x"}, nil},             // a dot: not a key
+		{"a.b:x", Tag{"", "a.b:x"}, nil},
+		{"İD:42", Tag{"id", "42"}, nil}, // İ lowers to a plain i: the key reads back as itself             // a dot: not a key
 		{"sender:", Tag{}, ErrNoValue},
 		{"sender:   ", Tag{}, ErrNoValue},
 		{"", Tag{}, ErrEmpty},
