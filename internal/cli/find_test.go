@@ -198,3 +198,40 @@ func TestFindRefusals(t *testing.T) {
 	contains("failed root, --no-scan", filo(ExitOK, "", false, "find", "--name", "*safety*", "--no-scan").stdout,
 		in("house/gas safety certificate.pdf"))
 }
+
+// TestFindTags: filo find --tag and --no-tag (docs/design.md, Tags, "Finding by tag"): in a terminal each file's
+// tags follow its path; piped, the list is paths only; a bad search is a usage error.
+func TestFindTags(t *testing.T) {
+	ct := newFindTest(t)
+	filo, in := ct.filo, ct.in
+	sep, oct := in("received/2026/09/2026-09-02 British Gas Bill.pdf"), in("received/2026/10/2026-10-03 British Gas Bill.pdf")
+	filo(ExitOK, "", false, "tag", sep, oct, "sender:British Gas", "type:bill")
+	filo(ExitOK, "", false, "tag", oct, "urgent")
+	filo(ExitOK, "", false, "tag", in("house/gas safety certificate.pdf"), "project:house")
+	var out strings.Builder
+	step := func(title string, args ...string) {
+		t.Helper()
+		out.WriteString("$ filo " + title + "\n" + filo(ExitOK, "", true, args...).stdout + "\n")
+	}
+	step("find --tag 'sender:british gas' --no-scan", "find", "--tag", "sender:british gas", "--no-scan")
+	step("find --tag type: --no-tag urgent --no-scan", "find", "--tag", "type:", "--no-tag", "urgent", "--no-scan")
+	step("find --no-tag sender: --no-scan", "find", "--no-tag", "sender:", "--no-scan")
+	step("find --name '*gas*' --tag 'project:*' --no-scan", "find", "--name", "*gas*", "--tag", "project:*",
+		"--no-scan")
+	step("find --tag type:invoice --no-scan", "find", "--tag", "type:invoice", "--no-scan")
+	golden(t, "find-tags.txt", ct.root, regexp.MustCompile(`as of the last scan, \d{4}-\d\d-\d\d \d\d:\d\d`).
+		ReplaceAllString(out.String(), "as of the last scan, <time>"))
+
+	if got, want := filo(ExitOK, "", false, "find", "--tag", "urgent").stdout, oct+"\n"; got != want {
+		t.Errorf("piped: %q, want %q", got, want)
+	}
+	for _, tt := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"find", "--tag", ""}, "--tag give a tag"},
+		{[]string{"find", "--no-tag", "a;b"}, `--no-tag "a;b": a tag cannot hold ";"`},
+	} {
+		ct.contains(strings.Join(tt.args, " "), filo(ExitUsage, "", false, tt.args...).stderr, tt.want)
+	}
+}

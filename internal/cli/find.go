@@ -12,16 +12,21 @@ import (
 	"github.com/alansav/filo/internal/reconcile"
 	"github.com/alansav/filo/internal/report"
 	"github.com/alansav/filo/internal/store"
+	"github.com/alansav/filo/internal/tags"
 	"github.com/alansav/filo/internal/view"
 )
 
-// find is filo find [DIR] [--name PATTERN] [-0] [--no-scan] [--workers N] (docs/design.md, Finding files): a scan
-// first, then the files present under DIR (or every root) whose base name matches, for reading in a terminal or, piped,
-// as a list of paths for other tools.
+// find is filo find [DIR] [--name PATTERN] [--tag TAG]... [--no-tag TAG]... [-0] [--no-scan] [--workers N]
+// (docs/design.md, Finding files and Tags): a scan first, then the files present under DIR (or every root) whose base
+// name matches and whose tags match every --tag and no --no-tag, for reading in a terminal (with their tags) or,
+// piped, as a list of paths for other tools.
 func (e *env) find(ctx context.Context, dbBefore string, args []string) error {
 	fl := e.flags("find")
 	db := dbFlag(fl, dbBefore)
 	name := fl.String("name", "", "")
+	var tagged, notTagged stringList
+	fl.Var(&tagged, "tag", "")
+	fl.Var(&notTagged, "no-tag", "")
 	nul := fl.Bool("0", false, "")
 	noScan := fl.Bool("no-scan", false, "")
 	workers := fl.Int("workers", reconcile.DefaultWorkers, "")
@@ -40,6 +45,20 @@ func (e *env) find(ctx context.Context, dbBefore string, args []string) error {
 	}
 	if err := checkTildes("DIR", pos...); err != nil {
 		return err
+	}
+	q := find.Query{Name: *name}
+	for _, l := range []struct {
+		flag  string
+		typed []string
+		to    *[]tags.Search
+	}{{"--tag", tagged, &q.Tagged}, {"--no-tag", notTagged, &q.NotTagged}} {
+		for _, t := range l.typed {
+			ts, err := tags.ParseSearch(t)
+			if err != nil {
+				return usageError{l.flag + " " + err.Error()}
+			}
+			*l.to = append(*l.to, ts)
+		}
 	}
 	s, err := e.open(ctx, *db)
 	if err != nil {
@@ -65,8 +84,15 @@ func (e *env) find(ctx context.Context, dbBefore string, args []string) error {
 	if err != nil {
 		return err
 	}
-	q := find.Query{Name: *name}
-	files := find.Select(rows, q, nil)
+	ids := make([]int64, len(rows))
+	for i, f := range rows {
+		ids[i] = f.FileID
+	}
+	tagsOf, err := s.FileTags(ctx, ids)
+	if err != nil {
+		return err
+	}
+	files := find.Select(rows, q, tagsOf)
 	if v.Terminal() {
 		find.Render(v, files, q, place.where, notScanned)
 		return nil
