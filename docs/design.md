@@ -1639,8 +1639,10 @@ so files can be found by tag; a project is a tag (`project:house sale`).
   tags files`.
 - **`filo tags rename OLD NEW`**, across every file that has OLD, which fixes a typo in the key or the value, or
   changes only the case (`british gas` to `British Gas`). OLD matches ignoring case, never with `*`. `OLD` and `NEW`
-  may both be `key:`, renaming the key of every value it has. A file that has NEW already keeps one: the two merge,
-  and the output counts them (`2 files had sender:British Gas already`). OLD that no file has is an error ("no file
+  may both be `key:`, renaming the key of every value it has (the same key twice is a usage error). A file that has
+  NEW already keeps one: the two merge, and the output counts them (`2 files had sender:British Gas already`; for a
+  key, `had the same value under sender: already`). NEW is spelled as typed on every file that has it, so a file
+  that had it in another spelling is respelled, and counted apart (`2 other files respelled`). OLD that no file has is an error ("no file
   has the tag X (filo tags lists them)"). It does not ask, as `filo policies rename` does not.
 
   ```

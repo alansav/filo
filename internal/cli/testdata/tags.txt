@@ -21,14 +21,21 @@ $ filo tags rename sendr: sender:
 Done   renamed sendr: to sender: . 1 file
 
 $ filo tags rename type:bill 'sender:British Gas' (merging)
-Done   renamed type:bill to sender:British Gas . 2 files . 2 had sender:British Gas already
+Done   renamed type:bill to sender:British Gas . 2 files . 2 files had sender:British Gas already
 
 $ filo tags rename urgent urgent
 Unchanged   urgent is spelled so already
 
+$ filo tags rename type: kind: (merging a key)
+Done   renamed type: to kind: . 2 files . 1 file had the same value under kind: already
+
+$ filo tags rename kind:invoice kind:BILL (respelling another file)
+Done   renamed kind:invoice to kind:BILL . 1 file . 2 other files respelled
+
 $ filo tags
-Tags   2 . 3 files tagged . 0 untagged
+Tags   3 . 3 files tagged . 0 untagged
 
   urgent                1 file
+  kind:BILL            3 files
   sender:British Gas   3 files
 

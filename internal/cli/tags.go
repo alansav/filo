@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strconv"
 
 	"github.com/alansav/filo/internal/report"
 	"github.com/alansav/filo/internal/store"
@@ -76,6 +75,9 @@ func (e *env) renameTag(ctx context.Context, db, oldArg, newArg string) error {
 	if old.AnyValue != to.AnyValue {
 		return usageError{"give both as key: to rename a key (filo tags rename sendr: sender:), or both as tags"}
 	}
+	if old.AnyValue && old.Key == to.Key {
+		return usageError{"OLD and NEW are the same key: nothing to rename"}
+	}
 	s, err := e.open(ctx, db)
 	if err != nil {
 		return err
@@ -93,14 +95,21 @@ func (e *env) renameTag(ctx context.Context, db, oldArg, newArg string) error {
 		return err
 	}
 	r := e.view
-	if res.Files == 0 {
+	if res.Files+res.Respelled == 0 {
 		r.Outcome("Unchanged", to.String()+" is spelled so already")
 		return nil
 	}
 	facts := []string{"renamed " + old.String() + " to " + to.String(), report.Plural(int64(res.Files), "file",
 		"files")}
 	if res.Merged > 0 {
-		facts = append(facts, strconv.Itoa(res.Merged)+" had "+to.String()+" already")
+		had := " had " + to.String() + " already"
+		if to.AnyValue {
+			had = " had the same value under " + to.String() + " already"
+		}
+		facts = append(facts, report.Plural(int64(res.Merged), "file", "files")+had)
+	}
+	if res.Respelled > 0 {
+		facts = append(facts, report.Plural(int64(res.Respelled), "other file", "other files")+" respelled")
 	}
 	r.Outcome("Done", facts...)
 	return nil

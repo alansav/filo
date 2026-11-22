@@ -27,6 +27,11 @@ func TestTagsGolden(t *testing.T) {
 	step("tags rename sendr: sender:", "tags", "rename", "sendr:", "sender:")
 	step("tags rename type:bill 'sender:British Gas' (merging)", "tags", "rename", "type:bill", "sender:British Gas")
 	step("tags rename urgent urgent", "tags", "rename", "urgent", "urgent")
+	filo(ExitOK, "", false, "tag", in("notes/ideas.txt"), "kind:bill", "type:bill")
+	filo(ExitOK, "", false, "tag", sep, "type:bill")
+	step("tags rename type: kind: (merging a key)", "tags", "rename", "type:", "kind:")
+	filo(ExitOK, "", false, "tag", oct, "kind:invoice")
+	step("tags rename kind:invoice kind:BILL (respelling another file)", "tags", "rename", "kind:invoice", "kind:BILL")
 	step("tags", "tags")
 	golden(t, "tags.txt", ct.root, out.String())
 
@@ -42,6 +47,7 @@ func TestTagsGolden(t *testing.T) {
 		{[]string{"tags", "rename", "sender:", "kind:x"}, "give both as key:"},
 		{[]string{"tags", "rename", "a*", "b"}, `OLD "a*": "*" is not taken here`},
 		{[]string{"tags", "list"}, `unknown tags command "list"`},
+		{[]string{"tags", "rename", "type:", "Type:"}, "OLD and NEW are the same key"},
 	} {
 		ct.contains(strings.Join(tt.args, " "), filo(ExitUsage, "", false, tt.args...).stderr, tt.want)
 	}
