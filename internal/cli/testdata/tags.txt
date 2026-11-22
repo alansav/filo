@@ -1,0 +1,34 @@
+$ filo tags (none yet)
+Tags   none . 3 untagged
+
+Next: filo tag FILE... TAG... tags files
+
+$ filo tags
+Tags   4 . 3 files tagged . 0 untagged
+
+  urgent                1 file
+  sender:british gas   2 files
+  sendr:British Gaz     1 file
+  type:bill            2 files
+
+$ filo tags rename 'sendr:British Gaz' 'sendr:British Gas'
+Done   renamed sendr:British Gaz to sendr:British Gas . 1 file
+
+$ filo tags rename 'sender:british gas' 'sender:British Gas'
+Done   renamed sender:british gas to sender:British Gas . 2 files
+
+$ filo tags rename sendr: sender:
+Done   renamed sendr: to sender: . 1 file
+
+$ filo tags rename type:bill 'sender:British Gas' (merging)
+Done   renamed type:bill to sender:British Gas . 2 files . 2 had sender:British Gas already
+
+$ filo tags rename urgent urgent
+Unchanged   urgent is spelled so already
+
+$ filo tags
+Tags   2 . 3 files tagged . 0 untagged
+
+  urgent                1 file
+  sender:British Gas   3 files
+

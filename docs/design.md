@@ -1627,16 +1627,16 @@ so files can be found by tag; a project is a tag (`project:house sale`).
   with no tag.
 
   ```
-  Tags   4 tags · 5 files tagged · 12 untagged
+  Tags   4 · 5 files tagged · 12 untagged
 
-      files   tag
-          1   urgent
-          2   project:house sale
-          3   sender:British Gas
-          3   type:bill
+    urgent                1 file
+    project:house sale   2 files
+    sender:British Gas   3 files
+    type:bill            3 files
   ```
 
-  No tag at all: the heading, and `Next: filo tag FILE... TAG... tags files`.
+  Laid out as `filo policies` is. No tag at all: `Tags   none · 12 untagged`, and `Next: filo tag FILE... TAG...
+  tags files`.
 - **`filo tags rename OLD NEW`**, across every file that has OLD, which fixes a typo in the key or the value, or
   changes only the case (`british gas` to `British Gas`). OLD matches ignoring case, never with `*`. `OLD` and `NEW`
   may both be `key:`, renaming the key of every value it has. A file that has NEW already keeps one: the two merge,
@@ -1646,6 +1646,8 @@ so files can be found by tag; a project is a tag (`project:house sale`).
   ```
   Done   renamed sender:british gas to sender:British Gas · 3 files
   ```
+
+  A rename that changes nothing (`urgent` to `urgent`) says `Unchanged   urgent is spelled so already`.
 - **Finding by tag**: `filo find --tag TAG` and `--no-tag TAG`, each repeatable; every condition must hold (AND,
   with `--name` too). A search is `key:value`, where `*` in the value matches any run of characters; `key:` (any
   value of the key; `--no-tag sender:` lists the files with no sender); or a bare value, which finds bare tags only
