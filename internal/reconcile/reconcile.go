@@ -12,11 +12,13 @@ import (
 	"path"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync/atomic"
 	"time"
 
 	"github.com/alansav/filo/internal/hasher"
 	"github.com/alansav/filo/internal/store"
+	"github.com/alansav/filo/internal/tags"
 	"github.com/alansav/filo/internal/walk"
 )
 
@@ -31,6 +33,8 @@ const (
 	// SameAsDeleted is a hint: a new file has the content of a file filo deleted (restored from a backup, say). It
 	// stays a new file that needs a retention; the old one's is never carried over.
 	SameAsDeleted = store.EventSameAsDeleted
+	// CopyTags is a new file that took the tags of copies whose tags differed: worth a look.
+	CopyTags = store.EventCopyTags
 )
 
 // DefaultWorkers is the hashing parallelism when Options.Workers is 0.
@@ -96,6 +100,7 @@ type Summary struct {
 	Missing       int
 	PossibleMoves int
 	SameAsDeleted int // new files with the content of a file filo deleted
+	CopyTags      int // new files that took the tags of copies whose tags differed
 	Errors        int
 	Samples       map[string][]store.Event // first SampleSize events of each kind
 	OtherFS       []string
@@ -444,6 +449,11 @@ func Scan(ctx context.Context, s *store.Store, opt Options) (Summary, error) {
 		leftNew = append(leftNew, side{ID: j, Name: path.Base(n.e.Path)})
 	}
 
+	// A new file takes its copies' tags.
+	if sum.CopyTags, err = copiesTags(ctx, s, &ch); err != nil {
+		return Summary{}, err
+	}
+
 	// A new file with the content of a file filo deleted: a hint only.
 	var newHashes []string
 	hashSeen := map[string]bool{}
@@ -466,11 +476,23 @@ func Scan(ctx context.Context, s *store.Store, opt Options) (Summary, error) {
 	}
 
 	// Same name on both sides, unique on each: reported, never applied.
-	for _, p := range possibleMoves(leftOld, leftNew) {
+	moves := possibleMoves(leftOld, leftNew)
+	oldIDs := make([]int64, len(moves))
+	for i, p := range moves {
+		oldIDs[i] = leftGone[p[0]].fileID
+	}
+	oldTags, err := s.FileTags(ctx, oldIDs)
+	if err != nil {
+		return Summary{}, err
+	}
+	for _, p := range moves {
 		g, n := leftGone[p[0]], news[p[1]]
 		detail := "same name"
 		if g.hash != "" && n.hash != "" && g.hash != n.hash {
 			detail = "same name, different content"
+		}
+		if len(oldTags[g.fileID]) > 0 {
+			detail += "; the old file had tags" // not carried over: the pairing is a guess (docs/design.md, Tags)
 		}
 		event(store.Event{Kind: PossibleMove, FileID: g.fileID, Path: n.e.Path, OtherPath: g.path, Detail: detail})
 		sum.PossibleMoves++
@@ -543,4 +565,82 @@ func linkText(target string, broken bool) string {
 		return target + " (broken)"
 	}
 	return target
+}
+
+// copiesTags gives each new regular file in ch the tags of the files present with its content, their union, once
+// (docs/design.md, Tags, "A copy keeps the tags"). A file whose content this scan changed is not a copy of what it
+// held. When the copies' tags differ, the new file gets a CopyTags event naming what it took; it returns how many
+// did.
+func copiesTags(ctx context.Context, s *store.Store, ch *store.Changes) (int, error) {
+	var hashes []string
+	seen := map[string]bool{}
+	for _, n := range ch.New {
+		if n.Kind == string(walk.KindFile) && n.Hash != "" && n.Size > 0 && !seen[n.Hash] {
+			seen[n.Hash] = true
+			hashes = append(hashes, n.Hash)
+		}
+	}
+	if len(hashes) == 0 {
+		return 0, nil
+	}
+	copies, err := s.Copies(ctx, hashes)
+	if err != nil {
+		return 0, err
+	}
+	nowHolds := map[int64]string{} // the files this scan found with another content
+	for _, u := range ch.Updates {
+		nowHolds[u.FileID] = u.Hash
+	}
+	differed := 0
+	for i := range ch.New {
+		n := &ch.New[i]
+		if !seen[n.Hash] || n.Kind != string(walk.KindFile) || n.Size == 0 {
+			continue
+		}
+		var sets [][]tags.Tag
+		for _, c := range copies[n.Hash] {
+			if h, ok := nowHolds[c.FileID]; ok && h != n.Hash {
+				continue
+			}
+			sets = append(sets, c.Tags)
+		}
+		union, differ := unionTags(sets)
+		if len(union) == 0 {
+			continue
+		}
+		n.Tags = union
+		if differ {
+			names := make([]string, len(union))
+			for j, t := range union {
+				names[j] = t.String()
+			}
+			ch.Events = append(ch.Events, store.Event{Kind: CopyTags, Path: n.Path,
+				Detail: "took the tags of copies that differed: " + strings.Join(names, "; ")})
+			differed++
+		}
+	}
+	return differed, nil
+}
+
+// unionTags is every tag in sets once, in the order filo tags lists them (bare first, then by key and folded
+// value), and whether the sets differ, a set with no tag included.
+func unionTags(sets [][]tags.Tag) ([]tags.Tag, bool) {
+	var union []tags.Tag
+	for _, set := range sets {
+		for _, t := range set {
+			if !slices.ContainsFunc(union, t.Same) {
+				union = append(union, t)
+			}
+		}
+	}
+	differ := false
+	for _, set := range sets {
+		if len(set) != len(union) {
+			differ = true // each set is part of the union: only its size can tell
+		}
+	}
+	slices.SortFunc(union, func(a, b tags.Tag) int {
+		return cmp.Or(cmp.Compare(a.Key, b.Key), cmp.Compare(a.Folded(), b.Folded()))
+	})
+	return union, differ
 }

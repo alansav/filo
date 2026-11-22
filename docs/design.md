@@ -2183,7 +2183,7 @@ CREATE INDEX ix_files_hash ON files(hash);
 CREATE TABLE events (
     id INTEGER PRIMARY KEY, scan_id INTEGER NOT NULL REFERENCES scans(id),
     kind TEXT NOT NULL,                 -- moved | missing | changed | possible_move | error | other_fs |
-                                        -- deleted | same_as_deleted
+                                        -- deleted | same_as_deleted | copy_tags
     file_id INTEGER, path TEXT, other_path TEXT, detail TEXT);
 
 -- exports and the history of retentions

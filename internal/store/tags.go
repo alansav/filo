@@ -17,6 +17,10 @@ const (
 	tagByScan  = "scan" // a new file took its copies' tags
 )
 
+// EventCopyTags is a scan's note that a new file took the tags of copies whose tags differed (docs/design.md, Tags,
+// "A copy keeps the tags"): its detail names the tags it took.
+const EventCopyTags = "copy_tags"
+
 // FileTags returns the tags of each of the given files that has any, in the order filo tags lists them: bare tags
 // first, then by key and by folded value.
 func (s *Store) FileTags(ctx context.Context, ids []int64) (map[int64][]tags.Tag, error) {
