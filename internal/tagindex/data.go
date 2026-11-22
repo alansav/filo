@@ -137,6 +137,13 @@ func Build(ix store.TagIndex, files []store.IndexFile) (Data, error) {
 			}
 		}
 	}
+	dirs := map[string]string{} // a key's directory, in lower case -> the key
+	for key, k := range keys {
+		if other, ok := dirs[strings.ToLower(k.Dir)]; ok {
+			return Data{}, fmt.Errorf("the keys %s and %s would have the same directory, %s", other, key, k.Dir)
+		}
+		dirs[strings.ToLower(k.Dir)] = key
+	}
 	for _, key := range slices.Sorted(maps.Keys(keys)) {
 		if key == "" {
 			d.Bare = *keys[key]
@@ -158,11 +165,23 @@ func title(ix store.TagIndex) string {
 	return path.Base(strings.ReplaceAll(ix.RootPath, "\\", "/"))
 }
 
-// keyDir is the directory of a key's pages: the key itself (lower case, letters, digits, - and _), BareDir for the
-// bare tags.
+// keyDir is the directory of a key's pages: BareDir for the bare tags; the key itself when it is plain ASCII (a-z,
+// 0-9, - and _: keys are lower case already); otherwise a slug of it, a dot, and eight hex digits of the key's
+// SHA-256 ("caf.1a2b3c4d"). A key may hold any letter, and two keys that differ only in their Unicode form (é as one
+// character or two) are one name on some file systems; no key holds a dot, so these names are never a key's.
 func keyDir(key string) string {
 	if key == "" {
 		return BareDir
+	}
+	for _, r := range key {
+		if !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '-' || r == '_') {
+			sum := sha256.Sum256([]byte(key))
+			s := slug(key)
+			if s == "" {
+				s = "k"
+			}
+			return s + "." + hex.EncodeToString(sum[:4])
+		}
 	}
 	return key
 }

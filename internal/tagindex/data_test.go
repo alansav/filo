@@ -144,3 +144,25 @@ func TestPageName(t *testing.T) {
 		t.Errorf("one value under two keys has one page name: %s", k)
 	}
 }
+
+func TestKeyDir(t *testing.T) {
+	for _, c := range []struct{ key, want string }{
+		{"", BareDir}, {"sender", "sender"}, {"project_2", "project_2"}, {"x-y", "x-y"},
+	} {
+		if got := keyDir(c.key); got != c.want {
+			t.Errorf("keyDir(%q) = %q, want %q", c.key, got, c.want)
+		}
+	}
+	nfc, nfd := keyDir("caf\u00e9"), keyDir("cafe\u0301")
+	if nfc == nfd || !strings.HasPrefix(nfc, "caf.") || !strings.HasPrefix(nfd, "cafe.") || len(nfc) != len("caf.")+8 {
+		t.Errorf("keyDir of café in two forms = %q, %q", nfc, nfd)
+	}
+	if d := keyDir("東京"); !strings.HasPrefix(d, "k.") || strings.ContainsFunc(d, func(r rune) bool { return r > 127 }) {
+		t.Errorf("keyDir(東京) = %q", d)
+	}
+	d, err := Build(bills, []store.IndexFile{file(t, "bills/a.pdf", "", time.Now(), "café:x")})
+	if err != nil || len(d.Keys) != 1 || !strings.HasPrefix(d.Keys[0].Values[0].Page, d.Keys[0].Dir+"/") ||
+		!strings.HasPrefix(d.Keys[0].Dir, "caf.") {
+		t.Errorf("Build with a non-ASCII key = %+v, %v", d.Keys, err)
+	}
+}

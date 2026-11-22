@@ -1775,7 +1775,9 @@ on the person's phone opens the file).
     its own, "11 files have no tags", linking to `.NAME/_untagged.html`.
   - `.NAME/<key>/index.html`: the key's values, each with its number of files; and in a section of its own, "34
     files have no sender tag", linking to `.NAME/<key>/_none.html`. The bare tags have `.NAME/_/index.html`: a key
-    has a letter, so none is named `_`.
+    has a letter, so none is named `_`. A key with a letter outside `a-z` (`café:`) has a directory named by a slug,
+    a dot and eight hex digits of the key (`caf.1a2b3c4d`), since two forms of one letter are one name on some file
+    systems; no key holds a dot.
   - `.NAME/<key>/<slug>-<hash>.html`: one value's files. The slug holds only `a-z`, `0-9` and `-` (at most 40), the
     hash is eight hex digits of the key and the folded value. The slug alone would make different tags one name
     (`British Gas` and `British-Gas`, values with no Latin letters, values too long for a file name); with the hash
