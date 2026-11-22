@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestIndexesGolden: filo indexes in a terminal (docs/design.md, Tag index pages): none yet, adding one, a second
@@ -179,4 +180,46 @@ func TestIndexesRefusals(t *testing.T) {
 	if ct.exists("received/tags.html") || ct.exists("received/.tags") || !ct.exists("received/index.html") {
 		t.Error("remove -y did not remove just that index")
 	}
+}
+
+// TestIndexRemoveAway: an index whose root cannot be reached (a drive not mounted, lost or formatted) is removed only
+// after saying its files cannot be, and that they would be registered should they come back; one whose directory is
+// gone is removed with nothing more to say.
+func TestIndexRemoveAway(t *testing.T) {
+	ct := newCLITest(t)
+	setNow(t, time.Date(2026, 11, 22, 12, 0, 0, 0, time.Local))
+	disk := filepath.Join(ct.work, "disk")
+	if err := os.MkdirAll(filepath.Join(disk, "bills"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(disk, "bills", "gas.pdf"), []byte("gas"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sameDevice(t, map[string]uint64{disk: 2})
+	ct.filo(ExitOK, "", false, "roots", "add", disk)
+	ct.filo(ExitOK, "", false, "indexes", "add", filepath.Join(disk, "bills"))
+	sameDevice(t, nil) // the drive is no longer mounted
+
+	r := ct.filo(ExitOK, "", false, "indexes", "remove", filepath.Join(disk, "bills"))
+	ct.contains("no terminal", r.stdout, "its files cannot be removed", "is not mounted",
+		"the next scan registers them as your files", "Nothing changed: there is no terminal to ask in")
+	r = ct.filo(ExitOK, "n\n", true, "indexes", "remove", filepath.Join(disk, "bills"))
+	ct.contains("declined", r.stdout, "Remove the index anyway, leaving its files? [y/N]", "Nothing changed.")
+	r = ct.filo(ExitOK, "y\n", true, "indexes", "remove", filepath.Join(disk, "bills"))
+	golden(t, "indexes-remove-away.txt", ct.work, r.stdout)
+	if _, err := os.Stat(filepath.Join(disk, "bills", "index.html")); err != nil {
+		t.Errorf("the pages of an unreachable root were touched: %v", err)
+	}
+	if r := ct.filo(ExitOK, "", false, "indexes"); !strings.Contains(r.stdout, "none yet") {
+		t.Errorf("the index is still listed:\n%s", r.stdout)
+	}
+
+	// A directory gone from a root that is there: its pages went with it.
+	tt := newTagTest(t)
+	tt.filo(ExitOK, "", false, "indexes", "add", tt.in("notes"))
+	if err := os.RemoveAll(tt.in("notes")); err != nil {
+		t.Fatal(err)
+	}
+	r = tt.filo(ExitOK, "", false, "indexes", "remove", tt.in("notes"), "-y")
+	tt.contains("gone", r.stdout, "notes is gone, and its pages with it", "Done   removed the index")
 }

@@ -22,7 +22,10 @@ filo indexes refresh [DIR] [--name NAME]
   pages again. filo indexes lists the indexes and what is wrong with each.
 
   remove lists what it will remove and asks first. A file that is not Filo's
-  stays, and so does the directory holding it; remove then exits 1.
+  stays, and so does the directory holding it; remove then exits 1. An index on
+  a drive that cannot be reached (not mounted, lost) cannot have its files
+  removed: remove says so and asks whether to remove the index anyway; its
+  files, should they come back, are then registered by the next scan.
 
 Flags
   --name NAME              add: the pages' name (letters, digits, - and _);

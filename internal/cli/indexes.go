@@ -234,7 +234,8 @@ func (e *env) indexList(ctx context.Context, s *store.Store) error {
 }
 
 // findIndex is the index on DIR named name, or its only one when name is "". With gone, a directory no longer on
-// the disk (a root not mounted) is found by its path alone, so its index can still be removed.
+// the disk, or on a root that cannot be reached (not mounted), is found by its path alone, so its index can still be
+// removed.
 func findIndex(ctx context.Context, s *store.Store, arg, name string, gone bool) (store.TagIndex, error) {
 	p, err := filepath.Abs(arg)
 	if err != nil {
@@ -242,10 +243,10 @@ func findIndex(ctx context.Context, s *store.Store, arg, name string, gone bool)
 	}
 	var root store.Root
 	var dir string
-	if _, statErr := os.Stat(p); statErr != nil && gone {
+	root, dir, err = indexDir(ctx, s, p)
+	if err != nil && gone {
+		// Not a directory on a root that can be reached (gone, or on a drive not mounted): found by its path alone.
 		root, dir, err = s.Locate(ctx, p)
-	} else {
-		root, dir, err = indexDir(ctx, s, p)
 	}
 	if err != nil {
 		return store.TagIndex{}, err
@@ -278,6 +279,9 @@ func findIndex(ctx context.Context, s *store.Store, arg, name string, gone bool)
 func (e *env) indexRemove(ctx context.Context, s *store.Store, arg, name string, yes bool) error {
 	ix, err := findIndex(ctx, s, arg, name, true)
 	if err != nil {
+		return err
+	}
+	if done, err := e.indexRemoveAway(ctx, s, ix, yes); done || err != nil {
 		return err
 	}
 	files, left := tagindex.Plan(ix)
@@ -350,6 +354,59 @@ func (e *env) indexRemove(ctx context.Context, s *store.Store, arg, name string,
 	r.Outcome("Done", facts...)
 	e.indexProblems(rest, ix)
 	return errReported
+}
+
+// indexRemoveAway removes an index whose files cannot be removed, and reports done: when its root cannot be reached
+// (a drive not mounted, lost or formatted), only after saying so and asking, since its files, should they come back,
+// are no longer Filo's and the next scan registers them; when its directory is gone from a root that is there, its
+// files went with it, and removing it is only removing the record. Otherwise it does nothing and remove goes on.
+func (e *env) indexRemoveAway(ctx context.Context, s *store.Store, ix store.TagIndex, yes bool) (bool, error) {
+	roots, err := s.Roots(ctx)
+	if err != nil {
+		return false, err
+	}
+	var rootErr error
+	why := ""
+	for _, rt := range roots {
+		if rt.ID == ix.RootID {
+			rootErr = store.CheckRoot(rt)
+			why = fmt.Sprint(rootErr)
+			if errors.Is(rootErr, store.ErrNotMounted) {
+				why = rt.MountPath + " is not mounted"
+			}
+		}
+	}
+	r := e.view
+	if rootErr == nil {
+		if _, err := os.Lstat(ix.DirAbs()); !errors.Is(err, fs.ErrNotExist) {
+			return false, nil
+		}
+		r.Heading("Remove index", view.Where{Roots: []string{ix.RootPath}}, ix.Rel(ix.Page()), "0 files")
+		r.Count(view.Neutral, e.indexPath(ix.RootPath, ix.Dir)+" is gone, and its pages with it")
+		ok, err := e.confirmChange(ctx, "Remove the index?", yes, nil)
+		if err != nil || !ok {
+			return true, err
+		}
+		if err := s.RemoveTagIndex(ctx, ix.ID); err != nil {
+			return true, err
+		}
+		r.Outcome("Done", "removed the index")
+		return true, nil
+	}
+	r.Heading("Remove index", view.Where{Roots: []string{ix.RootPath}}, ix.Rel(ix.Page()))
+	r.Blank()
+	r.Count(view.Attention, "its files cannot be removed: "+why)
+	r.Count(view.Attention, "removing the index anyway leaves them: should they come back, they are no longer "+
+		"Filo's, and the next scan registers them as your files")
+	ok, err := e.confirmChange(ctx, "Remove the index anyway, leaving its files?", yes, nil)
+	if err != nil || !ok {
+		return true, err
+	}
+	if err := s.RemoveTagIndex(ctx, ix.ID); err != nil {
+		return true, err
+	}
+	r.Outcome("Done", "removed the index", "its files were left where they were")
+	return true, nil
 }
 
 func (e *env) indexRefresh(ctx context.Context, s *store.Store, pos []string, name string) error {

@@ -1721,7 +1721,11 @@ on the person's phone opens the file).
 - **`filo indexes remove [DIR] [--name NAME] [-y]`** stops keeping an index and removes its files, after listing
   them and asking (`-y` answers; no terminal and no `-y`: refused, as `filo delete` is). A file that is not Filo's
   (below) is left, and so is the directory holding it: the output says so and the exit code is 1, since the person
-  needs to look at it. The index is removed from the register either way.
+  needs to look at it. The index is removed from the register either way. When the index's root cannot be reached
+  (a drive not mounted, lost or formatted; the person's decision, 2026-11-22), its files cannot be removed: `remove`
+  says so, and that should they come back they are no longer Filo's and the next scan registers them, and asks
+  `Remove the index anyway, leaving its files? [y/N]` (`-y` answers). An index whose directory is gone from a root
+  that is there is removed with nothing more to say: its pages went with it.
 
   ```
   Remove index   records/tags.html · 12 files · ~/Documents

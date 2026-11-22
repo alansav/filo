@@ -322,7 +322,9 @@ var commandHelps = map[string]commandHelp{
 				"Move it aside, then refresh writes the pages again. filo indexes lists the indexes and what is " +
 				"wrong with each.",
 			"remove lists what it will remove and asks first. A file that is not Filo's stays, and so does the " +
-				"directory holding it; remove then exits 1.",
+				"directory holding it; remove then exits 1. An index on a drive that cannot be reached (not " +
+				"mounted, lost) cannot have its files removed: remove says so and asks whether to remove the " +
+				"index anyway; its files, should they come back, are then registered by the next scan.",
 		},
 		flags: []view.Term{
 			{Name: "--name NAME", Text: "add: the pages' name (letters, digits, - and _); remove and refresh: " +
