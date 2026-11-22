@@ -202,6 +202,11 @@ var scanKinds = []scanKind{
 		"possible move", "possible moves", true},
 	{reconcile.SameAsDeleted, view.Neutral, func(s reconcile.Summary) int { return s.SameAsDeleted }, nil,
 		"with the content of a deleted file", "with the content of deleted files", false}, // counted with new
+	{reconcile.CopyTags, view.Attention, func(s reconcile.Summary) int { return s.CopyTags },
+		func(n int) string {
+			return pluralWord(n, "new file", "new files") + " took the tags of copies that differed: check with filo show"
+		},
+		"that took differing tags", "that took differing tags", false}, // counted with new
 	{reconcile.Error, view.Refused, func(s reconcile.Summary) int { return s.Errors },
 		fixed("could not be read: none marked missing"),
 		"error", "errors", true},
