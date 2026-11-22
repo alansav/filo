@@ -17,6 +17,7 @@ import (
 	"github.com/alansav/filo/internal/retention"
 	"github.com/alansav/filo/internal/sheet"
 	"github.com/alansav/filo/internal/store"
+	"github.com/alansav/filo/internal/tagcsv"
 	"github.com/alansav/filo/internal/view"
 )
 
@@ -26,7 +27,7 @@ var now = time.Now
 func today() string { return retention.Today(now().Local()) }
 
 // exportKinds are the CSVs filo can export. Each names what the CSV is for.
-var exportKinds = []string{"retention", "duplicates"}
+var exportKinds = []string{"retention", "duplicates", "tags"}
 
 // filterFor turns the DIR argument, if any, into a filter on the register and the place a heading names: the root
 // DIR is in and the directory under it, or every root when there is no DIR.
@@ -60,11 +61,11 @@ func (e *env) export(ctx context.Context, dbBefore string, args []string) error 
 		return err
 	}
 	if len(pos) == 0 {
-		return usageError{"export needs what to export: filo export retention|duplicates [DIR] -o FILE"}
+		return usageError{"export needs what to export: filo export retention|duplicates|tags [DIR] -o FILE"}
 	}
 	kind := pos[0]
 	if !slices.Contains(exportKinds, kind) {
-		return usageError{fmt.Sprintf("unknown export %q; the exports are retention and duplicates", kind)}
+		return usageError{fmt.Sprintf("unknown export %q; the exports are retention, duplicates and tags", kind)}
 	}
 	pos = pos[1:]
 	if len(pos) > 1 {
@@ -120,8 +121,11 @@ func (e *env) export(ctx context.Context, dbBefore string, args []string) error 
 			e.view.Blank()
 		}
 	}
-	if kind == "duplicates" {
+	switch kind {
+	case "duplicates":
 		return e.exportDuplicates(ctx, s, f, where, csvPath, asked, notScanned)
+	case "tags":
+		return e.exportTags(ctx, s, f, where, csvPath, asked, notScanned)
 	}
 	items, err := s.Files(ctx, today(), f)
 	if err != nil {
@@ -175,14 +179,14 @@ func (e *env) export(ctx context.Context, dbBefore string, args []string) error 
 	return nil
 }
 
-// scanFirst is an export's scan (docs/design.md, Lifespan, "A scan first"): a retention export of DIR scans DIR;
-// any other export scans every root, since a duplicate group's copies can be anywhere. Its output is exactly filo
+// scanFirst is an export's scan (docs/design.md, Lifespan, "A scan first"): a retention or tags export of DIR scans
+// DIR; a duplicates export scans every root, since a duplicate group's copies can be anywhere. Its output is exactly filo
 // scan's, Next: filo report included when it found something, so nothing it found is hidden. A root that fails to
 // scan stops the export, so a missing disk never gives a CSV that looks complete. scanned is false when there was nothing to scan (no roots), so nothing was shown.
 func (e *env) scanFirst(ctx context.Context, s *store.Store, kind string, pos []string, workers int) (scanned bool,
 	err error) {
 	dir := ""
-	if kind == "retention" && len(pos) == 1 {
+	if kind != "duplicates" && len(pos) == 1 {
 		dir = pos[0]
 	}
 	err = e.scanWhere(ctx, s, reconcile.Options{Workers: workers}, dir)
@@ -266,8 +270,11 @@ func (e *env) update(ctx context.Context, dbBefore string, args []string) error 
 	// No decisions to delete are stored any more (docs/design.md, Duplicates): a duplicates CSV is carried out by
 	// filo delete, which checks it against the disk at the time.
 	if duplicates.IsDuplicatesCSV(data) {
-		return fmt.Errorf("%s is a duplicates CSV: filo update records retentions only; carry it out with filo delete %s",
-			path, shellQuote(path))
+		return fmt.Errorf("%s is a duplicates CSV: filo update records retentions and tags only; carry it out with "+
+			"filo delete %s", path, shellQuote(path))
+	}
+	if tagcsv.IsTagsCSV(data) || tagcsv.LostTags(data) {
+		return e.updateTags(ctx, *db, path, data, *dry)
 	}
 	parsed, err := retention.ParseCSV(data)
 	if err != nil {

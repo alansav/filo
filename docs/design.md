@@ -1715,7 +1715,10 @@ so files can be found by tag; a project is a tag (`project:house sale`).
   scans first unless `--no-scan` is given (see Lifespan, "A scan first"), with `--workers` as for `filo scan`
   (refused with `--no-scan`). The word after `export`
   names the CSV, so a later CSV is a new word, not a new command; `update` tells the kind from the CSV's header.
-- `filo find [DIR] [--name PATTERN] [-0] [--no-scan] [--workers N]`: see Finding files.
+- `filo find [DIR] [--name PATTERN] [--tag TAG]... [--no-tag TAG]... [-0] [--no-scan] [--workers N]`: see Finding
+  files and Tags.
+- `filo tag FILE... TAG...`, `filo untag FILE... TAG...`, `filo tags`, `filo tags rename OLD NEW`, and `filo export
+  tags [DIR] -o FILE [--no-scan] [--workers N]`, read back by `filo update`: see Tags.
 - `filo delete [DIR] [-y]`: lists the files past their keep-until date and deletes the ones chosen (see Disposal).
 - `filo delete FILE.csv [-y]`: carries out a duplicates CSV (see Duplicates). An argument that is a directory is
   DIR; anything else is a CSV.
