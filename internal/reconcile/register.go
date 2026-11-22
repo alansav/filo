@@ -40,7 +40,9 @@ func PrepareFile(ctx context.Context, s *store.Store, root store.Root, rel strin
 	if walk.SkipsPath(root.Path, rel, root.IncludeHidden, root.Ignore) {
 		return nil, "its root's settings skip it (hidden or ignored); filo roots set changes them", nil
 	}
-	if ownPath(s, abs) {
+	if own, err := ownPath(ctx, s, abs); err != nil {
+		return nil, "", err
+	} else if own {
 		return nil, "one of filo's own files", nil
 	}
 	started := time.Now()
@@ -178,22 +180,27 @@ func movedFrom(ctx context.Context, s *store.Store, root store.Root, rel string,
 	return gone[0].LastPath, nil
 }
 
-// ownPath reports whether abs is one of the files the register keeps beside its database, which no scan records.
-func ownPath(s *store.Store, abs string) bool {
+// ownPath reports whether abs is one of Filo's own files (beside its database, or a tag index's), which no scan
+// records.
+func ownPath(ctx context.Context, s *store.Store, abs string) (bool, error) {
 	canon := abs
 	if dir, err := filepath.EvalSymlinks(filepath.Dir(abs)); err == nil {
 		canon = filepath.Join(dir, filepath.Base(abs))
 	}
-	for _, own := range s.OwnPaths() {
+	owns, err := s.OwnPaths(ctx)
+	if err != nil {
+		return false, err
+	}
+	for _, own := range owns {
 		o := filepath.Clean(own)
 		if dir, err := filepath.EvalSymlinks(filepath.Dir(o)); err == nil {
 			o = filepath.Join(dir, filepath.Base(o))
 		}
 		if canon == o || within(canon, o) {
-			return true
+			return true, nil
 		}
 	}
-	return false
+	return false, nil
 }
 
 // within reports whether p is below dir.

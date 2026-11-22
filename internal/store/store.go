@@ -129,11 +129,17 @@ func (s *Store) Close() error {
 
 func lockPath(dbPath string) string { return dbPath + ".lock" }
 
-// OwnPaths are the paths the register keeps next to its database: the database, SQLite's companion files, the lock
-// file and the snapshot directory. A scan never records them, wherever they are.
-func (s *Store) OwnPaths() []string {
+// OwnPaths are the paths of Filo's own files: those the register keeps next to its database (the database, SQLite's
+// companion files, the lock file and the snapshot directory) and each tag index's main page and pages directory
+// (docs/design.md, Tag index pages). A scan never records them, wherever they are.
+func (s *Store) OwnPaths(ctx context.Context) ([]string, error) {
 	db := s.dbPath
-	return []string{db, db + "-wal", db + "-shm", db + "-journal", lockPath(db), SnapshotDir(db)}
+	own := []string{db, db + "-wal", db + "-shm", db + "-journal", lockPath(db), SnapshotDir(db)}
+	ix, err := s.indexPaths(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return append(own, ix...), nil
 }
 
 // DBPath is the absolute path of the database file.

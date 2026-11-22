@@ -3,7 +3,7 @@ package store
 // SchemaVersion is the schema this build reads and writes. It is stored in meta.schema_version when a database is
 // created. An older database with a migration in migrations is upgraded when it is opened; any other version is
 // refused.
-const SchemaVersion = 11
+const SchemaVersion = 12
 
 // Meta keys.
 const (
@@ -89,7 +89,7 @@ CREATE TABLE events (
     other_path TEXT,
     detail TEXT
 );
-` + reviewSQL + duplicatesSQL + policiesSQL + rulesSQL + tagsSQL
+` + reviewSQL + duplicatesSQL + policiesSQL + rulesSQL + tagsSQL + tagIndexSQL
 
 // reviewSQL is the export and review tables, as of schema version 11.
 const reviewSQL = `
@@ -232,7 +232,36 @@ ALTER TABLE files ADD COLUMN rule_dated_utc TEXT;
 	10: `
 ALTER TABLE export_rows ADD COLUMN tags TEXT;
 ` + tagsSQL,
+	// 11 -> 12: tag index pages (docs/design.md, Tag index pages). Only new tables: no index exists yet.
+	11: tagIndexSQL,
 }
+
+// tagIndexSQL is the tag index pages, added in schema version 12. An index is declared on a directory of a root
+// ('/'-separated, relative to the root, the empty path for the root itself) and named: its pages are NAME.html and
+// .NAME/ in that directory. data_hash is the hash of the data its pages were last written from in full (NULL: never,
+// or the last writing failed, with why in problem). tag_index_files is every file and directory Filo wrote for it,
+// with each file's SHA-256 as written (NULL for a directory): Filo replaces or removes only those, and only while
+// they are unchanged.
+const tagIndexSQL = `
+CREATE TABLE tag_indexes (
+    id INTEGER PRIMARY KEY,
+    root_id INTEGER NOT NULL REFERENCES roots(id),
+    dir TEXT NOT NULL,
+    name TEXT NOT NULL,
+    added_utc TEXT NOT NULL,
+    data_hash TEXT,
+    written_utc TEXT,
+    problem TEXT,
+    UNIQUE (root_id, dir, name)
+);
+
+CREATE TABLE tag_index_files (
+    index_id INTEGER NOT NULL REFERENCES tag_indexes(id),
+    path TEXT NOT NULL,
+    hash TEXT,
+    PRIMARY KEY (index_id, path)
+);
+`
 
 // tagsSQL is the tags, added in schema version 11. A file has a tag while it has a row in tags: its key (lower case;
 // the empty string for a bare tag), its value as spelled, and the value folded (tags.Fold), which it is matched on, so a file has
