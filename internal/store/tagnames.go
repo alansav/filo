@@ -59,18 +59,20 @@ func (s *Store) TagSummary(ctx context.Context) (TagSummary, error) {
 // ErrNoSuchTag means no file (not deleted by filo) has the tag, or no tag has the key.
 var ErrNoSuchTag = errors.New("no file has the tag")
 
-// Renamed is what RenameTag did: how many files it changed, and how many of them had the new tag already (the two
-// merged into one).
+// Renamed is what RenameTag did: how many files that had the old tag it changed, how many of them had the new tag
+// already (the two merged into one), and how many other files had the new tag in another spelling, now respelled.
 type Renamed struct {
-	Files  int
-	Merged int
+	Files     int
+	Merged    int
+	Respelled int
 }
 
 // RenameTag renames a tag across every file not deleted by filo that has it (docs/design.md, Tags, "filo tags
 // rename"): old, matched ignoring case, becomes to, spelled as typed, which every file with to then has (a rename
-// that changes only the case respells it). With old.AnyValue, every tag with old's key gets to's key instead, each
-// value kept (spelled as the new key's tag is already, if it is). A file with both keeps one. Rows of files deleted by
-// filo stay as they are. ErrNoSuchTag if no file has old.
+// that changes only the case respells it; a file that had to in another spelling is respelled, and counted apart).
+// With old.AnyValue, every tag with old's key gets to's key instead, each value kept (spelled as the new key's tag is
+// already, if it is). A file with both keeps one. Rows of files deleted by filo stay as they are. ErrNoSuchTag if no
+// file has old.
 func (s *Store) RenameTag(ctx context.Context, old, to tags.Search, now time.Time) (Renamed, error) {
 	var res Renamed
 	if old.AnyValue != to.AnyValue {
@@ -136,9 +138,10 @@ func (s *Store) RenameTag(ctx context.Context, old, to tags.Search, now time.Tim
 			merged[r.fileID] = true
 		}
 	}
-	// Respell the new tag where it is spelled otherwise (a rename that changes the case, or a file that had it).
-	if !old.AnyValue {
-		nt := target[rows[0].t.Folded()]
+	// Respell each new tag where it is spelled otherwise, so it has one spelling (a file that had it already, merged
+	// or not, or two spellings stored before): to as typed, or for a key, the spelling the new key's tag had.
+	respelled := map[int64]bool{}
+	for _, nt := range target {
 		others, err := queryAll(ctx, tx, func(rs *sql.Rows) (row, error) {
 			var r row
 			return r, rs.Scan(&r.fileID, &r.t.Key, &r.t.Value)
@@ -155,11 +158,13 @@ func (s *Store) RenameTag(ctx context.Context, old, to tags.Search, now time.Tim
 			if _, err := addTag(ctx, tx, r.fileID, nt, tagByRename, now); err != nil {
 				return res, err
 			}
-			changed[r.fileID] = true
+			if !changed[r.fileID] {
+				respelled[r.fileID] = true
+			}
 		}
 	}
-	res.Files, res.Merged = len(changed), len(merged)
-	if res.Files == 0 {
+	res.Files, res.Merged, res.Respelled = len(changed), len(merged), len(respelled)
+	if res.Files+res.Respelled == 0 {
 		return res, nil
 	}
 	if err := s.commit(tx); err != nil {
