@@ -39,9 +39,9 @@ moves, renames or deletes anything outside its own database. See [Roadmap](#road
   `statements`" sets the policy of every file there with no retention, now and as each scan finds new ones. See
   [Directory rules](#directory-rules).
 - **Shows one file or directory at a time, and sets a few files by command**: `filo show` gives everything Filo
-  holds about a file (its paths over time, hash, retention, tags, copies) or a directory (its rules and contents), `filo
-  set` changes a file's `file_date`, retention or duplicates decision without a CSV, and `filo get` prints single
-  fields for scripts. See [One file at a time](#one-file-at-a-time).
+  holds about a file (its paths over time, hash, retention, tags, copies) or a directory (its rules and contents),
+  `filo set` changes a file's `file_date`, retention or duplicates decision without a CSV, and `filo get` prints
+  single fields for scripts. See [One file at a time](#one-file-at-a-time).
 - **Finds files by name or tag**, wherever they are in your roots: `filo find --name '*gas bill*'` or `filo find
   --tag 'sender:British Gas'` lists them, and piped it gives their paths to other tools (`xargs`, `tar`). See
   [Finding files](#finding-files).
