@@ -37,7 +37,7 @@ func queryAll[T any](ctx context.Context, q querier, scan func(*sql.Rows) (T, er
 
 // inBatches calls fn for the values in batches of at most 500, small enough for SQLite's limit on query arguments,
 // with the placeholders for an IN list ("?,?,?") and the batch as arguments.
-func inBatches(values []string, fn func(placeholders string, args []any) error) error {
+func inBatches[T any](values []T, fn func(placeholders string, args []any) error) error {
 	const batch = 500
 	for start := 0; start < len(values); start += batch {
 		part := values[start:min(start+batch, len(values))]

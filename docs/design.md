@@ -3,7 +3,7 @@
 **The present.** Of three documents, this is the present: `design.md` (what Filo is), `roadmap.md` (the future:
 what it is not yet) and `history.md` (the past: how it got here).
 
-Filo as built: schema version 10. Last updated: 2026-11-22.
+Filo as built: schema version 11. Last updated: 2026-11-22.
 
 This file records what Filo does and why, as built. Work not done yet, ideas, open questions and ideas rejected are
 in `roadmap.md`, where designs are worked out; a design moves here, in its own commit, when work on it starts (see
@@ -2120,7 +2120,7 @@ $ filo roots add
 filo: roots add takes exactly one DIR (see filo help roots)
 ```
 
-## 3. Data model (schema version 10)
+## 3. Data model (schema version 11)
 
 The register as `internal/store/schema.go` creates it (`schemaSQL`), with the meaning of each column. Keep the
 interval history and the partial unique index.
@@ -2200,6 +2200,7 @@ CREATE TABLE export_rows (
                                         -- policy's name for a file on one); cells left as these are untouched
     dup_group INTEGER,                  -- duplicates exports: the group number in the CSV
     path_id INTEGER REFERENCES paths(id),              -- duplicates exports: the path shown
+    tags TEXT,                          -- tags exports: the cell as exported
     PRIMARY KEY (export_id, file_id));
 CREATE TABLE review_batches (
     id INTEGER PRIMARY KEY, created_utc TEXT NOT NULL,
@@ -2257,6 +2258,24 @@ CREATE TABLE rules (
     added_utc TEXT NOT NULL,
     UNIQUE (root_id, dir, pattern_key));
 CREATE INDEX ix_files_rule ON files(rule_id);
+
+-- tags (see Tags)
+CREATE TABLE tags (                     -- a file has a tag while it has the row; rows of a file filo deleted stay
+    file_id INTEGER NOT NULL REFERENCES files(id),
+    key TEXT NOT NULL,                  -- lower case; '' for a bare tag
+    value TEXT NOT NULL,                -- as spelled: the tag's spelling, the same on every file
+    folded TEXT NOT NULL,               -- the value case-folded, what it is matched on
+    added_utc TEXT NOT NULL,
+    PRIMARY KEY (file_id, key, folded));
+CREATE INDEX ix_tags_tag ON tags(key, folded);
+CREATE TABLE tag_changes (              -- append-only: every tag added or removed, for the journal (roadmap 9c)
+    id INTEGER PRIMARY KEY,
+    kind TEXT NOT NULL,                 -- 'add' or 'remove'
+    file_id INTEGER NOT NULL REFERENCES files(id),
+    key TEXT NOT NULL, value TEXT NOT NULL,
+    command TEXT NOT NULL,              -- 'tag', 'untag', 'rename', 'update', or 'scan' (taken from copies)
+    changed_utc TEXT NOT NULL);
+CREATE INDEX ix_tag_changes_file ON tag_changes(file_id);
 ```
 
 "Present" means a file has a path interval with `valid_to_scan IS NULL`; there is no status column. "New" means
