@@ -72,7 +72,7 @@ func WriteCSV(w io.Writer, exportID int64, items []store.TagItem, loc *time.Loca
 		rec := []string{
 			strconv.FormatInt(it.FileID, 10), ex, sheet.Cell(directory), sheet.Cell(name),
 			strconv.FormatInt(it.Size, 10), time.Unix(0, it.MtimeNS).In(loc).Format("2006-01-02 15:04"),
-			sheet.Cell(store.JoinTags(it.Tags)),
+			guardCell(store.JoinTags(it.Tags)),
 		}
 		if err := cw.Write(rec); err != nil {
 			return err
@@ -96,8 +96,8 @@ type Parsed struct {
 
 // ParseCSV reads an edited tags CSV already read (with sheet.ReadFile), as spreadsheets save it (see package sheet).
 // Each cell is read with the spelling rules: tags separated by ";", spaces around them dropped, a tag typed twice
-// (in any case) one, an empty cell no tags. A row with a tag the rules refuse is refused whole, and so is a row
-// listed more than once, every time it appears.
+// (in any case) one, an empty cell no tags. A row with a tag the rules refuse is refused whole, and so is a file
+// listed more than once (under one export or several), every time it appears.
 func ParseCSV(data []byte) (Parsed, error) {
 	var p Parsed
 	if len(data) > sheet.MaxSize {
@@ -138,19 +138,30 @@ func ParseCSV(data []byte) (Parsed, error) {
 	if err != nil {
 		return p, err // a broken quote: csv says where
 	}
-	p.Rows = sheet.DropRepeated(p.Rows, func(r store.TagRow) [2]int64 { return [2]int64{r.ExportID, r.FileID} },
+	// One file, one row: a file under two exports in one CSV would be changed by both, each checked against the tags
+	// it had before either.
+	p.Rows = sheet.DropRepeated(p.Rows, func(r store.TagRow) int64 { return r.FileID },
 		func(r store.TagRow) {
-			p.Problems = append(p.Problems, Problem{r.Line,
-				fmt.Sprintf("file %d of export %d is listed more than once", r.FileID, r.ExportID)})
+			p.Problems = append(p.Problems, Problem{r.Line, fmt.Sprintf("file %d is listed more than once", r.FileID)})
 		})
 	return p, nil
 }
 
-// ParseCell reads a tags cell: the tags separated by ";", each once. The apostrophe sheet.Cell puts before a cell
-// that a spreadsheet would read as a formula (=, +, -, @) is dropped first.
+// guardCell is a tags cell as written: sheet.Cell's apostrophe before a cell a spreadsheet would read as a formula
+// (=, +, -, @), and one before a cell that starts with an apostrophe itself, so that ParseCell, dropping one, always
+// gives back the tags as they are.
+func guardCell(cell string) string {
+	if strings.HasPrefix(cell, "'") {
+		return "'" + cell
+	}
+	return sheet.Cell(cell)
+}
+
+// ParseCell reads a tags cell: the tags separated by ";", each once. The apostrophe guardCell puts before a cell is
+// dropped first: one before =, +, -, @ or another apostrophe.
 func ParseCell(cell string) ([]tags.Tag, error) {
 	cell = strings.TrimSpace(cell)
-	if len(cell) > 1 && cell[0] == '\'' && strings.ContainsRune("=+-@", rune(cell[1])) {
+	if len(cell) > 1 && cell[0] == '\'' && strings.ContainsRune("=+-@'", rune(cell[1])) {
 		cell = cell[1:]
 	}
 	var out []tags.Tag

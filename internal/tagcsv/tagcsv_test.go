@@ -20,6 +20,8 @@ func TestWriteAndParse(t *testing.T) {
 		{FoundFile: store.FoundFile{FileID: 8, Root: "/home/u/Documents", Rel: "=odd.txt", MtimeNS: mtime},
 			Tags: []tags.Tag{{Value: "-draft"}}},
 		{FoundFile: store.FoundFile{FileID: 9, Root: "/home/u/Documents", Rel: "top.txt", MtimeNS: mtime}},
+		{FoundFile: store.FoundFile{FileID: 10, Root: "/home/u/Documents", Rel: "q.txt", MtimeNS: mtime},
+			Tags: []tags.Tag{{Value: "'-quoted"}}}, // a tag that starts with an apostrophe itself
 	}
 	var b bytes.Buffer
 	if err := WriteCSV(&b, 3, items, time.UTC); err != nil {
@@ -28,7 +30,8 @@ func TestWriteAndParse(t *testing.T) {
 	want := "\ufeffid,export,directory,name,size,modified,tags\n" +
 		"7,3,/home/u/Documents/received,bill.pdf,12,2026-10-03 09:30,sender:British Gas; type:bill\n" +
 		"8,3,/home/u/Documents,'=odd.txt,0,2026-10-03 09:30,'-draft\n" +
-		"9,3,/home/u/Documents,top.txt,0,2026-10-03 09:30,\n"
+		"9,3,/home/u/Documents,top.txt,0,2026-10-03 09:30,\n" +
+		"10,3,/home/u/Documents,q.txt,0,2026-10-03 09:30,''-quoted\n"
 	if b.String() != want {
 		t.Errorf("CSV:\n%s\nwant:\n%s", b.String(), want)
 	}
@@ -36,7 +39,7 @@ func TestWriteAndParse(t *testing.T) {
 		t.Error("IsTagsCSV = false for a tags CSV")
 	}
 	p, err := ParseCSV(b.Bytes())
-	if err != nil || len(p.Problems) != 0 || len(p.Rows) != 3 {
+	if err != nil || len(p.Problems) != 0 || len(p.Rows) != 4 {
 		t.Fatalf("ParseCSV: %+v, %v", p, err)
 	}
 	if got := store.JoinTags(p.Rows[0].Tags); got != "sender:British Gas; type:bill" {
@@ -47,6 +50,9 @@ func TestWriteAndParse(t *testing.T) {
 	}
 	if len(p.Rows[2].Tags) != 0 || p.Rows[2].FileID != 9 || p.Rows[2].ExportID != 3 || p.Rows[2].Line != 4 {
 		t.Errorf("row 3 = %+v", p.Rows[2])
+	}
+	if got := store.JoinTags(p.Rows[3].Tags); got != "'-quoted" {
+		t.Errorf("row 4 tags = %q, want it back as it was", got)
 	}
 }
 
@@ -59,7 +65,7 @@ func TestParseCSVRows(t *testing.T) {
 		"4,2,a,b,c\n" +
 		"6,2,\"'=x; y\",\n" +
 		"5,2,,\n" +
-		"5,2,b,\n"
+		"5,3,b,\n"
 	p, err := ParseCSV([]byte(csv))
 	if err != nil {
 		t.Fatal(err)
@@ -76,8 +82,8 @@ func TestParseCSVRows(t *testing.T) {
 		`id "x" is not a file ID`,
 		`tags "a*b": a tag cannot hold "*"`,
 		`"c" is outside the columns; put it under tags`,
-		"file 5 of export 2 is listed more than once",
-		"file 5 of export 2 is listed more than once",
+		"file 5 is listed more than once", // under two exports: still one file
+		"file 5 is listed more than once",
 	}
 	if len(p.Problems) != len(want) {
 		t.Fatalf("problems = %+v", p.Problems)
