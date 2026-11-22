@@ -1,0 +1,51 @@
+$ filo indexes (none yet)
+Indexes   none yet
+
+Next: filo indexes add [DIR] [--name NAME] writes the pages of a directory's files by tag
+
+$ filo indexes add received
+Index added   received/index.html . 2 files . 2 tags . 5 pages . <root>
+  - its pages are in received/.index/; scans skip both
+
+Next: open <root>/received/index.html in a browser
+
+$ filo indexes add . --name tags (the root)
+Index added   tags.html . 3 files . 2 tags . 8 pages . <root>
+  - its pages are in .tags/; scans skip both
+  - 1 file has no tags: it is listed on the page "no tags"
+
+Next: open <root>/tags.html in a browser
+
+$ filo indexes
+Indexes   2 . <root>
+
+  tags.html             3 files   2 tags   written 2026-11-22 12:00
+  received/index.html   2 files   2 tags   written 2026-11-22 12:00
+
+Next: open an index's page in a browser
+
+$ filo indexes refresh
+Refreshed   2 indexes . <root>
+  - tags.html             up to date
+  - received/index.html   up to date
+
+$ filo indexes remove . --name tags
+Remove index   tags.html . 9 files . <root>
+
+    tags.html
+    .tags/      8 files: its pages and style.css
+  [!] .tags/notes.txt is not Filo's: it stays, and so does .tags/
+
+Remove the index and its 9 files? [y/N] 
+Done   removed 9 files
+  [!] .tags holds files that are not Filo's: it stays
+
+$ filo indexes remove received
+Remove index   received/index.html . 6 files . <root>
+
+    received/index.html
+    received/.index/      5 files: its pages and style.css
+
+Remove the index and its 6 files? [y/N] 
+Done   removed received/index.html and received/.index/
+
