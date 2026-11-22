@@ -524,6 +524,67 @@ Tests: store `TestNoSnapshotForAScanThatFoundNothing`, `TestFindFiles`, `TestFin
 Run by hand on a throwaway tree (`scripts/testtree.sh`): piped, `-0 | xargs -0 ls -l`, a terminal through `script`,
 an unreadable directory, and the snapshot count after a `find` with nothing changed.
 
+## Tags: how item 18a was built
+
+Designed with the person on 2026-11-19/20 (one mechanism for tags and projects, `key:value` or a bare value, the
+spelling rules, the commands, the tags CSV, single-file registration, tags following the file and its copies), and
+built on branch `tags` on 2026-11-22 in six slices, one PR, each slice reviewed once (`code-review`, medium). The
+person asked to go from slice to slice without waiting, and to stop only for a question; none came up. The same day
+they settled that a project note (18b) is not a tag, and noted an idea: tasks and events on a CalDAV server, each
+with a link to its files (Later d).
+
+Settled while building, by Claude, and written into `design.md` (outputs were not mocked with the person first, as
+the roadmap had planned, since they asked not to be stopped; to look over): the spelling first typed is the tag's on
+every file, and `filo tag` says when it gave a typed tag another spelling; `filo tag` takes the files first, the
+arguments on the disk, so a tag that names something in the current directory is read as a file; tag and untag are
+all or nothing and do not ask; `untag` and `tags rename` take `key:` for every value; a bare search finds bare tags
+only; a file not seen yet is registered as a scan whose scope is the file; the scan says so only when copies' tags
+differed; `filo tags` is laid out as `filo policies`; `filo show` lists the tags; `filo update` asks before removing
+tags, with no `-y`, as for clearing a retention.
+
+Slices and commits, lower layers first:
+1. *The register and the spelling rules*: the design moved in; `internal/tags` (`Parse`, `ParseSearch`,
+   `ParseRemoval`, `Fold`, `Match`); schema 11 (`tags`, `tag_changes`, `export_rows.tags`) with `TagFiles`,
+   `UntagFiles` and `FileTags`. Review: five findings, four fixed (the `*` matcher moved into `tags.Match`, which
+   `find.Match` calls, so `--name` and `--tag` match alike; a tag typed twice in two spellings is reported; deleted
+   files are refused; a comment gofmt had garbled). Not changed: a key whose lower case is not a key cannot happen,
+   as `strings.ToLower` maps a letter to a letter (`İ` to `i`); a test pins it.
+2. *`filo tag` and `untag`*: `walk.SkipsPath`; a new file's tags from its copies (`Store.Copies`, `NewFile.Tags`);
+   reconcile giving new files their copies' tags, the `copy_tags` event, and possible moves noting the old file's
+   tags; `PrepareFile` and `Register`, registering one file by itself; `filo scan`'s line; the commands. Review: nine
+   findings, all fixed (a file the scan finds missing is no copy, so tags never cross a move the scan did not pair;
+   a copy in another root, perhaps unmounted, no longer refuses a file as moved; one file by two paths is one file;
+   a registered file counts as tagged; a file back at its own path is worded so; the copy_tags event has its own
+   word; and wording).
+3. *`filo tags` and rename*: `TagSummary`, `RenameTag`, the commands. Review: six findings, five fixed (files
+   respelled by a rename are counted apart; a key rename respells too; the merge count's wording; a key renamed to
+   itself is a usage error; help came in slice 6). Not changed: the three queries of `filo tags` cannot see another
+   writer's change halfway, as every run holds the register's lock.
+4. *`filo find --tag` and `--no-tag`*: found files carry their id; `find.Query`; tags after the path; a Tags part in
+   `filo show`; the flags. Review: eight findings, seven fixed (a file's hard links, each a file in the register,
+   are matched on their tags together; filo's own notes go in brackets after the tags; show counts the tags and
+   lists one a line, and a deleted file's are labelled; an empty `--tag` is worded; tags are not read when nothing
+   uses them). The help came in slice 6.
+5. *The tags CSV*: `TagItems`, `RecordTagsExport`, `UpdateTags`; a row already applied is unchanged (found by the
+   CLI test before the review); `internal/tagcsv`; an older retention CSV is not a tags CSV missing its column;
+   `filo export tags` and the update. Review: seven findings, all fixed (a row left as exported is unchanged
+   whatever happened since; a tag starting with an apostrophe survives the round trip; a file under two exports in
+   one CSV is refused; Ctrl-C at the question is an interrupt; a dry run shows the spelling the run would give; and
+   `design.md` corrected where it promised `-y` and "no terminal: nothing changes").
+6. *Help and README*. Review: six findings, all fixed (a README example's unquoted tag; help gaps for update, find,
+   tag and show; the `-y` in `design.md`, as in slice 5).
+
+Tests: tags `TestParse`, `TestParseSearch`, `TestMatches`, `TestFoldAndSame`; walk `TestSkipsPath`; store
+`TestMigrateFromV10`, `TestTagFiles`, `TestUntagFiles`, `TestCopies`, `TestFoundAndShownTags`, `TestTagSummary`,
+`TestRenameTag`, `TestRenameKeyRespells`, `TestTagItemsAndExport`, `TestUpdateTags`; reconcile `TestScanCopiesTags`,
+`TestPossibleMoveNotesTags`, `TestRegisterFile`, `TestPrepareFileRefuses`, `TestPrepareFileHardLinkAndCopy`,
+`TestPrepareFileCopyInAnotherRoot`; find `TestSelectTags`, `TestRender`; show `TestRender`; tagcsv
+`TestWriteAndParse`, `TestParseCSVRows`, `TestKinds`; CLI `TestTagGolden` (`testdata/tag.txt`), `TestTagRefusals`,
+`TestTagUsage`, `TestTagsGolden` (`tags.txt`), `TestFindTags` (`find-tags.txt`), `TestTagsCSVGolden`
+(`tags-csv.txt`), `TestTagsCSVKinds`, `TestTagsUpdateInterruptedAtPrompt`, `TestScanCopyTags`, and the help pages.
+Run by hand on a throwaway tree: tagging, a copy registered by `filo tag` taking its original's tags, find by tag
+(terminal and piped), `filo tags`, `filo show`, and a move that keeps the tags.
+
 ## Notes on decisions
 
 Short notes taken out of `design.md` on 2026-11-17, by the section they were in.
