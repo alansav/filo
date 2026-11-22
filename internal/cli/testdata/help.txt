@@ -13,7 +13,11 @@ Commands
   export duplicates [DIR] -o FILE
                            write the duplicate groups with a copy under DIR, as
                            CSV
-  update FILE [--dry-run]  record the retentions edited in an exported CSV
+  export tags [DIR] -o FILE
+                           write every file under DIR (or every root) with its
+                           tags, as CSV
+  update FILE [--dry-run]  record the retentions or tags edited in an exported
+                           CSV
   delete [DIR] [-y]        delete the files past their retention, after asking
   delete FILE [-y]         carry out a duplicates CSV: delete the copies marked
                            delete, after asking
@@ -44,8 +48,13 @@ Commands
                            decision
   get FILE... --FIELD...   print fields of files, for scripts: --retention,
                            --keep-until …
-  find [DIR] [flags]       list the files under DIR (or every root), by name:
-                           --name '*bill*'
+  find [DIR] [flags]       list the files under DIR (or every root), by name or
+                           tag: --name '*bill*', --tag type:bill
+  tag FILE... TAG...       give files tags, such as sender:British Gas or urgent
+  untag FILE... TAG...     remove tags from files (key: for every value of the
+                           key)
+  tags                     list the tags in use, with how many files have each
+  tags rename OLD NEW      rename a tag, or a key, on every file that has it
   help [COMMAND]           this overview, or a command's flags and rules
 
 Every command accepts --db PATH (default: $FILO_DB, then the user data

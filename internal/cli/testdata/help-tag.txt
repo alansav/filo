@@ -1,0 +1,26 @@
+filo tag FILE... TAG...
+filo untag FILE... TAG...
+
+  Gives each file the tags, or removes them. A tag is key:value (sender:British
+  Gas, project:house sale) or a bare value (urgent); a file can have any number,
+  and several values for one key. The files come first: the arguments that are
+  on the disk are files, and the first that is not starts the tags, so quote a
+  tag with spaces.
+
+  Spelling: the first colon ends the key when what is before it is letters,
+  digits, - and _ with a letter (10:30 call is a bare tag). Keys are lower case;
+  values keep the case first typed, and match in any case: once a file has
+  sender:British Gas, sender:british gas gives another file the same tag (filo
+  tags rename changes the spelling). Spaces in a value are trimmed and runs of
+  them made one. A tag cannot hold ; or *, and needs a value: sender: alone is a
+  search, or for untag every value of the key.
+
+  All or nothing: if any file cannot be tagged (a directory, a symlink, outside
+  every root, skipped by its root's settings), nothing changes and every refusal
+  is listed. A file filo has not seen yet is registered by itself first, taking
+  the tags of any copies of its content; one that looks moved from a file the
+  register has is refused until filo scan pairs them.
+
+  Tags follow the file through moves and edits, and a new copy of a tagged file
+  takes its tags. Find files by tag with filo find --tag; many files at once
+  with filo export tags and filo update.

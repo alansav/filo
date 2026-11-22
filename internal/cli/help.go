@@ -25,8 +25,10 @@ var overview = struct {
 			Text: "write every file under DIR (or every root) with its retention, as CSV"},
 		{Name: "export duplicates [DIR] -o FILE",
 			Text: "write the duplicate groups with a copy under DIR, as CSV"},
+		{Name: "export tags [DIR] -o FILE",
+			Text: "write every file under DIR (or every root) with its tags, as CSV"},
 		{Name: "update FILE [--dry-run]",
-			Text: "record the retentions edited in an exported CSV"},
+			Text: "record the retentions or tags edited in an exported CSV"},
 		{Name: "delete [DIR] [-y]",
 			Text: "delete the files past their retention, after asking"},
 		{Name: "delete FILE [-y]",
@@ -50,7 +52,12 @@ var overview = struct {
 		{Name: "show PATH...", Text: "everything filo holds about a file or directory: retention, history, copies"},
 		{Name: "set FILE... [flags]", Text: "set files' file_date, retention or duplicates decision"},
 		{Name: "get FILE... --FIELD...", Text: "print fields of files, for scripts: --retention, --keep-until …"},
-		{Name: "find [DIR] [flags]", Text: "list the files under DIR (or every root), by name: --name '*bill*'"},
+		{Name: "find [DIR] [flags]", Text: "list the files under DIR (or every root), by name or tag: --name " +
+			"'*bill*', --tag type:bill"},
+		{Name: "tag FILE... TAG...", Text: "give files tags, such as sender:British Gas or urgent"},
+		{Name: "untag FILE... TAG...", Text: "remove tags from files (key: for every value of the key)"},
+		{Name: "tags", Text: "list the tags in use, with how many files have each"},
+		{Name: "tags rename OLD NEW", Text: "rename a tag, or a key, on every file that has it"},
 		{Name: "help [COMMAND]", Text: "this overview, or a command's flags and rules"},
 	},
 	after: "Every command accepts --db PATH (default: $FILO_DB, then the user data directory).",
@@ -110,6 +117,7 @@ var commandHelps = map[string]commandHelp{
 		usage: []string{
 			"filo export retention [DIR] -o FILE [--no-scan] [--workers N]",
 			"filo export duplicates [DIR] -o FILE [--no-scan] [--workers N]",
+			"filo export tags [DIR] -o FILE [--no-scan] [--workers N]",
 		},
 		before: []string{
 			"Scans first (DIR only; every root for export duplicates), then writes every file under DIR (inside a " +
@@ -127,6 +135,9 @@ var commandHelps = map[string]commandHelp{
 				"you decide on, write keep for the copy to keep and delete for the rest (or k and d); keep on two or " +
 				"more copies keeps them as separate files, each with its own retention; always on every row means the " +
 				"content belongs everywhere. A group left blank is left alone. filo delete FILE carries the CSV out.",
+			"export tags writes every file under DIR with its tags in one cell, separated by ; (see filo help tag). " +
+				"Columns: id, export, directory, name, size, modified, tags. Edit the cells, then run filo update " +
+				"FILE: each cell replaces its file's tags.",
 		},
 		flags: []view.Term{
 			{Name: "-o FILE", Text: "the CSV to write; an existing file is replaced only after asking"},
@@ -145,6 +156,10 @@ var commandHelps = map[string]commandHelp{
 				"terminal leaves them alone. A row is refused, with one line saying why, if a value does not parse, " +
 				"a period has no file_date, the file changed since the export, or its retention was changed from a " +
 				"later export. The other rows are still applied.",
+			"A tags CSV (from export tags) is told by its header: each tags cell replaces its file's tags, so an " +
+				"untouched cell changes nothing and an emptied one removes them all. Before removing any tag, filo " +
+				"lists those rows and asks; without a terminal it leaves them alone. A row is refused if a tag breaks " +
+				"the spelling rules or the file was tagged since the export.",
 			"A duplicates CSV (from export duplicates) is refused: its decisions are not recorded, but carried " +
 				"out by filo delete FILE.",
 		},
@@ -221,22 +236,61 @@ var commandHelps = map[string]commandHelp{
 		},
 	},
 	"find": {
-		usage: []string{"filo find [DIR] [--name PATTERN] [-0] [--no-scan] [--workers N]"},
+		usage: []string{"filo find [DIR] [--name PATTERN] [--tag TAG]... [--no-tag TAG]... [-0]",
+			"          [--no-scan] [--workers N]"},
 		before: []string{
 			"Lists the files under DIR, a directory inside a root, or under every root, whose name matches " +
-				"PATTERN; with no --name, every file. Scans first, so a file saved since the last scan is found. " +
+				"PATTERN and whose tags match every --tag and no --no-tag; with neither, every file. Scans first, " +
+				"so a file saved since the last scan is found. " +
 				"Lists the files present now: not missing files, files deleted by filo or symlinks. A file with " +
 				"hard links is listed once.",
-			"In a terminal, every file found, with its modified date and size. Piped, one absolute path per line, " +
+			"In a terminal, every file found, with its modified date, size and tags. Piped, one absolute path per line, " +
 				"escaped as all output is (a name holding a newline or a backslash is shown escaped, says so on " +
 				"stderr and exits 1); use -0 to pass any name to xargs -0 or tar --null -T -.",
 		},
 		flags: []view.Term{
 			{Name: "--name PATTERN", Text: "the file's name, not its directory, ignoring case; * matches any run " +
 				"of characters, and is the only wildcard (? and [ match themselves)"},
+			{Name: "--tag TAG", Text: "a tag the file has (repeatable: all of them): key:value, key: for any " +
+				"value of the key, or a bare value; * in a value matches any run of characters, and case is ignored"},
+			{Name: "--no-tag TAG", Text: "a tag the file lacks (repeatable): --no-tag sender: lists the files with " +
+				"no sender"},
 			{Name: "-0", Text: "piped only: the paths as they are, each ended by a NUL, for xargs -0"},
 			{Name: "--no-scan", Text: "skip the scan: list from the register as it is"},
 			{Name: "--workers N", Text: "for the scan: files hashed in parallel, 1-64 (default 4; use 1 on a spinning disk)"},
+		},
+	},
+	"tag": {
+		usage: []string{"filo tag FILE... TAG...", "filo untag FILE... TAG..."},
+		before: []string{
+			"Gives each file the tags, or removes them. A tag is key:value (sender:British Gas, project:house " +
+				"sale) or a bare value (urgent); a file can have any number, and several values for one key. The " +
+				"files come first: the arguments that are on the disk are files, and the first that is not starts " +
+				"the tags, so quote a tag with spaces.",
+			"Spelling: the first colon ends the key when what is before it is letters, digits, - and _ with a " +
+				"letter (10:30 call is a bare tag). Keys are lower case; values keep the case first typed, and match " +
+				"in any case: once a file has sender:British Gas, sender:british gas gives another file the same " +
+				"tag (filo tags rename changes the spelling). Spaces in a value are trimmed and runs of them made " +
+				"one. A tag cannot hold ; or *, and needs a value: sender: alone is a search, or for untag every " +
+				"value of the key.",
+			"All or nothing: if any file cannot be tagged (a directory, a symlink, outside every root, skipped by " +
+				"its root's settings), nothing changes and every refusal is listed. A file filo has not seen yet is " +
+				"registered by itself first, taking the tags of any copies of its content; one that looks moved " +
+				"from a file the register has is refused until filo scan pairs them.",
+		},
+		after: []string{
+			"Tags follow the file through moves and edits, and a new copy of a tagged file takes its tags. Find " +
+				"files by tag with filo find --tag; many files at once with filo export tags and filo update.",
+		},
+	},
+	"tags": {
+		usage: []string{"filo tags", "filo tags rename OLD NEW"},
+		before: []string{
+			"Lists every tag in use with how many files have it (files deleted by filo do not count), and how many " +
+				"files have a tag and how many none.",
+			"tags rename gives every file that has OLD the tag NEW instead, spelled as typed: it fixes a typo in a " +
+				"key or a value, or changes only the case (sender:british gas to sender:British Gas). With key: for " +
+				"both (sendr: sender:) it renames the key of every value. A file that has both keeps one.",
 		},
 	},
 	"get": {
@@ -383,3 +437,6 @@ func showCommandHelp(v *view.Renderer, h commandHelp) {
 		v.Paragraph(2, p)
 	}
 }
+
+// untag shares tag's help: one page for the pair.
+func init() { commandHelps["untag"] = commandHelps["tag"] }

@@ -1,20 +1,27 @@
-filo find [DIR] [--name PATTERN] [-0] [--no-scan] [--workers N]
+filo find [DIR] [--name PATTERN] [--tag TAG]... [--no-tag TAG]... [-0]
+          [--no-scan] [--workers N]
 
   Lists the files under DIR, a directory inside a root, or under every root,
-  whose name matches PATTERN; with no --name, every file. Scans first, so a file
-  saved since the last scan is found. Lists the files present now: not missing
-  files, files deleted by filo or symlinks. A file with hard links is listed
-  once.
+  whose name matches PATTERN and whose tags match every --tag and no --no-tag;
+  with neither, every file. Scans first, so a file saved since the last scan is
+  found. Lists the files present now: not missing files, files deleted by filo
+  or symlinks. A file with hard links is listed once.
 
-  In a terminal, every file found, with its modified date and size. Piped, one
-  absolute path per line, escaped as all output is (a name holding a newline or
-  a backslash is shown escaped, says so on stderr and exits 1); use -0 to pass
-  any name to xargs -0 or tar --null -T -.
+  In a terminal, every file found, with its modified date, size and tags. Piped,
+  one absolute path per line, escaped as all output is (a name holding a newline
+  or a backslash is shown escaped, says so on stderr and exits 1); use -0 to
+  pass any name to xargs -0 or tar --null -T -.
 
 Flags
   --name PATTERN           the file's name, not its directory, ignoring case; *
                            matches any run of characters, and is the only
                            wildcard (? and [ match themselves)
+  --tag TAG                a tag the file has (repeatable: all of them):
+                           key:value, key: for any value of the key, or a bare
+                           value; * in a value matches any run of characters,
+                           and case is ignored
+  --no-tag TAG             a tag the file lacks (repeatable): --no-tag sender:
+                           lists the files with no sender
   -0                       piped only: the paths as they are, each ended by a
                            NUL, for xargs -0
   --no-scan                skip the scan: list from the register as it is

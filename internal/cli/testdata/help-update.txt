@@ -11,6 +11,12 @@ filo update FILE [--dry-run]
   file changed since the export, or its retention was changed from a later
   export. The other rows are still applied.
 
+  A tags CSV (from export tags) is told by its header: each tags cell replaces
+  its file's tags, so an untouched cell changes nothing and an emptied one
+  removes them all. Before removing any tag, filo lists those rows and asks;
+  without a terminal it leaves them alone. A row is refused if a tag breaks the
+  spelling rules or the file was tagged since the export.
+
   A duplicates CSV (from export duplicates) is refused: its decisions are not
   recorded, but carried out by filo delete FILE.
 
