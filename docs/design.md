@@ -3,7 +3,7 @@
 **The present.** Of three documents, this is the present: `design.md` (what Filo is), `roadmap.md` (the future:
 what it is not yet) and `history.md` (the past: how it got here).
 
-Filo as built: schema version 10. Last updated: 2026-11-21.
+Filo as built: schema version 10. Last updated: 2026-11-22.
 
 This file records what Filo does and why, as built. Work not done yet, ideas, open questions and ideas rejected are
 in `roadmap.md`, where designs are worked out; a design moves here, in its own commit, when work on it starts (see
@@ -1478,7 +1478,7 @@ the tool for many). Replaces "Later b, setting dates in place".
 ### Finding files
 `filo find` (roadmap item 19). Agreed with the person on 2026-11-21. Finds files in the register by name, to read
 in a terminal or to hand to standard tools (`xargs`, `tar`) through a pipe. It covers what the register holds, not
-file contents (see `roadmap.md`, Rejected, "Building search"); tags (18a) add `--tag` and `--no-tag`.
+file contents (see `roadmap.md`, Rejected, "Building search"); tags add `--tag` and `--no-tag` (see Tags).
 
 - **`filo find [DIR] [--name PATTERN] [-0] [--no-scan] [--workers N]`.** Conditions combine with AND only; an OR is
   two runs. With no `--name`, every file under DIR.
@@ -1546,10 +1546,126 @@ file contents (see `roadmap.md`, Rejected, "Building search"); tags (18a) add `-
   escaping; 2 on a usage error.
 - **Read-only on the files**, like every command but `filo delete`; it writes the register only through its scan.
 
+### Tags
+Roadmap item 18a, designed with the person on 2026-11-19/20 (see `roadmap.md`, Direction, the goal: finding files by
+tags, not by directories); the details below were settled when work started, on 2026-11-22. Tags describe files,
+so files can be found by tag; a project is a tag (`project:house sale`).
+
+- **One mechanism.** Tags and projects are one thing. **A tag is not a retention:** a file has one retention (a
+  date, a period or a policy) and any number of tags, and a tag never carries a retention. A project note (18b) is
+  not a tag either: notes and tags are separate (2026-11-22).
+- **A tag is `key:value`, or a bare value**, and the key is first-class: files are found by key, by key and value,
+  or by a key they lack (`--no-tag sender:`, the tagging to-do list). A file can have several values for one key
+  (two projects). Keys are created on the fly, never declared; `filo tags` lists the tags, and a tag exists only
+  while some file not deleted by Filo has it. A typo is fixed by renaming the tag (`filo tags rename`), or by hand:
+  list its files, add the right tag, remove the wrong one.
+- **Spelling.** One rule: the first colon separates the key when what is before it is a valid key; otherwise the
+  whole tag is a bare value.
+  - A key is lower case whatever is typed, has no spaces, holds only letters, digits, `-` and `_`, and at least one
+    letter. A value may hold spaces: trimmed at the ends, a run of spaces (or tabs) is one space. It keeps the case
+    first typed, and matches ignoring case (Unicode case folding, as `--name` does).
+  - **The spelling first typed is the tag's**, for every file: once a file has `sender:British Gas`, tagging
+    another with `sender:british gas` gives it `sender:British Gas`, and `filo tag` says so. `filo tags rename`
+    changes it, the case alone included.
+  - A tag cannot hold `;` (the CSV's separator) or `*` (the one wildcard in a search, as in `filo find --name`),
+    nor a control character; `filo tag` refuses them and says why. `?` and `[` are ordinary characters.
+  - A tag needs a value: `filo tag FILE sender:` is refused ("give a value"), since `key:` alone is only a search,
+    or, for `untag`, every value of the key.
+
+  | typed | key | value |
+  |---|---|---|
+  | `Sender: British  Gas ` | `sender` | `British Gas` |
+  | `project:trip: Paris 2027` | `project` | `trip: Paris 2027` |
+  | `10:30 call` | (bare) | `10:30 call` |
+  | `re: invoice` | `re` | `invoice` (odd but logical) |
+  | `urgent?` | (bare) | `urgent?` |
+  | `sender:` | refused: give a value | |
+  | `type:bill;receipt` | refused: `;` | |
+- **`filo tag FILE... TAG...`** and **`filo untag FILE... TAG...`**. The files come first: the arguments that are
+  on the disk are FILEs, and the first that is not starts the TAGs, so a tag that is also the name of something in
+  the current directory is read as a FILE (run from another directory, or give the tag after one that is not a
+  path). A path after a tag is a usage error ("give the files first, then the tags"). Each FILE is a regular file in
+  a root, looked up as `filo set` looks one up (a directory, a symlink or a file at a path it has moved from is
+  refused, with why). **All or nothing**, as `filo set`: if any file is refused, nothing changes, and the refusals are
+  listed. Neither asks: they change no file, and a tag removed is put back with `filo tag`. `untag` takes `key:` for
+  every value of the key, and refuses `*`. A file that has the tags already (or, for `untag`, lacks them) is counted
+  and left alone.
+
+  ```
+  Tagged   2 files · sender:British Gas · type:bill · ~/Documents
+
+      received/2026/09/2026-09-02 British Gas Bill.pdf   sender:British Gas; type:bill
+      received/2026/10/2026-10-03 British Gas Bill.pdf   sender:British Gas; type:bill
+    · sender:british gas is written sender:British Gas, as first typed (filo tags rename changes it)
+  ```
+
+  Each file is listed with all its tags afterwards. With nothing to change, one line: `Unchanged   2 files have these
+  tags already` (or "have none of these tags").
+- **A file Filo has not seen yet** (dropped in the inbox, tagged at once): `filo tag` registers only that file, not
+  its directory, for speed: a scan of that one file, recorded as a scan whose scope is the file, so the next scan
+  treats it as known. The same inode as a file the register has at another path now: refused, "looks moved from X;
+  run filo scan" (never guess; a scan pairs it). Outside every root, or where the root's settings skip it (hidden,
+  ignored): refused, saying why. Otherwise it is registered as a new file (hashed; its copies' tags taken, below;
+  directory rules apply, as in any scan), and the output says `· registered 1 new file`. `untag` registers nothing:
+  a file not in the register has no tags to remove.
+- **Tags follow the file**, as the register tracks it, not its path or content: kept through a move or rename (the
+  inbox routine), an edit (unlike retention, which asks again), and while missing. A file deleted by Filo keeps its
+  rows in the register but drops out of every listing, count and search. **A copy keeps the tags:** a new file
+  with the same content as files present (any root, not empty, not deleted by Filo) takes the union of their tags,
+  once, when first seen; after that each copy's tags are its own. The scan says so only when those copies had
+  different tags (`· 1 new file took the tags of copies that differed: check it with filo show`), since a copy
+  that matches its original needs no look. Deleted files pass on nothing (a restored file is new, as for retention).
+  A file saved by writing a new file and renaming it into place (new inode, new content) stays a reported possible
+  move, never paired; its event says the old file had tags (`same name, different content; the old file had tags`).
+- **`filo tags`**: every tag with how many files have it (files not deleted by Filo: present or missing), bare tags
+  first, then by key and value ignoring case; the heading counts the tags, the files tagged and the present files
+  with no tag.
+
+  ```
+  Tags   4 tags · 5 files tagged · 12 untagged
+
+      files   tag
+          1   urgent
+          2   project:house sale
+          3   sender:British Gas
+          3   type:bill
+  ```
+
+  No tag at all: the heading, and `Next: filo tag FILE... TAG... tags files`.
+- **`filo tags rename OLD NEW`**, across every file that has OLD, which fixes a typo in the key or the value, or
+  changes only the case (`british gas` to `British Gas`). OLD matches ignoring case, never with `*`. `OLD` and `NEW`
+  may both be `key:`, renaming the key of every value it has. A file that has NEW already keeps one: the two merge,
+  and the output counts them (`2 files had sender:British Gas already`). OLD that no file has is an error ("no file
+  has the tag X (filo tags lists them)"). It does not ask, as `filo policies rename` does not.
+
+  ```
+  Done   renamed sender:british gas to sender:British Gas · 3 files
+  ```
+- **Finding by tag**: `filo find --tag TAG` and `--no-tag TAG`, each repeatable; every condition must hold (AND,
+  with `--name` too). A search is `key:value`, where `*` in the value matches any run of characters; `key:` (any
+  value of the key; `--no-tag sender:` lists the files with no sender); or a bare value, which finds bare tags only
+  (`*` allowed). Values match ignoring case; the key is lower-cased as when tagging. The heading names the search
+  (`tagged sender:British Gas`, `not tagged type:`). In a terminal, a file's tags follow its path, before the other
+  notes; piped and with `-0`, the list is paths only, as before. `filo show FILE` lists the file's tags.
+- **The tags CSV**: `filo export tags [DIR] -o FILE [--no-scan] [--workers N]`, a scan first as every export, and
+  read back by `filo update FILE [--dry-run]`, which tells it from a retention or duplicates CSV by its header.
+  Columns: `id, export, directory, name, size, modified, tags`; every present file under DIR (every root with no
+  DIR). The `tags` cell holds the file's tags, separated by `; `, in the order `filo tags` lists them. **The cell
+  replaces the file's tags:** a tag not in it is removed, so an untouched cell changes nothing and an emptied one
+  removes all. Cells are read with the spelling rules, so `type:Bill` on a file tagged `type:bill` changes nothing
+  (the first spelling stays: `filo tags rename` changes it), and a tag typed twice is one. A row whose file's tags
+  changed since the export (tagged by command meanwhile) is refused, as a changed file is for retention, and so is a
+  row with a tag that breaks the spelling rules; the other rows still apply. An update that removes tags asks first
+  in a terminal (`Remove them? [y/N]`, `-y` answers yes; no terminal: nothing changes), since an emptied column
+  (a spreadsheet that lost it on a save) would remove every tag at once.
+- **Register (schema version 11)**: a `tags` table on file ids (the key, the value as spelled and its folded form),
+  and `tag_changes`, the history of every tag added or removed and by which command, so each change can be written
+  to the journal later (9c) without rework. `export_rows` gain `tags`, the cell as exported.
+
 ### Commands and scheduling
 - Plain names, easy to remember: `roots`, `scan`, `report`, `export`, `update`, `delete`, `duplicates` (added
   2026-11-16, see Duplicates), `policies` and `rules` (both 2026-11-16, see Lifespan), `show` (2026-11-21, see Showing and setting a file's
-  details), `find` (2026-11-21, see Finding files). No
+  details), `find` (2026-11-21, see Finding files), `tag`, `untag` and `tags` (2026-11-22, see Tags). No
   themed subcommands. There is no `restore`: a file restored from a backup comes back as a new file. "Update" says
   that only existing files change; `filo review` only says it was replaced by `export retention` and `update`.
 - **Keep flags and options to a minimum** (2026-11-11). Prefer a safe default and clear output over a flag; prefer
@@ -1572,7 +1688,7 @@ file contents (see `roadmap.md`, Rejected, "Building search"); tags (18a) add `-
   root) is shown as `./~/…`, so it never reads as a path in the home directory. The CSV export guards against
   spreadsheet formulas separately.
 - **Prompts only in a terminal** (2026-11-12, replacing "no interactive prompts"). A command asks only where a person
-  should look first: `filo update` before clearing dates, and `filo delete`. Declining, or having no
+  should look first: `filo update` before clearing dates or removing tags, and `filo delete`. Declining, or having no
   terminal on standard input, is always the safe choice, so Filo still works the same from a script or a timer.
 - `filo roots` lists roots (settings, mount point, files, size, last scan); `filo roots add DIR [--include-hidden]
   [--ignore NAME]... [--no-scan]` registers one and scans it (absorbing any roots inside it on the same filesystem,

@@ -214,57 +214,13 @@ Point out directories where most files already share one policy and offer the `f
 rest. A suggestion only, never applied on its own.
 
 ### 18a. Tags (V7, C6)
-Designed with the person on 2026-11-19/20 (see Direction, the goal). Tags describe files, so files can be found by
-tag; a project is a tag.
-- **One mechanism.** Tags and projects are one thing: a project is a tag (`project:house sale`), which 18b can give
-  a markdown note. **A tag is not a retention:** a file has one retention (a date, a period or a policy) and any
-  number of tags, and a tag never carries a retention. (Possible later, not agreed: tags as an input to rules that
-  set a policy.)
-- **A tag is `key:value`, or a bare value**, and the key is first-class: files can be found by key, by key and
-  value, or by a key they lack (`--no-tag sender:`, the tagging to-do list). A file can have several values for one
-  key (two projects). Keys are created on the fly, never declared; `filo tags` lists them, and a tag exists only
-  while some file has it. A typo is fixed by renaming the tag, or by hand: list its files, add the right tag, remove
-  the wrong one. A project note (18b) is not a tag: notes and tags are separate (agreed 2026-11-22).
-- **Spelling.** Values may hold spaces (trimmed at the ends, runs collapsed), keep the case first typed, and match
-  ignoring case (`sender:british gas` finds `British Gas`). Keys are lowercase whatever is typed, have no spaces
-  (letters, digits, `-`, `_`) and at least one letter. The first colon separates the key when what is before it is
-  a valid key, so `project:trip: Paris 2027` is key `project`, and `10:30 call` is a bare tag; `re: invoice` is key
-  `re`, odd but logical. A tag cannot hold `;` (the CSV's separator) or `*` (the one wildcard in a search, as in
-  `filo find --name`), so
-  `filo tag` refuses both and says why; `?` and `[` are ordinary characters (`urgent?`, `Q1 [draft]`). A tag needs a
-  value: `filo tag FILE sender:` is refused ("give a value"), since `key:` alone is only a search (agreed
-  2026-11-20).
-- **Commands** (the first version): `filo tag FILE... TAG...` and `filo untag FILE... TAG...`; `filo tags`, tags with
-  their file counts; `filo tags rename OLD NEW`, across every file, which fixes a typo in the key or the value, and
-  may also change only the case (`british gas` to `British Gas`); `filo export tags [DIR] -o FILE` and `filo update
-  FILE` (a separate CSV from retention, told apart by its header). Finding files: `filo find --tag` and `--no-tag`,
-  with the search rules agreed for 19 (2026-11-19): `key:` means any value of that key (only in a search: a tag
-  always has a value), `*` in a value matches any run of characters, and `--no-tag sender:` lists the files with no
-  sender. In a terminal, `filo find` shows a file's tags after its path.
-- **The tags CSV** has a `tags` cell per file, tags separated by `;`, filled at export with the file's current tags.
-  The cell replaces the file's tags: a tag not in it is removed, so an untouched cell changes nothing and an emptied
-  one removes all. A file whose tags changed since the export (tagged by command meanwhile) is refused for that row,
-  as a changed file is today.
-- **A file Filo has not seen yet** (dropped in the inbox, tagged at once): `filo tag` registers only that file, not
-  its directory, for speed. Its path already known: just tagged. The same inode as a known file at another path:
-  refused, "looks moved from X; run filo scan" (never guess; a scan pairs it). Otherwise it is registered as a new
-  file (hashed; copies' tags taken, below), and the next scan treats it as known. Outside every root, or where the
-  root's settings skip it (hidden, ignored): refused, saying why.
-- **Tags follow the file**, as the register tracks it, not its path or content: kept through a move or rename (the
-  inbox routine), an edit (unlike retention, which asks again), and while missing; a file deleted by Filo drops out of
-  listings. **A copy keeps the tags:** a new file with the same content as files present takes the union of their
-  tags, once, when first seen, and the scan says so when those copies had different tags; after that each copy's tags
-  are its own. Deleted files pass on nothing (a restored file is new, as for retention). A file saved by writing a
-  new file and renaming it into place (new inode, new content) stays a reported possible move, never paired; the
-  report says the old file had tags.
-- **Slices** (one PR): the register (a schema version, a tags table on file ids) and the spelling rules; `filo tag`
-  and `untag` with single-file registration and copies' tags in scans; `filo tags` and rename; `filo find --tag`;
-  `filo export tags` and `filo update`; README and help. Each output mocked and agreed before its slice. Tags are
-  stored so each change can be written to the journal later (9c) without rework.
-- **Later:** rules that tag by name pattern (`*British Gas*` under `received` gives `sender:British Gas`), once tags
-  have been used by hand. In the journal (9c) a tag goes with its file's relative path and hash, and another device
-  matches it on the hash first and the path second (an edited file keeps its tags, unlike its retention); a tag
-  whose file cannot be found there is reported, never guessed onto another file (proposed 2026-11-19, with 9c).
+Being built (branch `tags`, started 2026-11-22): the design is in `design.md`, Tags. Left for later, not part of
+the item:
+- Rules that tag by name pattern (`*British Gas*` under `received` gives `sender:British Gas`), once tags have been
+  used by hand. (Possible later, not agreed: tags as an input to rules that set a policy.)
+- In the journal (9c) a tag goes with its file's relative path and hash, and another device matches it on the hash
+  first and the path second (an edited file keeps its tags, unlike its retention); a tag whose file cannot be found
+  there is reported, never guessed onto another file (proposed 2026-11-19, with 9c).
 
 ### 18b. Project notes and packages (V5, C5)
 Pull a project's files together. By the direction above, Filo writes the list and a standard tool does the copying
