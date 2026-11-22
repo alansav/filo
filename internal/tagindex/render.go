@@ -135,9 +135,7 @@ func (r *renderer) base(depth int, trail ...link) page {
 
 func (r *renderer) main() error {
 	p := page{Title: r.d.Title, Style: href(0, r.dir+"/"+Style), Heading: r.d.Title, Trail: []link{{Text: r.d.Title}}}
-	tagCount := len(r.d.Bare.Values)
 	for _, k := range r.d.Keys {
-		tagCount += len(k.Values)
 		p.Rows = append(p.Rows, row{Text: k.Key, Href: href(0, r.dir+"/"+k.Dir+"/"+KeyPage),
 			Count: count(len(k.Values), "value", "values") + " · " + count(k.Files, "file", "files")})
 	}
@@ -145,7 +143,7 @@ func (r *renderer) main() error {
 		p.Rows = append(p.Rows, row{Text: "other tags", Href: href(0, r.dir+"/"+b.Dir+"/"+KeyPage),
 			Count: count(len(b.Values), "tag", "tags") + " · " + count(b.Files, "file", "files")})
 	}
-	p.Counts = count(len(r.d.Files), "file", "files") + " · " + count(tagCount, "tag", "tags")
+	p.Counts = count(len(r.d.Files), "file", "files") + " · " + count(r.d.Tags(), "tag", "tags")
 	if len(r.d.Files) == 0 {
 		p.Empty = "No files here yet."
 	} else if len(p.Rows) == 0 {
