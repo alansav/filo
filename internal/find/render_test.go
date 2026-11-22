@@ -22,6 +22,8 @@ func TestRender(t *testing.T) {
 	old := file(archive, "tax/2018 return.pdf", 500, 5)
 	tagged := bill
 	tagged.Tags = []tags.Tag{{Key: "sender", Value: "British Gas"}, {Key: "type", Value: "bill"}}
+	lockedTagged := locked // a bare tag that reads like a note
+	lockedTagged.Tags = []tags.Tag{{Value: "could not be read"}}
 	for _, tc := range []struct {
 		name    string
 		files   []File
@@ -71,6 +73,12 @@ func TestRender(t *testing.T) {
 				"    modified        size\n" +
 				"    2026-10-03   184 KiB   received/2026/10/gas bill.pdf   sender:British Gas; type:bill\n" +
 				"    2026-10-04   2.0 KiB   house/gas safety.pdf   could not be read; and 1 hard link, the same file\n"},
+		{"tags and filo's notes", []File{lockedTagged}, "", "", view.Where{Roots: []string{docs}}, "", "" +
+			"Found   1 file . 2.0 KiB . ~/Documents\n" +
+			"\n" +
+			"    modified        size\n" +
+			"    2026-10-04   2.0 KiB   house/gas safety.pdf   could not be read   (could not be read; and 1 hard link, " +
+			"the same file)\n"},
 		{"nothing found by tag", nil, "", "type:invoice", view.Where{Roots: []string{docs}}, "", "" +
 			"Found   no files . tagged type:invoice . ~/Documents\n" +
 			"\n" +

@@ -112,11 +112,14 @@ func TestSelectTags(t *testing.T) {
 		{FileID: 2, RootID: 1, Rel: "a/water bill.pdf"},
 		{FileID: 3, RootID: 1, Rel: "b/notes.txt"},
 		{FileID: 4, RootID: 1, Rel: "b/untagged.txt"},
+		{FileID: 5, RootID: 1, Rel: "c/link one.pdf", Inode: 7, Links: 1}, // hard links, tagged through one
+		{FileID: 6, RootID: 1, Rel: "d/link two.pdf", Inode: 7, Links: 1},
 	}
 	tagsOf := map[int64][]tags.Tag{
 		1: {parse("sender:British Gas"), parse("type:bill")},
 		2: {parse("sender:Thames Water"), parse("type:bill"), parse("urgent")},
 		3: {parse("project:house")},
+		6: {parse("project:house"), parse("urgent")},
 	}
 	for _, tc := range []struct {
 		name          string
@@ -126,10 +129,15 @@ func TestSelectTags(t *testing.T) {
 	}{
 		{"a tag", "", []string{"type:bill"}, nil, []string{"a/gas bill.pdf", "a/water bill.pdf"}},
 		{"a value in any case", "", []string{"sender:BRITISH GAS"}, nil, []string{"a/gas bill.pdf"}},
-		{"a key", "", []string{"project:"}, nil, []string{"b/notes.txt"}},
+		{"a key", "", []string{"project:"}, nil, []string{"b/notes.txt", "c/link one.pdf"}},
 		{"a wildcard", "", []string{"sender:*water*"}, nil, []string{"a/water bill.pdf"}},
 		{"two tags: both", "", []string{"type:bill", "urgent"}, nil, []string{"a/water bill.pdf"}},
-		{"no such key: the tagging to-do list", "", nil, []string{"sender:"}, []string{"b/notes.txt", "b/untagged.txt"}},
+		{"no such key: the tagging to-do list", "", nil, []string{"sender:"}, []string{"b/notes.txt", "b/untagged.txt",
+			"c/link one.pdf"}},
+		{"a file tagged through one link is tagged", "", nil, []string{"project:"}, []string{"a/gas bill.pdf",
+			"a/water bill.pdf", "b/untagged.txt"}},
+		{"hard links listed at the first whose name matches", "*two*", []string{"urgent"}, nil,
+			[]string{"d/link two.pdf"}},
 		{"a tag and not another", "", []string{"type:bill"}, []string{"urgent"}, []string{"a/gas bill.pdf"}},
 		{"with a name", "water*", []string{"type:"}, nil, []string{"a/water bill.pdf"}},
 		{"a bare search finds bare tags only", "", []string{"bill"}, nil, nil},
@@ -145,8 +153,11 @@ func TestSelectTags(t *testing.T) {
 			var got []string
 			for _, f := range Select(fs, q, tagsOf) {
 				got = append(got, f.Rel)
-				if len(f.Tags) != len(tagsOf[f.FileID]) {
+				if f.Inode == 0 && len(f.Tags) != len(tagsOf[f.FileID]) {
 					t.Errorf("%s: %d tags, want %d", f.Rel, len(f.Tags), len(tagsOf[f.FileID]))
+				}
+				if f.Inode != 0 && len(f.Tags) != 2 { // the links' tags together
+					t.Errorf("%s: tags %v, want the links' two", f.Rel, f.Tags)
 				}
 			}
 			if !slices.Equal(got, tc.want) {

@@ -3,6 +3,7 @@
 package find
 
 import (
+	"cmp"
 	"path"
 	"slices"
 
@@ -50,19 +51,42 @@ func (q Query) Matches(name string, ts []tags.Tag) bool {
 
 // Select returns the files among fs (one row per path, as store.FindFiles gives them, in its order) that q finds,
 // with tagsOf their tags by file id, in the same order. Paths that are one file, hard links (the same inode, size and
-// modified time in the same root, as store.FindFiles counts them), are listed once, at the first that matches, if
-// any does. A stale inode reused by a file of another size or time is another file, listed too.
+// modified time in the same root, as store.FindFiles counts them), are listed once, at the first whose name matches,
+// if any does. The register keeps each link as a file with tags of its own, so a file's tags are those of all its
+// links: tagging it through one link tags the file. A stale inode reused by a file of another size or time is another
+// file, listed too.
 func Select(fs []store.FoundFile, q Query, tagsOf map[int64][]tags.Tag) []File {
 	type key struct{ root, ino, size, mtime int64 }
+	keyOf := func(f store.FoundFile) (key, bool) {
+		return key{f.RootID, f.Inode, f.Size, f.MtimeNS}, f.Inode != 0 && f.Links > 0
+	}
+	linked := map[key][]tags.Tag{} // the tags of every link of a file, each once
+	for _, f := range fs {
+		if k, ok := keyOf(f); ok {
+			for _, t := range tagsOf[f.FileID] {
+				if !slices.ContainsFunc(linked[k], t.Same) {
+					linked[k] = append(linked[k], t)
+				}
+			}
+		}
+	}
+	for _, ts := range linked {
+		slices.SortFunc(ts, func(a, b tags.Tag) int {
+			return cmp.Or(cmp.Compare(a.Key, b.Key), cmp.Compare(a.Folded(), b.Folded()))
+		})
+	}
 	listed := map[key]bool{}
 	var out []File
 	for _, f := range fs {
 		ts := tagsOf[f.FileID]
+		k, isLinked := keyOf(f)
+		if isLinked {
+			ts = linked[k]
+		}
 		if !q.Matches(path.Base(f.Rel), ts) {
 			continue
 		}
-		if f.Inode != 0 && f.Links > 0 {
-			k := key{f.RootID, f.Inode, f.Size, f.MtimeNS}
+		if isLinked {
 			if listed[k] {
 				continue
 			}

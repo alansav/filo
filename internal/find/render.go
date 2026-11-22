@@ -67,17 +67,26 @@ func modified(ns int64) string {
 	return time.Unix(0, ns).Local().Format("2006-01-02")
 }
 
-// note says what else a reader should know about a file: its tags, that it could not be read, and its other links.
+// note says what else a reader should know about a file: its tags, then, in brackets after them so no tag can read
+// as one, filo's notes: that it could not be read, and its other links.
 func note(f File) string {
-	var parts []string
-	for _, t := range f.Tags {
-		parts = append(parts, t.String())
-	}
+	var notes []string
 	if f.Unreadable {
-		parts = append(parts, "could not be read")
+		notes = append(notes, "could not be read")
 	}
 	if f.Links > 0 {
-		parts = append(parts, "and "+report.Plural(int64(f.Links), "hard link", "hard links")+", the same file")
+		notes = append(notes, "and "+report.Plural(int64(f.Links), "hard link", "hard links")+", the same file")
 	}
-	return strings.Join(parts, "; ")
+	own := strings.Join(notes, "; ")
+	if len(f.Tags) == 0 {
+		return own
+	}
+	names := make([]string, len(f.Tags))
+	for i, t := range f.Tags {
+		names[i] = t.String()
+	}
+	if own != "" {
+		return strings.Join(names, "; ") + "   (" + own + ")"
+	}
+	return strings.Join(names, "; ")
 }
