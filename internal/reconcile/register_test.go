@@ -2,6 +2,7 @@ package reconcile
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -79,6 +80,11 @@ func TestPrepareFileRefuses(t *testing.T) {
 			e.scan()
 			e.write("inbox/back.txt", "kept content")
 		}, "inbox/back.txt", "looks moved from "},
+		{"back at its own path after it went missing", func(e *env) {
+			e.rm("kept.txt")
+			e.scan()
+			e.write("kept.txt", "kept content") // restored from a backup
+		}, "kept.txt", "missing since a scan, and back at this path"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -109,5 +115,28 @@ func TestPrepareFileHardLinkAndCopy(t *testing.T) {
 		if p, why := e.prepare(rel); p == nil {
 			t.Errorf("PrepareFile(%s) refused: %s", rel, why)
 		}
+	}
+}
+
+// TestPrepareFileCopyInAnotherRoot: a copy in another root, whose disk may be unmounted, is not a move this root's
+// scan would pair: the file is registered.
+func TestPrepareFileCopyInAnotherRoot(t *testing.T) {
+	e := newEnv(t, nil)
+	other := canonicalTemp(t)
+	if err := os.WriteFile(filepath.Join(other, "bill.pdf"), []byte("bill"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.s.AddRoot(context.Background(), other); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Scan(context.Background(), e.s, Options{Target: other}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(other, "bill.pdf")); err != nil { // as if its disk were unmounted
+		t.Fatal(err)
+	}
+	e.write("inbox/bill.pdf", "bill")
+	if p, why := e.prepare("inbox/bill.pdf"); p == nil {
+		t.Errorf("refused: %s", why)
 	}
 }

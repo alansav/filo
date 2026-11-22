@@ -72,10 +72,13 @@ func PrepareFile(ctx context.Context, s *store.Store, root store.Root, rel strin
 		return nil, "could not be read: " + o.Err.Error(), nil
 	}
 	if from, err := movedFrom(ctx, s, root, rel, o.Result); err != nil || from != "" {
-		if from != "" {
-			return nil, "looks moved from " + from + "; run filo scan, which pairs it", err
+		switch {
+		case err != nil:
+			return nil, "", err
+		case from == abs:
+			return nil, "missing since a scan, and back at this path; run filo scan, which finds it", nil
 		}
-		return nil, "", err
+		return nil, "looks moved from " + from + "; run filo scan, which pairs it", nil
 	}
 
 	p := &Pending{root: root, rel: rel, started: started}
@@ -117,10 +120,11 @@ func (p *Pending) Register(ctx context.Context, s *store.Store) (Summary, error)
 	return sum, nil
 }
 
-// movedFrom is the path of a file the register has that the file at rel (read as r) looks moved from, "" if none: a
-// file in the root with its inode whose path is no longer that inode on the disk (a hard link is another path of
-// the same file, not a move), a file present with its content at a path no longer on the disk, or a file with its
-// content missing since an earlier scan.
+// movedFrom is the path of a file the register has that the file at rel (read as r) looks moved from, "" if none,
+// as a scan of the root would pair it: a file in the root with its inode whose path is no longer that inode on the
+// disk (a hard link is another path of the same file, not a move), a file present in the root with its content at a
+// path no longer on the disk (a copy in another root is not this scan's to pair: its disk may only be unmounted), or
+// a file with its content missing since an earlier scan, in any root (its own path, if it came back there).
 func movedFrom(ctx context.Context, s *store.Store, root store.Root, rel string, r hasher.Result) (string, error) {
 	onDisk := func(rootPath, p string) (fs.FileInfo, bool) {
 		fi, err := os.Lstat(filepath.Join(rootPath, filepath.FromSlash(p)))
@@ -151,6 +155,9 @@ func movedFrom(ctx context.Context, s *store.Store, root store.Root, rel string,
 		return "", err
 	}
 	for _, c := range copies[h] {
+		if c.RootID != root.ID {
+			continue
+		}
 		if _, ok := onDisk(c.RootPath, c.Path); !ok {
 			return c.AbsPath(), nil
 		}
