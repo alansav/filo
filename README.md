@@ -42,8 +42,12 @@ moves, renames or deletes anything outside its own database. See [Roadmap](#road
   holds about a file (its paths over time, hash, retention, copies) or a directory (its rules and contents), `filo
   set` changes a file's `file_date`, retention or duplicates decision without a CSV, and `filo get` prints single
   fields for scripts. See [One file at a time](#one-file-at-a-time).
-- **Finds files by name**, wherever they are in your roots: `filo find --name '*gas bill*'` lists them, and piped it
-  gives their paths to other tools (`xargs`, `tar`). See [Finding files](#finding-files).
+- **Finds files by name or tag**, wherever they are in your roots: `filo find --name '*gas bill*'` or `filo find
+  --tag sender:British Gas` lists them, and piped it gives their paths to other tools (`xargs`, `tar`). See
+  [Finding files](#finding-files).
+- **Tags files**, so you find them by what they are rather than where they are: `filo tag bill.pdf 'sender:British
+  Gas' type:bill`. A project is a tag (`project:house sale`). Tags follow a file when it moves or is edited, and a
+  new copy of a tagged file takes its tags. See [Tags](#tags).
 - **Deletes what you confirm**, after reading each file again just before deleting it: a file that changed since its
   retention was set, moved, or can't be read is skipped, never deleted.
 - **Clears out duplicates you decide on**: export the groups of identical copies, write `keep` or `delete` against
@@ -485,13 +489,14 @@ Next: filo set FILE --retention R, --file-date DATE or --duplicates always|recor
 
 ## Finding files
 
-`filo find` lists the files in the register by name, under a directory or under every root:
+`filo find` lists the files in the register by name and by tag, under a directory or under every root:
 
 ```sh
 filo find --name '*gas*'                          # every file whose name holds "gas", in every root
 filo find ~/Documents/received --name '*.pdf'     # under one directory only
 filo find --name '*.pdf' | less                   # piped: one absolute path per line
 filo find --name '*bill*' -0 | xargs -0 ls -l     # -0: any file name, safely, for xargs -0 or tar --null -T -
+filo find --tag 'project:house sale' -0 | tar --null -T - -czf house.tgz   # a project's files, packed
 ```
 
 ```
@@ -510,6 +515,9 @@ Found   3 files · 412 KiB · named *gas* · ~/Documents
 - **`--name`** matches the file's name, not its directory, ignoring case. `*` matches any run of characters and is
   the only wildcard: `?` and `[` match themselves, since they turn up in real names (`Q1 [draft].xlsx`). A name with
   no `*` must match whole: `--name bill.pdf` finds files called `bill.pdf`. With no `--name`, every file.
+- **`--tag TAG`** and **`--no-tag TAG`** (each repeatable; all must hold): `key:value`, where `*` in the value matches
+  any run of characters; `key:` for any value of the key (`--no-tag sender:` lists the files with no sender); or a
+  bare value, which finds bare tags. Case is ignored. See [Tags](#tags).
 - **It scans first**, as an export does, so a file saved a moment ago is found; the scan only reads files that
   changed. `--no-scan` lists from the register as it is. A root that can't be scanned (an unplugged disk) stops it,
   so a list never looks complete when it isn't.
@@ -518,6 +526,40 @@ Found   3 files · 412 KiB · named *gas* · ~/Documents
 - **Piped**, names are escaped as all of Filo's output is, so a name holding a newline or a backslash would not
   match on disk; `filo find` then says so on stderr and exits 1. `-0` writes the names exactly, each ended by a NUL,
   and works only through a pipe.
+
+## Tags
+
+A tag is `key:value` (`sender:British Gas`, `type:bill`, `project:house sale`) or a bare value (`urgent`). A file can
+have any number of tags, and several values for one key (two projects).
+
+```sh
+filo tag ~/inbox/scan.pdf 'sender:British Gas' type:bill   # the files first, then the tags
+filo untag ~/inbox/scan.pdf type:                          # key: removes every value of the key
+filo tags                                                   # the tags in use, with how many files have each
+filo tags rename 'sender:british gas' 'sender:British Gas'  # fix a typo or the case, on every file
+filo find --tag type:bill --no-tag sender:                  # bills with no sender yet: the to-do list
+```
+
+```
+$ filo tag received/2026-10-03\ British\ Gas\ Bill.pdf 'sender:british gas' type:bill
+Tagged   1 file · sender:British Gas · type:bill · ~/Documents
+
+    received/2026-10-03 British Gas Bill.pdf   sender:British Gas; type:bill
+  · sender:british gas is written sender:British Gas, as first typed (filo tags rename changes it)
+```
+
+- **Spelling.** Keys are lower case; values keep the case first typed and match in any case, so once one file has
+  `sender:British Gas`, typing `sender:british gas` gives another file the same tag. The first colon ends the key only
+  when what is before it is a word (letters, digits, `-` and `_`): `10:30 call` is a bare tag. A tag cannot hold `;`
+  or `*`.
+- **A file Filo has not seen yet** (just dropped in an inbox) is registered by itself when you tag it, without
+  scanning its directory. One that looks moved from a file Filo knows is refused until `filo scan` pairs the two.
+- **Tags follow the file**: through moves, renames and edits (unlike a retention, which an edit asks for again). A new
+  copy of a tagged file takes its tags when a scan first sees it; `filo scan` says so when the copies' tags differed.
+- **Many files at once**: `filo export tags [DIR] -o tags.csv` writes every file with its tags in one cell,
+  separated by `;`. Edit the cells and run `filo update tags.csv`: each cell replaces its file's tags, and Filo asks
+  before removing any.
+- In a terminal, `filo find` shows each file's tags after its path, and `filo show` lists them.
 
 ## Commands
 
@@ -530,7 +572,8 @@ Found   3 files · 412 KiB · named *gas* · ~/Documents
 | `filo report [--top N]` | Show the overview; `--top` sets how many entries each list shows (default 10). |
 | `filo export retention [DIR] -o FILE [--no-scan] [--workers N]` | Scan `DIR` (or every root), then write every file under it with its retention, as CSV. |
 | `filo export duplicates [DIR] -o FILE [--no-scan] [--workers N]` | Scan every root, then write the duplicate groups with a copy under `DIR` as CSV, to decide which copies to keep. See [Duplicates](#duplicates). |
-| `filo update FILE [--dry-run]` | Apply the retentions edited in an exported retention CSV. |
+| `filo export tags [DIR] -o FILE [--no-scan] [--workers N]` | Scan `DIR` (or every root), then write every file under it with its tags, as CSV. See [Tags](#tags). |
+| `filo update FILE [--dry-run]` | Apply the retentions or tags edited in an exported retention or tags CSV. |
 | `filo delete [DIR] [-y]` | List the files past their retention, ask, and delete the ones you choose. See [Deleting](#deleting). |
 | `filo delete FILE [-y]` | Carry out a duplicates CSV: check it against the disk, list, ask, and delete the copies marked `delete`. |
 | `filo duplicates` | List what is not counted as duplicates: excluded directories, contents marked always, identical files kept as separate files. |
@@ -551,7 +594,11 @@ Found   3 files · 412 KiB · named *gas* · ~/Documents
 | `filo show PATH... [-r] [--history] [--verify]` | Everything Filo holds about each file or directory. See [One file at a time](#one-file-at-a-time). |
 | `filo set FILE... [flags]` | Set files' `file_date`, retention or duplicates decision; asks before replacing a value. |
 | `filo get FILE... --FIELD...` | Print fields of files, for scripts. |
-| `filo find [DIR] [--name PATTERN] [-0] [--no-scan] [--workers N]` | Scan, then list the files under `DIR` (or every root) whose name matches. See [Finding files](#finding-files). |
+| `filo find [DIR] [--name PATTERN] [--tag TAG]... [--no-tag TAG]... [-0] [--no-scan] [--workers N]` | Scan, then list the files under `DIR` (or every root) whose name and tags match. See [Finding files](#finding-files). |
+| `filo tag FILE... TAG...` | Give files tags; a file not scanned yet is registered by itself. See [Tags](#tags). |
+| `filo untag FILE... TAG...` | Remove tags from files (`key:` for every value of the key). |
+| `filo tags` | List the tags in use, with how many files have each. |
+| `filo tags rename OLD NEW` | Rename a tag, or a key (`sendr: sender:`), on every file that has it. |
 | `filo help [COMMAND]` | Show usage. `-h` works on every command. |
 
 Options for `filo roots add` and `filo roots set`, which every scan of the root then uses:
@@ -588,8 +635,8 @@ Exit codes: `0` success (files that couldn't be read are reported but don't fail
 is not a failure), `1` an error, a root that failed during `filo scan` of every root, a CSV row that `filo update`
 refused, a file `filo delete` couldn't read or delete, a group of a duplicates CSV it refused, a path `filo show`
 or `filo get` couldn't show (not in the register, skipped by its root's settings, or for `get` a directory; the others
-are still shown), a file `filo set` refused, or a root `filo find` couldn't scan or a name it had to escape, `2` a
-usage error. `filo find` that finds nothing exits `0`.
+are still shown), a file `filo set`, `filo tag` or `filo untag` refused, a tag `filo tags rename` found on no file,
+or a root `filo find` couldn't scan or a name it had to escape, `2` a usage error. `filo find` that finds nothing exits `0`.
 
 ## Roots
 
@@ -677,8 +724,9 @@ Enable it with `systemctl --user enable --now filo-scan.timer`.
 8. **Show, set and get**: everything about a file or directory, and its decisions changed from the command line.
    Done.
 9. **Finding files** by name: `filo find`. Done.
-10. **Next**: what is planned, in order, is in [docs/roadmap.md](docs/roadmap.md): tags, pages listing files by tag,
-    bash completion, sharing decisions between devices, and more.
+10. **Tags**: `filo tag`, `untag`, `tags`, finding by tag, and the tags CSV. Done.
+11. **Next**: what is planned, in order, is in [docs/roadmap.md](docs/roadmap.md): pages listing files by tag, bash
+    completion, sharing decisions between devices, and more.
 
 Principles that won't change:
 - A retention is never a trigger: reaching its end makes a file a candidate you confirm.
