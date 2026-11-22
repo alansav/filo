@@ -176,6 +176,10 @@ func (e *env) run(ctx context.Context, args []string) error {
 		return e.get(ctx, *db, rest)
 	case "find":
 		return e.find(ctx, *db, rest)
+	case "tag":
+		return e.tag(ctx, *db, rest)
+	case "untag":
+		return e.untag(ctx, *db, rest)
 	case "review":
 		return usageError{"review was replaced by export retention and update; see filo help"}
 	default:

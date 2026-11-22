@@ -1599,8 +1599,9 @@ so files can be found by tag; a project is a tag (`project:house sale`).
     · sender:british gas is written sender:British Gas, as first typed (filo tags rename changes it)
   ```
 
-  Each file is listed with all its tags afterwards. With nothing to change, one line: `Unchanged   2 files have these
-  tags already` (or "have none of these tags").
+  Each file is listed with all its tags afterwards, and the heading counts the files left alone (`1 had them
+  already`). With nothing to change, one line: `Unchanged   type:bill · 2 files have this tag already` (`do not have
+  this tag`, `have none of these tags` for `untag`).
 - **A file Filo has not seen yet** (dropped in the inbox, tagged at once): `filo tag` registers only that file, not
   its directory, for speed: a scan of that one file, recorded as a scan whose scope is the file, so the next scan
   treats it as known. The same inode as a file the register has at another path now: refused, "looks moved from X;

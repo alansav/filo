@@ -1,0 +1,42 @@
+$ filo tag SEP OCT 'sender:British Gas' type:bill
+Tagged   2 files . sender:British Gas . type:bill . <root>
+
+    received/2026/09/2026-09-02 British Gas Bill.pdf   sender:British Gas; type:bill
+    received/2026/10/2026-10-03 British Gas Bill.pdf   sender:British Gas; type:bill
+
+$ filo tag NOTE 'sender:british gas' urgent
+Tagged   1 file . sender:British Gas . urgent . <root>
+
+    notes/ideas.txt   urgent; sender:British Gas
+  - sender:british gas is written sender:British Gas, as first typed (filo tags rename changes it)
+
+$ filo tag SEP OCT project:house type:Bill
+Tagged   2 files . project:house . type:bill . <root>
+
+    received/2026/09/2026-09-02 British Gas Bill.pdf   project:house; sender:British Gas; type:bill
+    received/2026/10/2026-10-03 British Gas Bill.pdf   project:house; sender:British Gas; type:bill
+  - type:Bill is written type:bill, as first typed (filo tags rename changes it)
+
+$ filo tag INBOX urgent (not seen yet)
+Tagged   1 file . urgent . <root>
+
+    inbox/scan 2026-10-03.pdf   urgent; project:house; sender:British Gas; type:bill
+  - registered 1 new file
+
+$ filo untag SEP OCT project:
+Untagged   2 files . project: . <root>
+
+    received/2026/09/2026-09-02 British Gas Bill.pdf   sender:British Gas; type:bill
+    received/2026/10/2026-10-03 British Gas Bill.pdf   sender:British Gas; type:bill
+
+$ filo untag SEP project:
+Unchanged   project: . 1 file does not have this tag . <root>
+
+$ filo tag SEP type:bill
+Unchanged   type:bill . 1 file has this tag already . <root>
+
+$ filo tag SEP NOTE urgent
+Tagged   1 file . urgent . 1 had it already . <root>
+
+    received/2026/09/2026-09-02 British Gas Bill.pdf   urgent; sender:British Gas; type:bill
+
