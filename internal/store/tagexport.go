@@ -110,8 +110,10 @@ type TagUpdateResult struct {
 
 // UpdateTags checks each row of a tags CSV against the register and applies the ones that pass, in one transaction
 // (docs/design.md, Tags, "The tags CSV"): the cell replaces the file's tags, a tag added with the spelling it has
-// already (one in the cell in another case than the file's is no change). A row of another kind of export, of a file
-// not in it, of a file deleted by filo, or whose file's tags changed since the export, is refused. A change that
+// already (one in the cell in another case than the file's is no change). A cell with the tags the file has is
+// unchanged, so a CSV applied twice changes nothing the second time. A row of another kind of export, of a file not
+// in it, of a file deleted by filo, or whose file's tags changed since the export (to others than the cell's), is
+// refused. A change that
 // removes a tag is made only if ConfirmRemovals, given every such change once, returns true; otherwise those rows
 // are left alone, and the others still apply.
 func (s *Store) UpdateTags(ctx context.Context, rows []TagRow, now time.Time, opt TagUpdateOptions) (TagUpdateResult,
@@ -231,6 +233,9 @@ func checkTagRow(ctx context.Context, tx *sql.Tx, r TagRow, ex exportInfo) (TagC
 	if err != nil {
 		return ch, "", err
 	}
+	if sameTags(have, r.Tags) {
+		return ch, "", nil // the tags the file has: unchanged, whatever happened since the export (a CSV applied twice)
+	}
 	if JoinTags(have) != exported.String {
 		return ch, fmt.Sprintf("its tags were changed after export %d (now %s); export again", r.ExportID,
 			cellOrNone(have)), nil
@@ -246,6 +251,19 @@ func checkTagRow(ctx context.Context, tx *sql.Tx, r TagRow, ex exportInfo) (TagC
 		}
 	}
 	return ch, "", nil
+}
+
+// sameTags reports whether a and b hold the same tags, in any case and order (each holds a tag once).
+func sameTags(a, b []tags.Tag) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for _, t := range a {
+		if !slices.ContainsFunc(b, t.Same) {
+			return false
+		}
+	}
+	return true
 }
 
 // fileTagsIn is one file's tags, read in tx, in the order FileTags gives them.

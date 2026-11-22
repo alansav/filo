@@ -104,6 +104,18 @@ func TestUpdateTags(t *testing.T) {
 		}
 	})
 
+	t.Run("a CSV applied twice changes nothing the second time", func(t *testing.T) {
+		e, id, k := setup(t)
+		rows := []TagRow{{Line: 2, ExportID: id, FileID: k["b"].FileID, Tags: cell(t, "urgent")}}
+		if _, err := e.s.UpdateTags(e.ctx, rows, tagNow, TagUpdateOptions{}); err != nil {
+			t.Fatal(err)
+		}
+		res, err := e.s.UpdateTags(e.ctx, rows, tagNow, TagUpdateOptions{})
+		if err != nil || res.Unchanged != 1 || len(res.Refusals)+len(res.Changed) != 0 {
+			t.Errorf("again: %+v, %v", res, err)
+		}
+	})
+
 	t.Run("removals not confirmed are left alone; additions still apply", func(t *testing.T) {
 		e, id, k := setup(t)
 		res, err := e.s.UpdateTags(e.ctx, []TagRow{
