@@ -54,8 +54,8 @@ func (e *env) exportTags(ctx context.Context, s *store.Store, f store.Filter, wh
 }
 
 // updateTags is filo update FILE for a tags CSV: each row's cell replaces its file's tags, asking once before any
-// tag is removed.
-func (e *env) updateTags(ctx context.Context, db, path string, data []byte, dry bool) error {
+// tag is removed, unless yes (-y) answers.
+func (e *env) updateTags(ctx context.Context, db, path string, data []byte, dry, yes bool) error {
 	parsed, err := tagcsv.ParseCSV(data)
 	if err != nil {
 		return fmt.Errorf("%s: %w", path, err)
@@ -84,7 +84,7 @@ func (e *env) updateTags(ctx context.Context, db, path string, data []byte, dry 
 	r.Heading(title, view.Where{Roots: roots}, csvFacts(path, exports, report.Plural(int64(total), "row", "rows"))...)
 	r.Blank()
 
-	asking := e.canPrompt()
+	asking := e.canPrompt() && !yes
 	var pr *prompter
 	if asking {
 		pr = newPrompter(e.stdin)
@@ -93,6 +93,9 @@ func (e *env) updateTags(ctx context.Context, db, path string, data []byte, dry 
 	}
 	asked := false
 	confirm := func(cs []store.TagChange) bool {
+		if yes {
+			return true // the rows that remove tags are listed with the others, after the update
+		}
 		if !asking {
 			return false
 		}
@@ -130,7 +133,7 @@ func (e *env) updateTags(ctx context.Context, db, path string, data []byte, dry 
 	if res.Skipped > 0 {
 		why := "not confirmed"
 		if !asked {
-			why = "there is no terminal to ask in; run filo update in a terminal to remove them"
+			why = "there is no terminal to ask in; run filo update in a terminal, or with -y, to remove them"
 		}
 		r.Count(view.Attention, report.Plural(int64(res.Skipped), "row left as it was", "rows left as they were")+
 			", though "+pluralWord(res.Skipped, "it removes", "they remove")+" tags ("+why+")")

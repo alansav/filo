@@ -55,7 +55,21 @@ func TestTagsCSVGolden(t *testing.T) {
 
 	// No terminal: nothing is removed, and the run says why.
 	r := filo(ExitError, "", false, "update", again)
-	ct.contains("no terminal", r.stdout, "1 row left as it was, though it removes tags (there is no terminal to ask in")
+	ct.contains("no terminal", r.stdout, "1 row left as it was, though it removes tags (there is no terminal to ask in",
+		"or with -y, to remove them")
+
+	// -y removes them without asking, with or without a terminal; the removals are listed with the other changes.
+	r = filo(ExitError, "", false, "update", again, "-y")
+	ct.contains("-y", r.stdout, "1 file had its tags changed",
+		"received/2026/09/2026-09-02 British Gas Bill.pdf   removed project:house; sender:British Gas; type:bill")
+	ct.lacks("-y", r.stdout, "Remove them?", "left as it was")
+	ct.contains("tags after -y", filo(ExitOK, "", false, "find", "--no-tag", "type:", "--no-scan").stdout, sep)
+
+	// -y answers only that question: with a retention CSV it is a usage error.
+	rcsv := filepath.Join(work, "r.csv")
+	filo(ExitOK, "", false, "export", "retention", "-o", rcsv, "--no-scan")
+	ct.contains("-y, retention", filo(ExitUsage, "", false, "update", rcsv, "-y").stderr,
+		"-y answers only the question about removing tags")
 }
 
 func TestTagsCSVKinds(t *testing.T) {

@@ -146,7 +146,7 @@ var commandHelps = map[string]commandHelp{
 		},
 	},
 	"update": {
-		usage: []string{"filo update FILE [--dry-run]"},
+		usage: []string{"filo update FILE [--dry-run] [-y]"},
 		before: []string{
 			"Reads an exported retention CSV and applies the file_date and retention you changed. retention is a " +
 				"period counted from file_date (7y, 18m, 6w, 30d), forever, or a date (YYYY-MM-DD); file_date is " +
@@ -158,13 +158,16 @@ var commandHelps = map[string]commandHelp{
 				"later export. The other rows are still applied.",
 			"A tags CSV (from export tags) is told by its header: each tags cell replaces its file's tags, so an " +
 				"untouched cell changes nothing and an emptied one removes them all. Before removing any tag, filo " +
-				"lists those rows and asks; without a terminal it leaves them alone. A row is refused, with one line " +
+				"lists those rows and asks (-y answers yes); without a terminal and -y it leaves them alone. A row is refused, with one line " +
 				"saying why, if for example a tag breaks the spelling rules (see filo help tag), the file's tags " +
 				"changed since the export (by tag, untag or tags rename), or the file is listed twice.",
 			"A duplicates CSV (from export duplicates) is refused: its decisions are not recorded, but carried " +
 				"out by filo delete FILE.",
 		},
-		flags: []view.Term{{Name: "--dry-run", Text: "check everything and write nothing"}},
+		flags: []view.Term{
+			{Name: "--dry-run", Text: "check everything and write nothing"},
+			{Name: "-y", Text: "a tags CSV: remove the tags its cells no longer hold without asking"},
+		},
 	},
 	"delete": {
 		usage: []string{"filo delete [DIR] [-y]", "filo delete FILE [-y]"},

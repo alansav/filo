@@ -249,6 +249,7 @@ func (e *env) update(ctx context.Context, dbBefore string, args []string) error 
 	fs := e.flags("update")
 	db := dbFlag(fs, dbBefore)
 	dry := fs.Bool("dry-run", false, "")
+	yes := fs.Bool("y", false, "")
 	pos, err := e.parse(fs, "update", args)
 	if err != nil {
 		return err
@@ -274,7 +275,11 @@ func (e *env) update(ctx context.Context, dbBefore string, args []string) error 
 			"filo delete %s", path, shellQuote(path))
 	}
 	if tagcsv.IsTagsCSV(data) || tagcsv.LostTags(data) {
-		return e.updateTags(ctx, *db, path, data, *dry)
+		return e.updateTags(ctx, *db, path, data, *dry, *yes)
+	}
+	if *yes {
+		return usageError{"-y answers only the question about removing tags, for a tags CSV; clearing a retention " +
+			"is asked in a terminal"}
 	}
 	parsed, err := retention.ParseCSV(data)
 	if err != nil {
