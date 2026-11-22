@@ -51,6 +51,22 @@ func (r Result) Problem() string {
 	}
 }
 
+// ProblemIn is Problem with each path relative to the index's root, as a line naming no index shows it.
+func (r Result) ProblemIn(ix store.TagIndex) string {
+	moved := r
+	moved.Problems = nil
+	for _, p := range r.Problems {
+		if p.Path == "" {
+			p.Path = ix.Rel(ix.Page())
+			p.Why = "not written: " + p.Why
+		} else {
+			p.Path = ix.Rel(p.Path)
+		}
+		moved.Problems = append(moved.Problems, p)
+	}
+	return moved.Problem()
+}
+
 const (
 	whyChanged  = "was changed since Filo wrote it: not replaced"
 	whyNotFilos = "is not Filo's: not replaced"

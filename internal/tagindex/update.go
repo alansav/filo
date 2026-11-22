@@ -22,7 +22,7 @@ func (o Outcome) Failed() bool { return len(o.Result.Problems) > 0 }
 // Update brings an index's pages up to date (docs/design.md, Tag index pages, "When the pages are written"): it
 // builds its data from the register and, unless force is set, does nothing when the data's hash is the one last
 // written in full; otherwise it renders and writes the pages and records what was written, with the data's hash
-// when every page was written, or why not. An error is the register's; a page that could not be written is in the
+// when every page was written, or why not (its paths relative to the root). An error is the register's; a page that could not be written is in the
 // outcome.
 func Update(ctx context.Context, s *store.Store, ix store.TagIndex, force bool, now time.Time) (Outcome, error) {
 	out := Outcome{Index: ix}
@@ -33,7 +33,8 @@ func Update(ctx context.Context, s *store.Store, ix store.TagIndex, force bool, 
 	d, err := Build(ix, files)
 	if err != nil {
 		out.Result = Result{Files: ix.Files, Problems: []Problem{{Why: err.Error()}}}
-		return out, s.RecordTagIndex(ctx, ix.ID, store.IndexWrite{Files: ix.Files, Problem: out.Result.Problem()}, now)
+		return out, s.RecordTagIndex(ctx, ix.ID, store.IndexWrite{Files: ix.Files, Problem: out.Result.ProblemIn(ix)},
+			now)
 	}
 	out.Data = d
 	hash := d.Hash()
@@ -49,7 +50,7 @@ func Update(ctx context.Context, s *store.Store, ix store.TagIndex, force bool, 
 	out.Result = Write(ix, p)
 	w := store.IndexWrite{Files: out.Result.Files}
 	if out.Failed() {
-		w.Problem = out.Result.Problem()
+		w.Problem = out.Result.ProblemIn(ix)
 	} else {
 		w.DataHash = hash
 	}

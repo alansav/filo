@@ -148,11 +148,12 @@ func TestUpdate(t *testing.T) {
 	}
 	e.tag("bills/water.pdf", "type:bill")
 	o, err = Update(e.ctx, e.s, e.index("bills", "index"), false, now)
-	if err != nil || !o.Failed() || o.Result.Problem() != "index.html "+whyChanged {
+	if err != nil || !o.Failed() || o.Result.Problem() != "index.html "+whyChanged ||
+		o.Result.ProblemIn(o.Index) != "bills/index.html "+whyChanged {
 		t.Errorf("update with a page edited: %+v, %v", o, err)
 	}
 	ix = e.index("bills", "index")
-	if ix.DataHash != "" || ix.Problem != "index.html "+whyChanged {
+	if ix.DataHash != "" || ix.Problem != "bills/index.html "+whyChanged {
 		t.Errorf("recorded after a failure: %+v", ix)
 	}
 	if b, _ := os.ReadFile(page); string(b) != "mine" {
