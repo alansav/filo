@@ -33,8 +33,13 @@ see the hard rules). Stay inside the current piece of work.
 - Filo must not modify, move, rename, delete or overwrite any file outside its own data directory (or the `--db` path
   given, its companion files and its `<db>.snapshots/` directory) except through `filo delete`, or the later work
   that calls for it, and the output file named with `-o`: if that file exists, Filo asks before replacing it (no
-  terminal: refused; `-y` does not answer it; see `docs/design.md`, Lifespan). Anything destructive shows what it
-  will do and asks first (or needs `-y`).
+  terminal: refused; `-y` does not answer it; see `docs/design.md`, Lifespan), and the files of a tag index
+  (`NAME.html` and `.NAME/` in a directory given to `filo indexes add`), which Filo creates only where nothing
+  exists, replaces or removes only while still exactly what it wrote (its hash matches; anything else is left alone
+  and reported), and removes as a whole only through `filo indexes remove`, which shows what it will remove and asks
+  (or `-y`). `internal/tagindex` is the only code that writes or removes them (`TestOnlyWriteTouchesTheDisk`
+  guards it); they are Filo's files, not the user's (see `docs/design.md`, Tag index pages). Anything destructive
+  shows what it will do and asks first (or needs `-y`).
 - Treat file names and the register as untrusted input: delete only inside a root (`internal/dispose` checks), and
   print through `internal/view` (its Renderer escapes every text it is given with `view.Escape`, then adds only its
   own colour codes; the one exception is `filo find -0`'s raw path list, written by the Renderer and refused when
