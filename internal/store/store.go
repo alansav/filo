@@ -51,6 +51,9 @@ type Store struct {
 // once as a warning: none when the register was already current.
 func (s *Store) UpgradeNotes() []string { return s.notes }
 
+// Changed reports whether this run committed a change to the register, which its end takes a snapshot of.
+func (s *Store) Changed() bool { return s.changed }
+
 // commit commits tx and notes that this run changed the register.
 func (s *Store) commit(tx *sql.Tx) error {
 	if err := tx.Commit(); err != nil {

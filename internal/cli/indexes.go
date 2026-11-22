@@ -59,6 +59,7 @@ func (e *env) indexes(ctx context.Context, dbBefore string, args []string) error
 		return err
 	}
 	defer e.closeStore(s)
+	e.indexesDone = true // each subcommand writes, or reports, the pages itself
 	arg := "."
 	if len(pos) > 0 {
 		arg = pos[0]
@@ -390,4 +391,26 @@ func (e *env) indexRefresh(ctx context.Context, s *store.Store, pos []string, na
 		return errReported
 	}
 	return nil
+}
+
+// refreshIndexes brings every index up to date at the end of a run that changed the register (docs/design.md, Tag
+// index pages, "When the pages are written"), saying nothing when that works. An index that could not be brought up
+// to date is one line on stderr, and the run exits 1; the run's own change stands.
+func (e *env) refreshIndexes(ctx context.Context, s *store.Store) {
+	if e.indexesDone || !s.Changed() {
+		return
+	}
+	outs, err := tagindex.UpdateAll(ctx, s, false, now())
+	if err != nil {
+		e.errorLine("the change is made, but the tag indexes were not brought up to date: " + err.Error())
+		e.indexFailed = true
+		return
+	}
+	for _, o := range outs {
+		if o.Failed() {
+			e.errorLine("the change is made, but " + e.view.Tilde(o.Index.Abs(o.Index.Page())) +
+				" was not brought up to date: " + o.Result.ProblemIn(o.Index) + " (filo indexes lists it)")
+			e.indexFailed = true
+		}
+	}
 }

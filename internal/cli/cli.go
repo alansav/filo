@@ -30,6 +30,9 @@ type env struct {
 	rawStderr io.Writer      // stderr: only through errorLine, and the progress line (scan.go)
 	getenv    func(string) string
 	cmd       string // the command run, for a usage error's pointer to its help
+	// indexesDone: the command wrote or reported the tag index pages itself (filo indexes), so the end of the run
+	// does not; indexFailed: an index was not brought up to date at the end of the run, which then exits 1.
+	indexesDone, indexFailed bool
 }
 
 // usageError is reported with exit code 2.
@@ -46,6 +49,9 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	err := e.run(ctx, args)
 	if err == nil && out.err != nil {
 		err = fmt.Errorf("write output: %w", out.err)
+	}
+	if err == nil && e.indexFailed {
+		err = errReported // the line is written already (refreshIndexes)
 	}
 	var ue usageError
 	switch {
@@ -257,9 +263,11 @@ func (e *env) open(ctx context.Context, db string) (*store.Store, error) {
 	return s, nil
 }
 
-// closeStore closes the register. The run's work is already written, so a problem here (most likely a snapshot that
-// could not be written) is a warning, one line on stderr.
+// closeStore closes the register, first bringing the tag indexes up to date if the run changed it (before the
+// snapshot, which then holds what was written). The run's work is already written, so a problem with the snapshot is
+// a warning, one line on stderr; an index not brought up to date makes the run exit 1.
 func (e *env) closeStore(s *store.Store) {
+	e.refreshIndexes(context.Background(), s) // the run's change is committed: its pages follow, even after Ctrl-C
 	if err := s.Close(); err != nil {
 		for _, p := range joinedParts(err) {
 			e.errorLine("warning: " + p.Error())

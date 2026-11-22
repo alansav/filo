@@ -24,28 +24,37 @@ Indexes   2 . <root>
 
 Next: open an index's page in a browser
 
+$ filo indexes (one flagged)
+Indexes   2 . 1 needs attention . <root>
+
+  tags.html             3 files   3 tags   written 2026-11-22 12:00
+  received/index.html   2 files   3 tags   written 2026-11-22 12:00   [!] not up to date
+    [!] received/index.html was changed since Filo wrote it: not replaced
+
+Next: move aside what is flagged, then filo indexes refresh <root>/received
+
 $ filo indexes refresh
 Refreshed   2 indexes . <root>
   - tags.html             up to date
-  - received/index.html   up to date
+  [ok] received/index.html   1 page written
 
 $ filo indexes remove . --name tags
-Remove index   tags.html . 9 files . <root>
+Remove index   tags.html . 10 files . <root>
 
     tags.html
-    .tags/      8 files: its pages and style.css
+    .tags/      9 files: its pages and style.css
   [!] .tags/notes.txt is not Filo's: it stays, and so does .tags/
 
-Remove the index and its 9 files? [y/N] 
-Done   removed 9 files
+Remove the index and its 10 files? [y/N] 
+Done   removed 10 files
   [!] .tags holds files that are not Filo's: it stays
 
 $ filo indexes remove received
-Remove index   received/index.html . 6 files . <root>
+Remove index   received/index.html . 8 files . <root>
 
     received/index.html
-    received/.index/      5 files: its pages and style.css
+    received/.index/      7 files: its pages and style.css
 
-Remove the index and its 6 files? [y/N] 
+Remove the index and its 8 files? [y/N] 
 Done   removed received/index.html and received/.index/
 

@@ -1759,9 +1759,11 @@ on the person's phone opens the file).
   layout) and does nothing when that hash is the one stored; otherwise it renders the pages, writes only those whose
   content changed (each to a temporary file in its directory, renamed into place), and removes the pages no longer
   needed, and the directories it made that are left empty. It says nothing when that works. When it fails (a page
-  not Filo's, a directory that cannot be reached or written), one line on stderr, `filo: <what the command did>, but
-  bills/index.html was not brought up to date: <why>`, and exit 1; the command's own change stands, and the next run
-  that commits tries again. Only a fully written index records its new data hash.
+  not Filo's, a directory that cannot be reached or written), one line on stderr, `filo: the change is made, but
+  ~/Documents/bills/index.html was not brought up to date: bills/index.html was changed since Filo wrote it: not
+  replaced (filo indexes lists it)`, and exit 1; the command's own change stands, and the next run that changes what
+  the index shows tries again. Only a fully written index records its new data hash, and `filo indexes` shows the
+  problem until then.
 - **Rendering.** Go's `html/template`, with the templates and stylesheet embedded in the binary; no dependency and
   no JavaScript. Not XSLT: Go has none (a cgo binding would be a dependency and break the static build, and
   `xsltproc` would have to be installed on every device), and `html/template` escapes each value for where it lands

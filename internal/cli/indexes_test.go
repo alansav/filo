@@ -8,7 +8,8 @@ import (
 )
 
 // TestIndexesGolden: filo indexes in a terminal (docs/design.md, Tag index pages): none yet, adding one, a second
-// name on the same directory, the list, refreshing, and removing one with a file that is not Filo's in it.
+// name on the same directory, the list, a page edited by hand flagged after the next change, refreshing, and
+// removing one with a file that is not Filo's in it.
 func TestIndexesGolden(t *testing.T) {
 	ct := newTagTest(t)
 	filo, in, root := ct.filo, ct.in, ct.root
@@ -26,6 +27,23 @@ func TestIndexesGolden(t *testing.T) {
 	step(ExitOK, "", "indexes add . --name tags (the root)", "indexes", "add", root, "--name", "tags")
 	step(ExitOK, "", "indexes", "indexes")
 
+	// A change outside the index's directory does not touch it.
+	filo(ExitOK, "", false, "tag", in("notes/ideas.txt"), "urgent")
+	// A page edited by hand: the next change to what it shows leaves it, says so on stderr and exits 1; the list flags it.
+	if err := os.WriteFile(in("received/index.html"), []byte("mine"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r := filo(ExitError, "", false, "tag", sep, "urgent")
+	ct.contains("tag after an edit", r.stdout, "Tagged   1 file")
+	ct.contains("tag after an edit", r.stderr, "filo: the change is made, but "+in("received/index.html")+
+		" was not brought up to date: received/index.html was changed since Filo wrote it: not replaced (filo indexes lists it)")
+	step(ExitOK, "", "indexes (one flagged)", "indexes")
+	if b, _ := os.ReadFile(in("received/index.html")); string(b) != "mine" {
+		t.Errorf("the edited page was replaced: %q", b)
+	}
+	if err := os.Remove(in("received/index.html")); err != nil {
+		t.Fatal(err)
+	}
 	step(ExitOK, "", "indexes refresh", "indexes", "refresh")
 
 	// Removing: a file that is not Filo's stays, with its directory, and the run exits 1.
@@ -62,6 +80,59 @@ func TestIndexPagesNotScanned(t *testing.T) {
 	ct.lacks("scan", r.stdout, "new")
 	r = filo(ExitError, "", false, "tag", in("received/index.html"), "urgent")
 	ct.contains("tag a page", r.stdout+r.stderr, "one of filo's own files")
+}
+
+// TestIndexPagesFollowChanges: a run that changes the register brings the pages up to date, saying nothing; one that
+// only reads writes none.
+func TestIndexPagesFollowChanges(t *testing.T) {
+	ct := newTagTest(t)
+	filo, in := ct.filo, ct.in
+	filo(ExitOK, "", false, "indexes", "add", in("received"))
+	page := func(rel string) string {
+		b, err := os.ReadFile(in(rel))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(b)
+	}
+	if strings.Contains(page("received/index.html"), "sender") {
+		t.Fatal("a sender on the page before any file has one")
+	}
+	r := filo(ExitOK, "", false, "tag", in("received/2026/09/2026-09-02 British Gas Bill.pdf"), "sender:British Gas")
+	if r.stderr != "" {
+		t.Errorf("tag wrote to stderr: %s", r.stderr)
+	}
+	if !strings.Contains(page("received/index.html"), "sender") || !ct.exists("received/.index/sender/index.html") {
+		t.Errorf("the pages do not show the new tag:\n%s", page("received/index.html"))
+	}
+	// A new file in the directory: the scan that finds it puts it on the pages.
+	ct.write("received/2026/11/2026-11-02 Water.pdf", "water")
+	filo(ExitOK, "", false, "scan")
+	if !strings.Contains(page("received/.index/_untagged.html"), "2026-11-02 Water.pdf") {
+		t.Errorf("the new file is not on the no tags page:\n%s", page("received/.index/_untagged.html"))
+	}
+	// Reading only: nothing is written (the page's modification time stays).
+	fi, err := os.Stat(in("received/index.html"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(in("received/index.html"), fi.ModTime().Add(-3600e9), fi.ModTime().Add(-3600e9)); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := os.Stat(in("received/index.html"))
+	filo(ExitOK, "", false, "tags")
+	filo(ExitOK, "", false, "indexes")
+	if after, _ := os.Stat(in("received/index.html")); !after.ModTime().Equal(before.ModTime()) {
+		t.Error("a run that only read wrote the main page")
+	}
+	// A pages directory that went: the next change makes it again.
+	if err := os.RemoveAll(in("received/.index")); err != nil {
+		t.Fatal(err)
+	}
+	filo(ExitOK, "", false, "untag", in("received/2026/09/2026-09-02 British Gas Bill.pdf"), "sender:")
+	if !ct.exists("received/.index/style.css") || ct.exists("received/.index/sender") {
+		t.Error("the pages were not written again after their directory went")
+	}
 }
 
 func TestIndexesRefusals(t *testing.T) {
