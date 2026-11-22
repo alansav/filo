@@ -14,6 +14,7 @@ import (
 const (
 	tagByTag   = "tag"
 	tagByUntag = "untag"
+	tagByScan  = "scan" // a new file took its copies' tags
 )
 
 // FileTags returns the tags of each of the given files that has any, in the order filo tags lists them: bare tags
@@ -39,6 +40,63 @@ func (s *Store) FileTags(ctx context.Context, ids []int64) (map[int64][]tags.Tag
 	})
 	if err != nil {
 		return nil, fmt.Errorf("read tags: %w", err)
+	}
+	return out, nil
+}
+
+// Copy is a file present with a content: one of its current paths, and its tags.
+type Copy struct {
+	FileID   int64
+	RootID   int64
+	RootPath string
+	Path     string // relative to the root; the first current path, should it have several (hard links)
+	Tags     []tags.Tag
+}
+
+// AbsPath is the copy's absolute path.
+func (c Copy) AbsPath() string { return absPath(c.RootPath, c.Path) }
+
+// Copies returns, for each of the given hashes, the regular files with that content that are present (in any root),
+// not empty and not deleted by filo, each once with its tags: the copies a new file with that content takes its tags
+// from (docs/design.md, Tags, "A copy keeps the tags"). Files with no tag are among them.
+func (s *Store) Copies(ctx context.Context, hashes []string) (map[string][]Copy, error) {
+	var all []Copy
+	var hashOf []string
+	err := inBatches(hashes, func(in string, args []any) error {
+		rows, err := s.db.QueryContext(ctx, `
+			SELECT f.id, f.hash, p.root_id, r.path, min(p.path) FROM files f
+			JOIN paths p ON p.file_id = f.id AND p.valid_to_scan IS NULL JOIN roots r ON r.id = p.root_id
+			WHERE f.hash IN (`+in+`) AND f.kind = 'file' AND f.size > 0 AND f.deleted_utc IS NULL
+			GROUP BY f.id ORDER BY f.id`, args...)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var c Copy
+			var h string
+			if err := rows.Scan(&c.FileID, &h, &c.RootID, &c.RootPath, &c.Path); err != nil {
+				return err
+			}
+			all, hashOf = append(all, c), append(hashOf, h)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, fmt.Errorf("find copies: %w", err)
+	}
+	ids := make([]int64, len(all))
+	for i, c := range all {
+		ids[i] = c.FileID
+	}
+	ts, err := s.FileTags(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	out := map[string][]Copy{}
+	for i, c := range all {
+		c.Tags = ts[c.FileID]
+		out[hashOf[i]] = append(out[hashOf[i]], c)
 	}
 	return out, nil
 }

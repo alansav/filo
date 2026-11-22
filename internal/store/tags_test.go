@@ -243,3 +243,51 @@ func TestUntagFiles(t *testing.T) {
 		t.Errorf("%d removals recorded, want 7:\n%s", removed, strings.Join(e.tagHistory(), "\n"))
 	}
 }
+
+// TestCopies: the files present with a content, each once with its tags; empty, missing and deleted files are not
+// copies. A new file given tags by a scan has them, recorded as the scan's.
+func TestCopies(t *testing.T) {
+	e := newReviewEnv(t)
+	empty := f("empty", "he")
+	empty.Size = 0
+	e.apply(Changes{New: []NewFile{f("a", "h1"), f("b", "h1"), f("gone", "h1"), f("del", "h1"), f("other", "h2"),
+		empty}})
+	k := e.known()
+	if _, err := e.s.TagFiles(e.ctx, []int64{k["a"].FileID, k["gone"].FileID, k["del"].FileID},
+		[]tags.Tag{mustTag(t, "type:bill")}, tagNow); err != nil {
+		t.Fatal(err)
+	}
+	e.apply(Changes{Close: []int64{k["gone"].PathID}})
+	if _, err := e.s.exec(e.ctx, `UPDATE files SET deleted_utc = 'x' WHERE id = ?`, k["del"].FileID); err != nil {
+		t.Fatal(err)
+	}
+	got, err := e.s.Copies(e.ctx, []string{"h1", "he", "h3"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var lines []string
+	for _, c := range got["h1"] {
+		var ts []string
+		for _, tg := range c.Tags {
+			ts = append(ts, tg.String())
+		}
+		lines = append(lines, c.Path+" ["+strings.Join(ts, "; ")+"]")
+	}
+	if strings.Join(lines, ", ") != "a [type:bill], b []" || len(got) != 1 {
+		t.Errorf("Copies = %v (%d contents)", lines, len(got))
+	}
+	if c := got["h1"][0]; c.AbsPath() != e.root.Path+"/a" {
+		t.Errorf("AbsPath = %q", c.AbsPath())
+	}
+
+	n := f("c", "h1")
+	n.Tags = []tags.Tag{mustTag(t, "type:bill"), mustTag(t, "urgent")}
+	e.apply(Changes{New: []NewFile{n}})
+	if got := e.tagList(e.known()["c"].FileID); got != "urgent; type:bill" {
+		t.Errorf("new file's tags = %q", got)
+	}
+	h := e.tagHistory()
+	if len(h) != 5 || !strings.HasPrefix(h[3], "add scan type:bill ") || !strings.HasPrefix(h[4], "add scan urgent ") {
+		t.Errorf("history = %q", h)
+	}
+}

@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"time"
+
+	"github.com/alansav/filo/internal/tags"
 )
 
 // Known is one current path of a root, with its file.
@@ -126,7 +128,8 @@ type NewFile struct {
 	Ino        uint64 // 0 = not known
 	LinkTarget string
 	LinkBroken bool
-	Unreadable bool // could not be opened or read: flagged unreadable since this scan
+	Unreadable bool       // could not be opened or read: flagged unreadable since this scan
+	Tags       []tags.Tag // the tags it takes from its copies (docs/design.md, Tags), spelled as they are
 }
 
 // Event is one reported change. FileID 0 means no file.
@@ -260,6 +263,11 @@ func (s *Store) ApplyScanRules(ctx context.Context, rec ScanRecord, ch Changes) 
 			}
 			if _, err := insPath.ExecContext(ctx, id, rec.RootID, n.Path, scanID); err != nil {
 				return 0, run, fmt.Errorf("insert path %s: %w", n.Path, err)
+			}
+			for _, t := range n.Tags {
+				if _, err := addTag(ctx, tx, id, t, tagByScan, rec.Started); err != nil {
+					return 0, run, err
+				}
 			}
 		}
 	}
