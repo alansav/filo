@@ -1,11 +1,15 @@
 package cli
 
 import (
+	"bytes"
+	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 )
 
 // setTags returns a CSV edit that sets the tags cell of the rows whose name is a key.
@@ -79,4 +83,30 @@ func TestTagsCSVKinds(t *testing.T) {
 	}
 	ct.contains("retention rows", filo(ExitError, "", false, "update", csvPath).stdout,
 		"is a retention export, not a tags export")
+}
+
+// TestTagsUpdateInterruptedAtPrompt: Ctrl-C at the question about removing tags ends the run as interrupted, exit 1,
+// with no tag removed.
+func TestTagsUpdateInterruptedAtPrompt(t *testing.T) {
+	ct := newTagTest(t)
+	note := ct.in("notes/ideas.txt")
+	ct.filo(ExitOK, "", false, "tag", note, "urgent")
+	csvPath := filepath.Join(ct.work, "tags.csv")
+	ct.filo(ExitOK, "", false, "export", "tags", "-o", csvPath, "--no-scan")
+	editCSV(t, csvPath, setTags(map[string]string{"ideas.txt": ""}))
+
+	pr, pw := io.Pipe()
+	defer pw.Close()
+	cctx, cancel := context.WithCancel(ct.ctx) // as Ctrl-C does
+	defer cancel()
+	time.AfterFunc(200*time.Millisecond, cancel)
+	var out termOut
+	var errb bytes.Buffer
+	code := Run(cctx, []string{"update", csvPath}, pipeTerminal{pr}, &out, &errb, func(k string) string {
+		return map[string]string{"NO_COLOR": "1", "FILO_DB": ct.db}[k]
+	})
+	if code != ExitError || !strings.Contains(errb.String(), "interrupted; nothing was recorded") {
+		t.Errorf("code %d, stderr %q; want 1 and interrupted", code, errb.String())
+	}
+	ct.contains("tags after", ct.filo(ExitOK, "", false, "tags").stdout, "urgent")
 }

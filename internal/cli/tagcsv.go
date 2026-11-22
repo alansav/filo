@@ -98,9 +98,12 @@ func (e *env) updateTags(ctx context.Context, db, path string, data []byte, dry 
 		}
 		asked = true
 		ok, err := e.confirmTagRemovals(ctx, pr, roots, cs)
-		return ok && err == nil // a cancelled context also stops the update itself: nothing is recorded
+		return ok && err == nil // interrupted: no, and the run says so after (a cancelled context writes nothing)
 	}
 	res, err := s.UpdateTags(ctx, parsed.Rows, now(), store.TagUpdateOptions{DryRun: dry, ConfirmRemovals: confirm})
+	if err == nil && ctx.Err() != nil {
+		err = ctx.Err() // interrupted at the question: nothing after it was written, though nothing failed
+	}
 	if err != nil {
 		return interruptedUpdate(err)
 	}
