@@ -1617,7 +1617,8 @@ so files can be found by tag; a project is a tag (`project:house sale`).
   rows in the register but drops out of every listing, count and search. **A copy keeps the tags:** a new file
   with the same content as files present (any root, not empty, not deleted by Filo) takes the union of their tags,
   once, when first seen; after that each copy's tags are its own. The scan says so only when those copies had
-  different tags (`· 1 new file took the tags of copies that differed: check it with filo show`), since a copy
+  different tags (`· 1 new file took the tags of copies that differed: check with filo show`, and the file
+  among the events, `took tags`, with the tags it took), since a copy
   that matches its original needs no look. Deleted files pass on nothing (a restored file is new, as for retention).
   A file saved by writing a new file and renaming it into place (new inode, new content) stays a reported possible
   move, never paired; its event says the old file had tags (`same name, different content; the old file had tags`).
