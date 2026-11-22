@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/alansav/filo/internal/tags"
 )
 
 // Tag index pages (docs/design.md, Tag index pages): an index declared on a directory of a root, and the files Filo
@@ -258,6 +260,58 @@ func (s *Store) indexPaths(ctx context.Context) ([]string, error) {
 	for _, i := range rows {
 		t := TagIndex{RootPath: i.root, Dir: i.dir, Name: i.name}
 		out = append(out, t.Abs(t.Page()), t.Abs(t.PagesDir()))
+	}
+	return out, nil
+}
+
+// IndexFile is one regular file present under an index's directory, as its pages list it.
+type IndexFile struct {
+	Rel      string // relative to the root, '/'-separated
+	MtimeNS  int64
+	FileDate string // YYYY-MM-DD; "" = none
+	Tags     []tags.Tag
+}
+
+// IndexFiles returns the regular files present at dir and below in a root ("" for all of it), each path a file of
+// its own (a hard link too), with its file_date and tags, ordered by path (docs/design.md, Tag index pages, "The
+// files"). Missing files, files deleted by filo and symlinks are not among them.
+func (s *Store) IndexFiles(ctx context.Context, rootID int64, dir string) ([]IndexFile, error) {
+	fs, err := s.FindFiles(ctx, rootID, dir)
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]int64, len(fs))
+	for i, f := range fs {
+		ids[i] = f.FileID
+	}
+	ts, err := s.FileTags(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	dates := map[int64]string{}
+	err = inBatches(ids, func(in string, args []any) error {
+		rows, err := s.db.QueryContext(ctx, `SELECT id, file_date FROM files WHERE file_date IS NOT NULL AND id IN (`+in+`)`,
+			args...)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var id int64
+			var d string
+			if err := rows.Scan(&id, &d); err != nil {
+				return err
+			}
+			dates[id] = d
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, fmt.Errorf("read file dates: %w", err)
+	}
+	out := make([]IndexFile, len(fs))
+	for i, f := range fs {
+		out[i] = IndexFile{Rel: f.Rel, MtimeNS: f.MtimeNS, FileDate: dates[f.FileID], Tags: ts[f.FileID]}
 	}
 	return out, nil
 }

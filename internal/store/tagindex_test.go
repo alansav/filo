@@ -6,8 +6,11 @@ import (
 	"path/filepath"
 	"slices"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/alansav/filo/internal/tags"
 )
 
 // Tag index pages (docs/design.md, Tag index pages): the register's indexes and the files written for them.
@@ -174,5 +177,38 @@ func TestOwnPathsHoldIndexes(t *testing.T) {
 		if !slices.Contains(own, p) {
 			t.Errorf("OwnPaths lacks %s: %q", p, own)
 		}
+	}
+}
+
+func TestIndexFiles(t *testing.T) {
+	e := newReviewEnv(t)
+	e.apply(Changes{New: []NewFile{f("bills/a.pdf", "ha"), f("bills/2026/b.pdf", "hb"), f("other/c.pdf", "hc"),
+		f("bills.txt", "hd")}})
+	k := e.known()
+	if _, err := e.s.TagFiles(e.ctx, []int64{k["bills/a.pdf"].FileID},
+		[]tags.Tag{mustTag(t, "type:bill"), mustTag(t, "urgent")}, tagNow); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.s.db.Exec(`UPDATE files SET file_date = '2026-09-02' WHERE id = ?`, k["bills/2026/b.pdf"].FileID); err != nil {
+		t.Fatal(err)
+	}
+	got, err := e.s.IndexFiles(e.ctx, e.root.ID, "bills")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var lines []string
+	for _, f := range got {
+		var ts []string
+		for _, tg := range f.Tags {
+			ts = append(ts, tg.String())
+		}
+		lines = append(lines, f.Rel+" "+f.FileDate+" ["+strings.Join(ts, "; ")+"]")
+	}
+	want := []string{"bills/2026/b.pdf 2026-09-02 []", "bills/a.pdf  [urgent; type:bill]"}
+	if !slices.Equal(lines, want) {
+		t.Errorf("IndexFiles(bills) =\n%q\nwant\n%q", lines, want)
+	}
+	if all, err := e.s.IndexFiles(e.ctx, e.root.ID, ""); err != nil || len(all) != 4 {
+		t.Errorf("IndexFiles of the root: %d files, %v; want 4", len(all), err)
 	}
 }
