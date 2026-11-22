@@ -1,0 +1,202 @@
+dirs: .index .index/sender .index/type
+== .index/sender/_none.html
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="generator" content="filo">
+<title>no sender · bills</title>
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<nav class="trail"><a href="../../index.html">bills</a> <span class="sep">›</span> <a href="index.html">sender</a> <span class="sep">›</span> <span>no sender</span></nav>
+<header>
+<h1>No sender tag</h1>
+<p class="counts">3 files have no sender tag</p>
+</header>
+<main>
+<ul class="files">
+<li>
+<a class="file" href="../../a%20%231%20%3Fx=%2541%20100%25.pdf">a #1 ?x=%41 100%.pdf</a>
+<div class="meta"><span class="date">2026-01-02</span></div>
+<div class="tags"><a class="tag" href="../type/bill-8b4c672e.html">type:bill</a></div>
+</li>
+<li>
+<a class="file" href="../../dir%20with%20space/b.pdf">b.pdf</a>
+<div class="meta"><span class="dir">dir with space</span><span class="date">2026-01-02</span></div>
+<div class="tags"><a class="tag" href="../type/bill-8b4c672e.html">type:bill</a></div>
+</li>
+<li>
+<a class="file" href="../../javascript:alert%281%29">javascript:alert(1)</a>
+<div class="meta"><span class="date">2026-01-02</span></div>
+<div class="tags"><a class="tag" href="../type/bill-8b4c672e.html">type:bill</a></div>
+</li>
+</ul>
+</main>
+</body>
+</html>
+== .index/sender/b-bold-b-co-638a96af.html
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="generator" content="filo">
+<title>&lt;b&gt;Bold&lt;/b&gt; &amp; &#34;Co&#34; · bills</title>
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<nav class="trail"><a href="../../index.html">bills</a> <span class="sep">›</span> <a href="index.html">sender</a> <span class="sep">›</span> <span>&lt;b&gt;Bold&lt;/b&gt; &amp; &#34;Co&#34;</span></nav>
+<header>
+<h1>sender:&lt;b&gt;Bold&lt;/b&gt; &amp; &#34;Co&#34;</h1>
+<p class="counts">1 file</p>
+</header>
+<main>
+<ul class="files">
+<li>
+<a class="file" href="../../%3Cscript%3Ealert%281%29%3C/script%3E%20%22q%22%20&amp;%20%27a%27.pdf">script&gt; &#34;q&#34; &amp; &#39;a&#39;.pdf</a>
+<div class="meta"><span class="dir">&lt;script&gt;alert(1)&lt;</span><span class="date">2026-01-02</span></div>
+</li>
+</ul>
+</main>
+</body>
+</html>
+== .index/sender/index.html
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="generator" content="filo">
+<title>sender · bills</title>
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<nav class="trail"><a href="../../index.html">bills</a> <span class="sep">›</span> <span>sender</span></nav>
+<header>
+<h1>sender</h1>
+<p class="counts">1 value · 1 file</p>
+</header>
+<main>
+<ul class="rows">
+<li><a href="./b-bold-b-co-638a96af.html"><span class="name">&lt;b&gt;Bold&lt;/b&gt; &amp; &#34;Co&#34;</span><span class="count">1 file</span></a></li>
+</ul>
+<section class="note">
+<a href="./_none.html">3 files have no sender tag</a>
+</section>
+</main>
+</body>
+</html>
+== .index/style.css (the stylesheet)
+== .index/type/_none.html
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="generator" content="filo">
+<title>no type · bills</title>
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<nav class="trail"><a href="../../index.html">bills</a> <span class="sep">›</span> <a href="index.html">type</a> <span class="sep">›</span> <span>no type</span></nav>
+<header>
+<h1>No type tag</h1>
+<p class="counts">1 file has no type tag</p>
+</header>
+<main>
+<ul class="files">
+<li>
+<a class="file" href="../../%3Cscript%3Ealert%281%29%3C/script%3E%20%22q%22%20&amp;%20%27a%27.pdf">script&gt; &#34;q&#34; &amp; &#39;a&#39;.pdf</a>
+<div class="meta"><span class="dir">&lt;script&gt;alert(1)&lt;</span><span class="date">2026-01-02</span></div>
+<div class="tags"><a class="tag" href="../sender/b-bold-b-co-638a96af.html">sender:&lt;b&gt;Bold&lt;/b&gt; &amp; &#34;Co&#34;</a></div>
+</li>
+</ul>
+</main>
+</body>
+</html>
+== .index/type/bill-8b4c672e.html
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="generator" content="filo">
+<title>bill · bills</title>
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<nav class="trail"><a href="../../index.html">bills</a> <span class="sep">›</span> <a href="index.html">type</a> <span class="sep">›</span> <span>bill</span></nav>
+<header>
+<h1>type:bill</h1>
+<p class="counts">3 files</p>
+</header>
+<main>
+<ul class="files">
+<li>
+<a class="file" href="../../a%20%231%20%3Fx=%2541%20100%25.pdf">a #1 ?x=%41 100%.pdf</a>
+<div class="meta"><span class="date">2026-01-02</span></div>
+</li>
+<li>
+<a class="file" href="../../dir%20with%20space/b.pdf">b.pdf</a>
+<div class="meta"><span class="dir">dir with space</span><span class="date">2026-01-02</span></div>
+</li>
+<li>
+<a class="file" href="../../javascript:alert%281%29">javascript:alert(1)</a>
+<div class="meta"><span class="date">2026-01-02</span></div>
+</li>
+</ul>
+</main>
+</body>
+</html>
+== .index/type/index.html
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="generator" content="filo">
+<title>type · bills</title>
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<nav class="trail"><a href="../../index.html">bills</a> <span class="sep">›</span> <span>type</span></nav>
+<header>
+<h1>type</h1>
+<p class="counts">1 value · 3 files</p>
+</header>
+<main>
+<ul class="rows">
+<li><a href="./bill-8b4c672e.html"><span class="name">bill</span><span class="count">3 files</span></a></li>
+</ul>
+<section class="note">
+<a href="./_none.html">1 file has no type tag</a>
+</section>
+</main>
+</body>
+</html>
+== index.html
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="generator" content="filo">
+<title>bills</title>
+<link rel="stylesheet" href="./.index/style.css">
+</head>
+<body>
+<nav class="trail"><span>bills</span></nav>
+<header>
+<h1>bills</h1>
+<p class="counts">4 files · 2 tags</p>
+</header>
+<main>
+<ul class="rows">
+<li><a href="./.index/sender/index.html"><span class="name">sender</span><span class="count">1 value · 1 file</span></a></li>
+<li><a href="./.index/type/index.html"><span class="name">type</span><span class="count">1 value · 3 files</span></a></li>
+</ul>
+</main>
+</body>
+</html>
