@@ -228,3 +228,47 @@ func TestRemoveAndPlan(t *testing.T) {
 		".index holds files that are not Filo's: it stays"})
 	check(t, "on disk", onDisk(t, ix), []string{".index/", ".index/notes.txt=notes", ".index/style.css=restyled"})
 }
+
+// A page Filo cannot remove keeps its directory Filo's, so the next run tries again, and the directory is not then
+// called someone else's.
+func TestWriteKeepsADirectoryWithAFiloFileLeft(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root removes files in a read-only directory")
+	}
+	ix := fixture(t)
+	write(t, &ix, pages(map[string]string{"index.html": "main", ".index/a/x.html": "x"}, ".index", ".index/a"))
+	if err := os.Chmod(ix.Abs(".index/a"), 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(ix.Abs(".index/a"), 0o755) })
+	res := write(t, &ix, pages(map[string]string{"index.html": "main"}, ".index"))
+	if len(res.Problems) != 1 || !strings.HasPrefix(res.Problems[0].String(), ".index/a/x.html could not be removed") {
+		t.Errorf("problems = %q", problems(res))
+	}
+	if h, ok := ix.Files[".index/a"]; !ok || h != "" {
+		t.Errorf("the directory is no longer recorded as Filo's: %v", ix.Files)
+	}
+	if err := os.Chmod(ix.Abs(".index/a"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if res := write(t, &ix, pages(map[string]string{"index.html": "main"}, ".index")); len(res.Problems) != 0 ||
+		res.Removed != 1 {
+		t.Errorf("the next run: %+v", res)
+	}
+	check(t, "on disk", onDisk(t, ix), []string{".index/", "index.html=main"})
+}
+
+// The main page's temporary file is written in the pages directory, which no scan sees.
+func TestTempFilesInThePagesDirectory(t *testing.T) {
+	ix := fixture(t)
+	w := writer{ix: ix, res: Result{Files: map[string]string{}}}
+	if got := w.tempDir("index.html"); got != ix.DirAbs() {
+		t.Errorf("tempDir before the pages directory is made = %s", got)
+	}
+	w.res.Files[".index"] = ""
+	for _, name := range []string{"index.html", ".index/a/x.html"} {
+		if got := w.tempDir(name); got != ix.Abs(".index") {
+			t.Errorf("tempDir(%s) = %s, want the pages directory", name, got)
+		}
+	}
+}

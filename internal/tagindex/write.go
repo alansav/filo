@@ -260,12 +260,21 @@ func (w *writer) file(name string, content []byte) {
 			return
 		}
 	}
-	if err := writeFile(abs, content); err != nil {
+	if err := writeFile(abs, w.tempDir(name), content); err != nil {
 		w.problem(name, "could not be written: "+errText(err))
 		return
 	}
 	w.res.Files[name] = sum
 	w.res.Written++
+}
+
+// tempDir is where the temporary file of name is written: the pages directory when Filo made it (so a temporary
+// file left by a crash is never one a scan sees: the pages directory is Filo's own), else name's own directory.
+func (w *writer) tempDir(name string) string {
+	if h, ok := w.res.Files[w.ix.PagesDir()]; ok && h == "" {
+		return w.ix.Abs(w.ix.PagesDir())
+	}
+	return filepath.Dir(w.ix.Abs(name))
 }
 
 // removeAll removes the files and directories Filo wrote for which drop holds: files first, then directories,
@@ -321,15 +330,39 @@ func (w *writer) removeAll(drop func(name string) bool) {
 		case !fi.IsDir():
 			delete(w.res.Files, name)
 			w.problem(name, "is not a directory Filo made any more: it stays")
+		case w.holdsFilos(name):
+			// A file of Filo's in it could not be removed (reported already): the directory stays Filo's, and the
+			// next run tries again.
 		default:
-			if err := os.Remove(abs); err != nil {
+			err := os.Remove(abs)
+			switch {
+			case err == nil:
+				delete(w.res.Files, name)
+			case !empty(abs):
 				delete(w.res.Files, name)
 				w.problem(name, "holds files that are not Filo's: it stays")
-				continue
+			default:
+				w.problem(name, "could not be removed: "+errText(err))
 			}
-			delete(w.res.Files, name)
 		}
 	}
+}
+
+// holdsFilos reports whether a file or directory Filo wrote is still recorded under the directory name.
+func (w *writer) holdsFilos(name string) bool {
+	for p := range w.res.Files {
+		if strings.HasPrefix(p, name+"/") {
+			return true
+		}
+	}
+	return false
+}
+
+// empty reports whether the directory abs holds nothing (or cannot be read: then it is not taken to hold files that
+// are not Filo's).
+func empty(abs string) bool {
+	entries, err := os.ReadDir(abs)
+	return err != nil || len(entries) == 0
 }
 
 // sameFile reports whether the regular file at abs (not a symlink) holds exactly the content whose SHA-256 is sum.
@@ -342,10 +375,11 @@ func sameFile(abs, sum string) bool {
 	return err == nil && hashOf(b) == sum
 }
 
-// writeFile writes content to abs through a temporary file in its directory, flushed and renamed into place, so a
-// page is never seen half written and a power cut cannot leave one torn (which would then not be Filo's to replace).
-func writeFile(abs string, content []byte) error {
-	tmp, err := os.CreateTemp(filepath.Dir(abs), "."+filepath.Base(abs)+".filo-*.tmp")
+// writeFile writes content to abs through a temporary file in tmpDir (on the same file system), flushed and renamed
+// into place, so a page is never seen half written and a power cut cannot leave one torn (which would then not be
+// Filo's to replace).
+func writeFile(abs, tmpDir string, content []byte) error {
+	tmp, err := os.CreateTemp(tmpDir, "."+filepath.Base(abs)+".filo-*.tmp")
 	if err != nil {
 		return err
 	}
