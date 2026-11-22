@@ -12,6 +12,7 @@
     file_date   2022-01-31
     keep_until  2029-01-31   in 2 years 2 months
     reviewed    2026-11-20, by filo update, on this content
+  Tags   none
   Copies   1 other file with the same content . counted as a duplicate
     <root>/backup/2022-01.pdf   no retention
 
@@ -27,6 +28,7 @@
   Retention
     status      [!] undated: no retention
     retention   none
+  Tags   none
 
 [3/3] notes.txt   [!] missing since <today> (scan 3) . 5 B . <root>
   File
@@ -39,5 +41,6 @@
   Retention
     status      [!] missing: run filo scan, if it was moved
     retention   none
+  Tags   none
 
 Next: filo set FILE --retention R, --file-date DATE or --duplicates always|records (filo help set for more)

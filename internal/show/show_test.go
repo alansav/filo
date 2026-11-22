@@ -12,6 +12,7 @@ import (
 	"github.com/alansav/filo/internal/fsid"
 	"github.com/alansav/filo/internal/hasher"
 	"github.com/alansav/filo/internal/store"
+	"github.com/alansav/filo/internal/tags"
 	"github.com/alansav/filo/internal/view"
 )
 
@@ -150,6 +151,7 @@ func TestRender(t *testing.T) {
 		},
 		Copies: []store.DupCopy{{Candidate: store.Candidate{FileItem: store.FileItem{RootPath: "/home/u/Backup",
 			Path: "bills/2022-01.pdf", KeepUntil: "2029-01-31"}}}},
+		Tags: []tags.Tag{{Key: "sender", Value: "British Gas"}, {Key: "type", Value: "bill"}},
 	}, Verify: VerifyMatches}
 
 	var b bytes.Buffer
@@ -170,6 +172,7 @@ func TestRender(t *testing.T) {
     file_date   2022-01-31
     keep_until  2029-01-31   in 2 years 2 months
     reviewed    2026-11-14, by filo update, on this content
+  Tags   sender:British Gas . type:bill
   Copies   1 other file with the same content . counted as a duplicate
     ~/Backup/bills/2022-01.pdf   until 2029-01-31
 `
@@ -196,7 +199,7 @@ func TestRender(t *testing.T) {
 	undated.Render(v, 1, 1, "2026-11-20", false)
 	for _, w := range []string{"2022-01 British Gas.pdf   [!] needs a retention . 184 KiB",
 		"modified    2022-02-03 09:14   [!] changed on disk since the last scan: run filo scan",
-		"status      [!] undated: no retention", "retention   none"} {
+		"status      [!] undated: no retention", "retention   none", "  Tags   sender:British Gas . type:bill"} {
 		if !strings.Contains(b.String(), w) {
 			t.Errorf("undated lacks %q:\n%s", w, b.String())
 		}
