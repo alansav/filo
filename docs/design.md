@@ -1661,7 +1661,7 @@ so files can be found by tag; a project is a tag (`project:house sale`).
   tagged through one link is tagged. `filo show FILE` has a Tags part: how many, then one tag a line (or `none`), so
   a tag named `none` cannot be mistaken; a file deleted by Filo shows the tags it had, `as when it was deleted`.
 - **The tags CSV**: `filo export tags [DIR] -o FILE [--no-scan] [--workers N]`, a scan first as every export, and
-  read back by `filo update FILE [--dry-run]`, which tells it from a retention or duplicates CSV by its header.
+  read back by `filo update FILE [--dry-run] [-y]`, which tells it from a retention or duplicates CSV by its header.
   Columns: `id, export, directory, name, size, modified, tags`; every present file under DIR (every root with no
   DIR). The `tags` cell holds the file's tags, separated by `; `, in the order `filo tags` lists them. **The cell
   replaces the file's tags:** a tag not in it is removed, so an untouched cell changes nothing and an emptied one
@@ -1674,9 +1674,10 @@ so files can be found by tag; a project is a tag (`project:house sale`).
   apply. A cell that starts with a character a spreadsheet would read as a formula (`=`, `+`, `-`, `@`), or with an
   apostrophe, is written after an apostrophe, which the update drops. An update that removes tags lists those rows
   and asks first (`Remove them? [y/N/l]`), as clearing a retention does, since an emptied column (a spreadsheet that
-  lost it on a save) would remove every tag at once; there is no `-y`, as there is none for clearing a retention. No,
-  or no terminal, leaves those rows as they were; the other rows are recorded either way. Ctrl-C at the question
-  records nothing.
+  lost it on a save) would remove every tag at once. `-y` answers yes, for a script (the person's decision,
+  2026-11-22); it answers only this question, so `filo update -y` of a retention CSV is a usage error (clearing a
+  retention has no `-y`). No, or no terminal and no `-y`, leaves those rows as they were; the other rows are
+  recorded either way. Ctrl-C at the question records nothing.
 - **Register (schema version 11)**: a `tags` table on file ids (the key, the value as spelled and its folded form),
   and `tag_changes`, the history of every tag added or removed and by which command, so each change can be written
   to the journal later (9c) without rework. `export_rows` gain `tags`, the cell as exported.
