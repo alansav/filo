@@ -38,7 +38,7 @@ on the other device: a retention by content hash (an edited file needs a new dec
 
 The pieces, in the order agreed: finding files (`filo find`, item 19, built 2026-11-21), 18a tags (built
 2026-11-22), 38 the tag index
-pages, 36 bash completion, then the sync items
+pages (built 2026-11-22), 36 bash completion, then the sync items
 (9b device ID, 9a synced directories, 9c the journal, which also carries tags), then 20 the Filo directory and 18b
 project notes and packages. 36 comes after tags so that its completion covers tag names from the start (reordered
 2026-11-20).
@@ -52,19 +52,18 @@ Provisional, agreed 2026-11-17, with the first places reordered on 2026-11-20 fo
 complexity scores (1 to 10, Claude's estimates) are still to be settled with the person. Items 22 to 33, and
 35, are not placed yet.
 
-1. 38 tag index pages (placed 2026-11-21)
-2. 36 bash completion
-3. 9b device ID, 9a marking synced directories, 9c sharing decisions
-4. 20 the Filo directory, 18b project notes and packages
-5. 5a progress line, 5b `--needing-retention`
-6. 13 removing empty directories
-7. 21 script mode, 34 received documents (needs 21 and 9a)
-8. 6 one decision for all copies
-9. 16 undoing an update batch, 17 suggested rules
-10. 15 where the space goes
-11. 7a–7c verifying content, 8 backup awareness, 9d snapshots to the backup machine
-12. 10 a summary for scheduled scans
-13. Later a and c–e
+1. 36 bash completion
+2. 9b device ID, 9a marking synced directories, 9c sharing decisions
+3. 20 the Filo directory, 18b project notes and packages
+4. 5a progress line, 5b `--needing-retention`
+5. 13 removing empty directories
+6. 21 script mode, 34 received documents (needs 21 and 9a)
+7. 6 one decision for all copies
+8. 16 undoing an update batch, 17 suggested rules
+9. 15 where the space goes
+10. 7a–7c verifying content, 8 backup awareness, 9d snapshots to the backup machine
+11. 10 a summary for scheduled scans
+12. Later a and c–e
 
 ## Items
 
@@ -222,7 +221,9 @@ Project notes (proposed 2026-11-19): Filo could also write one markdown note per
 file, into the Filo directory (20), never into a scanned tree, where each regeneration would show as a changed
 file needing a decision. The output is deterministic (sorted, no timestamps, written only when it changed) so two
 devices never make conflict copies. A relative link works on a device only if the note and its targets are in the
-same synced directory. It is Filo's first write beside the register, so it comes after the delete work.
+same synced directory. It is Filo's first write beside the register, so it comes after the delete work. The tag
+index pages (built 2026-11-22, `design.md`, Tag index pages) may make these notes unneeded: a project is a tag, and
+its tag page lists its files; to settle when 18b is picked.
 
 ### 20. The Filo directory (V6, C4)
 One directory per device, chosen by the person (for example `~/Sync/Filo`), shared across devices by any sync service,
@@ -340,10 +341,6 @@ Agreed with the person on 2026-11-20. Tab completes Filo's commands, flags and a
   and tag names (tags are built).
 - Bash only at first (zsh can load bash completions). No framework: Cobra would be a new dependency and a rewrite of
   every command's parsing.
-
-### 38. Tag index pages (V6, C4)
-Being built (branch `tag-index`, started 2026-11-22): the design is in `design.md`, Tag index pages. Whether the
-pages replace 18b's markdown project notes is settled with 18b.
 
 ### Docs
 

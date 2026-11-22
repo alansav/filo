@@ -586,6 +586,53 @@ Tests: tags `TestParse`, `TestParseSearch`, `TestMatches`, `TestFoldAndSame`; wa
 Run by hand on a throwaway tree: tagging, a copy registered by `filo tag` taking its original's tags, find by tag
 (terminal and piped), `filo tags`, `filo show`, and a move that keeps the tags.
 
+## Tag index pages: how item 38 was built
+
+Proposed by the person on 2026-11-21 as HTML pages written by `filo export tags -o DIR`; on 2026-11-22 they replaced
+that with indexes declared once on a directory and kept up to date by Filo, so the links are relative and work on any
+device that syncs the directory (they tested a relative link on their phone first: it opened the file). Designed with
+the person topic by topic the same day: `filo indexes add [DIR] [--name NAME]`, list, `remove` (asks) and `refresh`
+(their name for it); `NAME.html` and `.NAME/` skipped by every scan by exact path, not by the root's ignore names;
+Filo replaces or removes only its own unchanged files (by hash); the hard rule widened for them; pages written after
+every run that commits, the data hashed first (the person's idea, first as XML and XSLT; `html/template` chosen
+instead: no dependency, no cgo, escaping by context); a failure exits 1; page names a slug plus a hash; the "no …"
+pages told apart by place and wording; rows without size or retention; a local stylesheet for phones. The outputs of
+`filo indexes` were mocked with the person before building: a successful update says nothing; `remove` that leaves
+files exits 1. Built on branch `tag-index` on 2026-11-22, one slice, reviewed once (`code-review`, medium).
+
+Settled while building, by Claude, and written into `design.md`: a key's page is `.NAME/<key>/index.html` and the
+bare tags' are under `.NAME/_/` (a key may start with `_`, so `.NAME/_untagged.html` and a key page could clash); the
+pages are written at the end of a run, before its snapshot (`closeStore`), not after chosen commands; dates from a
+modification time are UTC, so every device writes the same pages; temporary files are written in `.NAME/`; the
+failure line reads "the change is made, but … was not brought up to date: …"; the pages were built before the
+commands, so `add` writes real pages from its first commit. A change that does not alter what an index shows writes
+nothing, so a page edited by hand is flagged only when its data next changes, or by `refresh`.
+
+Commits, lower layers first: the design moved in; schema 12 (`tag_indexes`, `tag_index_files`), the index paths among
+the register's own paths (`OwnPaths` now reads the register); `IndexFiles`; `internal/tagindex`: the data, page names
+and hash, rendering (embedded template and stylesheet), writing and removing with the ownership checks, `Update`;
+`view.TableRow.Below`; `filo indexes`; the pages following every change; help; README; the hard rule in `CLAUDE.md`
+with `TestOnlyWriteTouchesTheDisk`. Review: nine findings, all fixed: a root absorbed by `filo roots add` of a parent
+now takes its tag indexes (before, the add failed on the foreign key); `filo indexes` lists an index whose data cannot
+be built instead of failing; a directory Filo cannot remove keeps its record unless it holds other files; an unchanged
+index is skipped before rendering; temporary files in `.NAME/`; non-ASCII keys get a hashed directory name (two Unicode
+forms of one key are one name on APFS and NTFS); add's directory problem worded; remove's closing line as designed;
+and `remove` of an index whose root cannot be reached (a drive not mounted, lost or formatted) now says its files
+cannot be removed and would be registered should they come back, and asks whether to remove the index anyway (the
+person's decision; an index whose directory is gone is removed with nothing more to say).
+
+Tests: store `TestMigrateFromV11`, `TestValidIndexName`, `TestAddTagIndex`, `TestRecordAndRemoveTagIndex`,
+`TestOwnPathsHoldIndexes`, `TestIndexFiles`, and `TestAbsorbKeepsHistoryAndReviews` with indexes; reconcile
+`TestTagIndexFilesNotRecorded`; tagindex `TestBuild`, `TestHash`, `TestPageName`, `TestKeyDir`, `TestRender`
+(`testdata/sample.txt`), `TestRenderEmpty`, `TestRenderEscapes`, `TestWrite`, `TestWriteLeavesWhatIsNotFilos`,
+`TestWriteUnreachable`, `TestWriteKeepsADirectoryWithAFiloFileLeft`, `TestTempFilesInThePagesDirectory`,
+`TestRemoveAndPlan`, `TestUpdate`, `TestOnlyWriteTouchesTheDisk`; view `TestTableBelow`; CLI `TestIndexesGolden`
+(`indexes.txt`), `TestIndexPagesNotScanned`, `TestIndexPagesFollowChanges`, `TestIndexesRefusals`,
+`TestIndexRemoveAway` (`indexes-remove-away.txt`), and the help pages. Run by hand on a throwaway tree: adding an
+index, a tag updating the pages without a word, a scan finding no new file. Not tested: an index whose data cannot be
+built (two tags with one page name, which the hash makes all but impossible to produce); the pages in a real browser
+or on a phone.
+
 ## Notes on decisions
 
 Short notes taken out of `design.md` on 2026-11-17, by the section they were in.
