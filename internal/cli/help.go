@@ -158,8 +158,9 @@ var commandHelps = map[string]commandHelp{
 				"later export. The other rows are still applied.",
 			"A tags CSV (from export tags) is told by its header: each tags cell replaces its file's tags, so an " +
 				"untouched cell changes nothing and an emptied one removes them all. Before removing any tag, filo " +
-				"lists those rows and asks; without a terminal it leaves them alone. A row is refused if a tag breaks " +
-				"the spelling rules or the file was tagged since the export.",
+				"lists those rows and asks; without a terminal it leaves them alone. A row is refused, with one line " +
+				"saying why, if for example a tag breaks the spelling rules (see filo help tag), the file's tags " +
+				"changed since the export (by tag, untag or tags rename), or the file is listed twice.",
 			"A duplicates CSV (from export duplicates) is refused: its decisions are not recorded, but carried " +
 				"out by filo delete FILE.",
 		},
@@ -252,7 +253,8 @@ var commandHelps = map[string]commandHelp{
 			{Name: "--name PATTERN", Text: "the file's name, not its directory, ignoring case; * matches any run " +
 				"of characters, and is the only wildcard (? and [ match themselves)"},
 			{Name: "--tag TAG", Text: "a tag the file has (repeatable: all of them): key:value, key: for any " +
-				"value of the key, or a bare value; * in a value matches any run of characters, and case is ignored"},
+				"value of the key, or a bare value, which finds bare tags only; * in a value matches any run of " +
+				"characters, and case is ignored"},
 			{Name: "--no-tag TAG", Text: "a tag the file lacks (repeatable): --no-tag sender: lists the files with " +
 				"no sender"},
 			{Name: "-0", Text: "piped only: the paths as they are, each ended by a NUL, for xargs -0"},
@@ -266,7 +268,8 @@ var commandHelps = map[string]commandHelp{
 			"Gives each file the tags, or removes them. A tag is key:value (sender:British Gas, project:house " +
 				"sale) or a bare value (urgent); a file can have any number, and several values for one key. The " +
 				"files come first: the arguments that are on the disk are files, and the first that is not starts " +
-				"the tags, so quote a tag with spaces.",
+				"the tags, so quote a tag with spaces. A tag that is also the name of something in the current " +
+				"directory is read as a file: run filo from another directory.",
 			"Spelling: the first colon ends the key when what is before it is letters, digits, - and _ with a " +
 				"letter (10:30 call is a bare tag). Keys are lower case; values keep the case first typed, and match " +
 				"in any case: once a file has sender:British Gas, sender:british gas gives another file the same " +
@@ -353,8 +356,9 @@ var commandHelps = map[string]commandHelp{
 		before: []string{
 			"Shows everything the register holds about each file, one after another: what filo observed (its " +
 				"path and root, size, modified time, hash, when it was first seen, where it was before) and what " +
-				"was decided (its retention, file_date and keep_until, and when they were set), then the other " +
-				"files with the same content. Nothing is changed: filo set changes what was decided.",
+				"was decided (its retention, file_date and keep_until, and when they were set, and its tags), then " +
+				"the other files with the same content. Nothing is changed: filo set and filo tag change what was " +
+				"decided.",
 			"A path is looked up in the register, not on the disk, so a missing file is shown too, and a file " +
 				"deleted by filo is found by its last path. The modified line says whether the file on disk is " +
 				"still as the last scan saw it, from its size, modified time and inode, without reading it.",

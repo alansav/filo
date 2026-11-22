@@ -3,8 +3,9 @@ filo show PATH... [-r] [--history] [--verify]
   Shows everything the register holds about each file, one after another: what
   filo observed (its path and root, size, modified time, hash, when it was first
   seen, where it was before) and what was decided (its retention, file_date and
-  keep_until, and when they were set), then the other files with the same
-  content. Nothing is changed: filo set changes what was decided.
+  keep_until, and when they were set, and its tags), then the other files with
+  the same content. Nothing is changed: filo set and filo tag change what was
+  decided.
 
   A path is looked up in the register, not on the disk, so a missing file is
   shown too, and a file deleted by filo is found by its last path. The modified

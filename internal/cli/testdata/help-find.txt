@@ -18,8 +18,8 @@ Flags
                            wildcard (? and [ match themselves)
   --tag TAG                a tag the file has (repeatable: all of them):
                            key:value, key: for any value of the key, or a bare
-                           value; * in a value matches any run of characters,
-                           and case is ignored
+                           value, which finds bare tags only; * in a value
+                           matches any run of characters, and case is ignored
   --no-tag TAG             a tag the file lacks (repeatable): --no-tag sender:
                            lists the files with no sender
   -0                       piped only: the paths as they are, each ended by a

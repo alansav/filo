@@ -5,7 +5,8 @@ filo untag FILE... TAG...
   Gas, project:house sale) or a bare value (urgent); a file can have any number,
   and several values for one key. The files come first: the arguments that are
   on the disk are files, and the first that is not starts the tags, so quote a
-  tag with spaces.
+  tag with spaces. A tag that is also the name of something in the current
+  directory is read as a file: run filo from another directory.
 
   Spelling: the first colon ends the key when what is before it is letters,
   digits, - and _ with a letter (10:30 call is a bare tag). Keys are lower case;
