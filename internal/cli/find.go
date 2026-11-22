@@ -54,6 +54,9 @@ func (e *env) find(ctx context.Context, dbBefore string, args []string) error {
 	}{{"--tag", tagged, &q.Tagged}, {"--no-tag", notTagged, &q.NotTagged}} {
 		for _, t := range l.typed {
 			ts, err := tags.ParseSearch(t)
+			if errors.Is(err, tags.ErrEmpty) {
+				return usageError{l.flag + " needs a tag, such as type:bill or type:"}
+			}
 			if err != nil {
 				return usageError{l.flag + " " + err.Error()}
 			}
@@ -84,13 +87,15 @@ func (e *env) find(ctx context.Context, dbBefore string, args []string) error {
 	if err != nil {
 		return err
 	}
-	ids := make([]int64, len(rows))
-	for i, f := range rows {
-		ids[i] = f.FileID
-	}
-	tagsOf, err := s.FileTags(ctx, ids)
-	if err != nil {
-		return err
+	var tagsOf map[int64][]tags.Tag // read when a search or the terminal list needs them
+	if v.Terminal() || len(q.Tagged)+len(q.NotTagged) > 0 {
+		ids := make([]int64, len(rows))
+		for i, f := range rows {
+			ids[i] = f.FileID
+		}
+		if tagsOf, err = s.FileTags(ctx, ids); err != nil {
+			return err
+		}
 	}
 	files := find.Select(rows, q, tagsOf)
 	if v.Terminal() {

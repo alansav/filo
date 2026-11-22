@@ -229,7 +229,7 @@ func TestFindTags(t *testing.T) {
 		args []string
 		want string
 	}{
-		{[]string{"find", "--tag", ""}, "--tag give a tag"},
+		{[]string{"find", "--tag", ""}, "--tag needs a tag, such as type:bill or type:"},
 		{[]string{"find", "--no-tag", "a;b"}, `--no-tag "a;b": a tag cannot hold ";"`},
 	} {
 		ct.contains(strings.Join(tt.args, " "), filo(ExitUsage, "", false, tt.args...).stderr, tt.want)
