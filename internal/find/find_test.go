@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/alansav/filo/internal/store"
+	"github.com/alansav/filo/internal/tags"
 )
 
 func TestMatch(t *testing.T) {
@@ -81,11 +82,76 @@ func TestSelect(t *testing.T) {
 		{"a", nil}, // the base name only, never the directory
 	} {
 		var got []row
-		for _, s := range Select(fs, tc.pattern) {
+		for _, s := range Select(fs, Query{Name: tc.pattern}, nil) {
 			got = append(got, row{s.Rel, s.Links})
 		}
 		if !slices.Equal(got, tc.want) {
 			t.Errorf("Select(%q) = %v\nwant %v", tc.pattern, got, tc.want)
 		}
+	}
+}
+
+// TestSelectTags: --tag and --no-tag, each repeatable, with --name: every condition must hold.
+func TestSelectTags(t *testing.T) {
+	parse := func(s string) tags.Tag {
+		tg, err := tags.Parse(s)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return tg
+	}
+	search := func(s string) tags.Search {
+		q, err := tags.ParseSearch(s)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return q
+	}
+	fs := []store.FoundFile{
+		{FileID: 1, RootID: 1, Rel: "a/gas bill.pdf"},
+		{FileID: 2, RootID: 1, Rel: "a/water bill.pdf"},
+		{FileID: 3, RootID: 1, Rel: "b/notes.txt"},
+		{FileID: 4, RootID: 1, Rel: "b/untagged.txt"},
+	}
+	tagsOf := map[int64][]tags.Tag{
+		1: {parse("sender:British Gas"), parse("type:bill")},
+		2: {parse("sender:Thames Water"), parse("type:bill"), parse("urgent")},
+		3: {parse("project:house")},
+	}
+	for _, tc := range []struct {
+		name          string
+		pattern       string
+		tagged, lacks []string
+		want          []string
+	}{
+		{"a tag", "", []string{"type:bill"}, nil, []string{"a/gas bill.pdf", "a/water bill.pdf"}},
+		{"a value in any case", "", []string{"sender:BRITISH GAS"}, nil, []string{"a/gas bill.pdf"}},
+		{"a key", "", []string{"project:"}, nil, []string{"b/notes.txt"}},
+		{"a wildcard", "", []string{"sender:*water*"}, nil, []string{"a/water bill.pdf"}},
+		{"two tags: both", "", []string{"type:bill", "urgent"}, nil, []string{"a/water bill.pdf"}},
+		{"no such key: the tagging to-do list", "", nil, []string{"sender:"}, []string{"b/notes.txt", "b/untagged.txt"}},
+		{"a tag and not another", "", []string{"type:bill"}, []string{"urgent"}, []string{"a/gas bill.pdf"}},
+		{"with a name", "water*", []string{"type:"}, nil, []string{"a/water bill.pdf"}},
+		{"a bare search finds bare tags only", "", []string{"bill"}, nil, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			q := Query{Name: tc.pattern}
+			for _, s := range tc.tagged {
+				q.Tagged = append(q.Tagged, search(s))
+			}
+			for _, s := range tc.lacks {
+				q.NotTagged = append(q.NotTagged, search(s))
+			}
+			var got []string
+			for _, f := range Select(fs, q, tagsOf) {
+				got = append(got, f.Rel)
+				if len(f.Tags) != len(tagsOf[f.FileID]) {
+					t.Errorf("%s: %d tags, want %d", f.Rel, len(f.Tags), len(tagsOf[f.FileID]))
+				}
+			}
+			if !slices.Equal(got, tc.want) {
+				t.Errorf("got %v, want %v", got, tc.want)
+			}
+		})
 	}
 }

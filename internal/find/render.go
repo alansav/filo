@@ -1,6 +1,7 @@
 package find
 
 import (
+	"strings"
 	"time"
 
 	"github.com/alansav/filo/internal/report"
@@ -9,10 +10,10 @@ import (
 
 // Render writes what filo find found, for reading in a terminal (docs/design.md, Finding files): a heading (how many
 // files, their size, the search, where), then every file, never cut, by root and then path, with its modified date
-// and size. where names the roots searched and, with one, the directory under it; notScanned, if not "", is the line
-// under the heading that says the list is as of an earlier scan (--no-scan). Nothing found: the heading and, for a
-// name search, a Next line about the name.
-func Render(v *view.Renderer, files []File, pattern string, where view.Where, notScanned string) {
+// and size, and its tags after the path. where names the roots searched and, with one, the directory under it;
+// notScanned, if not "", is the line under the heading that says the list is as of an earlier scan (--no-scan).
+// Nothing found: the heading and, for a search by name or tag, a Next line about it.
+func Render(v *view.Renderer, files []File, q Query, where view.Where, notScanned string) {
 	var facts []string
 	if len(files) == 0 {
 		facts = append(facts, "no files")
@@ -23,8 +24,14 @@ func Render(v *view.Renderer, files []File, pattern string, where view.Where, no
 		}
 		facts = append(facts, report.Plural(int64(len(files)), "file", "files"), report.Size(size))
 	}
-	if pattern != "" {
-		facts = append(facts, "named "+pattern)
+	if q.Name != "" {
+		facts = append(facts, "named "+q.Name)
+	}
+	for _, t := range q.Tagged {
+		facts = append(facts, "tagged "+t.String())
+	}
+	for _, t := range q.NotTagged {
+		facts = append(facts, "not tagged "+t.String())
 	}
 	v.Heading("Found", where, facts...)
 	if notScanned != "" {
@@ -32,8 +39,14 @@ func Render(v *view.Renderer, files []File, pattern string, where view.Where, no
 	}
 	v.Blank()
 	if len(files) == 0 {
-		if pattern != "" {
+		switch {
+		case q.Name != "" && len(q.Tagged)+len(q.NotTagged) > 0:
+			v.Next("Next: check the name and the tags: * matches any run of characters, and case is ignored; " +
+				"filo tags lists the tags")
+		case q.Name != "":
 			v.Next("Next: check the name: * matches any run of characters, and case is ignored")
+		case len(q.Tagged)+len(q.NotTagged) > 0:
+			v.Next("Next: check the tags: filo tags lists them; key: finds any value, and * any run of characters")
 		}
 		return
 	}
@@ -54,17 +67,17 @@ func modified(ns int64) string {
 	return time.Unix(0, ns).Local().Format("2006-01-02")
 }
 
-// note says what else a reader should know about a file: that it could not be read, and its other links.
+// note says what else a reader should know about a file: its tags, that it could not be read, and its other links.
 func note(f File) string {
-	n := ""
+	var parts []string
+	for _, t := range f.Tags {
+		parts = append(parts, t.String())
+	}
 	if f.Unreadable {
-		n = "could not be read"
+		parts = append(parts, "could not be read")
 	}
 	if f.Links > 0 {
-		if n != "" {
-			n += "; "
-		}
-		n += "and " + report.Plural(int64(f.Links), "hard link", "hard links") + ", the same file"
+		parts = append(parts, "and "+report.Plural(int64(f.Links), "hard link", "hard links")+", the same file")
 	}
-	return n
+	return strings.Join(parts, "; ")
 }

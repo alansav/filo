@@ -65,9 +65,10 @@ func (e *env) find(ctx context.Context, dbBefore string, args []string) error {
 	if err != nil {
 		return err
 	}
-	files := find.Select(rows, *name)
+	q := find.Query{Name: *name}
+	files := find.Select(rows, q, nil)
 	if v.Terminal() {
-		find.Render(v, files, *name, place.where, notScanned)
+		find.Render(v, files, q, place.where, notScanned)
 		return nil
 	}
 	paths := make([]string, len(files))

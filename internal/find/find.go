@@ -4,6 +4,7 @@ package find
 
 import (
 	"path"
+	"slices"
 
 	"github.com/alansav/filo/internal/store"
 	"github.com/alansav/filo/internal/tags"
@@ -16,21 +17,48 @@ import (
 func Match(pattern, name string) bool { return tags.Match(pattern, name) }
 
 // File is one file filo find lists: at the first of its paths that matched, with how many other paths it has (hard
-// links in the same root, store.FoundFile's Links), which are not listed.
+// links in the same root, store.FoundFile's Links), which are not listed, and its tags.
 type File struct {
 	store.FoundFile
+	Tags []tags.Tag
 }
 
-// Select returns the files among fs (one row per path, as store.FindFiles gives them, in its order) whose base name
-// matches pattern ("" matches every name), in the same order. Paths that are one file, hard links (the same inode,
-// size and modified time in the same root, as store.FindFiles counts them), are listed once, at the first that
-// matches, if any does. A stale inode reused by a file of another size or time is another file, listed too.
-func Select(fs []store.FoundFile, pattern string) []File {
+// Query is what filo find looks for: every condition must hold (docs/design.md, Finding files and Tags).
+type Query struct {
+	Name      string        // the base name, with * the one wildcard; "" matches every name
+	Tagged    []tags.Search // each must find one of the file's tags
+	NotTagged []tags.Search // none may find one
+}
+
+// Matches reports whether a file with this base name and these tags is one q finds.
+func (q Query) Matches(name string, ts []tags.Tag) bool {
+	if q.Name != "" && !Match(q.Name, name) {
+		return false
+	}
+	for _, s := range q.Tagged {
+		if !slices.ContainsFunc(ts, s.Matches) {
+			return false
+		}
+	}
+	for _, s := range q.NotTagged {
+		if slices.ContainsFunc(ts, s.Matches) {
+			return false
+		}
+	}
+	return true
+}
+
+// Select returns the files among fs (one row per path, as store.FindFiles gives them, in its order) that q finds,
+// with tagsOf their tags by file id, in the same order. Paths that are one file, hard links (the same inode, size and
+// modified time in the same root, as store.FindFiles counts them), are listed once, at the first that matches, if
+// any does. A stale inode reused by a file of another size or time is another file, listed too.
+func Select(fs []store.FoundFile, q Query, tagsOf map[int64][]tags.Tag) []File {
 	type key struct{ root, ino, size, mtime int64 }
 	listed := map[key]bool{}
 	var out []File
 	for _, f := range fs {
-		if pattern != "" && !Match(pattern, path.Base(f.Rel)) {
+		ts := tagsOf[f.FileID]
+		if !q.Matches(path.Base(f.Rel), ts) {
 			continue
 		}
 		if f.Inode != 0 && f.Links > 0 {
@@ -40,7 +68,7 @@ func Select(fs []store.FoundFile, pattern string) []File {
 			}
 			listed[k] = true
 		}
-		out = append(out, File{FoundFile: f})
+		out = append(out, File{FoundFile: f, Tags: ts})
 	}
 	return out
 }
