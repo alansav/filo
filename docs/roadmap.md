@@ -7,7 +7,7 @@ Everything Filo does not do: the work planned, ideas, open questions, deferred i
 Filo does today is in `design.md`; how it was built is in `history.md`. An item stays here while it is discussed and
 designed. When work on it starts, its design moves into `design.md` (the first commit of its branch); when it is
 complete, nothing of it is left here. Items keep their numbers, so gaps in the numbering are work already done, or ideas
-rejected (see Rejected, at the end: 14 is deleting to the trash). Last updated: 2026-11-21.
+rejected (see Rejected, at the end: 14 is deleting to the trash). Last updated: 2026-11-22.
 
 ## Direction
 
@@ -224,7 +224,7 @@ tag; a project is a tag.
   value, or by a key they lack (`--no-tag sender:`, the tagging to-do list). A file can have several values for one
   key (two projects). Keys are created on the fly, never declared; `filo tags` lists them, and a tag exists only
   while some file has it. A typo is fixed by renaming the tag, or by hand: list its files, add the right tag, remove
-  the wrong one. (To check with 18b: a project tag with a note whose files all lose it.)
+  the wrong one. A project note (18b) is not a tag: notes and tags are separate (agreed 2026-11-22).
 - **Spelling.** Values may hold spaces (trimmed at the ends, runs collapsed), keep the case first typed, and match
   ignoring case (`sender:british gas` finds `British Gas`). Keys are lowercase whatever is typed, have no spaces
   (letters, digits, `-`, `_`) and at least one letter. The first colon separates the key when what is before it is
@@ -448,6 +448,8 @@ recurring check on a file, such as an annual look at a seven-year record, is a t
 lifecycle" that needs its own discussion first; by the direction above it may be a separate tool reading the register.
 Linking files to a project is a tag (18a). (Holds were dropped on 2026-11-12: a file that must be kept gets a later
 retention or `forever`.)
+Proposed 2026-11-22, not designed: tasks and events could live on a CalDAV server (the person's calendar and task
+lists), each with a link to its files, rather than in Filo.
 
 ### Later e. A watcher (V3, C8)
 Seeing changes as they happen (`inotify`/`fanotify`) instead of on the next scan. Rejected (below, "A daemon")
