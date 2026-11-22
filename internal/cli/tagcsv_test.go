@@ -58,9 +58,12 @@ func TestTagsCSVGolden(t *testing.T) {
 	ct.contains("no terminal", r.stdout, "1 row left as it was, though it removes tags (there is no terminal to ask in",
 		"or with -y, to remove them")
 
-	// -y removes them without asking, with or without a terminal; the removals are listed with the other changes.
-	r = filo(ExitError, "", false, "update", again, "-y")
-	ct.contains("-y", r.stdout, "1 file had its tags changed",
+	// A dry run with -y says it removes them without asking.
+	ct.contains("dry -y", filo(ExitError, "", false, "update", again, "--dry-run", "-y").stdout,
+		"1 of them would lose tags (-y removes them without asking)")
+	// -y removes them without asking, here in a terminal with nothing typed; they are counted and listed.
+	r = filo(ExitError, "", true, "update", again, "-y")
+	ct.contains("-y", r.stdout, "1 file had its tags changed", "1 of them lost tags",
 		"received/2026/09/2026-09-02 British Gas Bill.pdf   removed project:house; sender:British Gas; type:bill")
 	ct.lacks("-y", r.stdout, "Remove them?", "left as it was")
 	ct.contains("tags after -y", filo(ExitOK, "", false, "find", "--no-tag", "type:", "--no-scan").stdout, sep)
@@ -70,6 +73,12 @@ func TestTagsCSVGolden(t *testing.T) {
 	filo(ExitOK, "", false, "export", "retention", "-o", rcsv, "--no-scan")
 	ct.contains("-y, retention", filo(ExitUsage, "", false, "update", rcsv, "-y").stderr,
 		"-y answers only the question about removing tags")
+	// A file that is no CSV filo reads gets its own error, not the one about -y.
+	notCSV := filepath.Join(work, "notes.txt")
+	if err := os.WriteFile(notCSV, []byte("just notes\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ct.contains("-y, not a CSV", filo(ExitError, "", false, "update", notCSV, "-y").stderr, "not a filo retention CSV")
 }
 
 func TestTagsCSVKinds(t *testing.T) {

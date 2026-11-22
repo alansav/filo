@@ -158,7 +158,8 @@ var commandHelps = map[string]commandHelp{
 				"later export. The other rows are still applied.",
 			"A tags CSV (from export tags) is told by its header: each tags cell replaces its file's tags, so an " +
 				"untouched cell changes nothing and an emptied one removes them all. Before removing any tag, filo " +
-				"lists those rows and asks (-y answers yes); without a terminal and -y it leaves them alone. A row is refused, with one line " +
+				"lists those rows and asks (-y answers yes); without a terminal, and without -y, it leaves them " +
+				"alone. A row is refused, with one line " +
 				"saying why, if for example a tag breaks the spelling rules (see filo help tag), the file's tags " +
 				"changed since the export (by tag, untag or tags rename), or the file is listed twice.",
 			"A duplicates CSV (from export duplicates) is refused: its decisions are not recorded, but carried " +

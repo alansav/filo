@@ -277,13 +277,13 @@ func (e *env) update(ctx context.Context, dbBefore string, args []string) error 
 	if tagcsv.IsTagsCSV(data) || tagcsv.LostTags(data) {
 		return e.updateTags(ctx, *db, path, data, *dry, *yes)
 	}
-	if *yes {
-		return usageError{"-y answers only the question about removing tags, for a tags CSV; clearing a retention " +
-			"is asked in a terminal"}
-	}
 	parsed, err := retention.ParseCSV(data)
 	if err != nil {
 		return fmt.Errorf("%s: %w", path, err)
+	}
+	if *yes { // only once the CSV is known to be a retention CSV, so another file gets its own error
+		return usageError{"-y answers only the question about removing tags, in a tags CSV; a retention CSV's " +
+			"questions (clearing a retention, creating a policy) are asked in a terminal"}
 	}
 
 	s, err := e.open(ctx, *db)

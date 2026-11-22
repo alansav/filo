@@ -123,9 +123,16 @@ func (e *env) updateTags(ctx context.Context, db, path string, data []byte, dry,
 		}
 		r.Count(view.Done, report.Plural(int64(n), "file", "files")+what)
 	}
-	if dry && res.Removing > 0 {
-		r.Count(view.Neutral, report.Count(int64(res.Removing))+pluralWord(res.Removing, " of them would lose a tag",
-			" of them would lose tags")+" (filo update asks first)")
+	switch lost := res.Removing - res.Skipped; {
+	case dry && res.Removing > 0:
+		how := " (filo update asks first)"
+		if yes {
+			how = " (-y removes them without asking)"
+		}
+		r.Count(view.Neutral, report.Count(int64(res.Removing))+" of them would lose tags"+how)
+	case lost > 0:
+		// Counted, since the list below stops at a screenful: -y skips the question that lists every one.
+		r.Count(view.Neutral, report.Count(int64(lost))+" of them lost tags")
 	}
 	if res.Unchanged > 0 {
 		r.Count(view.Neutral, report.Plural(int64(res.Unchanged), "row", "rows")+" unchanged")

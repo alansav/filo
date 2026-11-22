@@ -10,7 +10,7 @@ $ filo update tags.csv --dry-run
 Tags update (dry run)   tags.csv . export 1 . 3 rows . <work>/home
 
   [ok] 3 files would have their tags changed
-  - 1 of them would lose a tag (filo update asks first)
+  - 1 of them would lose tags (filo update asks first)
 
     notes/ideas.txt   added urgent
     received/2026/09/2026-09-02 British Gas Bill.pdf   added project:house
@@ -26,6 +26,7 @@ Tags update   tags.csv . export 1 . 3 rows . <work>/home
 
 Remove them? The other rows are recorded either way. [y/N/l] 
   [ok] 3 files had their tags changed
+  - 1 of them lost tags
 
     notes/ideas.txt   added urgent
     received/2026/09/2026-09-02 British Gas Bill.pdf   added project:house
