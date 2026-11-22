@@ -11,7 +11,7 @@ import (
 type Outcome struct {
 	Index   store.TagIndex // as it was before
 	Data    Data           // what its pages show now
-	Pages   int            // how many pages it has (the stylesheet not counted)
+	Pages   int            // how many pages it has (the stylesheet not counted); 0 when Skipped
 	Skipped bool           // its data was the one last written in full: nothing was rendered or written
 	Result  Result         // what writing its files did (nothing when Skipped)
 }
@@ -38,15 +38,15 @@ func Update(ctx context.Context, s *store.Store, ix store.TagIndex, force bool, 
 	}
 	out.Data = d
 	hash := d.Hash()
+	if !force && hash == ix.DataHash {
+		out.Skipped = true // nothing rendered: most runs that change the register do not change what an index shows
+		return out, nil
+	}
 	p, err := Render(d)
 	if err != nil {
 		return out, err
 	}
 	out.Pages = len(p.Files) - 1
-	if !force && hash == ix.DataHash {
-		out.Skipped = true
-		return out, nil
-	}
 	out.Result = Write(ix, p)
 	w := store.IndexWrite{Files: out.Result.Files}
 	if out.Failed() {

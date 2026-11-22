@@ -128,7 +128,7 @@ func TestUpdate(t *testing.T) {
 	}
 
 	// Nothing changed: skipped. Forced: rendered and checked, nothing to write.
-	if o, err := Update(e.ctx, e.s, ix, false, now); err != nil || !o.Skipped {
+	if o, err := Update(e.ctx, e.s, ix, false, now); err != nil || !o.Skipped || o.Pages != 0 {
 		t.Errorf("unchanged update: %+v, %v", o, err)
 	}
 	if o, err := Update(e.ctx, e.s, ix, true, now); err != nil || o.Skipped || o.Result.Written != 0 || o.Failed() {
