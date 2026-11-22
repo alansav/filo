@@ -558,7 +558,7 @@ Tagged   1 file · sender:British Gas · type:bill · ~/Documents
   copy of a tagged file takes its tags when a scan first sees it; `filo scan` says so when the copies' tags differed.
 - **Many files at once**: `filo export tags [DIR] -o tags.csv` writes every file with its tags in one cell,
   separated by `;`. Edit the cells and run `filo update tags.csv`: each cell replaces its file's tags, and Filo asks
-  before removing any.
+  before removing any (`-y` answers yes, for a script).
 - In a terminal, `filo find` shows each file's tags after its path, and `filo show` lists them.
 
 ## Commands
@@ -573,7 +573,7 @@ Tagged   1 file · sender:British Gas · type:bill · ~/Documents
 | `filo export retention [DIR] -o FILE [--no-scan] [--workers N]` | Scan `DIR` (or every root), then write every file under it with its retention, as CSV. |
 | `filo export duplicates [DIR] -o FILE [--no-scan] [--workers N]` | Scan every root, then write the duplicate groups with a copy under `DIR` as CSV, to decide which copies to keep. See [Duplicates](#duplicates). |
 | `filo export tags [DIR] -o FILE [--no-scan] [--workers N]` | Scan `DIR` (or every root), then write every file under it with its tags, as CSV. See [Tags](#tags). |
-| `filo update FILE [--dry-run]` | Apply the retentions or tags edited in an exported retention or tags CSV. |
+| `filo update FILE [--dry-run] [-y]` | Apply the retentions or tags edited in an exported retention or tags CSV; `-y` removes tags without asking. |
 | `filo delete [DIR] [-y]` | List the files past their retention, ask, and delete the ones you choose. See [Deleting](#deleting). |
 | `filo delete FILE [-y]` | Carry out a duplicates CSV: check it against the disk, list, ask, and delete the copies marked `delete`. |
 | `filo duplicates` | List what is not counted as duplicates: excluded directories, contents marked always, identical files kept as separate files. |
