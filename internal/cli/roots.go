@@ -16,7 +16,7 @@ import (
 
 // valueFlags are the roots flags that take a value: given as the next argument (--ignore build), that value is not
 // a subcommand.
-var valueFlags = map[string]bool{"db": true, "ignore": true, "workers": true}
+var valueFlags = map[string]bool{"db": true, "ignore": true, "workers": true, "name": true}
 
 // rootsSub finds a roots subcommand among args, so it may follow a flag (filo roots --db X add DIR), and returns it
 // with the other arguments. Only the first positional argument can be one; "" means none.

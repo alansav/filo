@@ -654,8 +654,11 @@ func TestMigrateFromV3(t *testing.T) {
 	}
 }
 
-// dropTags removes the tags of schema 11, for a test that rebuilds an older one.
-const dropTags = `DROP TABLE tag_changes; DROP TABLE tags; ALTER TABLE export_rows DROP COLUMN tags;`
+// dropTagIndexes removes the tag indexes of schema 12, for a test that rebuilds an older one.
+const dropTagIndexes = `DROP TABLE tag_index_files; DROP TABLE tag_indexes;`
+
+// dropTags removes the tags of schema 11 (and the tag indexes of 12), for a test that rebuilds an older one.
+const dropTags = dropTagIndexes + `DROP TABLE tag_changes; DROP TABLE tags; ALTER TABLE export_rows DROP COLUMN tags;`
 
 // dropRules removes the directory rules of schema 10 (and the tags of 11), for a test that rebuilds an older one.
 const dropRules = dropTags + `DROP TABLE rules; DROP INDEX ix_files_rule; ALTER TABLE files DROP COLUMN rule_id;

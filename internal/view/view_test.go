@@ -677,3 +677,19 @@ func TestFilesOver(t *testing.T) {
 		t.Errorf("got\n%s\nwant\n%s", b.String(), want)
 	}
 }
+
+// TestTableBelow: lines that need attention go under their row, two further in, and the columns stay lined up.
+func TestTableBelow(t *testing.T) {
+	r, b := plainView()
+	r.Table([]TableRow{
+		{Name: "bills/index.html", Cells: []string{"214 files", "9 tags"}},
+		{Name: "records/tags.html", Cells: []string{"88 files", "4 tags"}, Attention: "not up to date",
+			Below: []string{".tags/sender.html was changed since Filo wrote it: not replaced"}},
+	}, true)
+	want := "  bills/index.html    214 files   9 tags\n" +
+		"  records/tags.html    88 files   4 tags   [!] not up to date\n" +
+		"    [!] .tags/sender.html was changed since Filo wrote it: not replaced\n"
+	if got := b.String(); got != want {
+		t.Errorf("got\n%s\nwant\n%s", got, want)
+	}
+}

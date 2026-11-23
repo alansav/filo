@@ -1,11 +1,13 @@
 package view
 
-// TableRow is one row of a table: a name (shown as a name, so a trailing space shows), its cells, and an optional
-// note that needs attention, shown last under the ! marker.
+// TableRow is one row of a table: a name (shown as a name, so a trailing space shows), its cells, an optional note
+// that needs attention, shown last under the ! marker, and lines that need attention, each under the row, two further
+// in (what is wrong with a tag index: "    ! .tags/sender.html was changed since Filo wrote it: not replaced").
 type TableRow struct {
 	Name      string
 	Cells     []string
 	Attention string
+	Below     []string
 }
 
 // TableGroup is a heading name (a directory) with its rows under it, and an optional note that needs attention on
@@ -132,4 +134,7 @@ func (r *Renderer) row(l layout, indent int, row TableRow, right []bool) {
 		spans = append(spans, spaces(3), r.mark(Attention), plain(" "+row.Attention))
 	}
 	r.write(spans...)
+	for _, b := range row.Below {
+		r.write(spaces(indent+2), r.mark(Attention), plain(" "+b))
+	}
 }

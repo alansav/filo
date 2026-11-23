@@ -148,9 +148,13 @@ func Scan(ctx context.Context, s *store.Store, opt Options) (Summary, error) {
 	if pr != nil {
 		walked = &pr.Walked
 	}
+	own, err := s.OwnPaths(ctx)
+	if err != nil {
+		return Summary{}, err
+	}
 	res, err := walk.Walk(ctx, walk.Options{
 		Root: root.Path, Scope: scope, IncludeHidden: root.IncludeHidden, Ignore: root.Ignore,
-		Exclude: s.OwnPaths(),
+		Exclude: own,
 		Seen:    walked,
 	})
 	if err != nil {

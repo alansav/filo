@@ -72,8 +72,8 @@ func TestMigrateFromV10(t *testing.T) {
 	rawExec(t, db, dropTags, `UPDATE meta SET value = '10' WHERE key = 'schema_version'`)
 	s := mustOpen(t, Options{DBPath: db})
 	defer mustClose(t, s)
-	if v := readMeta(t, s)[metaSchemaVersion]; v != strconv.Itoa(SchemaVersion) || SchemaVersion != 11 {
-		t.Fatalf("schema_version = %s after upgrade, want 11", v)
+	if v := readMeta(t, s)[metaSchemaVersion]; v != strconv.Itoa(SchemaVersion) {
+		t.Fatalf("schema_version = %s after upgrade, want %d", v, SchemaVersion)
 	}
 	counts, err := s.RowCounts(t.Context())
 	if err != nil || counts["tags"] != 0 || counts["tag_changes"] != 0 {

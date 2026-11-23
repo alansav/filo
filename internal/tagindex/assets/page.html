@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="generator" content="filo">
+<title>{{.Title}}</title>
+<link rel="stylesheet" href="{{.Style}}">
+</head>
+<body>
+<nav class="trail">{{range $i, $l := .Trail}}{{if $i}} <span class="sep">›</span> {{end}}{{if $l.Href}}<a href="{{$l.Href}}">{{$l.Text}}</a>{{else}}<span>{{$l.Text}}</span>{{end}}{{end}}</nav>
+<header>
+<h1>{{.Heading}}</h1>
+<p class="counts">{{.Counts}}</p>
+</header>
+<main>
+{{- if .Rows}}
+<ul class="rows">
+{{- range .Rows}}
+<li><a href="{{.Href}}"><span class="name">{{.Text}}</span><span class="count">{{.Count}}</span></a></li>
+{{- end}}
+</ul>
+{{- end}}
+{{- if .Files}}
+<ul class="files">
+{{- range .Files}}
+<li>
+<a class="file" href="{{.Href}}">{{.Name}}</a>
+<div class="meta">{{if .Dir}}<span class="dir">{{.Dir}}</span>{{end}}<span class="date">{{.Date}}</span></div>
+{{- if .Tags}}
+<div class="tags">{{range .Tags}}<a class="tag" href="{{.Href}}">{{.Text}}</a>{{end}}</div>
+{{- end}}
+</li>
+{{- end}}
+</ul>
+{{- end}}
+{{- if .Empty}}
+<p class="empty">{{.Empty}}</p>
+{{- end}}
+{{- if .Note}}
+<section class="note">
+<a href="{{.Note.Href}}">{{.Note.Text}}</a>
+</section>
+{{- end}}
+</main>
+</body>
+</html>

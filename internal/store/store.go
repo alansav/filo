@@ -51,6 +51,9 @@ type Store struct {
 // once as a warning: none when the register was already current.
 func (s *Store) UpgradeNotes() []string { return s.notes }
 
+// Changed reports whether this run committed a change to the register, which its end takes a snapshot of.
+func (s *Store) Changed() bool { return s.changed }
+
 // commit commits tx and notes that this run changed the register.
 func (s *Store) commit(tx *sql.Tx) error {
 	if err := tx.Commit(); err != nil {
@@ -129,11 +132,17 @@ func (s *Store) Close() error {
 
 func lockPath(dbPath string) string { return dbPath + ".lock" }
 
-// OwnPaths are the paths the register keeps next to its database: the database, SQLite's companion files, the lock
-// file and the snapshot directory. A scan never records them, wherever they are.
-func (s *Store) OwnPaths() []string {
+// OwnPaths are the paths of Filo's own files: those the register keeps next to its database (the database, SQLite's
+// companion files, the lock file and the snapshot directory) and each tag index's main page and pages directory
+// (docs/design.md, Tag index pages). A scan never records them, wherever they are.
+func (s *Store) OwnPaths(ctx context.Context) ([]string, error) {
 	db := s.dbPath
-	return []string{db, db + "-wal", db + "-shm", db + "-journal", lockPath(db), SnapshotDir(db)}
+	own := []string{db, db + "-wal", db + "-shm", db + "-journal", lockPath(db), SnapshotDir(db)}
+	ix, err := s.indexPaths(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return append(own, ix...), nil
 }
 
 // DBPath is the absolute path of the database file.

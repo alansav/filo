@@ -1,0 +1,7 @@
+Remove index   bills/index.html . <root>/disk
+
+  [!] its files cannot be removed: <root>/disk is not mounted
+  [!] removing the index anyway leaves them: should they come back, they are no longer Filo's, and the next scan registers them as your files
+
+Remove the index anyway, leaving its files? [y/N] 
+Done   removed the index . its files were left where they were

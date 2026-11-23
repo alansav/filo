@@ -58,6 +58,10 @@ var overview = struct {
 		{Name: "untag FILE... TAG...", Text: "remove tags from files (key: for every value of the key)"},
 		{Name: "tags", Text: "list the tags in use, with how many files have each"},
 		{Name: "tags rename OLD NEW", Text: "rename a tag, or a key, on every file that has it"},
+		{Name: "indexes", Text: "list the tag indexes: HTML pages of a directory's files by tag"},
+		{Name: "indexes add [DIR] [--name NAME]", Text: "write a directory's tag index, kept up to date from then on"},
+		{Name: "indexes remove [DIR] [--name NAME]", Text: "stop keeping an index, and remove its pages"},
+		{Name: "indexes refresh [DIR] [--name NAME]", Text: "write an index's pages again"},
 		{Name: "help [COMMAND]", Text: "this overview, or a command's flags and rules"},
 	},
 	after: "Every command accepts --db PATH (default: $FILO_DB, then the user data directory).",
@@ -298,6 +302,34 @@ var commandHelps = map[string]commandHelp{
 			"tags rename gives every file that has OLD the tag NEW instead, spelled as typed: it fixes a typo in a " +
 				"key or a value, or changes only the case (sender:british gas to sender:British Gas). With key: for " +
 				"both (sendr: sender:) it renames the key of every value. A file that has both keeps one.",
+		},
+	},
+	"indexes": {
+		usage: []string{"filo indexes", "filo indexes add [DIR] [--name NAME]",
+			"filo indexes remove [DIR] [--name NAME] [-y]", "filo indexes refresh [DIR] [--name NAME]"},
+		before: []string{
+			"A tag index is a set of HTML pages that list the files under a directory, at any depth, by tag, to " +
+				"browse and tap instead of typing searches: a main page of keys, a page per key of its values, a " +
+				"page per tag of its files, and the files with no tags. Each file opens from its page. The links " +
+				"are relative, so the pages work on any device that syncs the directory, and nothing is fetched " +
+				"from the network.",
+			"add declares an index on DIR (the current directory if not given) and writes its pages: NAME.html in " +
+				"DIR, and the other pages and a stylesheet in DIR/.NAME/ (NAME is index unless given). From then " +
+				"on every command that changes the register brings them up to date, and says nothing unless it " +
+				"cannot. Scans skip both paths.",
+			"Filo replaces or removes only the files it wrote, and only while they are as it wrote them: a page " +
+				"edited by hand, or a file put in .NAME/, is left alone and reported, and the command exits 1. " +
+				"Move it aside, then refresh writes the pages again. filo indexes lists the indexes and what is " +
+				"wrong with each.",
+			"remove lists what it will remove and asks first. A file that is not Filo's stays, and so does the " +
+				"directory holding it; remove then exits 1. An index on a drive that cannot be reached (not " +
+				"mounted, lost) cannot have its files removed: remove says so and asks whether to remove the " +
+				"index anyway; its files, should they come back, are then registered by the next scan.",
+		},
+		flags: []view.Term{
+			{Name: "--name NAME", Text: "add: the pages' name (letters, digits, - and _); remove and refresh: " +
+				"which index of DIR, when it has several"},
+			{Name: "-y", Text: "remove: remove without asking"},
 		},
 	},
 	"get": {

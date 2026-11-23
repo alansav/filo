@@ -1,0 +1,23 @@
+dirs: .index
+== .index/style.css (the stylesheet)
+== index.html
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="generator" content="filo">
+<title>bills</title>
+<link rel="stylesheet" href="./.index/style.css">
+</head>
+<body>
+<nav class="trail"><span>bills</span></nav>
+<header>
+<h1>bills</h1>
+<p class="counts">0 files · 0 tags</p>
+</header>
+<main>
+<p class="empty">No files here yet.</p>
+</main>
+</body>
+</html>

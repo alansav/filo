@@ -55,6 +55,15 @@ Commands
                            key)
   tags                     list the tags in use, with how many files have each
   tags rename OLD NEW      rename a tag, or a key, on every file that has it
+  indexes                  list the tag indexes: HTML pages of a directory's
+                           files by tag
+  indexes add [DIR] [--name NAME]
+                           write a directory's tag index, kept up to date from
+                           then on
+  indexes remove [DIR] [--name NAME]
+                           stop keeping an index, and remove its pages
+  indexes refresh [DIR] [--name NAME]
+                           write an index's pages again
   help [COMMAND]           this overview, or a command's flags and rules
 
 Every command accepts --db PATH (default: $FILO_DB, then the user data

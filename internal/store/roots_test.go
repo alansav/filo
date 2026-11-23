@@ -460,6 +460,19 @@ func TestAbsorbKeepsHistoryAndReviews(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Tag indexes on the whole of Documents and on its tax directory, one with a file written.
+	ixRoot, err := s.AddTagIndex(ctx, docs.ID, "", "index", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RecordTagIndex(ctx, ixRoot.ID, IndexWrite{Files: map[string]string{"index.html": "h"}, DataHash: "d"},
+		now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AddTagIndex(ctx, docs.ID, "tax", "tags", now); err != nil {
+		t.Fatal(err)
+	}
+
 	home, absorbed, err := s.AddRootAbsorb(ctx, abs("home"), Settings{IncludeHidden: true, Ignore: []string{"tmp", "tmp"}})
 	if err != nil {
 		t.Fatal(err)
@@ -532,6 +545,20 @@ func TestAbsorbKeepsHistoryAndReviews(t *testing.T) {
 		FROM (SELECT * FROM rules ORDER BY dir)`); v != strconv.FormatInt(home.ID, 10)+":Documents *|"+
 		strconv.FormatInt(home.ID, 10)+":Documents/tax *.pdf" {
 		t.Errorf("rules after absorb = %q", v)
+	}
+
+	// The tag indexes too, with the files written for them.
+	ixs, err := s.TagIndexes(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var gotIx []string
+	for _, ix := range ixs {
+		gotIx = append(gotIx, ix.Dir+" "+ix.Name+" "+strconv.Itoa(len(ix.Files))+" "+
+			strconv.FormatBool(ix.RootID == home.ID))
+	}
+	if want := []string{"Documents index 1 true", "Documents/tax tags 0 true"}; !slices.Equal(gotIx, want) {
+		t.Errorf("tag indexes after absorb = %q, want %q", gotIx, want)
 	}
 
 	// The keep_until date survived the absorb.
