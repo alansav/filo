@@ -88,7 +88,7 @@ make install          # builds bin/filo and copies it to ~/.local/bin
 ```
 
 `make build` only builds `bin/filo`; `scripts/install.sh` only copies it to `~/.local/bin` (replacing an older copy),
-so `filo` runs from anywhere if `~/.local/bin` is on your `PATH`. Both build a static binary (`CGO_ENABLED=0`).
+so `filo` runs from anywhere if `~/.local/bin` is on your `PATH`. The binary is static (`CGO_ENABLED=0`).
 Without Go on the host, build in the dev container and install on the host (see Development):
 
 ```sh
