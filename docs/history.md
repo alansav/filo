@@ -633,6 +633,15 @@ index, a tag updating the pages without a word, a scan finding no new file. Not 
 built (two tags with one page name, which the hash makes all but impossible to produce); the pages in a real browser
 or on a phone.
 
+## Makefile and install script
+
+Added 2026-11-23 on branch `improvements`: a Makefile (`make build`, a static `CGO_ENABLED=0` build; `make install`)
+and `scripts/install.sh`, which copies `bin/filo` to `~/.local/bin` on the host. A review the same day found that the
+first commit had no `install` target (its message named one) and passed `-X main.version` to a variable `cmd/filo`
+does not have, which the linker ignores; the target was added and the stamp moved to roadmap item 22 (`filo
+version`). Checked by hand: `make build`, and `scripts/install.sh` with `HOME` set to a throwaway directory, from the
+repo and from `/`.
+
 ## Notes on decisions
 
 Short notes taken out of `design.md` on 2026-11-17, by the section they were in.

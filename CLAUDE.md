@@ -72,7 +72,8 @@ a tag index's own pages, see the hard rules). Stay inside the current piece of w
 You run inside the dev container, so run Go commands directly. (From the host they need the `scripts/dev.sh run`
 prefix.)
 
-- Build: `go build -o bin/filo ./cmd/filo`
+- Build: `make build` (a static `bin/filo`; `scripts/install.sh` copies it to `~/.local/bin` and is for the user to
+  run on the host, not you)
 - Test: `go test ./...`
 - Vet and lint: `go vet ./...` and `staticcheck ./...`
 - Format: `gofmt -l -w .`

@@ -47,6 +47,10 @@ Principles. These are not negotiable:
 - Dev environment: a Podman container defined in the repo (`.devcontainer/Containerfile`), driven by
   `scripts/dev.sh` (`build`, `shell`, `run CMD...`, `clean`). Only the repo is mounted at `/workspace`. The container
   has its own home directory, so a scan of "home" inside it can never reach the real one. Git runs on the host.
+- Build and install: `make build` builds a static `bin/filo` (`CGO_ENABLED=0`, which the pure-Go driver allows), so
+  a binary built in the container runs on the host. `scripts/install.sh`, run on the host, copies it to
+  `~/.local/bin/filo` (through a temporary name and a rename, so a running copy is not cut off). `make install` does
+  both where Go is installed. No build version is stamped yet.
 - Claude Code runs inside the container (`scripts/dev.sh claude`) with normal permission prompts. Its login and
   settings live in a named volume (`filo-claude`). Git commits and pushes happen on the host: the container has no git
   identity and no SSH keys.

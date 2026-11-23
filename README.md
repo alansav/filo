@@ -84,10 +84,17 @@ not supported yet: file locking and inode lookup aren't implemented there.
 ```sh
 git clone https://github.com/alansav/filo.git
 cd filo
-go build -o bin/filo ./cmd/filo
+make install          # builds bin/filo and copies it to ~/.local/bin
 ```
 
-Copy `bin/filo` somewhere on your `PATH`, or run it from the repository.
+`make build` only builds `bin/filo`; `scripts/install.sh` only copies it to `~/.local/bin` (replacing an older copy),
+so `filo` runs from anywhere if `~/.local/bin` is on your `PATH`. Both build a static binary (`CGO_ENABLED=0`).
+Without Go on the host, build in the dev container and install on the host (see Development):
+
+```sh
+scripts/dev.sh run make build    # in the container
+scripts/install.sh               # on the host
+```
 
 ## Quick start
 
@@ -737,7 +744,7 @@ tested by the project yet:
 # ~/.config/systemd/user/filo-scan.service
 [Service]
 Type=oneshot
-ExecStart=%h/bin/filo scan
+ExecStart=%h/.local/bin/filo scan
 Nice=19
 IOSchedulingClass=idle
 
@@ -783,29 +790,31 @@ How Filo works and why is in [docs/design.md](docs/design.md); what is planned i
 The repository includes a Podman dev container (`.devcontainer/Containerfile`), driven by `scripts/dev.sh`:
 
 ```sh
-scripts/dev.sh run go build -o bin/filo ./cmd/filo   # build in the container
-scripts/dev.sh run go test ./...                     # run the tests in the container
-scripts/dev.sh run go vet ./...                      # vet
-scripts/dev.sh shell                                 # or work inside it
+scripts/dev.sh run make build       # build bin/filo in the container
+scripts/dev.sh run go test ./...    # run the tests in the container
+scripts/dev.sh run go vet ./...     # vet
+scripts/dev.sh shell                # or work inside it
 ```
 
 The first call builds the image (Claude Code is installed only with `scripts/dev.sh build --claude`). The container
 mounts only the repo, so `scripts/dev.sh run bin/filo ...` sees the repo and the container's own home, never your
-files. To run Filo on your own files, build it static in the container and run it from the host. The SQLite driver
-is pure Go, so `CGO_ENABLED=0` gives a binary with no library dependencies that runs on any x86-64 Linux, including
-older CPUs (Go's default target is `GOAMD64=v1`). Without it, the binary links the container's C library and may not
-start on an older host:
+files. To run Filo on your own files, build it in the container and run it from the host. `make build` builds it
+static: the SQLite driver is pure Go, so `CGO_ENABLED=0` gives a binary with no library dependencies that runs on any
+x86-64 Linux, including older CPUs (Go's default target is `GOAMD64=v1`). Without it, the binary links the
+container's C library and may not start on an older host. `scripts/install.sh`, run on the host, copies it to
+`~/.local/bin`:
 
 ```sh
-scripts/dev.sh run env CGO_ENABLED=0 go build -o bin/filo ./cmd/filo
-T=$(mktemp -d)                                         # on the host: a private directory
-bin/filo --db $T/f.db roots add ~/FiloTest
+scripts/dev.sh run make build    # in the container
+scripts/install.sh               # on the host: bin/filo to ~/.local/bin
+T=$(mktemp -d)                   # on the host: a private directory
+filo --db $T/f.db roots add ~/FiloTest
 ```
 
 Inside the container (or with Go installed locally):
 
 ```sh
-go build -o bin/filo ./cmd/filo
+make build
 go test ./...
 go vet ./... && staticcheck ./...
 ```
