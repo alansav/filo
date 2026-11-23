@@ -242,7 +242,9 @@ records what it planned, so the next scan records a file gone with its hash matc
 ### 22. `filo version` (V4, C2)
 Filo's own version (no build version is stamped yet) and the database in use: its path, schema version and when it
 was created. Today the schema version can only be read with `sqlite3 DB "SELECT key, value FROM meta"`. Showing the
-same in `filo report` was considered as a simpler alternative.
+same in `filo report` was considered as a simpler alternative. The build version would be stamped by `make build`
+with `-ldflags "-X main.version=$(VERSION)"`, `VERSION` from `git describe --tags --always --dirty` (`dev` when that
+fails), into a `var version = "dev"` in `cmd/filo`, so a plain `go build` still gives `dev`.
 
 ### 23. All of a scan's events (V3, C2)
 A scan shows the first 10 events of each kind and `… N more`; the report shows only the latest events overall, so
