@@ -27,7 +27,8 @@ func newPolicyTest(t *testing.T) policyTest {
 	ct.filo(ExitOK, "", false, "roots", "add", ct.root)
 	ct.filo(ExitOK, "", false, "policies", "add", "bills", "7y")
 	csv := filepath.Join(ct.work, "r.csv")
-	ct.filo(ExitOK, "", false, "export", "retention", "-o", csv)
+	ct.contains("export", ct.filo(ExitOK, "", false, "export", "retention", "-o", csv).stdout,
+		"[!] 2 file_dates read from the file name, marked !: remove the ! from each one you accept\n")
 	// 2015-06.pdf: until 2022-06-30 (past); 2022-01.pdf: until 2029-01-31; undated.pdf: forever for now.
 	editCSV(t, csv, accepting(setRetention(map[string]string{"2015-06.pdf": "bills", "2022-01.pdf": "bills",
 		"undated.pdf": "forever", "x.pdf": "bils"})))

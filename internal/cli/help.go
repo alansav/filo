@@ -132,8 +132,8 @@ var commandHelps = map[string]commandHelp{
 				"Fill in retention in a spreadsheet (a period such as 7y counted from file_date, a date, forever, or " +
 				"a policy name: filo help policies), then run filo update FILE. A blank file_date is filled in from " +
 				"the file name when the name holds one clear date (2023-03-14, 20230314, or 2023-03 for the month's " +
-				"last day), marked with ! (!2023-03-14): check it and remove the ! to accept it; until then it is " +
-				"not used. On a large system, export one directory at a time.",
+				"last day), marked with ! (!2023-03-14): check it and remove the ! to accept it; a period on a " +
+				"row whose date is still marked is refused. On a large system, export one directory at a time.",
 			"export duplicates writes each duplicate group (two or more copies of the same content; hard links to " +
 				"one file are one copy) with a copy under DIR, with all its copies. Columns: id, export, group, " +
 				"copies, directory, name, size, modified, file_date, retention, keep_until, action. In each group " +

@@ -170,7 +170,8 @@ func (e *env) export(ctx context.Context, dbBefore string, args []string) error 
 		report.Count(int64(len(items)-undated))+" with one")
 	if suggested > 0 {
 		v.Count(view.Attention, report.Plural(int64(suggested), "file_date", "file_dates")+
-			" read from the file name, marked !: remove the ! to accept "+pluralWord(suggested, "it", "one"))
+			" read from the file name, marked !: remove the ! "+pluralWord(suggested, "to accept it",
+			"from each one you accept"))
 	}
 	notScannedLine(v, notScanned)
 	v.Blank()
