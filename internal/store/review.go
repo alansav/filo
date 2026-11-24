@@ -277,7 +277,7 @@ type RetentionRow struct {
 	Line         int // in the CSV, for messages
 	ExportID     int64
 	FileID       int64
-	FileDate     string // YYYY-MM-DD, "" = blank
+	FileDate     string // YYYY-MM-DD, or marked as read from the file name (MarkedDate); "" = blank
 	HasFileDate  bool   // the CSV has a file_date column; without one, the file_date exported is kept
 	Retention    string // a period (7y), Forever, YYYY-MM-DD or a policy name (lower case), as checked; "" = blank
 	KeepUntil    string // the display cell as read, to check it was left alone
@@ -627,11 +627,25 @@ func checkRow(ctx context.Context, tx *sql.Tx, r RetentionRow, ex exportInfo, po
 		}
 		c.policyID, c.newPolicy, value = p.id, p.id == 0, p.value
 	}
-	// A file_date the export suggested from the name, left as it was, is a guess nobody has checked. It is stored
-	// only when the row's retention is a period, or a policy whose value is one, which is when it is used; otherwise
-	// a later period could count from it without anyone having looked.
+	// A file_date read from the file name is marked (MarkedDate) and counts only once the mark is removed: left as
+	// exported it is no decision about the date, so the stored one stays; edited but still marked it is refused.
+	marked := IsMarkedDate(c.fileDate)
+	if marked {
+		if c.fileDate != expDate.String {
+			c.refusal = markedDateRefusal(c.fileDate)
+			return c, nil
+		}
+		c.fileDate = storedDate
+	}
+	// A CSV from before dates were marked: a file_date the export suggested from the name, left as it was, is a guess
+	// nobody has checked. It is stored only when the row's retention is a period, or a policy whose value is one,
+	// which is when it is used; otherwise a later period could count from it without anyone having looked.
 	if storedDate == "" && expDate.String != "" && c.fileDate == expDate.String && !IsPeriod(value) {
 		c.fileDate = ""
+	}
+	if marked && c.fileDate == "" && IsPeriod(value) {
+		c.refusal = markedDateRefusal(expDate.String)
+		return c, nil
 	}
 	if c.fileDate == storedDate && c.retention == c.storedRetention {
 		c.unchanged = true
@@ -663,3 +677,17 @@ func newBatch(ctx context.Context, tx *sql.Tx, now time.Time, command, detail st
 }
 
 func nullInt(v int64) sql.NullInt64 { return sql.NullInt64{Int64: v, Valid: v != 0} }
+
+// A file_date the export read from the file name is written marked, "!2023-07-14", and counts only once the person
+// removes the mark (docs/design.md, Retention CSV columns).
+const dateMark = "!"
+
+// MarkedDate marks a file_date read from a file name.
+func MarkedDate(date string) string { return dateMark + date }
+
+// IsMarkedDate reports whether a file_date is marked as read from a file name.
+func IsMarkedDate(s string) bool { return strings.HasPrefix(s, dateMark) }
+
+func markedDateRefusal(date string) string {
+	return fmt.Sprintf("file_date %s was read from the file name: remove the ! to accept it", date)
+}

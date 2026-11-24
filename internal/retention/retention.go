@@ -40,6 +40,20 @@ func ParseDate(s string) (string, error) {
 	return t.Format(dateLayout), nil
 }
 
+// parseFileDate checks a file_date cell: a date as ParseDate takes it, or one marked as read from the file name
+// ("!2023-07-14", store.MarkedDate), which is passed on marked for the update to decide.
+func parseFileDate(s string) (string, error) {
+	s = strings.TrimSpace(s)
+	if !store.IsMarkedDate(s) {
+		return ParseDate(s)
+	}
+	d, err := ParseDate(strings.TrimPrefix(s, "!"))
+	if err != nil || d == "" {
+		return "", fmt.Errorf("%q is not a date: remove the ! and use YYYY-MM-DD, for example 2023-03-14%s", s, formatHint)
+	}
+	return store.MarkedDate(d), nil
+}
+
 // ParseRetention checks a typed retention: "" stays "" (a blank cell); forever (in any case) is store.Forever; a
 // period is N followed by y, m, w or d (years, months, weeks, days; N from 1 to 1000), returned in lower case; a
 // date is YYYY-MM-DD, a real date; and a policy name (store.PolicyName) is returned in lower case. Anything else is
@@ -283,7 +297,7 @@ func ParseCSV(data []byte) (Parsed, error) {
 		}
 		if sh.Has("file_date") {
 			rr.HasFileDate = true
-			if rr.FileDate, err = ParseDate(row.Get("file_date")); err != nil {
+			if rr.FileDate, err = parseFileDate(row.Get("file_date")); err != nil {
 				bad("file_date %v", err)
 				return
 			}

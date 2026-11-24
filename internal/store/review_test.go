@@ -486,3 +486,68 @@ func TestRecordExportRollsBackOnWriteError(t *testing.T) {
 }
 
 func itoa(n int64) string { return strconv.FormatInt(n, 10) }
+
+// A file_date read from the file name is exported marked, and counts only once the mark is removed (docs/design.md,
+// Retention CSV columns).
+func TestUpdateMarkedFileDate(t *testing.T) {
+	e := newReviewEnv(t)
+	const today = "2026-11-11"
+	now := time.Date(2026, 11, 11, 12, 0, 0, 0, time.UTC)
+	files := []string{"forever", "period", "accepted", "edited", "blank", "setsince"}
+	var nf []NewFile
+	for i, name := range files {
+		nf = append(nf, f(name, "h"+itoa(int64(i))))
+	}
+	e.apply(Changes{New: nf})
+	k := e.known()
+	exportID, _ := e.export(today, now)
+	if _, err := e.s.db.ExecContext(e.ctx, `UPDATE export_rows SET file_date = '!2019-01-01' WHERE export_id = ?`,
+		exportID); err != nil {
+		t.Fatal(err)
+	}
+	// A file_date set since the export (filo set), which an untouched marked cell leaves alone.
+	if _, err := e.s.db.ExecContext(e.ctx, `UPDATE files SET file_date = '2020-06-30' WHERE id = ?`,
+		k["setsince"].FileID); err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		file, date, retention string
+		stored                string // file_date retention keep_until, - for none
+		refused               bool
+	}{
+		{"forever", "!2019-01-01", "forever", "- forever forever", false},
+		{"period", "!2019-01-01", "7y", "- - -", true},
+		{"accepted", "2019-01-01", "7y", "2019-01-01 7y 2026-01-01", false},
+		{"edited", "!2019-02-01", "forever", "- - -", true},
+		{"blank", "!2019-01-01", "", "- - -", false},
+		{"setsince", "!2019-01-01", "7y", "2020-06-30 7y 2027-06-30", false},
+	}
+	var rows []RetentionRow
+	for i, tc := range tests {
+		rows = append(rows, RetentionRow{Line: i + 2, ExportID: exportID, FileID: k[tc.file].FileID,
+			FileDate: tc.date, HasFileDate: true, Retention: tc.retention})
+	}
+	res, err := e.s.UpdateRetention(e.ctx, rows, now, today, "m.csv", false, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	refused := map[int64]string{}
+	for _, r := range res.Refusals {
+		refused[r.FileID] = r.Reason
+	}
+	for _, tc := range tests {
+		id := k[tc.file].FileID
+		v := rawQueryString(t, e.db, `SELECT coalesce(file_date, '-') || ' ' || coalesce(retention, '-') || ' ' ||
+			coalesce(keep_until, '-') FROM files WHERE id = `+itoa(id))
+		if v != tc.stored {
+			t.Errorf("%s: stored %q, want %q", tc.file, v, tc.stored)
+		}
+		reason, ok := refused[id]
+		if ok != tc.refused {
+			t.Errorf("%s: refused = %v (%q), want %v", tc.file, ok, reason, tc.refused)
+		}
+		if ok && !strings.Contains(reason, "was read from the file name: remove the ! to accept it") {
+			t.Errorf("%s: reason %q", tc.file, reason)
+		}
+	}
+}
