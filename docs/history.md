@@ -642,6 +642,26 @@ does not have, which the linker ignores; the target was added and the stamp move
 version`). Checked by hand: `make build`, and `scripts/install.sh` with `HOME` set to a throwaway directory, from the
 repo and from `/`.
 
+## Export headings and marked file_dates
+
+A friction fix from real use, discussed and built 2026-11-24 on branch `improvements`. The export's heading,
+`Retention export   export 18 · 5,222 files`, said "export" twice and did not show that 18 was an ID; it became
+`Export #18 (retention)`, with `Scan #17` and `export #18` in update headings to match. The `!` line asked to check
+2,766 dates read from file names, but the CSV gave no way to find them, and filling `7y` down a directory accepted
+every guess unseen; such a date is now written `!2023-07-14` and counts only once the `!` is removed. Considered and
+left out: an info line or per-directory lines in the CSV (they break sort, filter and fill-down), a separate Y/N
+"reviewed" column (filling it down checks nothing), and recording in the register where each file_date came from
+(the mark keeps unchecked guesses out of it). Links to files from the CSV stay roadmap item 29.
+
+Commits: the design, the update reading marked dates, the export writing them, the README, the headings. The code
+review (medium) found a test that could no longer fail (it looked for the old heading), a refusal calling an edited
+marked date "read from the file name", "accept one" in the plural `!` line, help text saying a marked date "is not
+used" where a period on it is refused, no test of a marked date on a period policy, and `#` only in headings; on
+the last, the number became `#N` in every message (refusals, report, show, scan events), and the design and README
+now say to format the `file_date` column as text before removing the marks (untested in Calc or Excel). Tests: a
+table of the update's cases for marked dates in `internal/store`, marked cells in the CSV parser, the plural `!`
+line, golden files, and a run by hand on a throwaway tree.
+
 ## Notes on decisions
 
 Short notes taken out of `design.md` on 2026-11-17, by the section they were in.
