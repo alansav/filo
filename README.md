@@ -182,8 +182,9 @@ and filter it however you like.
   date). If it's blank, the export fills it in from the file name when the name holds one clear date:
   `2023-03-14 invoice.pdf`, `IMG_20230714_1032.jpg`, or `2023-03 rent.pdf` (the month's last day, so nothing is kept
   for less time than meant). A lone year, a name with two dates, or `14-03-2023` (is that day or month first?) are
-  left blank. A filled-in date you leave as it is only counts when you give that file a period; otherwise it is
-  dropped. Check it before counting from it.
+  left blank. A date read from the name is marked with `!` (`!2023-03-14`), so you can filter on it, and only counts
+  once you remove the `!`: a period on a row whose date is still marked is refused. To accept a whole column of
+  checked dates, find and replace `!` with nothing in the `file_date` column.
 - **`keep_until`** is worked out by Filo, so you can sort by it. Leave it alone: a cell holding a different date is
   refused.
 
