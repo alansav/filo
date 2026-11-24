@@ -26,7 +26,7 @@ func (e *env) exportTags(ctx context.Context, s *store.Store, f store.Filter, wh
 	}
 	v := e.view
 	if len(items) == 0 {
-		v.Heading("Tags export", where, "no files")
+		v.Heading("Export (tags)", where, "no files")
 		notScannedLine(v, notScanned)
 		v.Next("Nothing exported.")
 		return nil
@@ -43,7 +43,7 @@ func (e *env) exportTags(ctx context.Context, s *store.Store, f store.Filter, wh
 			tagged++
 		}
 	}
-	v.Heading("Tags export", where, fmt.Sprintf("export %d", id), report.Plural(int64(len(items)), "file", "files"))
+	v.Heading(fmt.Sprintf("Export #%d (tags)", id), where, report.Plural(int64(len(items)), "file", "files"))
 	v.Blank()
 	v.Count(view.Neutral, report.Count(int64(tagged))+" tagged, "+report.Count(int64(len(items)-tagged))+
 		" without a tag")

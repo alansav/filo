@@ -1,5 +1,5 @@
 $ filo export tags -o tags.csv --no-scan
-Tags export   export 1 . 3 files . <work>/home
+Export #1 (tags)   3 files . <work>/home
 
   - 2 tagged, 1 without a tag
   - not scanned first: as of the last scan, <time>
@@ -7,7 +7,7 @@ Tags export   export 1 . 3 files . <work>/home
 Next: fill in tags (key:value or a bare value, separated by ;), then filo update <work>/tags.csv
 
 $ filo update tags.csv --dry-run
-Tags update (dry run)   tags.csv . export 1 . 3 rows . <work>/home
+Tags update (dry run)   tags.csv . export #1 . 3 rows . <work>/home
 
   [ok] 3 files would have their tags changed
   - 1 of them would lose tags (filo update asks first)
@@ -19,7 +19,7 @@ Tags update (dry run)   tags.csv . export 1 . 3 rows . <work>/home
 Dry run: nothing was written.
 
 $ filo update tags.csv (removing a tag: yes)
-Tags update   tags.csv . export 1 . 3 rows . <work>/home
+Tags update   tags.csv . export #1 . 3 rows . <work>/home
 
 [!] 1 row removes tags:
     received/2026/10/2026-10-03 British Gas Bill.pdf   removed type:bill
@@ -33,12 +33,12 @@ Remove them? The other rows are recorded either way. [y/N/l]
     received/2026/10/2026-10-03 British Gas Bill.pdf   removed type:bill
 
 $ filo update tags.csv (again: nothing to change)
-Tags update   tags.csv . export 1 . 3 rows . <work>/home
+Tags update   tags.csv . export #1 . 3 rows . <work>/home
 
   - 3 rows unchanged
 
 $ filo update again.csv (refused rows, removal declined)
-Tags update   again.csv . export 2 . 3 rows . <work>/home
+Tags update   again.csv . export #2 . 3 rows . <work>/home
 
 [!] 1 row removes tags:
     received/2026/09/2026-09-02 British Gas Bill.pdf   removed project:house; sender:British Gas; type:bill

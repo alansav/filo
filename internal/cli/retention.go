@@ -145,7 +145,7 @@ func (e *env) export(ctx context.Context, dbBefore string, args []string) error 
 	}
 	v := e.view
 	if len(items) == 0 {
-		v.Heading("Retention export", where, "no files")
+		v.Heading("Export (retention)", where, "no files")
 		notScannedLine(v, notScanned)
 		v.Next("Nothing exported.")
 		return nil
@@ -164,7 +164,7 @@ func (e *env) export(ctx context.Context, dbBefore string, args []string) error 
 		}
 	}
 	// docs/design.md, Terminal output, Export.
-	v.Heading("Retention export", where, fmt.Sprintf("export %d", id), report.Plural(int64(len(items)), "file", "files"))
+	v.Heading(fmt.Sprintf("Export #%d (retention)", id), where, report.Plural(int64(len(items)), "file", "files"))
 	v.Blank()
 	v.Count(view.Neutral, report.Count(int64(undated))+" without a retention, "+
 		report.Count(int64(len(items)-undated))+" with one")
@@ -431,7 +431,7 @@ func (e *env) update(ctx context.Context, dbBefore string, args []string) error 
 func csvFacts(path string, exports []int64, count string) []string {
 	facts := []string{filepath.Base(path)}
 	if len(exports) == 1 {
-		facts = append(facts, fmt.Sprintf("export %d", exports[0]))
+		facts = append(facts, fmt.Sprintf("export #%d", exports[0]))
 	}
 	return append(facts, count)
 }

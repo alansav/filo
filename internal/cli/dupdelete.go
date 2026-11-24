@@ -702,7 +702,7 @@ func (l *dupList) draw(r *view.Renderer, max int) (cut bool) {
 	}
 	var exs []string
 	for _, id := range l.exports {
-		exs = append(exs, strconv.FormatInt(id, 10))
+		exs = append(exs, "#"+strconv.FormatInt(id, 10))
 	}
 	r.Heading("Duplicates", view.Where{Roots: roots}, l.csv, ex+strings.Join(exs, ", "),
 		report.Plural(int64(len(l.jobs)), "group", "groups"))

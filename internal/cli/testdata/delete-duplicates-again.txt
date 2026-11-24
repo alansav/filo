@@ -1,4 +1,4 @@
-Duplicates   d.csv . export 1 . 5 groups . <root>
+Duplicates   d.csv . export #1 . 5 groups . <root>
 
 Won't touch
   [refused] group 5   line 12   report.pdf: every copy is delete: no copy would be left; to remove this content entirely, give it a past retention

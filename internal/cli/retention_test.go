@@ -135,7 +135,7 @@ func TestRetentionRoundTrip(t *testing.T) {
 	filo(ExitUsage, "", false, "export", "retention")
 	filo(ExitUsage, "", false, "export", "-o", r1)
 	contains("export", filo(ExitOK, "", false, "export", "retention", "-o", r1).stdout,
-		"Retention export   export 1 . 4 files", "  - 4 without a retention, 0 with one\n",
+		"Export #1 (retention)   4 files", "  - 4 without a retention, 0 with one\n",
 		"  [!] 1 file_date read from the file name, marked !: remove the ! to accept it\n",
 		"Next: fill in retention (7y, 18m, forever or a date), then filo update "+r1+"\n")
 	contains("export again", filo(ExitError, "", false, "export", "retention", "-o", r1).stderr, "already exists")
@@ -149,7 +149,7 @@ func TestRetentionRoundTrip(t *testing.T) {
 	editCSV(t, r1, accepting(setRetention(map[string]string{"a.txt": "2027-01-01", "2023-03 invoice.pdf": "3y",
 		"c.txt": "2027-02-29", "🏖️ beach.jpg": "Forever"})))
 	r := filo(ExitError, "", false, "update", r1, "--dry-run")
-	contains("dry run", r.stdout, "Retention update (dry run)   r1.csv . export 1 . 4 rows . "+root,
+	contains("dry run", r.stdout, "Retention update (dry run)   r1.csv . export #1 . 4 rows . "+root,
 		"Dry run: nothing was written.", "3 files would be given a retention", "1 file would be past its retention")
 	wantDates("after a dry run", map[string]string{"a.txt": " undated"})
 	r = filo(ExitError, "", false, "update", r1)

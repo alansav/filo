@@ -18,7 +18,7 @@ Took in 4 roots, with their history and retentions
   - my docs   had other settings (hidden files included): these apply now
 Next: filo roots set <root> --include-hidden --ignore build, to scan .config again
 
-Scan   scan 4 . 4 files seen . <took> . <root>
+Scan #4   4 files seen . <took> . <root>
   - 2 new
 
 Next: filo report

@@ -1,4 +1,4 @@
-Retention update   r2.csv . export 2 . 4 rows . <root>
+Retention update   r2.csv . export #2 . 4 rows . <root>
 
 [!] 2 rows have a blank retention where one is stored. Recording clears it:
     retention   until

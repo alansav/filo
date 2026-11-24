@@ -1,5 +1,5 @@
 $ filo scan
-Scan   scan 2 . 4 files seen . <took> . <root>
+Scan #2   4 files seen . <took> . <root>
 
   - 2 new
   - 1 changed
@@ -27,11 +27,11 @@ Events   up to 10 of each kind
 Next: filo report
 
 $ filo scan docs
-Scan   scan 3 . 0 files seen . <took> . <root>, under docs/
+Scan #3   0 files seen . <took> . <root>, under docs/
   [ok] no changes
 
 $ filo scan (a disk mounted inside the root)
-Scan   scan 4 . 4 files seen . <took> . <root>
+Scan #4   4 files seen . <took> . <root>
 
   - 1 directory on another filesystem, not scanned
 
@@ -43,7 +43,7 @@ $ filo scan (one root unmounted)
 Scan   <work>/disk
   [refused] not scanned: the root looks unmounted (<work>/disk is not mounted)
 
-Scan   scan 5 . 4 files seen . <took> . <root>
+Scan #5   4 files seen . <took> . <root>
   [ok] no changes
 
 Done   2 roots . 1 scanned . 1 failed

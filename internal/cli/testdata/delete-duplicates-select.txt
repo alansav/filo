@@ -1,4 +1,4 @@
-Duplicates   d.csv . export 1 . 5 groups . <root>
+Duplicates   d.csv . export #1 . 5 groups . <root>
 
 Will delete                                         2 copies in 2 groups . 11 B
     notes.txt . 5 B each

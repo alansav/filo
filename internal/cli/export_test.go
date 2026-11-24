@@ -81,7 +81,7 @@ func TestExportReplace(t *testing.T) {
 	}
 
 	r = filo(ExitOK, "y\n", true, "export", "retention", "-o", l)
-	contains("yes", r.stdout, "Replace "+l+"? [y/N]", "Retention export   export 1 . 2 files")
+	contains("yes", r.stdout, "Replace "+l+"? [y/N]", "Export #1 (retention)   2 files")
 	contains("CSV", string(mustRead(t, l)), "id,export,directory,name")
 	if fi, err := os.Stat(l); err != nil || fi.Mode().Perm() != 0o600 {
 		t.Errorf("l.csv after replacing: %v, %v; want mode 0600", fi, err)
@@ -89,7 +89,7 @@ func TestExportReplace(t *testing.T) {
 	d := filepath.Join(ct.work, "d.csv")
 	filo(ExitOK, "", false, "export", "duplicates", "-o", d)
 	contains("duplicates", filo(ExitOK, "yes\n", true, "export", "duplicates", "-o", d).stdout,
-		"Replace "+d+"? [y/N]", "Duplicates export   export 3")
+		"Replace "+d+"? [y/N]", "Export #3 (duplicates)")
 	entries, err := os.ReadDir(ct.work)
 	if err != nil {
 		t.Fatal(err)
@@ -219,14 +219,14 @@ func TestExportScansFirst(t *testing.T) {
 	write("tax/new.txt", "new")
 	write("photos/p.jpg", "photo") // outside tax/
 	r := filo(ExitOK, "", false, "export", "retention", ct.in("tax"), "-o", csv("1.csv"))
-	contains("scan of DIR", r.stdout, "Scan   scan 2 . 2 files seen", "under tax/", "  - 1 new\n",
-		"Retention export   export 1 . 2 files")
-	contains("scan of DIR", r.stdout, "  - 1 new\n\nNext: filo report\n\nRetention export") // exactly filo scan's output
+	contains("scan of DIR", r.stdout, "Scan #2   2 files seen", "under tax/", "  - 1 new\n",
+		"Export #1 (retention)   2 files")
+	contains("scan of DIR", r.stdout, "  - 1 new\n\nNext: filo report\n\nExport #") // exactly filo scan's output
 	contains("CSV of DIR", string(mustRead(t, csv("1.csv"))), ",new.txt,")
 
 	// DIR only: photos/ was not scanned, so a --no-scan export of the whole root does not know p.jpg yet.
 	r = filo(ExitOK, "", false, "export", "retention", "--no-scan", "-o", csv("2.csv"))
-	contains("--no-scan", r.stdout, "Retention export   export 2 . 2 files",
+	contains("--no-scan", r.stdout, "Export #2 (retention)   2 files",
 		"  - not scanned first: as of the last scan, 2026-")
 	lacks("--no-scan", r.stdout, "Scan   ")
 	lacks("--no-scan CSV", string(mustRead(t, csv("2.csv"))), "p.jpg")
@@ -234,7 +234,7 @@ func TestExportScansFirst(t *testing.T) {
 	// A duplicates export scans every root: a copy saved in photos/ since makes a group.
 	write("photos/a copy.txt", "a")
 	r = filo(ExitOK, "", false, "export", "duplicates", ct.in("tax"), "-o", csv("d.csv"))
-	contains("duplicates", r.stdout, "Scan   scan 3", "  - 2 new\n", "Duplicates export   export 3 . 1 group . 2 copies")
+	contains("duplicates", r.stdout, "Scan #3", "  - 2 new\n", "Export #3 (duplicates)   1 group . 2 copies")
 	contains("duplicates CSV", string(mustRead(t, csv("d.csv"))), ",a copy.txt,")
 
 	// A root that cannot be scanned stops the export: nothing written, nothing recorded.
@@ -253,7 +253,7 @@ func TestExportScansFirst(t *testing.T) {
 		t.Error("x.csv was written after a failed scan")
 	}
 	r = filo(ExitOK, "", false, "export", "duplicates", "--no-scan", "-o", csv("x.csv"))
-	contains("failed root, --no-scan", r.stdout, "Duplicates export   export 4")
+	contains("failed root, --no-scan", r.stdout, "Export #4 (duplicates)")
 
 	// --workers is the scan's: checked as filo scan checks it, and refused with --no-scan.
 	for _, n := range []string{"0", "65", "-1"} {
@@ -266,7 +266,7 @@ func TestExportScansFirst(t *testing.T) {
 			"--no-scan")...).stderr, "give one or the other")
 	}
 	contains("--workers", filo(ExitOK, "", false, "export", "retention", ct.in("tax"), "--workers", "1", "-o",
-		csv("w.csv")).stdout, "Scan   scan ")
+		csv("w.csv")).stdout, "Scan #")
 
 	// Ctrl-C during the scan: nothing exported.
 	ctx, cancel := context.WithCancel(context.Background())
@@ -294,7 +294,7 @@ func TestExportNoScanLine(t *testing.T) {
 	csv := func(name string) string { return filepath.Join(ct.work, name) }
 
 	r := filo(ExitOK, "", false, "export", "retention", "-o", csv("0.csv"))
-	if !strings.HasPrefix(r.stdout, "Retention export   no files") {
+	if !strings.HasPrefix(r.stdout, "Export (retention)   no files") {
 		t.Errorf("empty register:\n%s", r.stdout)
 	}
 

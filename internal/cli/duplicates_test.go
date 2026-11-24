@@ -98,7 +98,7 @@ func TestExportMergesOneFileSeenTwice(t *testing.T) {
 		return id, err
 	}))
 	out := ct.filo(ExitOK, "", false, "export", "duplicates", "-o", filepath.Join(ct.work, "d.csv")).stdout
-	ct.contains("export", out, "Duplicates export   no groups", "\nNothing exported.\n")
+	ct.contains("export", out, "Export (duplicates)   no groups", "\nNothing exported.\n")
 }
 
 // TestDistinctOnDiskRecords: copies merged as one file on disk (a bind mount) are decided again: two records of one

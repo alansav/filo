@@ -108,7 +108,7 @@ A scan prints a summary like this (paths are relative to the root named at the t
 symbols and colours):
 
 ```
-Scan   scan 2 . 15 files seen . 0.4 s . ~/FiloTest
+Scan #2   15 files seen . 0.4 s . ~/FiloTest
 
   - 3 new
   - 2 changed
@@ -391,7 +391,7 @@ pass.
 `filo delete dupes.csv` checks every decided group against the disk first, then lists what it will do:
 
 ```
-Duplicates   dupes.csv · export 7 · 12 groups · ~/Documents
+Duplicates   dupes.csv · export #7 · 12 groups · ~/Documents
 
 Will delete                                              9 copies in 6 groups · 1.2 GB
     contract.pdf · 8 MB each
@@ -513,7 +513,7 @@ filo find --tag 'project:house sale' -0 | tar --null -T - -czf house.tgz   # a p
 
 ```
 $ filo find --name '*gas*'
-Scan   scan 12 · 5,310 files seen · 0.4 s · ~/Documents
+Scan #12   5,310 files seen · 0.4 s · ~/Documents
   ✓ no changes
 
 Found   3 files · 412 KiB · named *gas* · ~/Documents
