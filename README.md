@@ -154,7 +154,7 @@ Duplicates                                 1 group · 3 copies · 195 KiB reclai
 
 Unreadable files                                                                1
     since
-    scan 2   docs/private.txt
+    scan #2   docs/private.txt
 
 Recent events                                                                none
 ```
@@ -184,7 +184,8 @@ and filter it however you like.
   for less time than meant). A lone year, a name with two dates, or `14-03-2023` (is that day or month first?) are
   left blank. A date read from the name is marked with `!` (`!2023-03-14`), so you can filter on it, and only counts
   once you remove the `!`: a period on a row whose date is still marked is refused. To accept a whole column of
-  checked dates, find and replace `!` with nothing in the `file_date` column.
+  checked dates, find and replace `!` with nothing in the `file_date` column; format the column as text first, or
+  the spreadsheet may save the dates in your locale's format (`14/03/2023`), which `filo update` refuses.
 - **`keep_until`** is worked out by Filo, so you can sort by it. Leave it alone: a cell holding a different date is
   refused.
 
@@ -464,7 +465,7 @@ $ filo show "$HOME/Documents/bills/2022-01 British Gas.pdf"
     size        184 KiB
     modified    2022-02-03 09:14   unchanged since the last scan (2026-11-20)
     sha256      3f9a1c0e8b2d47f6a9e0c5d1b7a3f2e8c4d6b0a9e1f3c5d7b9a2e4f6c8d0e21e
-    first seen  2026-11-12 (scan 3)
+    first seen  2026-11-12 (scan #3)
     moved from  ~/Documents/inbox/british-gas.pdf   2026-11-12 to 2026-11-13
   Retention
     status      kept
