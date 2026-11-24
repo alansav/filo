@@ -649,7 +649,7 @@ func TestOldCSVAfterMove(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(res.Refusals) != 1 || res.Refusals[0].Reason != "its retention was changed after export "+
+		if len(res.Refusals) != 1 || res.Refusals[0].Reason != "its retention was changed after export #"+
 			strconv.FormatInt(ex, 10)+"; export again" || res.PoliciesCreated != 0 {
 			t.Errorf("rename %v: %+v, want the row refused and no policy created", rename, res)
 		}

@@ -465,7 +465,7 @@ func refusalProblems(roots []string, problems []retention.Problem, refusals []st
 	for _, rf := range refusals {
 		p := view.Problem{Line: rf.Line, Group: int(rf.Group), Reason: rf.Reason}
 		if rf.Export != 0 && len(exports) > 1 {
-			p.Reason = fmt.Sprintf("export %d: %s", rf.Export, rf.Reason)
+			p.Reason = fmt.Sprintf("export #%d: %s", rf.Export, rf.Reason)
 		}
 		if rf.Path == "" {
 			p.Reason = fmt.Sprintf("file %d: %s", rf.FileID, rf.Reason)

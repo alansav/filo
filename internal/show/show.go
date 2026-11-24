@@ -183,7 +183,7 @@ func (f File) status() (string, bool) {
 	case f.DeletedUTC != "":
 		return "deleted by filo on " + date(f.DeletedUTC), false
 	case !f.Present:
-		return "missing since " + date(f.GoneUTC) + " (scan " + strconv.FormatInt(f.GoneScan, 10) + ")", true
+		return "missing since " + date(f.GoneUTC) + " (scan #" + strconv.FormatInt(f.GoneScan, 10) + ")", true
 	}
 	switch f.Status {
 	case store.StatusKept:
@@ -322,7 +322,7 @@ func (f File) fileFields(history bool) []view.Field {
 		fields = append(fields, sum)
 	}
 	fields = append(fields, view.Field{Label: "first seen",
-		Value: date(f.FirstSeenUTC) + " (scan " + strconv.FormatInt(f.FirstSeenScan, 10) + ")"})
+		Value: date(f.FirstSeenUTC) + " (scan #" + strconv.FormatInt(f.FirstSeenScan, 10) + ")"})
 	if len(f.Paths) > 1 && !history {
 		p := f.Paths[1]
 		moved := view.Field{Label: "moved from", Value: p.AbsPath(), Path: true, Note: seen(p)}

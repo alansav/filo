@@ -164,7 +164,7 @@ func TestRender(t *testing.T) {
     size        184 KiB
     modified    2022-02-03 09:14   unchanged since the last scan (2026-11-20)
     sha256      3f9a   content matches the register (read now)
-    first seen  2026-11-12 (scan 3)
+    first seen  2026-11-12 (scan #3)
     moved from  ~/Documents/inbox/british-gas.pdf   2026-11-12 to 2026-11-13   ... 1 more: --history
   Retention
     status      kept
@@ -248,7 +248,7 @@ func TestRender(t *testing.T) {
 	missing.DeletedUTC, missing.GoneUTC = "", at("2026-11-18")
 	b.Reset()
 	missing.Render(v, 1, 1, "2026-11-20", false)
-	for _, w := range []string{"[!] missing since 2026-11-18 (scan 20)",
+	for _, w := range []string{"[!] missing since 2026-11-18 (scan #20)",
 		"status      [!] missing: run filo scan, if it was moved"} {
 		if !strings.Contains(b.String(), w) {
 			t.Errorf("missing lacks %q:\n%s", w, b.String())

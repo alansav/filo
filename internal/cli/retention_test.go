@@ -204,7 +204,7 @@ func TestRetentionRoundTrip(t *testing.T) {
 	// An older export cannot overwrite a retention changed from a later one.
 	editCSV(t, r1, setRetention(map[string]string{"a.txt": "2029-01-01"}))
 	contains("stale", filo(ExitError, "", false, "update", r1).stdout,
-		"a.txt: its retention was changed after export 1; export again")
+		"a.txt: its retention was changed after export #1; export again")
 
 	// A file changed since the export is refused; once past its retention, a changed file needs a new one.
 	r3 := filepath.Join(work, "r3.csv")
@@ -214,7 +214,7 @@ func TestRetentionRoundTrip(t *testing.T) {
 	filo(ExitOK, "", false, "scan")
 	editCSV(t, r3, setRetention(map[string]string{"c.txt": "2027-06-30"}))
 	contains("changed", filo(ExitError, "", false, "update", r3).stdout,
-		"docs/c.txt: changed since export 3; export again to set its retention")
+		"docs/c.txt: changed since export #3; export again to set its retention")
 	wantDates("changed", map[string]string{"docs/2023-03 invoice.pdf": "2026-11-10 changed"})
 	contains("delete after a change", filo(ExitOK, "", false, "delete").stdout, "No files are past their retention.")
 
@@ -223,7 +223,7 @@ func TestRetentionRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	contains("added row", filo(ExitError, "", false, "update", r3).stdout,
-		"file 9999 is not in export 3 (rows cannot be added)")
+		"file 9999 is not in export #3 (rows cannot be added)")
 }
 
 func mustRead(t *testing.T, path string) []byte {

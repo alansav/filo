@@ -178,11 +178,11 @@ func TestUpdateTags(t *testing.T) {
 			t.Fatal(err)
 		}
 		want := []string{
-			"its tags were changed after export 1 (now later); export again",
+			"its tags were changed after export #1 (now later); export again",
 			"deleted by filo since the export",
-			"export 99 is not in this register",
-			"export 2 is a retention export, not a tags export",
-			"file 999 is not in export 1 (rows cannot be added)",
+			"export #99 is not in this register",
+			"export #2 is a retention export, not a tags export",
+			"file 999 is not in export #1 (rows cannot be added)",
 		}
 		var got []string
 		for _, rf := range res.Refusals {

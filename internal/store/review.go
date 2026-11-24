@@ -508,10 +508,10 @@ func readExport(ctx context.Context, tx *sql.Tx, id int64) (exportInfo, error) {
 		return ex, nil
 	}
 	if err != nil {
-		return ex, fmt.Errorf("read export %d: %w", id, err)
+		return ex, fmt.Errorf("read export #%d: %w", id, err)
 	}
 	if ex.created, err = time.Parse(time.RFC3339Nano, created); err != nil {
-		return ex, fmt.Errorf("read export %d: %w", id, err)
+		return ex, fmt.Errorf("read export #%d: %w", id, err)
 	}
 	ex.found = true
 	return ex, nil
@@ -535,22 +535,22 @@ type checked struct {
 func checkRow(ctx context.Context, tx *sql.Tx, r RetentionRow, ex exportInfo, policies policyCache) (checked, error) {
 	var c checked
 	if !ex.found {
-		c.refusal = fmt.Sprintf("export %d is not in this register", r.ExportID)
+		c.refusal = fmt.Sprintf("export #%d is not in this register", r.ExportID)
 		return c, nil
 	}
 	if ex.kind != ExportRetention {
-		c.refusal = fmt.Sprintf("export %d is a %s export, not a retention export", r.ExportID, ex.kind)
+		c.refusal = fmt.Sprintf("export #%d is a %s export, not a retention export", r.ExportID, ex.kind)
 		return c, nil
 	}
 	var expDate, expRetention, expKeep sql.NullString
 	err := tx.QueryRowContext(ctx, `SELECT hash, file_date, retention, keep_until FROM export_rows
 		WHERE export_id = ? AND file_id = ?`, r.ExportID, r.FileID).Scan(&c.exportHash, &expDate, &expRetention, &expKeep)
 	if errors.Is(err, sql.ErrNoRows) {
-		c.refusal = fmt.Sprintf("file %d is not in export %d (rows cannot be added)", r.FileID, r.ExportID)
+		c.refusal = fmt.Sprintf("file %d is not in export #%d (rows cannot be added)", r.FileID, r.ExportID)
 		return c, nil
 	}
 	if err != nil {
-		return c, fmt.Errorf("read export %d: %w", r.ExportID, err)
+		return c, fmt.Errorf("read export #%d: %w", r.ExportID, err)
 	}
 	// The file's current path, for messages; looked up only once a row needs one, so untouched rows cost one query.
 	present := false
@@ -613,7 +613,7 @@ func checkRow(ctx context.Context, tx *sql.Tx, r RetentionRow, ex exportInfo, po
 	}
 	if err == nil && !(lastExport.Valid && lastExport.Int64 == r.ExportID) {
 		if t, perr := time.Parse(time.RFC3339Nano, lastCreated); perr == nil && t.After(ex.created) {
-			c.refusal = fmt.Sprintf("its retention was changed after export %d; export again", r.ExportID)
+			c.refusal = fmt.Sprintf("its retention was changed after export #%d; export again", r.ExportID)
 			return c, nil
 		}
 	}
@@ -653,7 +653,7 @@ func checkRow(ctx context.Context, tx *sql.Tx, r RetentionRow, ex exportInfo, po
 		return c, nil
 	}
 	if hash != c.exportHash {
-		c.refusal = fmt.Sprintf("changed since export %d; export again to set its retention", r.ExportID)
+		c.refusal = fmt.Sprintf("changed since export #%d; export again to set its retention", r.ExportID)
 		return c, nil
 	}
 	if c.policy && IsPeriod(value) && c.fileDate == "" {

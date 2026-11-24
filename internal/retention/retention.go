@@ -317,7 +317,7 @@ func ParseCSV(data []byte) (Parsed, error) {
 	p.Rows = sheet.DropRepeated(p.Rows, func(r store.RetentionRow) [2]int64 { return [2]int64{r.ExportID, r.FileID} },
 		func(r store.RetentionRow) {
 			p.Problems = append(p.Problems, Problem{r.Line,
-				fmt.Sprintf("file %d of export %d is listed more than once", r.FileID, r.ExportID)})
+				fmt.Sprintf("file %d of export #%d is listed more than once", r.FileID, r.ExportID)})
 		})
 	return p, nil
 }

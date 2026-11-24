@@ -428,7 +428,7 @@ func TestDuplicatesDeleteReviewFindings(t *testing.T) {
 			t.Fatal(err)
 		}
 		out := d.run(ExitOK, both)
-		d.contains("run", out, "Will delete   2 copies in 1 group", "the same as group 1 of export 1, which does it",
+		d.contains("run", out, "Will delete   2 copies in 1 group", "the same as group 1 of export #1, which does it",
 			"Done   deleted 2 copies")
 		d.lacks("run", out, "Skipped")
 		d.there("run", map[string]bool{"a/contract.pdf": true, "b/contract.pdf": false, "c/contract.pdf": false})

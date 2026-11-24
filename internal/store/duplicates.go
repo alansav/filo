@@ -263,7 +263,7 @@ func (s *Store) ExportedGroups(ctx context.Context, exportIDs []int64) (map[int6
 		}, `SELECT er.file_id, er.dup_group FROM export_rows er JOIN exports e ON e.id = er.export_id
 			WHERE er.export_id = ? AND e.kind = ? AND er.dup_group IS NOT NULL`, id, ExportDuplicates)
 		if err != nil {
-			return nil, fmt.Errorf("read export %d: %w", id, err)
+			return nil, fmt.Errorf("read export #%d: %w", id, err)
 		}
 		if len(rows) == 0 {
 			continue

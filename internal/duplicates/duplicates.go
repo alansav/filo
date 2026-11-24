@@ -256,7 +256,7 @@ func Plan(p Parsed, exported map[int64]map[int64]int64) ([]GroupPlan, []Problem)
 			refuse(r.Key, at+r.Bad)
 			continue
 		case !known:
-			refuse(r.Key, fmt.Sprintf("%sexport %d is not a duplicates export of this register: export again",
+			refuse(r.Key, fmt.Sprintf("%sexport #%d is not a duplicates export of this register: export again",
 				at, r.Key.Export))
 			continue
 		}
@@ -276,11 +276,11 @@ func Plan(p Parsed, exported map[int64]map[int64]int64) ([]GroupPlan, []Problem)
 		seen[fk] = listing{r.Line, r.Key.Group}
 		switch {
 		case !in:
-			refuse(r.Key, fmt.Sprintf("%sfile %d is not in export %d (added, or pasted from another export): "+
+			refuse(r.Key, fmt.Sprintf("%sfile %d is not in export #%d (added, or pasted from another export): "+
 				"export again", at, r.FileID, r.Key.Export))
 			continue
 		case want != r.Key.Group:
-			why := fmt.Sprintf("%sfile %d is in group %d of export %d, not group %d (its group was edited): "+
+			why := fmt.Sprintf("%sfile %d is in group %d of export #%d, not group %d (its group was edited): "+
 				"export again", at, r.FileID, want, r.Key.Export, r.Key.Group)
 			refuse(r.Key, why)
 			refuse(GroupKey{r.Key.Export, want}, why)

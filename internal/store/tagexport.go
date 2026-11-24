@@ -200,19 +200,19 @@ func (s *Store) UpdateTags(ctx context.Context, rows []TagRow, now time.Time, op
 func checkTagRow(ctx context.Context, tx *sql.Tx, r TagRow, ex exportInfo) (TagChange, string, error) {
 	ch := TagChange{FileID: r.FileID}
 	if !ex.found {
-		return ch, fmt.Sprintf("export %d is not in this register", r.ExportID), nil
+		return ch, fmt.Sprintf("export #%d is not in this register", r.ExportID), nil
 	}
 	if ex.kind != ExportTags {
-		return ch, fmt.Sprintf("export %d is a %s export, not a tags export", r.ExportID, ex.kind), nil
+		return ch, fmt.Sprintf("export #%d is a %s export, not a tags export", r.ExportID, ex.kind), nil
 	}
 	var exported sql.NullString
 	err := tx.QueryRowContext(ctx, `SELECT tags FROM export_rows WHERE export_id = ? AND file_id = ?`, r.ExportID,
 		r.FileID).Scan(&exported)
 	if errors.Is(err, sql.ErrNoRows) {
-		return ch, fmt.Sprintf("file %d is not in export %d (rows cannot be added)", r.FileID, r.ExportID), nil
+		return ch, fmt.Sprintf("file %d is not in export #%d (rows cannot be added)", r.FileID, r.ExportID), nil
 	}
 	if err != nil {
-		return ch, "", fmt.Errorf("read export %d: %w", r.ExportID, err)
+		return ch, "", fmt.Errorf("read export #%d: %w", r.ExportID, err)
 	}
 	// A cell left as exported is not a decision, whatever happened to the file since (as for a retention CSV).
 	if sameTags(splitCell(exported.String), r.Tags) {
@@ -241,7 +241,7 @@ func checkTagRow(ctx context.Context, tx *sql.Tx, r TagRow, ex exportInfo) (TagC
 		return ch, "", nil // the tags the file has: unchanged, whatever happened since the export (a CSV applied twice)
 	}
 	if JoinTags(have) != exported.String {
-		return ch, fmt.Sprintf("its tags were changed after export %d (now %s); export again", r.ExportID,
+		return ch, fmt.Sprintf("its tags were changed after export #%d (now %s); export again", r.ExportID,
 			cellOrNone(have)), nil
 	}
 	for _, t := range r.Tags {

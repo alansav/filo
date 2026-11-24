@@ -433,7 +433,7 @@ func TestAbsorbKeepsHistoryAndReviews(t *testing.T) {
 		OtherPath: "old.txt"}}})
 	apply(docs, "tax", Changes{})
 	apply(pics, "", Changes{Events: []Event{{Kind: "moved", FileID: 99, Path: "beach.jpg", OtherPath: "x/beach.jpg",
-		Detail: "returned (missing since scan 1) from root " + abs("home/Documents")}}})
+		Detail: "returned (missing since scan #1) from root " + abs("home/Documents")}}})
 
 	// A keep_until date on a Documents file.
 	q, err := s.Files(ctx, "2026-11-11", Filter{})

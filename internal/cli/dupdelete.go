@@ -431,7 +431,7 @@ func once(jobs []*dupJob) {
 	recording := map[int64]duplicates.GroupKey{} // file -> the group storing it as a record
 	always := map[string]duplicates.GroupKey{}   // content -> the group making it always
 	where := func(k duplicates.GroupKey) string {
-		return "group " + strconv.FormatInt(k.Group, 10) + " of export " + strconv.FormatInt(k.Export, 10)
+		return "group " + strconv.FormatInt(k.Group, 10) + " of export #" + strconv.FormatInt(k.Export, 10)
 	}
 	for _, j := range jobs {
 		if j.state != jobDelete && j.state != jobRecord {
@@ -759,7 +759,7 @@ func (l *dupList) draw(r *view.Renderer, max int) (cut bool) {
 	}
 	prefix := func(j *dupJob) string {
 		if len(l.exports) > 1 {
-			return "export " + strconv.FormatInt(j.key.Export, 10) + ": "
+			return "export #" + strconv.FormatInt(j.key.Export, 10) + ": "
 		}
 		return ""
 	}

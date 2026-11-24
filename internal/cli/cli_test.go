@@ -268,13 +268,13 @@ func TestEndToEnd(t *testing.T) {
 		"Broken symlinks   2",
 		"    broken-link   -> nowhere",
 		"     117 KiB   photos/img2-renamed.bin", // largest first
-		"last scan 2",
+		"last scan #2",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("report lacks %q:\n%s", want, out)
 		}
 	}
-	wantUnreadable := "Unreadable files   1\n    since\n    scan 2   docs/private.txt\n"
+	wantUnreadable := "Unreadable files   1\n    since\n    scan #2   docs/private.txt\n"
 	if asRoot {
 		wantUnreadable = "Unreadable files   none\n"
 	}
