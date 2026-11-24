@@ -632,7 +632,8 @@ func checkRow(ctx context.Context, tx *sql.Tx, r RetentionRow, ex exportInfo, po
 	marked := IsMarkedDate(c.fileDate)
 	if marked {
 		if c.fileDate != expDate.String {
-			c.refusal = markedDateRefusal(c.fileDate)
+			c.refusal = fmt.Sprintf("file_date %s is marked as read from the file name, but it is not the one "+
+				"exported: remove the ! to use it", c.fileDate)
 			return c, nil
 		}
 		c.fileDate = storedDate

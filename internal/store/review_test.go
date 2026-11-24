@@ -493,13 +493,16 @@ func TestUpdateMarkedFileDate(t *testing.T) {
 	e := newReviewEnv(t)
 	const today = "2026-11-11"
 	now := time.Date(2026, 11, 11, 12, 0, 0, 0, time.UTC)
-	files := []string{"forever", "period", "accepted", "edited", "blank", "setsince"}
+	files := []string{"forever", "period", "accepted", "edited", "blank", "setsince", "policy"}
 	var nf []NewFile
 	for i, name := range files {
 		nf = append(nf, f(name, "h"+itoa(int64(i))))
 	}
 	e.apply(Changes{New: nf})
 	k := e.known()
+	if err := e.s.AddPolicy(e.ctx, "bills", "7y", now); err != nil {
+		t.Fatal(err)
+	}
 	exportID, _ := e.export(today, now)
 	if _, err := e.s.db.ExecContext(e.ctx, `UPDATE export_rows SET file_date = '!2019-01-01' WHERE export_id = ?`,
 		exportID); err != nil {
@@ -521,6 +524,7 @@ func TestUpdateMarkedFileDate(t *testing.T) {
 		{"edited", "!2019-02-01", "forever", "- - -", true},
 		{"blank", "!2019-01-01", "", "- - -", false},
 		{"setsince", "!2019-01-01", "7y", "2020-06-30 7y 2027-06-30", false},
+		{"policy", "!2019-01-01", "bills", "- - -", true}, // a policy whose value is a period
 	}
 	var rows []RetentionRow
 	for i, tc := range tests {
@@ -546,7 +550,7 @@ func TestUpdateMarkedFileDate(t *testing.T) {
 		if ok != tc.refused {
 			t.Errorf("%s: refused = %v (%q), want %v", tc.file, ok, reason, tc.refused)
 		}
-		if ok && !strings.Contains(reason, "was read from the file name: remove the ! to accept it") {
+		if ok && !strings.Contains(reason, "read from the file name") {
 			t.Errorf("%s: reason %q", tc.file, reason)
 		}
 	}
