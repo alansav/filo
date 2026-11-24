@@ -455,7 +455,9 @@ when the file reached the disk. So the CSV has a date to count from and a retent
 - **A date read from a file name is marked** (decided 2026-11-24): it is written `!2023-07-14`, so the rows to check
   can be found (filter or search on `!`), and it counts only once the `!` is removed. A spreadsheet treats the
   marked cell as text, so marked dates also sort apart. `!` and not `?`, which is a wildcard in Excel's find and
-  replace, so removing every `!` in the column accepts them all in one deliberate step. On update:
+  replace, so removing every `!` in the column accepts them all in one deliberate step. Format the `file_date`
+  column as text first: a spreadsheet may read the cell left after the replace as a date and save it in the
+  locale's format (`14/03/2023`), which the update refuses. On update:
 
   | `file_date` cell | Result |
   |---|---|
@@ -1335,7 +1337,7 @@ the tool for many). Replaces "Later b, setting dates in place".
       size        184 KB
       modified    2022-02-03 09:14   unchanged since the last scan (2026-11-20)
       sha256      3f9a1c0e8b2d47f6a9e0c5d1b7a3f2e8c4d6b0a9e1f3c5d7b9a2e4f6c8d0e21e
-      first seen  2026-11-12 (scan 3)
+      first seen  2026-11-12 (scan #3)
       moved from  ~/Documents/inbox/british-gas.pdf   2026-11-12 to 2026-11-13   ... 2 more: --history
     Retention
       status      kept
@@ -2143,7 +2145,7 @@ Roots   5 files . 17 B . 2 roots
     never scanned
   <root>   5 files . 17 B
     hidden files skipped . ignoring build
-    last scan 4, <time>, whole root: 4 seen, new 2, changed 0, moved 0, missing 0, errors 0
+    last scan #4, <time>, whole root: 4 seen, new 2, changed 0, moved 0, missing 0, errors 0
 ```
 
 ```
@@ -2189,7 +2191,10 @@ Next: filo scan <root>
   command. The CSV's path appears once, in that `Next:` line, in full and quoted when needed (see "Paths in a `Next:`
   line"), not also on a "written to" line. The full explanation stays in `filo help export`. Nothing to export:
   `Export (retention)   no files · <place>` (no number is used) and `Nothing exported.` A scan's heading names its
-  number the same way, `Scan #2`; an update's heading names the export it reads as a fact, `export #1`.
+  number the same way, `Scan #2`; an update's heading names the export it reads as a fact, `export #1`. Every
+  message that names an export or a scan writes its number the same way (`changed since export #3`, `first seen
+  2026-11-12 (scan #3)`, `last scan #4`), so one number never shows in two forms; only the CSV's `export` column
+  holds the bare number.
 - **`filo export duplicates`** has the same shape: `Export #2 (duplicates)`, groups, copies and the
   place; the rules of the `action` column as `·` lines (too long for the `Next:` line); `Next:` with the `filo delete`
   command (see Duplicates, Output). Copies in the heading count every copy in the CSV, also those outside DIR (a group
