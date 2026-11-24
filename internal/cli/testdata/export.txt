@@ -5,7 +5,7 @@ Scan   scan 2 . 2 files seen . under 0.1 s . <root>, under tax/
 Retention export   export 1 . 2 files . <root>, under tax/
 
   - 2 without a retention, 0 with one
-  [!] 1 file_date filled in from the file name: check it before counting from it
+  [!] 1 file_date read from the file name, marked !: remove the ! to accept it
 
 Next: fill in retention (7y, 18m, forever or a date), then filo update <work>/l.csv
 

@@ -66,6 +66,15 @@ func setRetention(values map[string]string) func(map[string]string) {
 	return setCells("retention", values)
 }
 
+// accepting returns edit after accepting every file_date the export read from a file name (removing its !), as a
+// person who checked them does.
+func accepting(edit func(map[string]string)) func(map[string]string) {
+	return func(row map[string]string) {
+		row["file_date"] = strings.TrimPrefix(row["file_date"], "!")
+		edit(row)
+	}
+}
+
 // setCells returns a CSV edit that sets column col on the rows whose name is a key.
 func setCells(col string, values map[string]string) func(map[string]string) {
 	return func(row map[string]string) {
@@ -127,17 +136,18 @@ func TestRetentionRoundTrip(t *testing.T) {
 	filo(ExitUsage, "", false, "export", "-o", r1)
 	contains("export", filo(ExitOK, "", false, "export", "retention", "-o", r1).stdout,
 		"Retention export   export 1 . 4 files", "  - 4 without a retention, 0 with one\n",
-		"  [!] 1 file_date filled in from the file name: check it before counting from it\n",
+		"  [!] 1 file_date read from the file name, marked !: remove the ! to accept it\n",
 		"Next: fill in retention (7y, 18m, forever or a date), then filo update "+r1+"\n")
 	contains("export again", filo(ExitError, "", false, "export", "retention", "-o", r1).stderr, "already exists")
 	contains("CSV", string(mustRead(t, r1)), "id,export,directory,name,size,modified,file_date,retention,keep_until\n",
-		","+root+"/docs,2023-03 invoice.pdf,1,", ",2023-03-31,,\n", // file_date read from the name
+		","+root+"/docs,2023-03 invoice.pdf,1,", ",!2023-03-31,,\n", // file_date read from the name, marked
 		","+root+"/📷 Pictures,🏖️ beach.jpg,4,")
 
-	// Set retentions: a period from the suggested file_date (already past), forever, a fixed date. An impossible
-	// date and a period without a file_date are refused with their lines; the other rows still apply.
-	editCSV(t, r1, setRetention(map[string]string{"a.txt": "2027-01-01", "2023-03 invoice.pdf": "3y",
-		"c.txt": "2027-02-29", "🏖️ beach.jpg": "Forever"}))
+	// Set retentions: a period from the file_date read from the name and accepted (already past), forever, a fixed
+	// date. An impossible date and a period without a file_date are refused with their lines; the other rows still
+	// apply.
+	editCSV(t, r1, accepting(setRetention(map[string]string{"a.txt": "2027-01-01", "2023-03 invoice.pdf": "3y",
+		"c.txt": "2027-02-29", "🏖️ beach.jpg": "Forever"})))
 	r := filo(ExitError, "", false, "update", r1, "--dry-run")
 	contains("dry run", r.stdout, "Retention update (dry run)   r1.csv . export 1 . 4 rows . "+root,
 		"Dry run: nothing was written.", "3 files would be given a retention", "1 file would be past its retention")
@@ -180,7 +190,7 @@ func TestRetentionRoundTrip(t *testing.T) {
 	r2 := filepath.Join(work, "r2.csv")
 	filo(ExitOK, "", false, "export", "retention", "-o", r2)
 	contains("re-export", string(mustRead(t, r2)), ",2026-01-15,7y,2033-01-15\n", ",,forever,forever\n",
-		",,2027-01-01,2027-01-01\n", ",2023-03-31,,\n")
+		",,2027-01-01,2027-01-01\n", ",!2023-03-31,,\n") // its file_date was cleared: read from the name again
 
 	// A file past its retention is listed by delete and the report.
 	editCSV(t, r2, setRetention(map[string]string{"2023-03 invoice.pdf": "2026-11-10", "a.txt": "2027-02-01"}))
@@ -252,8 +262,8 @@ func TestUpdateGolden(t *testing.T) {
 	filo(ExitOK, "", false, "roots", "add", root)
 	rcsv := filepath.Join(work, "r.csv")
 	filo(ExitOK, "", false, "export", "retention", "-o", rcsv)
-	editCSV(t, rcsv, setRetention(map[string]string{"2023-01-01 coffee.pdf": "7d", "2019-03.pdf": "2027-02-29",
-		"old draft.txt": "7y", "2020 return.pdf": "forever"}))
+	editCSV(t, rcsv, accepting(setRetention(map[string]string{"2023-01-01 coffee.pdf": "7d", "2019-03.pdf": "2027-02-29",
+		"old draft.txt": "7y", "2020 return.pdf": "forever"})))
 	golden(t, "update-retention-dry.txt", root, filo(ExitError, "", false, "update", "--dry-run", rcsv).stdout)
 	golden(t, "update-retention.txt", root, filo(ExitError, "", false, "update", rcsv).stdout)
 	// A new export shows the stored retentions; blanking two clears them: listed, l lists them again in full, then

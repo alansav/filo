@@ -29,8 +29,8 @@ func newPolicyTest(t *testing.T) policyTest {
 	csv := filepath.Join(ct.work, "r.csv")
 	ct.filo(ExitOK, "", false, "export", "retention", "-o", csv)
 	// 2015-06.pdf: until 2022-06-30 (past); 2022-01.pdf: until 2029-01-31; undated.pdf: forever for now.
-	editCSV(t, csv, setRetention(map[string]string{"2015-06.pdf": "bills", "2022-01.pdf": "bills",
-		"undated.pdf": "forever", "x.pdf": "bils"}))
+	editCSV(t, csv, accepting(setRetention(map[string]string{"2015-06.pdf": "bills", "2022-01.pdf": "bills",
+		"undated.pdf": "forever", "x.pdf": "bils"})))
 	ct.filo(ExitOK, "y\n", true, "update", csv)
 	return policyTest{ct}
 }
@@ -205,7 +205,7 @@ func TestPoliciesReviewFindings(t *testing.T) {
 		ct.filo(ExitOK, "", false, "policies", "add", "bills", "7y")
 		csv := filepath.Join(ct.work, "r.csv")
 		ct.filo(ExitOK, "", false, "export", "retention", "-o", csv)
-		editCSV(t, csv, setRetention(names))
+		editCSV(t, csv, accepting(setRetention(names)))
 		ct.filo(ExitOK, "", false, "update", csv)
 		out := ct.filo(ExitOK, "l\nn\n", true, "policies", "set", "bills", "1y").stdout
 		ct.contains("cut", out, "[!] 12 files would be past their retention:", "... 2 more files",

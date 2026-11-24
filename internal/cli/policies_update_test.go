@@ -78,12 +78,16 @@ func TestUpdatePolicies(t *testing.T) {
 			"or a policy name")
 	})
 
-	t.Run("a period policy keeps the file_date suggested from the name", func(t *testing.T) {
+	t.Run("a period policy counts from a file_date read from the name once its ! is removed", func(t *testing.T) {
 		ct, csv := setup(t)
 		addPolicy(t, ct, "bills", "7y")
-		// 2019-03.pdf's file_date, 2019-03-31, was suggested from its name; left as it was, a period counts from it.
-		editCSV(t, csv, setRetention(map[string]string{"2019-03.pdf": "bills", "2019-04.pdf": "", "2020-01.pdf": "",
-			"notes.txt": ""}))
+		// 2019-03.pdf's file_date, !2019-03-31, was read from its name: left marked, the period has nothing to
+		// count from; accepted, it counts from it.
+		names := map[string]string{"2019-03.pdf": "bills", "2019-04.pdf": "", "2020-01.pdf": "", "notes.txt": ""}
+		editCSV(t, csv, setRetention(names))
+		ct.contains("marked", ct.filo(ExitError, "", false, "update", csv).stdout,
+			"file_date !2019-03-31 was read from the file name: remove the ! to accept it")
+		editCSV(t, csv, setCells("file_date", map[string]string{"2019-03.pdf": "2019-03-31"}))
 		ct.contains("update", ct.filo(ExitOK, "", false, "update", csv).stdout, "[ok] 1 file given a retention")
 		csv2 := filepath.Join(ct.work, "r2.csv")
 		ct.filo(ExitOK, "", false, "export", "retention", "-o", csv2)

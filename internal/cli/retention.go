@@ -131,14 +131,14 @@ func (e *env) export(ctx context.Context, dbBefore string, args []string) error 
 	if err != nil {
 		return err
 	}
-	// Fill in a blank file_date from the file name where it holds one unambiguous date. The export records it as
-	// written, so an untouched suggestion is no change; it takes effect only through a retention period typed later.
+	// Fill in a blank file_date from the file name where it holds one unambiguous date, marked (!2023-07-14) so it
+	// counts only once the person removes the mark. The export records it as written, so an untouched one is no change.
 	suggested := 0
 	names := retention.NewDateReader(today()) // one day for the whole export
 	for i := range items {
 		if items[i].FileDate == "" {
 			if d := names.Read(path.Base(items[i].Path)); d != "" {
-				items[i].FileDate = d
+				items[i].FileDate = store.MarkedDate(d)
 				suggested++
 			}
 		}
@@ -170,8 +170,7 @@ func (e *env) export(ctx context.Context, dbBefore string, args []string) error 
 		report.Count(int64(len(items)-undated))+" with one")
 	if suggested > 0 {
 		v.Count(view.Attention, report.Plural(int64(suggested), "file_date", "file_dates")+
-			" filled in from the file name: check "+pluralWord(suggested, "it", "them")+" before counting from "+
-			pluralWord(suggested, "it", "them"))
+			" read from the file name, marked !: remove the ! to accept "+pluralWord(suggested, "it", "one"))
 	}
 	notScannedLine(v, notScanned)
 	v.Blank()
