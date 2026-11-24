@@ -413,7 +413,7 @@ when the file reached the disk. So the CSV has a date to count from and a retent
 
 - **Columns**, in order: `id, export, directory, name, size, modified, file_date, retention, keep_until`.
   - `file_date`: the date the file is about or was issued, the date a retention period counts from. Typed by the
-    person, or filled in by the export from the file name (below). Not the filesystem's creation date, which is not
+    person, or suggested by the export from the file name, marked `!` (below). Not the filesystem's creation date, which is not
     reliable. Kept in the register even when no retention uses it.
   - `retention`, one cell for the decision, whose value says what kind it is:
     - a period, `Ny`, `Nm`, `Nw` or `Nd` (years, months, weeks, days; any case, stored without leading zeros, so
@@ -451,11 +451,23 @@ when the file reached the disk. So the CSV has a date to count from and a retent
   The result must be a real date between 1900-01-01 and 30 days after today (one day for the whole export, even if
   it runs past midnight); anything else is not a date
   (`1245-06`, `2099-01-01`). A lone year (`2019 report.pdf`) is not read: it may be a model number or part of a title.
-  A name with two different dates (`2023-01-01 to 2023-12-31 statement.pdf`) gets none: the person types it. A
-  filled-in `file_date` is a suggestion shown in the spreadsheet. Left untouched, it is stored only when the row's
-  retention is a period, which is when it is used and the person has had reason to look at it; with `forever`, a
-  fixed date or no retention it is dropped, so a later period can never count from a guess nobody checked. (Found in
-  a code review on 2026-11-12: `scan 20190101 id.pdf` would otherwise keep 2019-01-01 as its file_date.)
+  A name with two different dates (`2023-01-01 to 2023-12-31 statement.pdf`) gets none: the person types it.
+- **A date read from a file name is marked** (decided 2026-11-24): it is written `!2023-07-14`, so the rows to check
+  can be found (filter or search on `!`), and it counts only once the `!` is removed. A spreadsheet treats the
+  marked cell as text, so marked dates also sort apart. `!` and not `?`, which is a wildcard in Excel's find and
+  replace, so removing every `!` in the column accepts them all in one deliberate step. On update:
+
+  | `file_date` cell | Result |
+  |---|---|
+  | marked, as exported, and a retention that is not a period | nothing is stored for the date |
+  | marked, as exported, and a period (or a policy whose value is one) | row refused: "file_date !2023-07-14 was read from the file name: remove the ! to accept it" |
+  | marked, but not as exported | row refused with the same hint |
+  | the `!` removed | an ordinary date, as if typed |
+
+  So a guess nobody looked at never reaches the register, not even when a period is filled down a whole directory.
+  (Before 2026-11-24 the date was written unmarked and stored, untouched, when the row's retention was a period; a
+  CSV from then still works that way. Found in a code review on 2026-11-12: `scan 20190101 id.pdf` would otherwise
+  keep 2019-01-01 as its file_date.)
 - **Register (schema version 5)**: `files.file_date` (YYYY-MM-DD, NULL = none), `files.retention` (the value as
   given: a period, `forever` or a date; NULL = none), and `files.keep_until`, now always worked out from those two
   (YYYY-MM-DD or `forever`). Statuses and `filo delete` keep using `keep_until` only. Migration: an existing
@@ -760,7 +772,7 @@ Removed   bank . *bank* -> banking
 
 ```
 $ filo scan (four new files)
-Scan   scan 2 . 11 files seen . <took> . <root>
+Scan #2   11 files seen . <took> . <root>
 
   - 4 new
   - 3 given a policy by rules
@@ -1175,10 +1187,10 @@ Nothing to include   <root>/Documents/notes.txt
 
 ```
 $ filo export duplicates
-Scan   scan 4 . 4 files seen . under 0.1 s . <root>
+Scan #4   4 files seen . under 0.1 s . <root>
   [ok] no changes
 
-Duplicates export   export 2 . 1 group . 2 copies . <root>
+Export #2 (duplicates)   1 group . 2 copies . <root>
 
   - in each group: keep for the copy to keep, delete for the rest; always on every row if the content belongs everywhere
   - keep on two or more copies: they are kept as separate files, each with its own retention
@@ -1956,7 +1968,7 @@ Examples, from the golden files (plain form, as when piped; `<root>` is the test
 typed at a prompt is not echoed):
 
 ```
-Retention update   r.csv . export 1 . 4 rows . <root>
+Retention update   r.csv . export #1 . 4 rows . <root>
 
   [ok] 2 files given a retention
   [refused] 2 rows refused
@@ -1973,7 +1985,7 @@ Nothing has been deleted. Next: filo delete
 ```
 
 ```
-Duplicates   d.csv . export 1 . 5 groups . <root>
+Duplicates   d.csv . export #1 . 5 groups . <root>
 
 Will delete   2 copies in 1 group . 16 B
     contract.pdf . 8 B each
@@ -2077,7 +2089,7 @@ Done   deleted 1 file . freed 5 B . removed 1 empty directory
 
 ```
 $ filo scan
-Scan   scan 2 . 4 files seen . <took> . <root>
+Scan #2   4 files seen . <took> . <root>
 
   - 2 new
   - 1 changed
@@ -2107,14 +2119,14 @@ Next: filo report
 
 ```
 $ filo scan docs
-Scan   scan 3 . 0 files seen . <took> . <root>, under docs/
+Scan #3   0 files seen . <took> . <root>, under docs/
   [ok] no changes
 
 $ filo scan (one root unmounted)
 Scan   <work>/disk
   [refused] not scanned: the root looks unmounted (<work>/disk is not mounted)
 
-Scan   scan 5 . 4 files seen . <took> . <root>
+Scan #5   4 files seen . <took> . <root>
   [ok] no changes
 
 Done   2 roots . 1 scanned . 1 failed
@@ -2146,7 +2158,7 @@ Took in 4 roots, with their history and retentions
   - my docs   had other settings (hidden files included): these apply now
 Next: filo roots set <root> --include-hidden --ignore build, to scan .config again
 
-Scan   scan 4 . 4 files seen . <took> . <root>
+Scan #4   4 files seen . <took> . <root>
   - 2 new
 
 Next: filo report
@@ -2169,35 +2181,37 @@ Next: filo scan <root>
   `Next:` lines: hiding the scan's would hide where its findings are listed.
   With `--no-scan`, no scan block, and a `·` line in the export block: `not scanned first: as of the last scan,
   <when>`.
-- **`filo export retention`**: a heading, `Retention export`, with the export number (the one `filo update`
-  refers to), the number of files and the place (`~/Documents, under tax/`, as everywhere); a count line of files
-  without a retention and with one (`·`); a `!` line when file_dates were filled in from file names, since a wrong
-  guess moves every period counted from it; then `Next:` with the forms a retention takes and the `filo update`
+- **`filo export retention`**: a heading, `Export #18 (retention)`: the export number marked as an ID by `#` (the
+  one in the CSV's `export` column and `filo update`'s heading; one sequence for every kind of export), then the
+  number of files and the place (`~/Documents, under tax/`, as everywhere); a count line of files
+  without a retention and with one (`·`); a `!` line when file_dates were read from file names, saying they are
+  marked `!` and count only once it is removed; then `Next:` with the forms a retention takes and the `filo update`
   command. The CSV's path appears once, in that `Next:` line, in full and quoted when needed (see "Paths in a `Next:`
   line"), not also on a "written to" line. The full explanation stays in `filo help export`. Nothing to export:
-  `Retention export   no files · <place>` and `Nothing exported.`
-- **`filo export duplicates`** has the same shape: `Duplicates export` with the export number, groups, copies and the
+  `Export (retention)   no files · <place>` (no number is used) and `Nothing exported.` A scan's heading names its
+  number the same way, `Scan #2`; an update's heading names the export it reads as a fact, `export #1`.
+- **`filo export duplicates`** has the same shape: `Export #2 (duplicates)`, groups, copies and the
   place; the rules of the `action` column as `·` lines (too long for the `Next:` line); `Next:` with the `filo delete`
   command (see Duplicates, Output). Copies in the heading count every copy in the CSV, also those outside DIR (a group
   comes with all its copies).
 
 ```
 $ filo export retention tax
-Scan   scan 2 . 2 files seen . under 0.1 s . <root>, under tax/
+Scan #2   2 files seen . under 0.1 s . <root>, under tax/
   [ok] no changes
 
-Retention export   export 1 . 2 files . <root>, under tax/
+Export #1 (retention)   2 files . <root>, under tax/
 
   - 2 without a retention, 0 with one
-  [!] 1 file_date filled in from the file name: check it before counting from it
+  [!] 1 file_date read from the file name, marked !: remove the ! to accept it
 
 Next: fill in retention (7y, 18m, forever or a date), then filo update <work>/l.csv
 
 $ filo export retention empty
-Scan   scan 3 . 0 files seen . under 0.1 s . <root>, under empty/
+Scan #3   0 files seen . under 0.1 s . <root>, under empty/
   [ok] no changes
 
-Retention export   no files . <root>, under empty/
+Export (retention)   no files . <root>, under empty/
 Nothing exported.
 ```
 
@@ -2205,7 +2219,7 @@ Nothing exported.
 
 ```
 $ filo export duplicates photos
-Duplicates export   no groups . <root>, under photos/
+Export (duplicates)   no groups . <root>, under photos/
 Nothing exported.
 ```
 
@@ -2346,7 +2360,7 @@ CREATE TABLE export_rows (
     export_id INTEGER NOT NULL REFERENCES exports(id), file_id INTEGER NOT NULL REFERENCES files(id),
     hash TEXT,                          -- the content shown; the update refuses the row if it has changed
     keep_until TEXT,                    -- the date exported
-    file_date TEXT, retention TEXT,     -- as exported (file_date as filled in from the name; retention a
+    file_date TEXT, retention TEXT,     -- as exported (file_date as read from the name, marked !; retention a
                                         -- policy's name for a file on one); cells left as these are untouched
     dup_group INTEGER,                  -- duplicates exports: the group number in the CSV
     path_id INTEGER REFERENCES paths(id),              -- duplicates exports: the path shown
