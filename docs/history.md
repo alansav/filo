@@ -658,7 +658,8 @@ review (medium) found a test that could no longer fail (it looked for the old he
 marked date "read from the file name", "accept one" in the plural `!` line, help text saying a marked date "is not
 used" where a period on it is refused, no test of a marked date on a period policy, and `#` only in headings; on
 the last, the number became `#N` in every message (refusals, report, show, scan events), and the design and README
-now say to format the `file_date` column as text before removing the marks (untested in Calc or Excel). Tests: a
+now say to format the `file_date` column as text before removing the marks (checked by hand in LibreOffice Calc on 2026-11-24: removing the `!` kept
+the date as `YYYY-MM-DD`; Excel not checked). Tests: a
 table of the update's cases for marked dates in `internal/store`, marked cells in the CSV parser, the plural `!`
 line, golden files, and a run by hand on a throwaway tree.
 

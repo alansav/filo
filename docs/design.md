@@ -457,7 +457,8 @@ when the file reached the disk. So the CSV has a date to count from and a retent
   marked cell as text, so marked dates also sort apart. `!` and not `?`, which is a wildcard in Excel's find and
   replace, so removing every `!` in the column accepts them all in one deliberate step. Format the `file_date`
   column as text first: a spreadsheet may read the cell left after the replace as a date and save it in the
-  locale's format (`14/03/2023`), which the update refuses. On update:
+  locale's format (`14/03/2023`), which the update refuses (LibreOffice Calc keeps `YYYY-MM-DD`, checked
+  2026-11-24; Excel not checked). On update:
 
   | `file_date` cell | Result |
   |---|---|
