@@ -76,7 +76,7 @@ func TestExportReplace(t *testing.T) {
 	for _, answer := range []string{"n\n", "\n", ""} {
 		r = filo(ExitOK, answer, true, "export", "retention", "-o", l)
 		contains("declined", r.stdout, "Replace "+l+"? [y/N]", "Nothing exported.")
-		lacks("declined", r.stdout, "Retention export")
+		lacks("declined", r.stdout, "Export #")
 		same(fmt.Sprintf("answer %q", answer))
 	}
 
