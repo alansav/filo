@@ -435,9 +435,9 @@ func retentionExports(rows []store.RetentionRow) []int64 {
 }
 
 // nowPast lists the files a change left past their retention, with the hint to check for a typo (docs/design.md,
-// Retention CSV columns, "Past dates are accepted"), after a blank line; nothing when there are none. It shows max of
+// Retention CSV columns, "Past dates are accepted"), after a blank line; nothing when there are none. It shows limit of
 // them before "… N more" (0: all).
-func nowPast(r *view.Renderer, roots []string, past []store.Past, dry bool, max int) {
+func nowPast(r *view.Renderer, roots []string, past []store.Past, dry bool, limit int) {
 	n := len(past)
 	if n == 0 {
 		return
@@ -454,7 +454,7 @@ func nowPast(r *view.Renderer, roots []string, past []store.Past, dry bool, max 
 	}
 	r.Note(view.Attention, what+" retention. Check for a typo, such as 7d for 7y:")
 	r.Files(view.FileList{Columns: []view.Column{{Header: "retention"}, {Header: "until"}}, Rows: rows,
-		Max: max, More: "files", MoreOne: "file"})
+		Max: limit, More: "files", MoreOne: "file"})
 }
 
 // refusalProblems turns the rows the CSV reader refused and the rows or groups the register refused into one list in
@@ -503,7 +503,7 @@ func (e *env) confirmClears(ctx context.Context, pr *prompter, roots []string, c
 	}
 	list := func(max int) {
 		r.Files(view.FileList{Columns: []view.Column{{Header: "retention"}, {Header: "until"}}, Rows: rows,
-			Max: max, More: "files", MoreOne: "file"})
+			Max: limit, More: "files", MoreOne: "file"})
 		r.Blank()
 	}
 	r.Note(view.Attention, report.Plural(int64(len(cs)), "row has", "rows have")+" a blank retention where one is "+
