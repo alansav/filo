@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"path"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -45,10 +46,7 @@ func NewWriter(w io.Writer, header []string) (*csv.Writer, error) {
 // (the root's path and the file's directory in it), name, size and modified time (in loc, to the minute).
 func FileCells(root, rel string, size, mtimeNS int64, loc *time.Location) []string {
 	dir, name := path.Split(rel)
-	directory := root
-	if dir = strings.TrimSuffix(dir, "/"); dir != "" {
-		directory = root + "/" + dir
-	}
+	directory := filepath.Join(root, filepath.FromSlash(dir)) // as store gives a file's path: "/" + "etc" is /etc
 	return []string{Cell(directory), Cell(name), strconv.FormatInt(size, 10),
 		time.Unix(0, mtimeNS).In(loc).Format("2006-01-02 15:04")}
 }

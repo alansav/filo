@@ -170,6 +170,8 @@ func TestFileCells(t *testing.T) {
 		{"/home/u", "doc.txt", []string{"/home/u", "doc.txt", "12", "2026-05-02 00:30"}},
 		{"/home/u", "a/b/doc.txt", []string{"/home/u/a/b", "doc.txt", "12", "2026-05-02 00:30"}},
 		{"/home/u", "a/=sum.txt", []string{"/home/u/a", "'=sum.txt", "12", "2026-05-02 00:30"}},
+		{"/", "hosts", []string{"/", "hosts", "12", "2026-05-02 00:30"}},
+		{"/", "etc/hosts", []string{"/etc", "hosts", "12", "2026-05-02 00:30"}},
 	}
 	for _, tt := range tests {
 		if got := FileCells(tt.root, tt.rel, 12, mtime, loc); !slices.Equal(got, tt.want) {
