@@ -172,20 +172,7 @@ func (e *env) set(ctx context.Context, dbBefore string, args []string) error {
 				"it has one")
 		}
 	}
-	if n := len(res.NowPast); n > 0 {
-		rows := make([]view.FileRow, n)
-		for i, p := range res.NowPast {
-			root, rel := view.SplitRoot(roots, p.Path)
-			rows[i] = view.FileRow{Root: root, Rel: rel, Cells: []string{p.Retention, p.KeepUntil}}
-		}
-		r.Blank()
-		what := report.Plural(int64(n), "file is now past its", "files are now past their")
-		if *dry {
-			what = report.Plural(int64(n), "file would be past its", "files would be past their")
-		}
-		r.Note(view.Attention, what+" retention. Check for a typo, such as 7d for 7y:")
-		r.Files(view.FileList{Columns: []view.Column{{Header: "retention"}, {Header: "until"}}, Rows: rows})
-	}
+	nowPast(r, roots, res.NowPast, *dry, 0) // all of them, where the update shows the first ten in a terminal
 	switch {
 	case *dry:
 		r.Blank()

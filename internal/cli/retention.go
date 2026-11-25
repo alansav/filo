@@ -400,21 +400,7 @@ func (e *env) update(ctx context.Context, dbBefore string, args []string) error 
 		r.Blank()
 		r.Problems("Refused: fix these rows in the CSV and run filo update again", view.Refused, refused)
 	}
-	if n := len(res.NowPast); n > 0 {
-		rows := make([]view.FileRow, n)
-		for i, p := range res.NowPast {
-			root, rel := view.SplitRoot(roots, p.Path)
-			rows[i] = view.FileRow{Root: root, Rel: rel, Cells: []string{p.Retention, p.KeepUntil}}
-		}
-		r.Blank()
-		what := report.Plural(int64(n), "file is now past its", "files are now past their")
-		if *dry {
-			what = report.Plural(int64(n), "file would be past its", "files would be past their")
-		}
-		r.Note(view.Attention, what+" retention. Check for a typo, such as 7d for 7y:")
-		r.Files(view.FileList{Columns: []view.Column{{Header: "retention"}, {Header: "until"}}, Rows: rows,
-			Max: r.Overview(), More: "files", MoreOne: "file"})
-	}
+	nowPast(r, roots, res.NowPast, *dry, r.Overview())
 	r.Blank()
 	switch {
 	case *dry:
@@ -446,6 +432,29 @@ func retentionExports(rows []store.RetentionRow) []int64 {
 		}
 	}
 	return out
+}
+
+// nowPast lists the files a change left past their retention, with the hint to check for a typo (docs/design.md,
+// Retention CSV columns, "Past dates are accepted"), after a blank line; nothing when there are none. It shows max of
+// them before "… N more" (0: all).
+func nowPast(r *view.Renderer, roots []string, past []store.Past, dry bool, max int) {
+	n := len(past)
+	if n == 0 {
+		return
+	}
+	rows := make([]view.FileRow, n)
+	for i, p := range past {
+		root, rel := view.SplitRoot(roots, p.Path)
+		rows[i] = view.FileRow{Root: root, Rel: rel, Cells: []string{p.Retention, p.KeepUntil}}
+	}
+	r.Blank()
+	what := report.Plural(int64(n), "file is now past its", "files are now past their")
+	if dry {
+		what = report.Plural(int64(n), "file would be past its", "files would be past their")
+	}
+	r.Note(view.Attention, what+" retention. Check for a typo, such as 7d for 7y:")
+	r.Files(view.FileList{Columns: []view.Column{{Header: "retention"}, {Header: "until"}}, Rows: rows,
+		Max: max, More: "files", MoreOne: "file"})
 }
 
 // refusalProblems turns the rows the CSV reader refused and the rows or groups the register refused into one list in
