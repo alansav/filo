@@ -503,7 +503,7 @@ func (e *env) confirmClears(ctx context.Context, pr *prompter, roots []string, c
 	}
 	list := func(max int) {
 		r.Files(view.FileList{Columns: []view.Column{{Header: "retention"}, {Header: "until"}}, Rows: rows,
-			Max: limit, More: "files", MoreOne: "file"})
+			Max: max, More: "files", MoreOne: "file"})
 		r.Blank()
 	}
 	r.Note(view.Attention, report.Plural(int64(len(cs)), "row has", "rows have")+" a blank retention where one is "+
