@@ -682,6 +682,29 @@ the paths step to use `ix_paths_file`, and matched SQLite's exact plan wording; 
 check, for every root, a root and a scope, failing without the `+`; `TestFindFilesLinks` unchanged; and timings by
 hand on the throwaway tree.
 
+## Faster tags updates and index pages
+
+A performance review after the stall fix, built 2026-11-25 on branch `improvements`. Profiled on a throwaway tree of
+20,000 tagged files with one tag index. Two changes, picked from the review's list; the others (planner statistics
+with `PRAGMA optimize`, fewer pages, cheaper snapshots, one query for `FileTags`) were left, the first three needing a
+design decision.
+
+- The tags CSV update compiled the same few queries again for each row: a third of its time. `store.stmtCache`
+  prepares each distinct query once in the transaction, and a tag's spelling is looked up once per spelling as
+  written while the rows are checked. `UpdateTags` on 20,000 rows: 2.7 s to 1.2 s.
+- Rendering a changed index was nearly all `html/template`, one page at a time. `tagindex.Render` now makes every
+  page and then executes them on every processor, longest first; the pages are the same bytes. `filo indexes
+  refresh` (and `filo tag` under the index) with 97 MB of pages: 6.0-7.1 s to 2.4 s on 8 processors. What is left is
+  mostly the single largest page (4.3 MB), which renders on one processor.
+
+Commits: the statement cache, the parallel rendering. The code review (medium) found no bug; it found that a failed
+page's name in the error had changed, that the longest-first order ignored pages of rows, and that the cache's
+comment did not say a failed prepare runs the query again uncached: all three fixed. Not done: stopping early when a
+page fails, and a test that the error is the same on every run (a page cannot fail with the embedded template).
+Tests: `TestStmtCache`, a case of a spelling repeated over rows in `TestUpdateTags` (a dry run shows each as written),
+`TestRenderParallel` (one processor and eight give the same pages), the unchanged golden file, the race detector on
+both packages, and timings by hand on the throwaway tree.
+
 ## Notes on decisions
 
 Short notes taken out of `design.md` on 2026-11-17, by the section they were in.
