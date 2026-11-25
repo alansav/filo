@@ -124,7 +124,9 @@ func (s *Store) UpdateTags(ctx context.Context, rows []TagRow, now time.Time, op
 		return res, err
 	}
 	defer tx.Rollback()
+	q := newStmtCache(tx) // the same few queries for each row
 	exports := map[int64]exportInfo{}
+	spelled := map[string]tags.Tag{} // the register does not change while the rows are checked
 	var changes []TagChange
 	for _, r := range rows {
 		ex, ok := exports[r.ExportID]
@@ -134,7 +136,7 @@ func (s *Store) UpdateTags(ctx context.Context, rows []TagRow, now time.Time, op
 			}
 			exports[r.ExportID] = ex
 		}
-		ch, why, err := checkTagRow(ctx, tx, r, ex)
+		ch, why, err := checkTagRow(ctx, q, r, ex, spelled)
 		switch {
 		case err != nil:
 			return res, err
@@ -170,17 +172,17 @@ func (s *Store) UpdateTags(ctx context.Context, rows []TagRow, now time.Time, op
 	}
 	for i, ch := range changes {
 		for _, t := range ch.Removed {
-			if _, err := removeTags(ctx, tx, ch.FileID, tags.Search{Key: t.Key, Value: t.Value}, tagByUpdate,
+			if _, err := removeTags(ctx, q, ch.FileID, tags.Search{Key: t.Key, Value: t.Value}, tagByUpdate,
 				now); err != nil {
 				return res, err
 			}
 		}
 		for j, t := range ch.Added {
-			sp, err := spelling(ctx, tx, t) // again: an earlier row may have removed the tag's only other spelling
+			sp, err := spelling(ctx, q, t) // again: an earlier row may have removed the tag's only other spelling
 			if err != nil {
 				return res, err
 			}
-			if _, err := addTag(ctx, tx, ch.FileID, sp, tagByUpdate, now); err != nil {
+			if _, err := addTag(ctx, q, ch.FileID, sp, tagByUpdate, now); err != nil {
 				return res, err
 			}
 			changes[i].Added[j] = sp
@@ -197,7 +199,8 @@ func (s *Store) UpdateTags(ctx context.Context, rows []TagRow, now time.Time, op
 }
 
 // checkTagRow applies a tags update's rules to one row: what it changes, or why it is refused.
-func checkTagRow(ctx context.Context, tx *sql.Tx, r TagRow, ex exportInfo) (TagChange, string, error) {
+func checkTagRow(ctx context.Context, tx querier, r TagRow, ex exportInfo, spelled map[string]tags.Tag) (TagChange,
+	string, error) {
 	ch := TagChange{FileID: r.FileID}
 	if !ex.found {
 		return ch, fmt.Sprintf("export #%d is not in this register", r.ExportID), nil
@@ -246,9 +249,14 @@ func checkTagRow(ctx context.Context, tx *sql.Tx, r TagRow, ex exportInfo) (TagC
 	}
 	for _, t := range r.Tags {
 		if !slices.ContainsFunc(have, t.Same) {
-			sp, err := spelling(ctx, tx, t) // as the run gives it, so a dry run shows the same
-			if err != nil {
-				return ch, "", err
+			sk := t.Key + "\x00" + t.Value // as written: a spelling not yet in the register is its own
+			sp, ok := spelled[sk]
+			if !ok {
+				var err error
+				if sp, err = spelling(ctx, tx, t); err != nil { // as the run gives it, so a dry run shows the same
+					return ch, "", err
+				}
+				spelled[sk] = sp
 			}
 			ch.Added = append(ch.Added, sp)
 		}
@@ -286,7 +294,7 @@ func sameTags(a, b []tags.Tag) bool {
 }
 
 // fileTagsIn is one file's tags, read in tx, in the order FileTags gives them.
-func fileTagsIn(ctx context.Context, tx *sql.Tx, id int64) ([]tags.Tag, error) {
+func fileTagsIn(ctx context.Context, tx querier, id int64) ([]tags.Tag, error) {
 	out, err := queryAll(ctx, tx, func(rows *sql.Rows) (tags.Tag, error) {
 		var t tags.Tag
 		return t, rows.Scan(&t.Key, &t.Value)

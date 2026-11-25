@@ -217,7 +217,7 @@ func spelling(ctx context.Context, q querier, t tags.Tag) (tags.Tag, error) {
 
 // addTag gives a file a tag, spelled as t is, unless it has it already in any case, and records the change. It
 // reports whether the tag was added.
-func addTag(ctx context.Context, tx *sql.Tx, fileID int64, t tags.Tag, command string, now time.Time) (bool, error) {
+func addTag(ctx context.Context, tx execer, fileID int64, t tags.Tag, command string, now time.Time) (bool, error) {
 	r, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO tags (file_id, key, value, folded, added_utc)
 		VALUES (?, ?, ?, ?, ?)`, fileID, t.Key, t.Value, t.Folded(), utc(now))
 	if err != nil {
@@ -231,7 +231,7 @@ func addTag(ctx context.Context, tx *sql.Tx, fileID int64, t tags.Tag, command s
 
 // removeTags removes from a file the tags q names (q.Value matched ignoring case, never as a pattern) and records
 // each change. It returns how many it removed.
-func removeTags(ctx context.Context, tx *sql.Tx, fileID int64, q tags.Search, command string, now time.Time) (int,
+func removeTags(ctx context.Context, tx execer, fileID int64, q tags.Search, command string, now time.Time) (int,
 	error) {
 	cond, args := ` AND folded = ?`, []any{fileID, q.Key, tags.Fold(q.Value)}
 	if q.AnyValue {
@@ -253,7 +253,7 @@ func removeTags(ctx context.Context, tx *sql.Tx, fileID int64, q tags.Search, co
 }
 
 // recordTagChange adds a row to the tags' history.
-func recordTagChange(ctx context.Context, tx *sql.Tx, kind string, fileID int64, t tags.Tag, command string,
+func recordTagChange(ctx context.Context, tx execer, kind string, fileID int64, t tags.Tag, command string,
 	now time.Time) error {
 	if _, err := tx.ExecContext(ctx, `INSERT INTO tag_changes (kind, file_id, key, value, command, changed_utc)
 		VALUES (?, ?, ?, ?, ?, ?)`, kind, fileID, t.Key, t.Value, command, utc(now)); err != nil {

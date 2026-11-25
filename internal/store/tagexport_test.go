@@ -153,6 +153,31 @@ func TestUpdateTags(t *testing.T) {
 		}
 	})
 
+	t.Run("a spelling repeated over rows: a dry run shows each as written, the run gives the first", func(t *testing.T) {
+		e, id, k := setup(t)
+		rows := []TagRow{
+			{Line: 2, ExportID: id, FileID: k["b"].FileID, Tags: cell(t, "SENDER:british gas; batch:New")},
+			{Line: 3, ExportID: id, FileID: k["c"].FileID, Tags: cell(t, "sender:british gas; batch:NEW")},
+		}
+		res, err := e.s.UpdateTags(e.ctx, rows, tagNow, TagUpdateOptions{DryRun: true})
+		if err != nil || len(res.Changed) != 2 {
+			t.Fatalf("dry run: %+v, %v", res, err)
+		}
+		for i, want := range []string{"sender:British Gas; batch:New", "sender:British Gas; batch:NEW"} {
+			if got := JoinTags(res.Changed[i].Added); got != want {
+				t.Errorf("dry run row %d adds %q, want %q", i, got, want)
+			}
+		}
+		if _, err := e.s.UpdateTags(e.ctx, rows, tagNow, TagUpdateOptions{}); err != nil {
+			t.Fatal(err)
+		}
+		for _, f := range []string{"b", "c"} {
+			if got := e.tagList(k[f].FileID); got != "batch:New; sender:British Gas" {
+				t.Errorf("%s's tags = %q", f, got)
+			}
+		}
+	})
+
 	t.Run("refusals", func(t *testing.T) {
 		e, id, k := setup(t)
 		if _, err := e.s.TagFiles(e.ctx, []int64{k["b"].FileID}, []tags.Tag{mustTag(t, "later")}, tagNow); err != nil {

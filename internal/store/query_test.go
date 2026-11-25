@@ -64,3 +64,58 @@ func TestQueryAll(t *testing.T) {
 		t.Error("a broken query returned no error")
 	}
 }
+
+// TestStmtCache: each distinct query is prepared once and gives what the transaction gives, and a query that cannot
+// be prepared fails as it would on the transaction.
+func TestStmtCache(t *testing.T) {
+	ctx := context.Background()
+	s := mustOpen(t, Options{DBPath: tempDB(t)})
+	defer mustClose(t, s)
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	c := newStmtCache(tx)
+	if _, err := c.ExecContext(ctx, `CREATE TEMP TABLE kv (k INTEGER PRIMARY KEY, v TEXT)`); err != nil {
+		t.Fatal(err)
+	}
+	for i := range 3 {
+		if _, err := c.ExecContext(ctx, `INSERT INTO kv (k, v) VALUES (?, ?)`, i, "v"+strconv.Itoa(i)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i := range 3 {
+		var v string
+		if err := c.QueryRowContext(ctx, `SELECT v FROM kv WHERE k = ?`, i).Scan(&v); err != nil || v != "v"+strconv.Itoa(i) {
+			t.Errorf("row %d: %q, %v", i, v, err)
+		}
+	}
+	vs, err := queryAll(ctx, c, func(rs *sql.Rows) (string, error) {
+		var v string
+		return v, rs.Scan(&v)
+	}, `SELECT v FROM kv ORDER BY k`)
+	if err != nil || strings.Join(vs, ",") != "v0,v1,v2" {
+		t.Errorf("queryAll = %v, %v", vs, err)
+	}
+	var n int
+	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM kv`).Scan(&n); err != nil || n != 3 {
+		t.Errorf("the transaction sees %d rows, %v; want the cache's 3", n, err)
+	}
+	if len(c.stmts) != 4 {
+		t.Errorf("%d statements prepared; want 4, one per distinct query", len(c.stmts))
+	}
+	bad := `SELECT nope FROM kv`
+	if err := c.QueryRowContext(ctx, bad).Scan(&n); err == nil {
+		t.Error("QueryRowContext of a bad query: no error")
+	}
+	if _, err := c.QueryContext(ctx, bad); err == nil {
+		t.Error("QueryContext of a bad query: no error")
+	}
+	if _, err := c.ExecContext(ctx, `DELETE FROM nope`); err == nil {
+		t.Error("ExecContext of a bad query: no error")
+	}
+	if len(c.stmts) != 4 {
+		t.Errorf("%d statements after failed ones; want 4", len(c.stmts))
+	}
+}
