@@ -88,8 +88,9 @@ func (c *stmtCache) QueryContext(ctx context.Context, q string, args ...any) (*s
 	return st.QueryContext(ctx, args...)
 }
 
-// QueryRowContext reports a query that cannot be prepared through the row, as the transaction's own would: the
-// query is run on the transaction, which fails the same way.
+// QueryRowContext reports a query that cannot be prepared through the row, as the transaction's own would: there is
+// no other way to make a *sql.Row carry an error, so the query is run on the transaction, uncached. A query that is
+// wrong fails there the same way; one whose prepare failed for a passing reason may succeed there.
 func (c *stmtCache) QueryRowContext(ctx context.Context, q string, args ...any) *sql.Row {
 	st, err := c.prepare(ctx, q)
 	if err != nil {
