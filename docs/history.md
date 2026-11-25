@@ -728,9 +728,10 @@ hand-written row loops).
 Commits: `IndexFiles` on `TagItems`, the sheet parts, the CSVs using them, `nowPast`. The code review (medium) found
 no bug; two nits (`sheet.Problem`'s comment named only updates; `nowPast`'s parameter `max` hid the built-in) were
 fixed. The rename of `max` was made by a text replacement that also changed the same text in the clears list, and
-was committed without the checks passing: commit `18a463f` does not build, and the commit after it fixes it. Left
-open, found by the review and older than this work: with a root at `/`, `FileCells` writes a directory cell such as
-`//etc`. Tests: `TestNewWriter`, `TestFileCells`, `TestReadIDs`; the CSV golden files and the message tests of the
+was committed without the checks passing: commit `18a463f` does not build, and the commit after it fixes it. Found
+by the review and older than this work: with a root at `/`, the CSVs wrote a directory cell such as `//etc`;
+`FileCells` now joins with `filepath.Join` (fixed after the series, at the user's request, with two cases added to
+`TestFileCells`). Tests: `TestNewWriter`, `TestFileCells`, `TestReadIDs`; the CSV golden files and the message tests of the
 retention and tags updates, unchanged.
 
 ## Notes on decisions
