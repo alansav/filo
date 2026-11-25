@@ -7,8 +7,11 @@ import (
 	"html/template"
 	"net/url"
 	"path"
+	"runtime"
+	"slices"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/alansav/filo/internal/tags"
 )
@@ -57,49 +60,96 @@ type Pages struct {
 // one for the bare tags), a page per tag, and the pages of the files with no tag and with none of a key's values,
 // where there are any (docs/design.md, Tag index pages, "Pages").
 func Render(d Data) (Pages, error) {
-	r := renderer{d: d, dir: "." + d.Name, out: Pages{Files: map[string][]byte{}}}
+	r := renderer{d: d, dir: "." + d.Name, out: Pages{Files: map[string][]byte{}}, pages: map[string]string{}}
+	for _, k := range append(append([]Key(nil), d.Keys...), d.Bare) {
+		for _, v := range k.Values {
+			r.pages[v.Tag.Key+"\x00"+v.Tag.Folded()] = v.Page
+		}
+	}
 	style, err := assets.ReadFile("assets/style.css")
 	if err != nil {
 		return Pages{}, err
 	}
 	r.out.Dirs = append(r.out.Dirs, r.dir)
 	r.out.Files[r.dir+"/"+Style] = style
-	if err := r.main(); err != nil {
-		return Pages{}, err
-	}
+	r.main()
 	if len(d.Untagged) > 0 {
 		p := r.base(1, link{Text: "no tags"})
 		p.Heading = "No tags"
 		p.Counts = count(len(d.Untagged), "file has", "files have") + " no tags"
 		p.Files = r.files(1, d.Untagged, tags.Tag{}, false)
-		if err := r.write(Untagged, p); err != nil {
-			return Pages{}, err
-		}
+		r.write(Untagged, p)
 	}
 	for _, k := range append(append([]Key(nil), d.Keys...), d.Bare) {
 		if len(k.Values) == 0 {
 			continue
 		}
-		if err := r.key(k); err != nil {
-			return Pages{}, err
-		}
+		r.key(k)
+	}
+	if err := r.execute(); err != nil {
+		return Pages{}, err
 	}
 	return r.out, nil
 }
 
 type renderer struct {
-	d   Data
-	dir string // the pages directory, .NAME
-	out Pages
+	d     Data
+	dir   string // the pages directory, .NAME
+	out   Pages
+	pages map[string]string // a tag's key and folded value -> its page, relative to the pages directory
+	todo  []pageJob         // the pages made, rendered together by execute
 }
 
-// write renders p to rel, a path relative to the pages directory.
-func (r *renderer) write(rel string, p page) error {
-	var b bytes.Buffer
-	if err := pageTemplate.Execute(&b, p); err != nil {
-		return fmt.Errorf("render %s: %w", rel, err)
+// pageJob is a page to render to name, a path relative to the index's directory.
+type pageJob struct {
+	name string
+	p    page
+}
+
+// write adds p, to be rendered to rel, a path relative to the pages directory, by execute.
+func (r *renderer) write(rel string, p page) {
+	r.todo = append(r.todo, pageJob{name: path.Join(r.dir, rel), p: p})
+}
+
+// execute renders every page made, on as many goroutines as there are processors: rendering is most of the time
+// a changed index takes, and each page stands alone. The error is the first page's that failed, in the order the
+// pages were made, so it is the same on every run.
+func (r *renderer) execute() error {
+	out := make([][]byte, len(r.todo))
+	errs := make([]error, len(r.todo))
+	next := make(chan int)
+	var wg sync.WaitGroup
+	for range min(runtime.GOMAXPROCS(0), len(r.todo)) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range next {
+				var b bytes.Buffer
+				if err := pageTemplate.Execute(&b, r.todo[i].p); err != nil {
+					errs[i] = fmt.Errorf("render %s: %w", r.todo[i].name, err)
+					continue
+				}
+				out[i] = b.Bytes()
+			}
+		}()
 	}
-	r.out.Files[path.Join(r.dir, rel)] = b.Bytes()
+	// The longest pages first, so that none is left to render alone at the end.
+	order := make([]int, len(r.todo))
+	for i := range order {
+		order[i] = i
+	}
+	slices.SortStableFunc(order, func(a, b int) int { return len(r.todo[b].p.Files) - len(r.todo[a].p.Files) })
+	for _, i := range order {
+		next <- i
+	}
+	close(next)
+	wg.Wait()
+	for i, j := range r.todo {
+		if errs[i] != nil {
+			return errs[i]
+		}
+		r.out.Files[j.name] = out[i]
+	}
 	return nil
 }
 
@@ -133,7 +183,7 @@ func (r *renderer) base(depth int, trail ...link) page {
 	return p
 }
 
-func (r *renderer) main() error {
+func (r *renderer) main() {
 	p := page{Title: r.d.Title, Style: href(0, r.dir+"/"+Style), Heading: r.d.Title, Trail: []link{{Text: r.d.Title}}}
 	for _, k := range r.d.Keys {
 		p.Rows = append(p.Rows, row{Text: k.Key, Href: href(0, r.dir+"/"+k.Dir+"/"+KeyPage),
@@ -152,16 +202,11 @@ func (r *renderer) main() error {
 	if n := len(r.d.Untagged); n > 0 {
 		p.Note = &link{Text: count(n, "file has", "files have") + " no tags", Href: href(0, r.dir+"/"+Untagged)}
 	}
-	var b bytes.Buffer
-	if err := pageTemplate.Execute(&b, p); err != nil {
-		return fmt.Errorf("render %s.html: %w", r.d.Name, err)
-	}
-	r.out.Files[r.d.Name+".html"] = b.Bytes()
-	return nil
+	r.todo = append(r.todo, pageJob{name: r.d.Name + ".html", p: p})
 }
 
 // key writes a key's page (the bare tags' for Key ""), each of its tags' pages, and its "no …" page.
-func (r *renderer) key(k Key) error {
+func (r *renderer) key(k Key) {
 	r.out.Dirs = append(r.out.Dirs, path.Join(r.dir, k.Dir))
 	name := k.Key
 	if name == "" {
@@ -181,39 +226,26 @@ func (r *renderer) key(k Key) error {
 	if len(k.None) > 0 {
 		p.Note = &link{Text: count(len(k.None), "file has", "files have") + " no " + k.Key + " tag", Href: "./" + None}
 	}
-	if err := r.write(path.Join(k.Dir, KeyPage), p); err != nil {
-		return err
-	}
+	r.write(path.Join(k.Dir, KeyPage), p)
 	for _, v := range k.Values {
 		p := r.base(2, keyLink, link{Text: v.Tag.Value})
 		p.Heading = v.Tag.String()
 		p.Counts = count(len(v.Files), "file", "files")
 		p.Files = r.files(2, v.Files, v.Tag, true)
-		if err := r.write(v.Page, p); err != nil {
-			return err
-		}
+		r.write(v.Page, p)
 	}
 	if len(k.None) > 0 {
 		p := r.base(2, keyLink, link{Text: "no " + k.Key})
 		p.Heading = "No " + k.Key + " tag"
 		p.Counts = count(len(k.None), "file has", "files have") + " no " + k.Key + " tag"
 		p.Files = r.files(2, k.None, tags.Tag{}, false)
-		if err := r.write(path.Join(k.Dir, None), p); err != nil {
-			return err
-		}
+		r.write(path.Join(k.Dir, None), p)
 	}
-	return nil
 }
 
 // files are the rows of the files at positions in Data.Files, on a page depth directories below the index's
 // directory, each with its tags but the page's own (skip, when skipping).
 func (r *renderer) files(depth int, positions []int, own tags.Tag, skip bool) []fileRow {
-	pages := map[string]string{} // key and folded value -> page, relative to the pages directory
-	for _, k := range append(append([]Key(nil), r.d.Keys...), r.d.Bare) {
-		for _, v := range k.Values {
-			pages[v.Tag.Key+"\x00"+v.Tag.Folded()] = v.Page
-		}
-	}
 	var out []fileRow
 	for _, i := range positions {
 		f := r.d.Files[i]
@@ -225,7 +257,7 @@ func (r *renderer) files(depth int, positions []int, own tags.Tag, skip bool) []
 			if skip && t.Same(own) {
 				continue
 			}
-			fr.Tags = append(fr.Tags, link{Text: t.String(), Href: up(depth-1) + pages[t.Key+"\x00"+t.Folded()]})
+			fr.Tags = append(fr.Tags, link{Text: t.String(), Href: up(depth-1) + r.pages[t.Key+"\x00"+t.Folded()]})
 		}
 		out = append(out, fr)
 	}

@@ -5,7 +5,9 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -73,6 +75,36 @@ func TestRender(t *testing.T) {
 			strings.Contains(string(b), "<script") {
 			t.Errorf("%s reaches out or runs a script", name)
 		}
+	}
+}
+
+// TestRenderParallel: the pages are rendered on several goroutines; what they are does not depend on how many.
+func TestRenderParallel(t *testing.T) {
+	may := time.Date(2026, 5, 1, 23, 30, 0, 0, time.UTC)
+	var files []store.IndexFile
+	for i := range 300 {
+		n := strconv.Itoa(i)
+		files = append(files, file(t, "bills/"+strconv.Itoa(i%7)+"/f"+n+".pdf", "", may,
+			"sender:S"+strconv.Itoa(i%11), "type:T"+strconv.Itoa(i%5), "b"+strconv.Itoa(i%3)))
+	}
+	files = append(files, file(t, "bills/none.pdf", "", may))
+	d, err := Build(bills, files)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer runtime.GOMAXPROCS(runtime.GOMAXPROCS(1))
+	one, err := Render(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime.GOMAXPROCS(8)
+	many, err := Render(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(one.Files) < 20 || joined(one) != joined(many) {
+		t.Errorf("%d pages on one processor, %d on eight; the same: %v", len(one.Files), len(many.Files),
+			joined(one) == joined(many))
 	}
 }
 
