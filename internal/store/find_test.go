@@ -199,12 +199,20 @@ func TestFindFilesLinkCountUsesInodeIndex(t *testing.T) {
 			if err := rows.Err(); err != nil {
 				t.Fatal(err)
 			}
-			// The subquery's steps follow its line; the first must search files by inode, and none paths by root.
-			i := slices.Index(plan, "CORRELATED SCALAR SUBQUERY 1")
-			if i < 0 || i+1 >= len(plan) || !strings.HasPrefix(plan[i+1], "SEARCH lf USING ") ||
-				!strings.Contains(plan[i+1], "INDEX ix_files_inode (inode=?)") ||
-				slices.ContainsFunc(plan[i+1:], func(l string) bool { return strings.Contains(l, "ux_paths_current") }) {
-				t.Errorf("the link count does not search by inode:\n%s", strings.Join(plan, "\n"))
+			// The subquery's steps follow its line, up to the next line that is not a step: they must search files by
+			// inode, then paths by file. The wording is the bundled SQLite's, and may change with its version.
+			var steps []string
+			if i := slices.IndexFunc(plan, func(l string) bool { return strings.Contains(l, "SUBQUERY") }); i >= 0 {
+				for _, l := range plan[i+1:] {
+					if !strings.HasPrefix(l, "SEARCH") && !strings.HasPrefix(l, "SCAN") {
+						break
+					}
+					steps = append(steps, l)
+				}
+			}
+			if len(steps) != 2 || !strings.Contains(steps[0], "lf") || !strings.Contains(steps[0], "ix_files_inode") ||
+				!strings.Contains(steps[1], "lp") || !strings.Contains(steps[1], "ix_paths_file") {
+				t.Errorf("the link count does not search files by inode, then their paths:\n%s", strings.Join(plan, "\n"))
 			}
 		})
 	}
