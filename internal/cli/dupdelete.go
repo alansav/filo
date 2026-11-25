@@ -659,7 +659,7 @@ type dupList struct {
 	csv      string
 	exports  []int64
 	jobs     []*dupJob
-	problems []duplicates.Problem
+	problems []sheet.Problem
 	links    map[string][]string
 }
 

@@ -4,11 +4,9 @@
 package tagcsv
 
 import (
-	"encoding/csv"
 	"errors"
 	"fmt"
 	"io"
-	"path"
 	"strconv"
 	"strings"
 	"time"
@@ -55,25 +53,15 @@ func LostTags(data []byte) bool {
 
 // WriteCSV writes items as one export, each with its tags cell. Times are shown in loc.
 func WriteCSV(w io.Writer, exportID int64, items []store.TagItem, loc *time.Location) error {
-	if _, err := io.WriteString(w, sheet.BOM); err != nil {
-		return err
-	}
-	cw := csv.NewWriter(w)
-	if err := cw.Write(Header); err != nil {
+	cw, err := sheet.NewWriter(w, Header)
+	if err != nil {
 		return err
 	}
 	ex := strconv.FormatInt(exportID, 10)
 	for _, it := range items {
-		dir, name := path.Split(it.Rel)
-		directory := it.Root
-		if dir = strings.TrimSuffix(dir, "/"); dir != "" {
-			directory = it.Root + "/" + dir
-		}
-		rec := []string{
-			strconv.FormatInt(it.FileID, 10), ex, sheet.Cell(directory), sheet.Cell(name),
-			strconv.FormatInt(it.Size, 10), time.Unix(0, it.MtimeNS).In(loc).Format("2006-01-02 15:04"),
-			guardCell(store.JoinTags(it.Tags)),
-		}
+		rec := append([]string{strconv.FormatInt(it.FileID, 10), ex},
+			sheet.FileCells(it.Root, it.Rel, it.Size, it.MtimeNS, loc)...)
+		rec = append(rec, guardCell(store.JoinTags(it.Tags)))
 		if err := cw.Write(rec); err != nil {
 			return err
 		}
@@ -82,16 +70,10 @@ func WriteCSV(w io.Writer, exportID int64, items []store.TagItem, loc *time.Loca
 	return cw.Error()
 }
 
-// Problem is a row the update refuses before it reaches the register.
-type Problem struct {
-	Line int
-	Msg  string
-}
-
 // Parsed is what ParseCSV found.
 type Parsed struct {
 	Rows     []store.TagRow // every readable row; the register decides which changed
-	Problems []Problem
+	Problems []sheet.Problem
 }
 
 // ParseCSV reads an edited tags CSV already read (with sheet.ReadFile), as spreadsheets save it (see package sheet).
@@ -112,20 +94,11 @@ func ParseCSV(data []byte) (Parsed, error) {
 	}
 	err := sh.Each(func(row sheet.Row) {
 		bad := func(format string, args ...any) {
-			p.Problems = append(p.Problems, Problem{row.Line, fmt.Sprintf(format, args...)})
+			p.Problems = append(p.Problems, sheet.Problem{Line: row.Line, Msg: fmt.Sprintf(format, args...)})
 		}
-		id, idErr := strconv.ParseInt(row.Get("id"), 10, 64)
-		ex, exErr := strconv.ParseInt(row.Get("export"), 10, 64)
-		switch {
-		case idErr != nil || id < 1:
-			bad("id %q is not a file ID", row.Get("id"))
-			return
-		case exErr != nil || ex < 1:
-			bad("export %q is not an export number", row.Get("export"))
-			return
-		}
-		if v := row.Beyond(); v != "" {
-			bad("%q is outside the columns; put it under tags", v)
+		id, ex, problem := sheet.ReadIDs(row, "tags")
+		if problem != "" {
+			bad("%s", problem)
 			return
 		}
 		ts, err := ParseCell(row.Get("tags"))
@@ -142,7 +115,8 @@ func ParseCSV(data []byte) (Parsed, error) {
 	// it had before either.
 	p.Rows = sheet.DropRepeated(p.Rows, func(r store.TagRow) int64 { return r.FileID },
 		func(r store.TagRow) {
-			p.Problems = append(p.Problems, Problem{r.Line, fmt.Sprintf("file %d is listed more than once", r.FileID)})
+			p.Problems = append(p.Problems, sheet.Problem{Line: r.Line,
+				Msg: fmt.Sprintf("file %d is listed more than once", r.FileID)})
 		})
 	return p, nil
 }

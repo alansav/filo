@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/alansav/filo/internal/report"
-	"github.com/alansav/filo/internal/retention"
 	"github.com/alansav/filo/internal/store"
 	"github.com/alansav/filo/internal/tagcsv"
 	"github.com/alansav/filo/internal/view"
@@ -111,11 +110,7 @@ func (e *env) updateTags(ctx context.Context, db, path string, data []byte, dry,
 		return interruptedUpdate(err)
 	}
 
-	problems := make([]retention.Problem, len(parsed.Problems))
-	for i, p := range parsed.Problems {
-		problems[i] = retention.Problem{Line: p.Line, Msg: p.Msg}
-	}
-	refused := refusalProblems(roots, problems, res.Refusals)
+	refused := refusalProblems(roots, parsed.Problems, res.Refusals)
 	if n := len(res.Changed); n > 0 {
 		what := pluralWord(n, " had its tags changed", " had their tags changed")
 		if dry {

@@ -7,11 +7,9 @@ package duplicates
 
 import (
 	"cmp"
-	"encoding/csv"
 	"errors"
 	"fmt"
 	"io"
-	"path"
 	"slices"
 	"strconv"
 	"strings"
@@ -77,11 +75,8 @@ func ParseAction(s string) (Action, error) {
 // blank, except keep on a copy that is one of a set of records: a new copy of records is exported with them (F3),
 // to delete or to keep and join the set. Times are shown in loc.
 func WriteCSV(w io.Writer, exportID int64, groups []store.DupContent, loc *time.Location) error {
-	if _, err := io.WriteString(w, sheet.BOM); err != nil {
-		return err
-	}
-	cw := csv.NewWriter(w)
-	if err := cw.Write(Header); err != nil {
+	cw, err := sheet.NewWriter(w, Header)
+	if err != nil {
 		return err
 	}
 	ex := strconv.FormatInt(exportID, 10)
@@ -89,20 +84,13 @@ func WriteCSV(w io.Writer, exportID int64, groups []store.DupContent, loc *time.
 		group := strconv.Itoa(i + 1)
 		copies := strconv.Itoa(len(g.Copies))
 		for _, c := range g.Copies {
-			dir, name := path.Split(c.Path)
-			directory := c.RootPath
-			if dir = strings.TrimSuffix(dir, "/"); dir != "" {
-				directory = c.RootPath + "/" + dir
-			}
 			action := ""
 			if c.RecordSet != 0 {
 				action = Keep.String()
 			}
-			rec := []string{
-				strconv.FormatInt(c.FileID, 10), ex, group, copies, sheet.Cell(directory), sheet.Cell(name),
-				strconv.FormatInt(c.Size, 10), time.Unix(0, c.MtimeNS).In(loc).Format("2006-01-02 15:04"),
-				c.FileDate, c.Retention, c.KeepUntil, action,
-			}
+			rec := append([]string{strconv.FormatInt(c.FileID, 10), ex, group, copies},
+				sheet.FileCells(c.RootPath, c.Path, c.Size, c.MtimeNS, loc)...)
+			rec = append(rec, c.FileDate, c.Retention, c.KeepUntil, action)
 			if err := cw.Write(rec); err != nil {
 				return err
 			}
@@ -125,16 +113,10 @@ type Row struct {
 	Bad    string // why the row could not be read ("" if it could)
 }
 
-// Problem is a row that cannot be tied to a group (its export or group cell cannot be read).
-type Problem struct {
-	Line int
-	Msg  string
-}
-
 // Parsed is what ReadCSV found.
 type Parsed struct {
 	Rows     []Row
-	Problems []Problem
+	Problems []sheet.Problem // rows that cannot be tied to a group (their export or group cell cannot be read)
 }
 
 // ReadCSV reads an edited duplicates CSV, as spreadsheets save it (see package sheet). A CSV of the first design, a
@@ -172,11 +154,11 @@ func ParseCSV(data []byte) (Parsed, error) {
 		group, gErr := strconv.ParseInt(row.Get("group"), 10, 64)
 		switch {
 		case exErr != nil || ex < 1:
-			p.Problems = append(p.Problems, Problem{row.Line, fmt.Sprintf("export %q is not an export number",
+			p.Problems = append(p.Problems, sheet.Problem{Line: row.Line, Msg: fmt.Sprintf("export %q is not an export number",
 				row.Get("export"))})
 			return
 		case gErr != nil || group < 1:
-			p.Problems = append(p.Problems, Problem{row.Line, fmt.Sprintf("group %q is not a group number",
+			p.Problems = append(p.Problems, sheet.Problem{Line: row.Line, Msg: fmt.Sprintf("group %q is not a group number",
 				row.Get("group"))})
 			return
 		}
@@ -224,7 +206,7 @@ type GroupPlan struct {
 // from another export or duplicated) refuses every group it touches: the group in its cell and the group it was
 // exported in. The other groups are planned as usual. Groups are found by their export and group cells, not by the
 // order of the rows, so a sorted CSV is fine. Problems are the rows that cannot be tied to any group.
-func Plan(p Parsed, exported map[int64]map[int64]int64) ([]GroupPlan, []Problem) {
+func Plan(p Parsed, exported map[int64]map[int64]int64) ([]GroupPlan, []sheet.Problem) {
 	plans := map[GroupKey]*GroupPlan{}
 	get := func(k GroupKey) *GroupPlan {
 		if plans[k] == nil {

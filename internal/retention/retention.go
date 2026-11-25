@@ -4,11 +4,9 @@
 package retention
 
 import (
-	"encoding/csv"
 	"errors"
 	"fmt"
 	"io"
-	"path"
 	"strconv"
 	"strings"
 	"time"
@@ -192,24 +190,15 @@ func Today(t time.Time) string { return t.Format(dateLayout) }
 // WriteCSV writes items as one export: the file_date, retention and keep_until they carry (the caller fills in
 // file_date from the name first, and records the same values with the export). Times are shown in loc.
 func WriteCSV(w io.Writer, exportID int64, items []store.FileItem, loc *time.Location) error {
-	if _, err := io.WriteString(w, sheet.BOM); err != nil {
-		return err
-	}
-	cw := csv.NewWriter(w)
-	if err := cw.Write(Header); err != nil {
+	cw, err := sheet.NewWriter(w, Header)
+	if err != nil {
 		return err
 	}
 	ex := strconv.FormatInt(exportID, 10)
 	for _, it := range items {
-		dir, name := path.Split(it.Path)
-		directory := it.RootPath
-		if dir = strings.TrimSuffix(dir, "/"); dir != "" {
-			directory = it.RootPath + "/" + dir
-		}
-		rec := []string{
-			strconv.FormatInt(it.FileID, 10), ex, sheet.Cell(directory), sheet.Cell(name), strconv.FormatInt(it.Size, 10),
-			time.Unix(0, it.MtimeNS).In(loc).Format("2006-01-02 15:04"), it.FileDate, it.Retention, it.KeepUntil,
-		}
+		rec := append([]string{strconv.FormatInt(it.FileID, 10), ex},
+			sheet.FileCells(it.RootPath, it.Path, it.Size, it.MtimeNS, loc)...)
+		rec = append(rec, it.FileDate, it.Retention, it.KeepUntil)
 		if err := cw.Write(rec); err != nil {
 			return err
 		}
@@ -218,16 +207,10 @@ func WriteCSV(w io.Writer, exportID int64, items []store.FileItem, loc *time.Loc
 	return cw.Error()
 }
 
-// Problem is a row the update refuses before it reaches the register.
-type Problem struct {
-	Line int
-	Msg  string
-}
-
 // Parsed is what ReadCSV found.
 type Parsed struct {
 	Rows     []store.RetentionRow // every readable row; the register decides which changed
-	Problems []Problem
+	Problems []sheet.Problem
 }
 
 var (
@@ -273,20 +256,11 @@ func ParseCSV(data []byte) (Parsed, error) {
 
 	err := sh.Each(func(row sheet.Row) {
 		bad := func(format string, args ...any) {
-			p.Problems = append(p.Problems, Problem{row.Line, fmt.Sprintf(format, args...)})
+			p.Problems = append(p.Problems, sheet.Problem{Line: row.Line, Msg: fmt.Sprintf(format, args...)})
 		}
-		id, idErr := strconv.ParseInt(row.Get("id"), 10, 64)
-		ex, exErr := strconv.ParseInt(row.Get("export"), 10, 64)
-		switch {
-		case idErr != nil || id < 1:
-			bad("id %q is not a file ID", row.Get("id"))
-			return
-		case exErr != nil || ex < 1:
-			bad("export %q is not an export number", row.Get("export"))
-			return
-		}
-		if v := row.Beyond(); v != "" {
-			bad("%q is outside the columns; put it under file_date or retention", v)
+		id, ex, problem := sheet.ReadIDs(row, "file_date or retention")
+		if problem != "" {
+			bad("%s", problem)
 			return
 		}
 		rr := store.RetentionRow{Line: row.Line, ExportID: ex, FileID: id}
@@ -316,8 +290,8 @@ func ParseCSV(data []byte) (Parsed, error) {
 	}
 	p.Rows = sheet.DropRepeated(p.Rows, func(r store.RetentionRow) [2]int64 { return [2]int64{r.ExportID, r.FileID} },
 		func(r store.RetentionRow) {
-			p.Problems = append(p.Problems, Problem{r.Line,
-				fmt.Sprintf("file %d of export #%d is listed more than once", r.FileID, r.ExportID)})
+			p.Problems = append(p.Problems, sheet.Problem{Line: r.Line,
+				Msg: fmt.Sprintf("file %d of export #%d is listed more than once", r.FileID, r.ExportID)})
 		})
 	return p, nil
 }

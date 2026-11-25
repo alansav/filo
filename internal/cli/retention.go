@@ -451,7 +451,7 @@ func retentionExports(rows []store.RetentionRow) []int64 {
 // refusalProblems turns the rows the CSV reader refused and the rows or groups the register refused into one list in
 // CSV line order, each file shown relative to its root and each group in the group column. When the CSV mixes rows
 // from several exports, a group's reason names its export too, since a group number alone would be ambiguous.
-func refusalProblems(roots []string, problems []retention.Problem, refusals []store.Refusal) []view.Problem {
+func refusalProblems(roots []string, problems []sheet.Problem, refusals []store.Refusal) []view.Problem {
 	exports := map[int64]bool{}
 	for _, rf := range refusals {
 		if rf.Export != 0 {
