@@ -53,7 +53,7 @@ func FileCells(root, rel string, size, mtimeNS int64, loc *time.Location) []stri
 		time.Unix(0, mtimeNS).In(loc).Format("2006-01-02 15:04")}
 }
 
-// Problem is a row an update refuses before it reaches the register.
+// Problem is a row of an edited CSV that is refused before it reaches the register.
 type Problem struct {
 	Line int
 	Msg  string
