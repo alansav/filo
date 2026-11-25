@@ -705,6 +705,34 @@ Tests: `TestStmtCache`, a case of a spelling repeated over rows in `TestUpdateTa
 `TestRenderParallel` (one processor and eight give the same pages), the unchanged golden file, the race detector on
 both packages, and timings by hand on the throwaway tree.
 
+## Duplicated code merged
+
+A review for duplicated lines, built 2026-11-25 on branch `improvements`. A scan for runs of six or more identical
+lines in the non-test code found little copying; most runs were import blocks, OS-specific twins and a migration's
+copy of a table, all left as they are. Three were merged:
+
+- The retention, tags and duplicates CSVs each wrote the byte order mark and header, and a file's directory, name,
+  size and modified cells, themselves; the retention and tags updates each read the id and export and checked for
+  text past the columns; and three packages had the same `Problem` type. These are now `sheet.NewWriter`,
+  `sheet.FileCells`, `sheet.ReadIDs` and `sheet.Problem` (the tags update no longer copies its problems into
+  retention's to list them).
+- `filo set` and `filo update` each built the "now past its retention" list; both call `nowPast`. The update, from a
+  CSV, shows the first ten in a terminal; `filo set`, a command naming its files, shows every one (the user's
+  decision, now in `design.md`).
+- `store.IndexFiles` repeated `TagItems`' steps; it calls it.
+
+Proposed and not done: one helper for the "all, select, list, none" question that `filo delete` and `filo delete
+FILE.csv` each have (the destructive path, left for a separate decision), and smaller ones (the prompter setup,
+hand-written row loops).
+
+Commits: `IndexFiles` on `TagItems`, the sheet parts, the CSVs using them, `nowPast`. The code review (medium) found
+no bug; two nits (`sheet.Problem`'s comment named only updates; `nowPast`'s parameter `max` hid the built-in) were
+fixed. The rename of `max` was made by a text replacement that also changed the same text in the clears list, and
+was committed without the checks passing: commit `18a463f` does not build, and the commit after it fixes it. Left
+open, found by the review and older than this work: with a root at `/`, `FileCells` writes a directory cell such as
+`//etc`. Tests: `TestNewWriter`, `TestFileCells`, `TestReadIDs`; the CSV golden files and the message tests of the
+retention and tags updates, unchanged.
+
 ## Notes on decisions
 
 Short notes taken out of `design.md` on 2026-11-17, by the section they were in.
