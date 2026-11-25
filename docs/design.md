@@ -1466,8 +1466,10 @@ the tool for many). Replaces "Later b, setting dates in place".
   ```
 
   A file left past its retention is listed after `Done` with the update's typo hint ("Check for a typo, such as 7d
-  for 7y"), then "Nothing has been deleted. Next: filo delete". Clearing (`--no-retention`) asks in the same shape,
-  adding "they will need a retention again". `--duplicates` names the content and every copy it covers:
+  for 7y"), every one of them (the update, from a CSV, shows the first ten in a terminal; `filo set` is a command
+  naming its files, so it shows every file it affected), then "Nothing has been deleted. Next: filo delete".
+  Clearing (`--no-retention`) asks in the same shape, adding "they will need a retention again". `--duplicates`
+  names the content and every copy it covers:
 
   ```
   Done   always . 1 content . applies to 3 copies

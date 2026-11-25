@@ -172,7 +172,7 @@ func (e *env) set(ctx context.Context, dbBefore string, args []string) error {
 				"it has one")
 		}
 	}
-	nowPast(r, roots, res.NowPast, *dry, 0) // all of them, where the update shows the first ten in a terminal
+	nowPast(r, roots, res.NowPast, *dry, 0) // every one: a command shows every file it affected, unlike the CSV update
 	switch {
 	case *dry:
 		r.Blank()
