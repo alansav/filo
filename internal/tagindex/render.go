@@ -126,19 +126,21 @@ func (r *renderer) execute() error {
 			for i := range next {
 				var b bytes.Buffer
 				if err := pageTemplate.Execute(&b, r.todo[i].p); err != nil {
-					errs[i] = fmt.Errorf("render %s: %w", r.todo[i].name, err)
+					// Named as before: relative to the pages directory, the main page by its own name.
+					errs[i] = fmt.Errorf("render %s: %w", strings.TrimPrefix(r.todo[i].name, r.dir+"/"), err)
 					continue
 				}
 				out[i] = b.Bytes()
 			}
 		}()
 	}
-	// The longest pages first, so that none is left to render alone at the end.
+	// The longest pages first (files or rows), so that none is left to render alone at the end.
 	order := make([]int, len(r.todo))
 	for i := range order {
 		order[i] = i
 	}
-	slices.SortStableFunc(order, func(a, b int) int { return len(r.todo[b].p.Files) - len(r.todo[a].p.Files) })
+	size := func(i int) int { return len(r.todo[i].p.Files) + len(r.todo[i].p.Rows) }
+	slices.SortStableFunc(order, func(a, b int) int { return size(b) - size(a) })
 	for _, i := range order {
 		next <- i
 	}
