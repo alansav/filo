@@ -276,17 +276,13 @@ type IndexFile struct {
 // its own (a hard link too), with its file_date and tags, ordered by path (docs/design.md, Tag index pages, "The
 // files"). Missing files, files deleted by filo and symlinks are not among them.
 func (s *Store) IndexFiles(ctx context.Context, rootID int64, dir string) ([]IndexFile, error) {
-	fs, err := s.FindFiles(ctx, rootID, dir)
+	fs, err := s.TagItems(ctx, rootID, dir)
 	if err != nil {
 		return nil, err
 	}
 	ids := make([]int64, len(fs))
 	for i, f := range fs {
 		ids[i] = f.FileID
-	}
-	ts, err := s.FileTags(ctx, ids)
-	if err != nil {
-		return nil, err
 	}
 	dates := map[int64]string{}
 	err = inBatches(ids, func(in string, args []any) error {
@@ -311,7 +307,7 @@ func (s *Store) IndexFiles(ctx context.Context, rootID int64, dir string) ([]Ind
 	}
 	out := make([]IndexFile, len(fs))
 	for i, f := range fs {
-		out[i] = IndexFile{Rel: f.Rel, MtimeNS: f.MtimeNS, FileDate: dates[f.FileID], Tags: ts[f.FileID]}
+		out[i] = IndexFile{Rel: f.Rel, MtimeNS: f.MtimeNS, FileDate: dates[f.FileID], Tags: f.Tags}
 	}
 	return out, nil
 }
