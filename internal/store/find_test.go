@@ -4,6 +4,7 @@ import (
 	"context"
 	"maps"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 )
@@ -150,5 +151,61 @@ func TestFindFilesLinks(t *testing.T) {
 	want := map[string]int{"in/x.pdf": 1, "in/stale.pdf": 0, "in/no inode.pdf": 0, "in/other no inode.pdf": 0}
 	if !maps.Equal(links, want) {
 		t.Errorf("links = %v, want %v", links, want)
+	}
+}
+
+// TestFindFilesLinkCountUsesInodeIndex: the hard-link count searches files by inode, not every current path of the
+// root once per file (which took minutes on a root of 20,000 files). The plan is the bundled SQLite's, with the
+// statistics a register has (none).
+func TestFindFilesLinkCountUsesInodeIndex(t *testing.T) {
+	ctx := context.Background()
+	s := mustOpen(t, Options{DBPath: tempDB(t)})
+	defer mustClose(t, s)
+	r, err := s.AddRoot(ctx, tree(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ApplyScan(ctx, ScanRecord{RootID: r.ID, Started: time.Now()}, Changes{New: []NewFile{
+		{Path: "a/x.pdf", Kind: "file", Size: 5, MtimeNS: 9, Hash: "h", Ino: 42},
+		{Path: "b/x.pdf", Kind: "file", Size: 5, MtimeNS: 9, Hash: "h", Ino: 42},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name   string
+		rootID int64
+		scope  string
+	}{
+		{"every root", 0, ""},
+		{"a root", r.ID, ""},
+		{"a scope", r.ID, "a"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			query, args := findFilesQuery(tc.rootID, tc.scope)
+			rows, err := s.db.QueryContext(ctx, "EXPLAIN QUERY PLAN "+query, args...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer rows.Close()
+			var plan []string
+			for rows.Next() {
+				var id, parent, unused int
+				var detail string
+				if err := rows.Scan(&id, &parent, &unused, &detail); err != nil {
+					t.Fatal(err)
+				}
+				plan = append(plan, detail)
+			}
+			if err := rows.Err(); err != nil {
+				t.Fatal(err)
+			}
+			// The subquery's steps follow its line; the first must search files by inode, and none paths by root.
+			i := slices.Index(plan, "CORRELATED SCALAR SUBQUERY 1")
+			if i < 0 || i+1 >= len(plan) || !strings.HasPrefix(plan[i+1], "SEARCH lf USING ") ||
+				!strings.Contains(plan[i+1], "INDEX ix_files_inode (inode=?)") ||
+				slices.ContainsFunc(plan[i+1:], func(l string) bool { return strings.Contains(l, "ux_paths_current") }) {
+				t.Errorf("the link count does not search by inode:\n%s", strings.Join(plan, "\n"))
+			}
+		})
 	}
 }
