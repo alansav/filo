@@ -1,6 +1,6 @@
 // Package sheet writes and reads the CSV files filo exports for editing in a spreadsheet, accepting what spreadsheets
 // do to them: a byte order mark, CRLF line ends, ';' or tab as the separator, columns moved or added, and empty
-// rows. Packages retention and duplicates hold what their columns mean.
+// rows. Packages retention, tagcsv and duplicates hold what their columns mean.
 package sheet
 
 import (
@@ -10,7 +10,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
+	"strconv"
 	"strings"
+	"time"
 )
 
 // BOM marks the file as UTF-8 for spreadsheets that would otherwise guess another encoding.
@@ -24,6 +27,52 @@ func Cell(s string) string {
 		return "'" + s
 	}
 	return s
+}
+
+// NewWriter starts a CSV for a spreadsheet on w: the byte order mark, then the header.
+func NewWriter(w io.Writer, header []string) (*csv.Writer, error) {
+	if _, err := io.WriteString(w, BOM); err != nil {
+		return nil, err
+	}
+	cw := csv.NewWriter(w)
+	if err := cw.Write(header); err != nil {
+		return nil, err
+	}
+	return cw, nil
+}
+
+// FileCells are the cells every export shows of a file at rel ('/'-separated) in the root at root: its directory
+// (the root's path and the file's directory in it), name, size and modified time (in loc, to the minute).
+func FileCells(root, rel string, size, mtimeNS int64, loc *time.Location) []string {
+	dir, name := path.Split(rel)
+	directory := root
+	if dir = strings.TrimSuffix(dir, "/"); dir != "" {
+		directory = root + "/" + dir
+	}
+	return []string{Cell(directory), Cell(name), strconv.FormatInt(size, 10),
+		time.Unix(0, mtimeNS).In(loc).Format("2006-01-02 15:04")}
+}
+
+// Problem is a row an update refuses before it reaches the register.
+type Problem struct {
+	Line int
+	Msg  string
+}
+
+// ReadIDs reads a row's file ID and export number, and checks that nothing was typed past the header's columns.
+// When it cannot, it returns why, with the column to type into named by under ("file_date or retention").
+func ReadIDs(row Row, under string) (id, export int64, problem string) {
+	id, idErr := strconv.ParseInt(row.Get("id"), 10, 64)
+	export, exErr := strconv.ParseInt(row.Get("export"), 10, 64)
+	switch {
+	case idErr != nil || id < 1:
+		return 0, 0, fmt.Sprintf("id %q is not a file ID", row.Get("id"))
+	case exErr != nil || export < 1:
+		return 0, 0, fmt.Sprintf("export %q is not an export number", row.Get("export"))
+	case row.Beyond() != "":
+		return 0, 0, fmt.Sprintf("%q is outside the columns; put it under %s", row.Beyond(), under)
+	}
+	return id, export, ""
 }
 
 // Limits on an edited CSV, so a huge or malformed file is refused before it is parsed, never read until memory runs
