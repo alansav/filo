@@ -663,6 +663,25 @@ the date as `YYYY-MM-DD`; Excel not checked). Tests: a
 table of the update's cases for marked dates in `internal/store`, marked cells in the CSV parser, the plural `!`
 line, golden files, and a run by hand on a throwaway tree.
 
+## The stall after commands
+
+A friction fix from real use, found and built 2026-11-25 on branch `improvements`. Commands stalled after their work
+was done. The guess was the tag index pages, with a single page reading JSON proposed instead. Measured on a
+throwaway tree of 20,000 tagged files, the stall was a query: the hard-link count in `store.FindFiles` searched
+`paths` by root for each file, as SQLite has no statistics to prefer `ix_files_inode`, so it read every current path
+of the root once per file (more than 100 s for the query alone). Every command that changes the register ran it once
+an index existed, since an index's data is built before its hash says whether the pages need writing; `filo find`
+and the tags export ran it too. Writing `+lp.root_id` makes it search files by inode and then their paths: 0.2 s
+for the 20,000 files. After the fix, a run that changes what an index shows took 1.4 to 1.8 s on that tree, nearly
+all of it rendering 26 MB of pages (mostly the pages of files with none of a key's values); a run that does not
+change it, about 0.2 s. The single page was not needed for speed.
+
+Commits: the fix and a test of the query's plan. The code review (medium) found no bug in the query; on the test,
+it found that the check read past the subquery's steps (a later outer step could fail a good plan), did not require
+the paths step to use `ix_paths_file`, and matched SQLite's exact plan wording; all three were fixed. Tests: the plan
+check, for every root, a root and a scope, failing without the `+`; `TestFindFilesLinks` unchanged; and timings by
+hand on the throwaway tree.
+
 ## Notes on decisions
 
 Short notes taken out of `design.md` on 2026-11-17, by the section they were in.
