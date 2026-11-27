@@ -167,7 +167,8 @@ var commandHelps = map[string]commandHelp{
 				"the export, or a tag breaks the spelling rules (see filo help tag). The other rows are still " +
 				"applied.",
 			"If any row clears a retention, removes a tag or names a policy that does not exist yet, filo lists " +
-				"them first and asks once (-y answers yes); no, or no terminal without -y, records nothing at all.",
+				"them first and asks once (-y answers yes); no, or no terminal without -y, records nothing at all " +
+				"(exit 1 when there was no terminal to ask in).",
 			"A CSV from export retention is read the same way without tags; a blank retention there clears a " +
 				"stored one after asking, and without a terminal those rows are left alone.",
 			"A tags CSV (from export tags) is told by its header: each tags cell replaces its file's tags. " +

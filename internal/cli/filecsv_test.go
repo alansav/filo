@@ -81,6 +81,15 @@ func TestFilesCSVGolden(t *testing.T) {
 	ct.contains("-y", r.stdout, "1 file put on a policy with no value yet", "1 file had its tags changed",
 		"1 policy created: bills")
 	ct.lacks("-y", r.stdout, "Apply the update?", "nothing recorded")
+
+	// No terminal and nothing refused: still exit 1, since nothing was recorded; a no typed at the question is exit 0.
+	clean := filepath.Join(work, "clean.csv")
+	filo(ExitOK, "", false, "export", "-o", clean, "--no-scan")
+	editCSV(t, clean, setTags(map[string]string{"ideas.txt": ""}))
+	ct.contains("no terminal, exit 1", filo(ExitError, "", false, "update", clean).stdout,
+		"nothing recorded: there is no terminal to ask in")
+	ct.contains("declined, exit 0", filo(ExitOK, "n\n", true, "update", clean).stdout,
+		"nothing recorded: not confirmed")
 	ct.lacks("tags after -y", filo(ExitOK, "", false, "find", "--tag", "paid", "--no-scan").stdout, oct)
 }
 

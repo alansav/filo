@@ -179,7 +179,7 @@ func (e *env) updateFiles(ctx context.Context, s *store.Store, path string, pars
 		r.Blank()
 		r.Next("Nothing has been deleted. Next: filo delete")
 	}
-	if len(refused) > 0 {
+	if len(refused) > 0 || (res.Declined && !asked) { // nothing done, and no one was asked: a script must see it
 		return errReported
 	}
 	return nil
