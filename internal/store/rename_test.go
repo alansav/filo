@@ -29,7 +29,7 @@ func TestRenameRun(t *testing.T) {
 
 	started := time.Now()
 	run := e.s.BeginRenameRun(started)
-	if err := run.Renamed(e.ctx, c, "British Gas bill.pdf", started); err != nil {
+	if err := run.Renamed(e.ctx, c, "d/British Gas bill.pdf", started); err != nil {
 		t.Fatal(err)
 	}
 	if err := run.Finish(e.ctx, started.Add(time.Second)); err != nil {
@@ -52,7 +52,7 @@ func TestRenameRun(t *testing.T) {
 		t.Errorf("scans of kind scan = %s, want 1", v)
 	}
 	// Renaming the same path again: it is no longer current, so nothing is recorded.
-	if err := run.Renamed(e.ctx, c, "again.pdf", started); err == nil {
+	if err := run.Renamed(e.ctx, c, "d/again.pdf", started); err == nil {
 		t.Error("a second rename of a closed path was recorded")
 	}
 }

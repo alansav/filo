@@ -301,12 +301,13 @@ func unwrapPath(err error) error {
 	return err
 }
 
-// renameInPlace renames old to name in dir, never replacing a file at name (renameat2 with RENAME_NOREPLACE).
-func renameInPlace(dir *os.Root, old, name string) error {
+// renameBetween renames old in from to name in to, never replacing a file at name (renameat2 with
+// RENAME_NOREPLACE).
+func renameBetween(from *os.Root, old string, to *os.Root, name string) error {
 	if sysRenameat2 == 0 {
 		return errNoReplace
 	}
-	return renameat(dir, old, dir, name, renameNoReplace)
+	return renameat(from, old, to, name, renameNoReplace)
 }
 
 // canRename reports whether this system has a rename that never replaces its target, which renames need.

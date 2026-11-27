@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"path"
 	"time"
 )
 
@@ -13,8 +12,11 @@ import (
 // a file by its name cell").
 const ScanRename = "rename"
 
-// renamedDetail is a rename's moved event detail.
-const renamedDetail = "renamed by filo update"
+// renamedDetail and movedDetail are a rename's and a move's moved event detail.
+const (
+	renamedDetail = "renamed by filo update"
+	movedDetail   = "moved by filo update"
+)
 
 // RenameRun records the renames one run of filo update makes. Each is written in its own transaction straight after
 // the file is renamed, so a run cut off part-way leaves an accurate record. Each root it renames in gets one scan of
@@ -31,9 +33,10 @@ func (s *Store) BeginRenameRun(started time.Time) *RenameRun {
 	return &RenameRun{s: s, started: started, scans: map[int64]int64{}, renamed: map[int64]int{}}
 }
 
-// Renamed records that c was renamed to name in its own directory: its path is closed at the run's scan and the new
-// one opened on the same file row, so its retention, tags and history stay with it; a moved event says it was renamed.
-func (r *RenameRun) Renamed(ctx context.Context, c Candidate, name string, now time.Time) error {
+// Renamed records that c was renamed or moved to newPath (relative to its root): its path is closed at the run's scan
+// and the new one opened on the same file row, so its retention, tags and history stay with it; a moved event says it
+// was renamed or moved by filo update.
+func (r *RenameRun) Renamed(ctx context.Context, c Candidate, newPath string, now time.Time) error {
 	scanID, ok := r.scans[c.RootID]
 	if !ok {
 		res, err := r.s.exec(ctx, `INSERT INTO scans (started_utc, root_id, kind) VALUES (?, ?, ?)`, utc(r.started),
@@ -46,7 +49,10 @@ func (r *RenameRun) Renamed(ctx context.Context, c Candidate, name string, now t
 		}
 		r.scans[c.RootID] = scanID
 	}
-	newPath := path.Join(path.Dir(c.Path), name)
+	detail := renamedDetail
+	if relDir(newPath) != relDir(c.Path) {
+		detail = movedDetail
+	}
 	tx, err := r.s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -66,7 +72,7 @@ func (r *RenameRun) Renamed(ctx context.Context, c Candidate, name string, now t
 		return fmt.Errorf("record the rename of %s: %w", c.AbsPath(), err)
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO events (scan_id, kind, file_id, path, other_path, detail)
-		VALUES (?, 'moved', ?, ?, ?, ?)`, scanID, c.FileID, newPath, c.Path, renamedDetail); err != nil {
+		VALUES (?, 'moved', ?, ?, ?, ?)`, scanID, c.FileID, newPath, c.Path, detail); err != nil {
 		return fmt.Errorf("record the rename of %s: %w", c.AbsPath(), err)
 	}
 	if err := r.s.commit(tx); err != nil {

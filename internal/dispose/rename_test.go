@@ -15,8 +15,8 @@ import (
 // fakeRenames records what Rename reported.
 type fakeRenames struct{ names []string }
 
-func (f *fakeRenames) Renamed(_ context.Context, c store.Candidate, name string, _ time.Time) error {
-	f.names = append(f.names, c.Path+" -> "+name)
+func (f *fakeRenames) Renamed(_ context.Context, c store.Candidate, newPath string, _ time.Time) error {
+	f.names = append(f.names, c.Path+" -> "+newPath)
 	return nil
 }
 
@@ -100,7 +100,7 @@ func TestRename(t *testing.T) {
 			if len(entries) != 1 {
 				t.Errorf("directory holds %d entries, want the one file under its new name", len(entries))
 			}
-			if len(rec.names) != 1 || rec.names[0] != "d/Britsh Gas bill.pdf -> "+tc.to {
+			if len(rec.names) != 1 || rec.names[0] != "d/Britsh Gas bill.pdf -> d/"+tc.to {
 				t.Errorf("recorded %v", rec.names)
 			}
 		})
@@ -199,5 +199,140 @@ func TestRenameRecordedAfterCtrlC(t *testing.T) {
 	o, err := Rename(ctx, rec, c, "b.txt", time.Now())
 	if err != nil || !o.Done || !rec.recorded {
 		t.Errorf("outcome %+v, %v, recorded %v; want renamed and recorded", o, err, rec.recorded)
+	}
+}
+
+func TestMove(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("moves need renameat2 (Linux)")
+	}
+	ctx := context.Background()
+	exists := func(t *testing.T, p string) bool {
+		t.Helper()
+		_, err := os.Lstat(p)
+		return err == nil
+	}
+	for _, tc := range []struct {
+		name  string
+		setup func(t *testing.T, root string)
+		dir   string
+		to    string
+		done  bool
+		want  string   // a word the reason holds
+		made  int      // directories made
+		there []string // paths (relative) that must exist after
+		gone  []string // paths that must not
+	}{
+		{name: "into an existing directory", dir: "archive", to: "bill.pdf", done: true,
+			setup: func(t *testing.T, root string) { mkdir(t, filepath.Join(root, "archive")) },
+			there: []string{"archive/bill.pdf"}, gone: []string{"inbox/bill.pdf"}},
+		{name: "into new directories, under a new name", dir: "received/2026/11", to: "Bill (paid).pdf", done: true,
+			made: 3, there: []string{"received/2026/11/Bill (paid).pdf"}},
+		{name: "to the top of the root", dir: "", to: "bill.pdf", done: true, there: []string{"bill.pdf"}},
+		{name: "a name taken in the new directory", dir: "archive", to: "bill.pdf", want: "already exists",
+			setup: func(t *testing.T, root string) { write(t, filepath.Join(root, "archive", "bill.pdf"), "other") },
+			there: []string{"inbox/bill.pdf", "archive/bill.pdf"}},
+		{name: "a symlink on the new path", dir: "link/x", to: "bill.pdf", want: "symlink",
+			setup: func(t *testing.T, root string) {
+				mkdir(t, filepath.Join(root, "real"))
+				if err := os.Symlink("real", filepath.Join(root, "link")); err != nil {
+					t.Fatal(err)
+				}
+			},
+			there: []string{"inbox/bill.pdf"}, gone: []string{"real/x"}},
+		{name: "a file where a new directory would go", dir: "plain/x", to: "bill.pdf", want: "no longer a directory",
+			setup: func(t *testing.T, root string) { write(t, filepath.Join(root, "plain"), "a file") },
+			there: []string{"inbox/bill.pdf"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := canonicalTemp(t)
+			write(t, filepath.Join(root, "inbox", "bill.pdf"), "bill")
+			write(t, filepath.Join(root, "inbox", "keep.txt"), "stays")
+			if tc.setup != nil {
+				tc.setup(t, root)
+			}
+			c := candidate(t, root, filepath.Join("inbox", "bill.pdf"))
+			rec := &fakeRenames{}
+			m := NewMover(rec, time.Now)
+			o, err := m.Move(ctx, store.Rename{Candidate: c, Dir: tc.dir, Name: tc.to})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if o.Done != tc.done || !strings.Contains(o.Reason, tc.want) || len(o.Made) != tc.made {
+				t.Fatalf("outcome %+v, want done %v, reason %q, %d made", o, tc.done, tc.want, tc.made)
+			}
+			for _, p := range tc.there {
+				if !exists(t, filepath.Join(root, p)) {
+					t.Errorf("%s missing", p)
+				}
+			}
+			for _, p := range tc.gone {
+				if exists(t, filepath.Join(root, p)) {
+					t.Errorf("%s still there", p)
+				}
+			}
+			if tc.done != (len(rec.names) == 1) {
+				t.Errorf("recorded %v", rec.names)
+			}
+		})
+	}
+}
+
+func mkdir(t *testing.T, p string) {
+	t.Helper()
+	if err := os.MkdirAll(p, 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestMoveUnmakesDirs: a move that fails after making its directories removes them again.
+func TestMoveUnmakesDirs(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("moves need renameat2 (Linux)")
+	}
+	root := canonicalTemp(t)
+	write(t, filepath.Join(root, "inbox", "bill.pdf"), "bill")
+	c := candidate(t, root, filepath.Join("inbox", "bill.pdf"))
+	// The file changes once the checks are done: the rename finds it gone.
+	beforeRename = func(string) { os.Remove(filepath.Join(root, "inbox", "bill.pdf")) }
+	t.Cleanup(func() { beforeRename = nil })
+	o, err := NewMover(&fakeRenames{}, time.Now).Move(context.Background(), store.Rename{Candidate: c,
+		Dir: "new/deeper", Name: "bill.pdf"})
+	if err != nil || o.Done {
+		t.Fatalf("outcome %+v, %v", o, err)
+	}
+	if _, err := os.Lstat(filepath.Join(root, "new")); err == nil {
+		t.Error("the directories made for the move are still there")
+	}
+}
+
+// TestMovePrunes: the directories the moves emptied are removed, as filo delete does; one with a hidden file stays,
+// and so does the root.
+func TestMovePrunes(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("moves need renameat2 (Linux)")
+	}
+	root := canonicalTemp(t)
+	write(t, filepath.Join(root, "inbox", "a", "x.pdf"), "x")
+	write(t, filepath.Join(root, "other", "y.pdf"), "y")
+	write(t, filepath.Join(root, "other", ".DS_Store"), "")
+	write(t, filepath.Join(root, "top.pdf"), "t")
+	m := NewMover(&fakeRenames{}, time.Now)
+	for _, mv := range []struct{ from, dir string }{{"inbox/a/x.pdf", "sorted"}, {"other/y.pdf", "sorted"},
+		{"top.pdf", "sorted"}} {
+		c := candidate(t, root, filepath.FromSlash(mv.from))
+		if o, err := m.Move(context.Background(), store.Rename{Candidate: c, Dir: mv.dir,
+			Name: filepath.Base(mv.from)}); err != nil || !o.Done {
+			t.Fatalf("move %s: %+v, %v", mv.from, o, err)
+		}
+	}
+	removed, problems := m.PruneDirs()
+	if len(problems) != 0 || len(removed) != 2 {
+		t.Errorf("removed %v, problems %v; want inbox/a and inbox", removed, problems)
+	}
+	for p, want := range map[string]bool{"inbox": false, "other": true, ".": true, "sorted": true} {
+		if _, err := os.Lstat(filepath.Join(root, p)); (err == nil) != want {
+			t.Errorf("%s exists = %v, want %v", p, err == nil, want)
+		}
 	}
 }
