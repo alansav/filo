@@ -22,15 +22,14 @@ register and report; retention through the retention CSV (`filo export retention
 FILE.csv`, `filo duplicates`); the terminal output (every command prints through `internal/view`); named retention
 policies (`filo policies`); directory rules (`filo rules`); showing and setting a file's details (`filo show`, `filo
 set`, `filo get`); finding files (`filo find`); tags (`filo tag`, `untag`, `tags`, `find --tag`, the tags CSV); tag
-index pages (`filo indexes`); the combined CSV (`filo export [DIR] -o FILE`), renaming by its `name` cell and moving by its `directory` cell (all on
-branch `improvements` until merged). What is next is in `docs/roadmap.md`, Priority (2026-11-27: 40, once the combined
-CSV has been used; then 36 bash completion and the sync items).
+index pages (`filo indexes`); the combined CSV (`filo export [DIR] -o FILE`), renaming by its `name` cell and moving
+by its `directory` cell (all on branch `improvements` until merged). What is next is in `docs/roadmap.md`, Priority
+(2026-11-27: 40, once the combined CSV has been used; then 36 bash completion and the sync items).
 **`internal/dispose` is the only code allowed to change the user's files**: deleting them only from `filo delete`,
 renaming or moving them within their root only from `filo update` (a changed `name` or `directory` cell in the
-combined CSV, making the directories a move needs;
-`TestOnlyDisposeChangesUserFiles` guards it); everything else stays read-only on them, and nothing overwrites an
-existing file without asking (only an `-o` output file, and a tag index's own pages, see the hard rules). Stay inside
-the current piece of work.
+combined CSV, making the directories a move needs; `TestOnlyDisposeChangesUserFiles` guards it); everything else stays
+read-only on them, and nothing overwrites an existing file without asking (only an `-o` output file, and a tag index's
+own pages, see the hard rules). Stay inside the current piece of work.
 
 ## Hard rules
 
