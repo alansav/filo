@@ -1,4 +1,28 @@
 dirs: .index .index/sender .index/type
+== .index/index.html
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="generator" content="filo">
+<title>bills</title>
+<link rel="stylesheet" href="./style.css">
+</head>
+<body>
+<nav class="trail"><a class="find" href="../index.html">Find files</a><span>bills</span></nav>
+<header>
+<h1>bills</h1>
+<p class="counts">6 files · 2 tags</p>
+</header>
+<main>
+<ul class="rows">
+<li><a href="./sender/index.html"><span class="name">sender</span><span class="count">1 value · 1 file</span></a></li>
+<li><a href="./type/index.html"><span class="name">type</span><span class="count">1 value · 5 files</span></a></li>
+</ul>
+</main>
+</body>
+</html>
 == .index/sender/_none.html
 <!doctype html>
 <html lang="en">
@@ -10,13 +34,18 @@ dirs: .index .index/sender .index/type
 <link rel="stylesheet" href="../style.css">
 </head>
 <body>
-<nav class="trail"><a href="../../index.html">bills</a> <span class="sep">›</span> <a href="index.html">sender</a> <span class="sep">›</span> <span>no sender</span></nav>
+<nav class="trail"><a class="find" href="../../index.html">Find files</a><a href="../index.html">bills</a> <span class="sep">›</span> <a href="index.html">sender</a> <span class="sep">›</span> <span>no sender</span></nav>
 <header>
 <h1>No sender tag</h1>
-<p class="counts">3 files have no sender tag</p>
+<p class="counts">5 files have no sender tag</p>
 </header>
 <main>
 <ul class="files">
+<li>
+<a class="file" href="../../%3C/script%3E%3Cscript%3Ex%28%29%3C/script%3E.pdf">script&gt;.pdf</a>
+<div class="meta"><span class="dir">&lt;/script&gt;&lt;script&gt;x()&lt;</span><span class="date">2026-01-02</span></div>
+<div class="tags"><a class="tag" href="../type/bill-8b4c672e.html">type:bill</a></div>
+</li>
 <li>
 <a class="file" href="../../a%20%231%20%3Fx=%2541%20100%25.pdf">a #1 ?x=%41 100%.pdf</a>
 <div class="meta"><span class="date">2026-01-02</span></div>
@@ -29,6 +58,11 @@ dirs: .index .index/sender .index/type
 </li>
 <li>
 <a class="file" href="../../javascript:alert%281%29">javascript:alert(1)</a>
+<div class="meta"><span class="date">2026-01-02</span></div>
+<div class="tags"><a class="tag" href="../type/bill-8b4c672e.html">type:bill</a></div>
+</li>
+<li>
+<a class="file" href="../../line%E2%80%A8sep%E2%80%A9.pdf">line sep .pdf</a>
 <div class="meta"><span class="date">2026-01-02</span></div>
 <div class="tags"><a class="tag" href="../type/bill-8b4c672e.html">type:bill</a></div>
 </li>
@@ -47,7 +81,7 @@ dirs: .index .index/sender .index/type
 <link rel="stylesheet" href="../style.css">
 </head>
 <body>
-<nav class="trail"><a href="../../index.html">bills</a> <span class="sep">›</span> <a href="index.html">sender</a> <span class="sep">›</span> <span>&lt;b&gt;Bold&lt;/b&gt; &amp; &#34;Co&#34;</span></nav>
+<nav class="trail"><a class="find" href="../../index.html">Find files</a><a href="../index.html">bills</a> <span class="sep">›</span> <a href="index.html">sender</a> <span class="sep">›</span> <span>&lt;b&gt;Bold&lt;/b&gt; &amp; &#34;Co&#34;</span></nav>
 <header>
 <h1>sender:&lt;b&gt;Bold&lt;/b&gt; &amp; &#34;Co&#34;</h1>
 <p class="counts">1 file</p>
@@ -73,7 +107,7 @@ dirs: .index .index/sender .index/type
 <link rel="stylesheet" href="../style.css">
 </head>
 <body>
-<nav class="trail"><a href="../../index.html">bills</a> <span class="sep">›</span> <span>sender</span></nav>
+<nav class="trail"><a class="find" href="../../index.html">Find files</a><a href="../index.html">bills</a> <span class="sep">›</span> <span>sender</span></nav>
 <header>
 <h1>sender</h1>
 <p class="counts">1 value · 1 file</p>
@@ -83,7 +117,7 @@ dirs: .index .index/sender .index/type
 <li><a href="./b-bold-b-co-638a96af.html"><span class="name">&lt;b&gt;Bold&lt;/b&gt; &amp; &#34;Co&#34;</span><span class="count">1 file</span></a></li>
 </ul>
 <section class="note">
-<a href="./_none.html">3 files have no sender tag</a>
+<a href="./_none.html">5 files have no sender tag</a>
 </section>
 </main>
 </body>
@@ -100,7 +134,7 @@ dirs: .index .index/sender .index/type
 <link rel="stylesheet" href="../style.css">
 </head>
 <body>
-<nav class="trail"><a href="../../index.html">bills</a> <span class="sep">›</span> <a href="index.html">type</a> <span class="sep">›</span> <span>no type</span></nav>
+<nav class="trail"><a class="find" href="../../index.html">Find files</a><a href="../index.html">bills</a> <span class="sep">›</span> <a href="index.html">type</a> <span class="sep">›</span> <span>no type</span></nav>
 <header>
 <h1>No type tag</h1>
 <p class="counts">1 file has no type tag</p>
@@ -127,13 +161,17 @@ dirs: .index .index/sender .index/type
 <link rel="stylesheet" href="../style.css">
 </head>
 <body>
-<nav class="trail"><a href="../../index.html">bills</a> <span class="sep">›</span> <a href="index.html">type</a> <span class="sep">›</span> <span>bill</span></nav>
+<nav class="trail"><a class="find" href="../../index.html">Find files</a><a href="../index.html">bills</a> <span class="sep">›</span> <a href="index.html">type</a> <span class="sep">›</span> <span>bill</span></nav>
 <header>
 <h1>type:bill</h1>
-<p class="counts">3 files</p>
+<p class="counts">5 files</p>
 </header>
 <main>
 <ul class="files">
+<li>
+<a class="file" href="../../%3C/script%3E%3Cscript%3Ex%28%29%3C/script%3E.pdf">script&gt;.pdf</a>
+<div class="meta"><span class="dir">&lt;/script&gt;&lt;script&gt;x()&lt;</span><span class="date">2026-01-02</span></div>
+</li>
 <li>
 <a class="file" href="../../a%20%231%20%3Fx=%2541%20100%25.pdf">a #1 ?x=%41 100%.pdf</a>
 <div class="meta"><span class="date">2026-01-02</span></div>
@@ -144,6 +182,10 @@ dirs: .index .index/sender .index/type
 </li>
 <li>
 <a class="file" href="../../javascript:alert%281%29">javascript:alert(1)</a>
+<div class="meta"><span class="date">2026-01-02</span></div>
+</li>
+<li>
+<a class="file" href="../../line%E2%80%A8sep%E2%80%A9.pdf">line sep .pdf</a>
 <div class="meta"><span class="date">2026-01-02</span></div>
 </li>
 </ul>
@@ -161,14 +203,14 @@ dirs: .index .index/sender .index/type
 <link rel="stylesheet" href="../style.css">
 </head>
 <body>
-<nav class="trail"><a href="../../index.html">bills</a> <span class="sep">›</span> <span>type</span></nav>
+<nav class="trail"><a class="find" href="../../index.html">Find files</a><a href="../index.html">bills</a> <span class="sep">›</span> <span>type</span></nav>
 <header>
 <h1>type</h1>
-<p class="counts">1 value · 3 files</p>
+<p class="counts">1 value · 5 files</p>
 </header>
 <main>
 <ul class="rows">
-<li><a href="./bill-8b4c672e.html"><span class="name">bill</span><span class="count">3 files</span></a></li>
+<li><a href="./bill-8b4c672e.html"><span class="name">bill</span><span class="count">5 files</span></a></li>
 </ul>
 <section class="note">
 <a href="./_none.html">1 file has no type tag</a>
@@ -182,21 +224,31 @@ dirs: .index .index/sender .index/type
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src &#39;none&#39;; script-src &#39;sha256-UMmH7E9MYM2nERFGqAPEKkiLtnKnLr/QZiskz38Y8Go=&#39;; style-src &#39;sha256-TziSgzJFp36/eLkatejb8bcgn9tedwTw7TJ6UgJ6f/8=&#39;; base-uri &#39;none&#39;; form-action &#39;none&#39;">
 <meta name="generator" content="filo">
 <title>bills</title>
-<link rel="stylesheet" href="./.index/style.css">
+[the inline styles]
 </head>
 <body>
-<nav class="trail"><span>bills</span></nav>
 <header>
 <h1>bills</h1>
-<p class="counts">4 files · 2 tags</p>
+<p class="counts" id="counts">6 files · 2 tags</p>
+<p class="browse"><a href="./.index/index.html">Browse by key</a></p>
 </header>
-<main>
-<ul class="rows">
-<li><a href="./.index/sender/index.html"><span class="name">sender</span><span class="count">1 value · 1 file</span></a></li>
-<li><a href="./.index/type/index.html"><span class="name">type</span><span class="count">1 value · 3 files</span></a></li>
-</ul>
+<noscript><p class="empty">Finding needs the page's script, which this viewer does not run: browse by key instead.</p></noscript>
+<main id="find" hidden>
+<div class="box">
+<input id="q" type="search" placeholder="Search names, or type a tag" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Search names and directories, or find a tag">
+<ul id="suggest" class="suggest" hidden></ul>
+</div>
+<div id="chips" class="chips"></div>
+<details id="dirs" class="dirs"><summary>Directory</summary><div id="crumbs" class="crumbs"></div><ul id="subdirs" class="rows"></ul></details>
+<div id="keys" class="keys"></div>
+<p id="none" class="empty" hidden>No file matches.</p>
+<ul id="results" class="files"></ul>
+<button id="more" class="more" type="button" hidden>Show more</button>
 </main>
+<script type="application/json" id="data">{"title":"bills","browse":"./.index/index.html","tags":[{"k":"sender","v":"\u003cb\u003eBold\u003c/b\u003e \u0026 \"Co\"","p":"sender/b-bold-b-co-638a96af.html"},{"k":"type","v":"bill","p":"type/bill-8b4c672e.html"}],"files":[{"n":"script\u003e.pdf","d":"\u003c/script\u003e\u003cscript\u003ex()\u003c","h":"./%3C/script%3E%3Cscript%3Ex%28%29%3C/script%3E.pdf","t":"2026-01-02","g":[1]},{"n":"script\u003e \"q\" \u0026 'a'.pdf","d":"\u003cscript\u003ealert(1)\u003c","h":"./%3Cscript%3Ealert%281%29%3C/script%3E%20%22q%22%20\u0026%20%27a%27.pdf","t":"2026-01-02","g":[0]},{"n":"a #1 ?x=%41 100%.pdf","d":"","h":"./a%20%231%20%3Fx=%2541%20100%25.pdf","t":"2026-01-02","g":[1]},{"n":"b.pdf","d":"dir with space","h":"./dir%20with%20space/b.pdf","t":"2026-01-02","g":[1]},{"n":"javascript:alert(1)","d":"","h":"./javascript:alert%281%29","t":"2026-01-02","g":[1]},{"n":"line\u2028sep\u2029.pdf","d":"","h":"./line%E2%80%A8sep%E2%80%A9.pdf","t":"2026-01-02","g":[1]}]}</script>
+[the find page's script]
 </body>
 </html>

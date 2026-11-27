@@ -111,3 +111,85 @@ test('the address: written and read back; unknown tags and directories ignored; 
   assert.equal(hostile.q, '<script>alert(1)</script>');
   assert.deepEqual(names(Find.matches(model, hostile)), []);
 });
+
+// A fake of the few DOM calls the page makes, enough to run the drawing code in Node and catch mistakes in it. What
+// the page looks like is checked by hand in a browser.
+function fakeDOM(hash) {
+  const byId = new Map();
+  function element(tag) {
+    const e = {
+      tagName: tag, className: '', textContent: '', hidden: false, open: false, type: '', href: '', value: '',
+      children: [], listeners: new Map(), attributes: new Map(),
+      appendChild(c) { this.children.push(c); return c; },
+      replaceChildren() { this.children = []; },
+      addEventListener(type, fn) {
+        if (!this.listeners.has(type)) { this.listeners.set(type, []); }
+        this.listeners.get(type).push(fn);
+      },
+      setAttribute(k, v) { this.attributes.set(k, v); },
+      focus() { doc.activeElement = this; },
+      fire(type) { for (const fn of this.listeners.get(type) || []) { fn({ preventDefault() {} }); } },
+      text() { return this.textContent + this.children.map((c) => c.text()).join(' '); },
+      all(pred, out = []) {
+        if (pred(this)) { out.push(this); }
+        for (const c of this.children) { c.all(pred, out); }
+        return out;
+      },
+    };
+    return e;
+  }
+  for (const id of ['q', 'suggest', 'chips', 'crumbs', 'subdirs', 'keys', 'none', 'results', 'more', 'counts',
+    'find', 'data']) {
+    byId.set(id, element(id === 'q' ? 'input' : 'div'));
+  }
+  byId.get('data').textContent = JSON.stringify(data);
+  const doc = {
+    activeElement: null,
+    getElementById: (id) => byId.get(id),
+    createElement: element,
+  };
+  const loc = { hash: hash, pathname: '/x/index.html', search: '', replace(h) { this.hash = h; } };
+  const win = { listeners: new Map(), addEventListener(t, fn) { this.listeners.set(t, fn); } };
+  const hist = { replaceState(_s, _t, url) { loc.hash = url.startsWith('#') ? url : ''; } };
+  return { byId, doc, loc, win, hist };
+}
+
+test('the page: drawn from the data, and the box, a suggestion, a chip and the address work', () => {
+  const fs = require('node:fs');
+  const vm = require('node:vm');
+  const src = fs.readFileSync(path.join(__dirname, '..', 'assets', 'find.js'), 'utf8');
+  const dom = fakeDOM('#tag=type%3Abill');
+  vm.runInNewContext(src, {
+    document: dom.doc, location: dom.loc, window: dom.win, history: dom.hist,
+    JSON, URLSearchParams, Map, Set, Array, String,
+  });
+  const $ = (id) => dom.byId.get(id);
+  assert.equal($('find').hidden, false, 'the page is shown');
+  assert.equal($('counts').textContent, '3 of 5 files', 'type:bill from the address');
+  assert.equal($('results').children.length, 3);
+  assert.match($('chips').text(), /type: bill/);
+  // Typing in the box searches and suggests.
+  $('q').focus();
+  $('q').value = 'edf';
+  $('q').fire('input');
+  assert.equal($('counts').textContent, '1 of 5 files');
+  assert.equal(dom.loc.hash, '#tag=type%3Abill&q=edf');
+  const suggested = $('suggest').all((e) => e.tagName === 'button');
+  assert.equal($('suggest').hidden, false);
+  assert.match(suggested[0].text(), /sender:EDF/);
+  // Tapping the suggestion adds the tag and clears the box.
+  suggested[0].fire('click');
+  assert.equal($('q').value, '');
+  assert.equal($('counts').textContent, '1 of 5 files');
+  assert.equal(dom.loc.hash, '#tag=type%3Abill&tag=sender%3AEDF');
+  // Removing a chip; going into a directory.
+  $('chips').children[0].fire('click');
+  assert.equal(dom.loc.hash, '#tag=sender%3AEDF');
+  $('subdirs').all((e) => e.tagName === 'button')[0].fire('click');
+  assert.match(dom.loc.hash, /dir=received/);
+  // The address changed by hand (back, a bookmark) is read again.
+  dom.loc.hash = '#q=welcome';
+  dom.win.listeners.get('hashchange')();
+  assert.equal($('counts').textContent, '1 of 5 files');
+  assert.equal($('q').value, 'welcome');
+});

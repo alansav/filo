@@ -1,6 +1,5 @@
 dirs: .index
-== .index/style.css (the stylesheet)
-== index.html
+== .index/index.html
 <!doctype html>
 <html lang="en">
 <head>
@@ -8,10 +7,10 @@ dirs: .index
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="generator" content="filo">
 <title>bills</title>
-<link rel="stylesheet" href="./.index/style.css">
+<link rel="stylesheet" href="./style.css">
 </head>
 <body>
-<nav class="trail"><span>bills</span></nav>
+<nav class="trail"><a class="find" href="../index.html">Find files</a><span>bills</span></nav>
 <header>
 <h1>bills</h1>
 <p class="counts">0 files · 0 tags</p>
@@ -19,5 +18,40 @@ dirs: .index
 <main>
 <p class="empty">No files here yet.</p>
 </main>
+</body>
+</html>
+== .index/style.css (the stylesheet)
+== index.html
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src &#39;none&#39;; script-src &#39;sha256-UMmH7E9MYM2nERFGqAPEKkiLtnKnLr/QZiskz38Y8Go=&#39;; style-src &#39;sha256-TziSgzJFp36/eLkatejb8bcgn9tedwTw7TJ6UgJ6f/8=&#39;; base-uri &#39;none&#39;; form-action &#39;none&#39;">
+<meta name="generator" content="filo">
+<title>bills</title>
+[the inline styles]
+</head>
+<body>
+<header>
+<h1>bills</h1>
+<p class="counts" id="counts">0 files · 0 tags</p>
+<p class="browse"><a href="./.index/index.html">Browse by key</a></p>
+</header>
+<noscript><p class="empty">Finding needs the page's script, which this viewer does not run: browse by key instead.</p></noscript>
+<main id="find" hidden>
+<div class="box">
+<input id="q" type="search" placeholder="Search names, or type a tag" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Search names and directories, or find a tag">
+<ul id="suggest" class="suggest" hidden></ul>
+</div>
+<div id="chips" class="chips"></div>
+<details id="dirs" class="dirs"><summary>Directory</summary><div id="crumbs" class="crumbs"></div><ul id="subdirs" class="rows"></ul></details>
+<div id="keys" class="keys"></div>
+<p id="none" class="empty" hidden>No file matches.</p>
+<ul id="results" class="files"></ul>
+<button id="more" class="more" type="button" hidden>Show more</button>
+</main>
+<script type="application/json" id="data">{"title":"bills","browse":"./.index/index.html","tags":[],"files":[]}</script>
+[the find page's script]
 </body>
 </html>
