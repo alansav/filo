@@ -6,11 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"path"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/alansav/filo/internal/sheet"
 	"github.com/alansav/filo/internal/tags"
 )
 
@@ -165,6 +167,10 @@ func (s *Store) UpdateFiles(ctx context.Context, rows []FilesRow, now time.Time,
 	for _, r := range roots {
 		settings[r.ID] = r.Settings
 	}
+	own, err := s.OwnPaths(ctx) // a file renamed to one of these would be lost: no scan records them
+	if err != nil {
+		return res, err
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return res, err
@@ -204,7 +210,7 @@ func (s *Store) UpdateFiles(ctx context.Context, rows []FilesRow, now time.Time,
 			}
 		}
 		rc.reasons = append(rc.reasons, why)
-		if rc.rename, rc.holder, why, err = checkRename(ctx, q, r, settings, opt.CheckName); err != nil {
+		if rc.rename, rc.holder, why, err = checkRename(ctx, q, r, settings, own, opt.CheckName); err != nil {
 			return res, err
 		}
 		rc.reasons = append(rc.reasons, why)
@@ -333,7 +339,7 @@ func (s *Store) UpdateFiles(ctx context.Context, rows []FilesRow, now time.Time,
 // a file by its name cell"): the rename it asks for, or why it is refused; neither for a name cell left as exported.
 // checkName is the new name's rules (package dispose's), for the root's settings. holder is the file that has the
 // new name already, when that is why it is refused.
-func checkRename(ctx context.Context, q querier, r FilesRow, settings map[int64]Settings,
+func checkRename(ctx context.Context, q querier, r FilesRow, settings map[int64]Settings, own []string,
 	checkName func(old, name string, includeHidden bool, ignore []string) string) (rn *Rename, holder int64,
 	why string, err error) {
 	if !r.HasName {
@@ -360,7 +366,8 @@ func checkRename(ctx context.Context, q querier, r FilesRow, settings map[int64]
 	}
 	old := path.Base(c.Path)
 	if !cell.Valid {
-		if r.Name == old {
+		// An export from before schema 13 wrote the cell as any display cell; left as it was, it is no change.
+		if r.Name == old || r.NameCell == sheet.Cell(old) {
 			return nil, 0, "", nil
 		}
 		return nil, 0, fmt.Sprintf("export #%d was made before renaming by the name cell; export again to rename it",
@@ -379,6 +386,10 @@ func checkRename(ctx context.Context, q querier, r FilesRow, settings map[int64]
 		}
 	}
 	newPath := path.Join(path.Dir(c.Path), r.Name)
+	if slices.Contains(own, filepath.Join(c.RootPath, filepath.FromSlash(newPath))) {
+		return nil, 0, fmt.Sprintf("%s is the name of one of filo's own files there (its database or a tag "+
+			"index's page), which no scan records", r.Name), nil
+	}
 	var other int64
 	switch err := q.QueryRowContext(ctx, `SELECT file_id FROM paths WHERE root_id = ? AND path = ?
 		AND valid_to_scan IS NULL`, c.RootID, newPath).Scan(&other); {

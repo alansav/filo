@@ -133,6 +133,22 @@ func TestUpdateFilesRenames(t *testing.T) {
 		}
 	})
 
+	t.Run("a name of filo's own (a tag index's page) is refused", func(t *testing.T) {
+		e, id, it := setup(t)
+		if _, err := e.s.AddTagIndex(e.ctx, e.root.ID, "d", "bills", now); err != nil {
+			t.Fatal(err)
+		}
+		res, err := e.s.UpdateFiles(e.ctx, []FilesRow{row(2, id, it["d/b.pdf"], "bills.html"),
+			row(3, id, it["d/c.pdf"], ".bills")}, now, today, "f.csv", opt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(res.Refusals) != 2 || !strings.Contains(res.Refusals[0].Reason, "filo's own files") ||
+			!strings.Contains(res.Refusals[1].Reason, "filo's own files") {
+			t.Errorf("result %+v", res)
+		}
+	})
+
 	t.Run("a chain or a swap: both rows refused", func(t *testing.T) {
 		e, id, it := setup(t)
 		res, err := e.s.UpdateFiles(e.ctx, []FilesRow{row(2, id, it["d/b.pdf"], "c.pdf"),
