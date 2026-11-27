@@ -1757,7 +1757,7 @@ so files can be found by tag; a project is a tag (`project:house sale`).
     | `.bashrc.bak` → `.bashrc.old` (hidden to hidden, in a root that includes hidden files) | renamed |
     | a name holding `/`, or empty, `.` or `..` | refused: one name in the same directory |
     | `bill.pdf` → `.bill.pdf`, or `.notes` → `notes` | refused: a rename never hides or unhides a file |
-    | a name starting `.filo-delete-` | refused: Filo's own |
+    | a name starting `.filo-delete-`, or the path of one of Filo's own files there (a tag index's `NAME.html` or `.NAME`, the database and its companions), which no scan records | refused: Filo's own |
     | a name the root ignores (`--ignore`) | refused: the next scan would lose it |
     | a control character (tab, newline, escape) in it | refused |
     | more than 255 bytes | refused (the filesystem's limit) |
