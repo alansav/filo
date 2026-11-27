@@ -19,7 +19,7 @@ and getting rid of it safely when its time comes. The register is how it does th
   Filo writes** (a list for `tar`, a script of `mv` lines the person reads and runs). This keeps it one tool, in the
   Unix sense of programs that work together. Clarified 2026-11-27: this rules out clones of file commands (`filo
   mv`, `filo cp`), not changes made through the export and bulk update, such as renaming a file by editing its
-  `name` cell (39, see `design.md`).
+  `name` cell (built, see `design.md`).
 - **Filo stays outside the file system.** Making Filo a file system (every move seen as it happens, no scans) was
   considered and not taken: a bug in it could then lose data on every read and write, while today a broken Filo
   leaves the files untouched and the worst case is a wrong register, which the snapshots cover (principle 3, fail
@@ -54,9 +54,8 @@ Provisional, agreed 2026-11-17, with the first places reordered on 2026-11-20 fo
 complexity scores (1 to 10, Claude's estimates) are still to be settled with the person. Items 22 to 33, and
 35, are not placed yet.
 
-Next, agreed 2026-11-27 (friction week, on the `improvements` branch, after the combined CSV, built that day):
-39 renaming by the `name` cell (being built, see `design.md`), then 40 once the combined CSV has been used in
-practice, each one at a time; then the list below.
+Next, agreed 2026-11-27 (friction week, on the `improvements` branch, after the combined CSV and 39 renaming by
+the `name` cell, both built that day): 40 once the combined CSV has been used in practice; then the list below.
 
 1. 36 bash completion
 2. 9b device ID, 9a marking synced directories, 9c sharing decisions

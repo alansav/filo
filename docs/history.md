@@ -760,6 +760,49 @@ now exits 1 (a no typed at the question stays 0). Tests: `TestFilesItemsAndExpor
 `TestFilesUpdateInterruptedAtPrompt`, and the help golden files. Checked by hand on a throwaway tree: export, update
 without a question, the no-terminal refusal, a dry run and `-y`.
 
+## Renaming by the name cell
+
+Roadmap 39, built 2026-11-27 on branch `improvements`, the second of the three parts agreed that day. A changed
+`name` cell in the combined CSV renames the file in its own directory. The design was settled in seven topics: the
+hard rule (one package, `internal/dispose`, now changes the user's files in two ways, deleting from `filo delete` and
+renaming in place from `filo update`); the check (the very file the last scan saw, no re-hash); the names allowed
+(the person chose to allow a change of spaces at the start or end, and to refuse hiding or unhiding, not every
+leading dot); recording (a scan of kind `rename`, a `moved` event, schema 13 with `export_rows.name`); the order
+(the register's changes first, then each rename, recorded straight after; a rename not made keeps its row's other
+changes); the output (old and new names side by side, quoted when a space starts or ends one); edge cases (hard
+links, symlinks, Syncthing, no `renameat2` off Linux). The Direction's "standard tools" rule was clarified by the
+person: it rules out clones of file commands, not changes through the export and bulk update.
+
+Added while building, each with its own design commit: a name cell doubles a leading apostrophe, as the tags cell
+does; a combined export row keeps the path it showed (`path_id`); in a chain or swap both rows are refused.
+
+Commits: the design; schema 13; `dispose.CheckName`; `sheet.Row.Raw` (a cell with its spaces); the `filecsv` name
+cell; `dispose.Rename`; `store.RenameRun` and the exported path; the update's rename checks; `dispose.CheckRename`;
+the view's `Renames`; a store fix naming a refused row's file; the CLI. Commit `26b0b0a` was made with a test
+failing (its output was piped through `grep`, which hid the exit code); `9ce2e19` fixes the test, with no code
+change, and every commit after was checked on the test's own exit code.
+
+The code review (medium) found three important issues, all fixed: a Ctrl-C landing between a rename and its record
+could leave the file renamed on disk but not in the register (the record now ignores cancellation); a rename could
+give a file the path of one of Filo's own files (a tag index's pages, the database), which no scan records (now
+refused, from `OwnPaths`); a register write failing part-way hid what the run had done (now shown, then the error).
+Nits fixed: a rename that a scan cannot put right is listed under "Not renamed", and on a system without
+`renameat2` every rename is refused before the question (that change went into commit `e5311cb`, whose message names
+only the Ctrl-C fix); an untouched name cell of an export from before schema 13 no longer refuses its row; a name
+starting with `'` is made valid UTF-8; no "0 of 0 renames" after Ctrl-C; a hidden name's dot is not an extension.
+One was the person's decision: a rename of a name a spreadsheet may have reformatted (`0012`, `1E5`, `1-2`) is
+noted in the summary, not refused. Also at the person's request: `TestOnlyDisposeChangesUserFiles`, which parses
+every Go file of the module and fails on a call that removes or renames on the disk outside `internal/dispose` and
+the three files that handle only Filo's own files (checked by planting such calls). Until then no test guarded the
+rule that only `internal/dispose` deletes; an earlier message in the design talk had said one did.
+
+Tests: `TestCheckName`, `TestRename`, `TestRenameNeverReplaces`, `TestRenameSymlink`, `TestCheckRename`,
+`TestRenameRecordedAfterCtrlC`, `TestRowRaw`, `TestNameCell`, `TestNameColumn`, `TestMigrateFromV12`,
+`TestRenameRun`, `TestFilesExportRecordsPath`, `TestUpdateFilesRenames`, `TestRenames`, `TestRenameRowNotes`,
+`TestRenameGolden` (`rename.txt`), `TestRenameNoTerminal`, `TestOnlyDisposeChangesUserFiles`. Checked by hand on a
+throwaway tree: two renames from the CSV (one only removing a trailing space), a dry run, `-y`, and a scan after
+finding no changes.
+
 ## Notes on decisions
 
 Short notes taken out of `design.md` on 2026-11-17, by the section they were in.
