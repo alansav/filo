@@ -216,7 +216,8 @@ func checkTagRow(ctx context.Context, tx querier, r TagRow, ex exportInfo, kind 
 		return ch, fmt.Sprintf("export #%d is not in this register", r.ExportID), nil
 	}
 	if ex.kind != kind {
-		return ch, fmt.Sprintf("export #%d is a %s export, not a %s export", r.ExportID, ex.kind, kind), nil
+		return ch, fmt.Sprintf("export #%d is a %s export, not a %s export", r.ExportID, KindName(ex.kind),
+			KindName(kind)), nil
 	}
 	var exported sql.NullString
 	err := tx.QueryRowContext(ctx, `SELECT tags FROM export_rows WHERE export_id = ? AND file_id = ?`, r.ExportID,

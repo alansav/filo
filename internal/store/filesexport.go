@@ -15,6 +15,15 @@ import (
 // and tags, in one CSV (docs/design.md, Tags, "The combined CSV").
 const ExportFiles = "files"
 
+// KindName is an export kind as messages name it: "combined" for ExportFiles, as the help and design call it, the
+// kind itself otherwise.
+func KindName(kind string) string {
+	if kind == ExportFiles {
+		return "combined"
+	}
+	return kind
+}
+
 // FilesItem is one present file for the combined CSV: its retention and its tags. A symlink has no tags.
 type FilesItem struct {
 	FileItem

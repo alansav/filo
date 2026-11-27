@@ -155,7 +155,7 @@ func TestUpdateFiles(t *testing.T) {
 		ex, _ := e.tagsExport()
 		res, err := e.s.UpdateFiles(e.ctx, []FilesRow{row(2, ex, it["b"], "", "", "urgent")}, now, today, "f.csv",
 			FilesUpdateOptions{})
-		if err != nil || len(res.Refusals) != 1 || !strings.Contains(res.Refusals[0].Reason, "not a files export") {
+		if err != nil || len(res.Refusals) != 1 || !strings.Contains(res.Refusals[0].Reason, "is a tags export, not a combined export") {
 			t.Errorf("result %+v, %v", res, err)
 		}
 	})

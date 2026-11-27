@@ -561,7 +561,8 @@ func checkRow(ctx context.Context, tx *sql.Tx, r RetentionRow, ex exportInfo, ki
 		return c, nil
 	}
 	if ex.kind != kind {
-		c.refusal = fmt.Sprintf("export #%d is a %s export, not a %s export", r.ExportID, ex.kind, kind)
+		c.refusal = fmt.Sprintf("export #%d is a %s export, not a %s export", r.ExportID, KindName(ex.kind),
+			KindName(kind))
 		return c, nil
 	}
 	var expDate, expRetention, expKeep sql.NullString
