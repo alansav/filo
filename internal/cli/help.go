@@ -132,7 +132,8 @@ var commandHelps = map[string]commandHelp{
 				"export, directory, name, size, modified, file_date, retention, keep_until, tags. " +
 				"Fill in retention in a spreadsheet (a period such as 7y counted from file_date, a date, forever, or " +
 				"a policy name: filo help policies) and tags (separated by ;, see filo help tag), then run filo " +
-				"update FILE. A directory named retention, duplicates or tags is given as ./tags. A blank file_date is filled in from " +
+				"update FILE. A directory named retention, duplicates or tags is given with ./ before it (./tags). A " +
+				"blank file_date is filled in from " +
 				"the file name when the name holds one clear date (2023-03-14, 20230314, or 2023-03 for the month's " +
 				"last day), marked with ! (!2023-03-14): check it and remove the ! to accept it; a period on a " +
 				"row whose date is still marked is refused. On a large system, export one directory at a time.",

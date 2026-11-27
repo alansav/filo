@@ -117,6 +117,7 @@ func (e *env) updateFiles(ctx context.Context, s *store.Store, path string, pars
 		defer pr.close()
 	}
 	asked := false
+	var askErr error // the question could not be asked (output failed): nothing is recorded, and the run says why
 	confirm := func(p store.FilesPending) bool {
 		if yes {
 			return true
@@ -125,13 +126,18 @@ func (e *env) updateFiles(ctx context.Context, s *store.Store, path string, pars
 			return false
 		}
 		asked = true
-		ok, err := e.confirmPending(ctx, pr, roots, p)
-		return ok && err == nil // interrupted: no, and the run says so after (a cancelled context writes nothing)
+		var ok bool
+		ok, askErr = e.confirmPending(ctx, pr, roots, p)
+		return ok && askErr == nil
 	}
 	res, err := s.UpdateFiles(ctx, parsed.Rows, now(), today(), path, store.FilesUpdateOptions{DryRun: dry,
 		Confirm: confirm})
-	if err == nil && ctx.Err() != nil {
+	switch {
+	case err != nil:
+	case ctx.Err() != nil:
 		err = ctx.Err() // interrupted at the question: nothing was written, though nothing failed
+	case askErr != nil:
+		return fmt.Errorf("nothing recorded: %w", askErr)
 	}
 	if err != nil {
 		return interruptedUpdate(err)
@@ -264,13 +270,7 @@ func (e *env) maybeUpdateFiles(ctx context.Context, db, path string, data []byte
 		return true, err
 	}
 	defer e.closeStore(s)
-	var exports []int64
-	for _, row := range parsed.Rows {
-		if !slices.Contains(exports, row.ExportID) {
-			exports = append(exports, row.ExportID)
-		}
-	}
-	id, err := filesExports(ctx, s, exports)
+	id, err := filesExports(ctx, s, parsed.Exports) // refused rows' too: a CSV whose rows are all refused is still one
 	if err != nil {
 		return true, err
 	}

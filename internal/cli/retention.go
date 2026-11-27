@@ -300,11 +300,6 @@ func (e *env) update(ctx context.Context, dbBefore string, args []string) error 
 	if err != nil {
 		return fmt.Errorf("%s: %w", path, err)
 	}
-	if *yes { // only once the CSV is known to be a retention CSV, so another file gets its own error
-		return usageError{"-y answers only the question about removing tags, in a tags CSV; a retention CSV's " +
-			"questions (clearing a retention, creating a policy) are asked in a terminal"}
-	}
-
 	s, err := e.open(ctx, *db)
 	if err != nil {
 		return err
@@ -314,6 +309,10 @@ func (e *env) update(ctx context.Context, dbBefore string, args []string) error 
 		if err := lostColumn(ctx, s, path, retentionExports(parsed.Rows), "tags"); err != nil {
 			return err
 		}
+	}
+	if *yes { // only once the CSV is known to be a retention CSV, so another file gets its own error
+		return usageError{"-y is for a CSV from filo export or export tags; a retention CSV's questions " +
+			"(clearing a retention, creating a policy) are asked in a terminal"}
 	}
 	roots, err := registeredRoots(ctx, s)
 	if err != nil {

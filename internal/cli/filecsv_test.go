@@ -100,9 +100,18 @@ func TestFilesCSVKinds(t *testing.T) {
 	}
 	write(strings.Replace(data, ",keep_until,tags\n", ",keep_until,labels\n", 1))
 	ct.contains("lost tags", filo(ExitError, "", false, "update", csvPath).stderr, "has no tags column; put it back")
+	ct.contains("lost tags, -y", filo(ExitError, "", false, "update", csvPath, "-y").stderr,
+		"has no tags column; put it back")
 	write(strings.Replace(data, ",retention,keep_until,", ",ret,keep_until,", 1))
 	ct.contains("lost retention", filo(ExitError, "", false, "update", csvPath).stderr,
 		"has no retention column; put it back")
+
+	// Every row refused for its cells: still a combined CSV, and the reasons are its own.
+	write(data)
+	editCSV(t, csvPath, setTags(map[string]string{"ideas.txt": "a*b", "2026-09-02 British Gas Bill.pdf": "a*b",
+		"2026-10-03 British Gas Bill.pdf": "a*b"}))
+	ct.contains("all refused", filo(ExitError, "", false, "update", csvPath, "-y").stdout, "Update   all.csv",
+		`tags "a*b": a tag cannot hold "*"`)
 
 	r := filepath.Join(work, "r.csv")
 	filo(ExitOK, "", false, "export", "retention", "-o", r, "--no-scan")

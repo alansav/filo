@@ -72,7 +72,7 @@ func TestTagsCSVGolden(t *testing.T) {
 	rcsv := filepath.Join(work, "r.csv")
 	filo(ExitOK, "", false, "export", "retention", "-o", rcsv, "--no-scan")
 	ct.contains("-y, retention", filo(ExitUsage, "", false, "update", rcsv, "-y").stderr,
-		"-y answers only the question about removing tags")
+		"-y is for a CSV from filo export or export tags")
 	// A file that is no CSV filo reads gets its own error, not the one about -y.
 	notCSV := filepath.Join(work, "notes.txt")
 	if err := os.WriteFile(notCSV, []byte("just notes\n"), 0o644); err != nil {
