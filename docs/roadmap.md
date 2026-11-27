@@ -19,7 +19,7 @@ and getting rid of it safely when its time comes. The register is how it does th
   Filo writes** (a list for `tar`, a script of `mv` lines the person reads and runs). This keeps it one tool, in the
   Unix sense of programs that work together. Clarified 2026-11-27: this rules out clones of file commands (`filo
   mv`, `filo cp`), not changes made through the export and bulk update, such as renaming a file by editing its
-  `name` cell (39).
+  `name` cell (39, see `design.md`).
 - **Filo stays outside the file system.** Making Filo a file system (every move seen as it happens, no scans) was
   considered and not taken: a bug in it could then lose data on every read and write, while today a broken Filo
   leaves the files untouched and the worst case is a wrong register, which the snapshots cover (principle 3, fail
@@ -55,7 +55,8 @@ complexity scores (1 to 10, Claude's estimates) are still to be settled with the
 35, are not placed yet.
 
 Next, agreed 2026-11-27 (friction week, on the `improvements` branch, after the combined CSV, built that day):
-39, then 40 once the combined CSV has been used in practice, each one at a time; then the list below.
+39 renaming by the `name` cell (being built, see `design.md`), then 40 once the combined CSV has been used in
+practice, each one at a time; then the list below.
 
 1. 36 bash completion
 2. 9b device ID, 9a marking synced directories, 9c sharing decisions
@@ -348,22 +349,6 @@ Agreed with the person on 2026-11-20. Tab completes Filo's commands, flags and a
   and tag names (tags are built).
 - Bash only at first (zsh can load bash completions). No framework: Cobra would be a new dependency and a rewrite of
   every command's parsing.
-
-### 39. Renaming a file by editing its `name` cell (V6, C6)
-Agreed as wanted on 2026-11-27, design not started. Editing a CSV, the person often sees a typo in a file name; a
-changed `name` cell in the combined CSV asks for the file to be renamed, with no second column (each row is keyed on
-(export, id), so the cell is compared with the name exported; that name is stored with the export row).
-- **Filo renames** (decided 2026-11-27): it is part of the export and bulk update, not a clone of `mv`, so it fits
-  the Direction above. It still changes a hard rule (Filo changes the person's files only through `filo delete`),
-  which the design must word.
-- Checks: the file is still the one exported (as at delete: re-read, unchanged), inside its root, never
-  over an existing name (`renameat2(RENAME_NOREPLACE)`, as `internal/dispose` uses), a name that is one path
-  component (no `/`, not `.` or `..`, no NUL); recorded as a move, so retention and tags follow; listed in the
-  update's one summary before anything is done, and `-y` answers it as it does the rest.
-- Risks: a fill-down on `name` asks to rename a whole directory to one name (the reason a delete column was
-  rejected; the summary is what catches it); a name that is not valid UTF-8 is exported with U+FFFD, so its row
-  cannot ask for a rename and is refused if its cell changed; the `'` formula guard must be dropped before
-  comparing. The `directory` cell stays display only (moving is a bigger step).
 
 ### 40. Removing `export retention` and `export tags` (V4, C2)
 Agreed 2026-11-27: once the combined CSV has been used in practice, the retention and tags exports and their

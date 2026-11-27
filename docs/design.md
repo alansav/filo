@@ -838,7 +838,8 @@ Retention   …
   | G1 the upgrade from schema 9 | table and columns created, nothing else changes |
 
 ### Disposal
-Package `internal/dispose`, the only code that deletes the user's files.
+Package `internal/dispose`, the only code that changes the user's files: deleting them from `filo delete`, and
+renaming them in place from `filo update` (see Tags, "Renaming a file by its `name` cell").
 
 - **Deletion is permanent.** No quarantine and no recycle bin: the bin can fill up with large files, and is
   missing on network disks; backups are what make a deletion recoverable. (The private directory a file passes
@@ -1735,6 +1736,63 @@ so files can be found by tag; a project is a tag (`project:house sale`).
     with the hint to check for a typo, as the two updates show them.
   - The retention and tags CSVs keep their own rules (their questions keep the other rows, and `-y` is refused for
     a retention CSV) until roadmap 40 removes them.
+- **Renaming a file by its `name` cell** (decided 2026-11-27, roadmap 39; schema version 13). In the combined CSV, a
+  `name` cell changed from what was exported asks for the file to be renamed in its own directory; no second column.
+  This is part of the export and bulk update, not a clone of `mv`: Filo has no command that moves or copies files. It
+  is the second of the two ways Filo changes the person's files, beside `filo delete`, and is done by
+  `internal/dispose` with the same machinery (inside its root, through the opened directories, never by path).
+  - **A change is the cell compared with the cell as exported** (`export_rows.name`), so the formula guard
+    (`'=odd.txt`) left alone is no change; on a change, a guard's `'` before `=`, `+`, `-`, `@`, tab or CR is dropped
+    from the new cell. A row of an export made before schema 13 has no exported name: a changed cell is refused,
+    "export again". The `directory` cell stays display only: moving is not a rename.
+  - **The new name must be one plain name the next scan sees as the same file in the same place.** A changed cell is
+    refused, with one line saying why, when:
+
+    | `name` cell, edited | Result |
+    |---|---|
+    | `Britsh Gas bill.pdf` → `British Gas bill.pdf`; `bill.pdf` → `Bill.pdf` | renamed |
+    | `notes.txt ` → `notes.txt` (a space at the start or end added or removed) | renamed, noted in the summary |
+    | `.bashrc.bak` → `.bashrc.old` (hidden to hidden, in a root that includes hidden files) | renamed |
+    | a name holding `/`, or empty, `.` or `..` | refused: one name in the same directory |
+    | `bill.pdf` → `.bill.pdf`, or `.notes` → `notes` | refused: a rename never hides or unhides a file |
+    | a name starting `.filo-delete-` | refused: Filo's own |
+    | a name the root ignores (`--ignore`) | refused: the next scan would lose it |
+    | a control character (tab, newline, escape) in it | refused |
+    | more than 255 bytes | refused (the filesystem's limit) |
+    | an old name that is not valid UTF-8 (exported with U+FFFD), its cell changed | refused: its real name cannot be written back |
+    | two rows giving one directory the same new name | both refused |
+    | a new name another row's file has now (a chain or a swap, `a`→`b` and `b`→`c`) | both refused: "rename one at a time" |
+    | a new name a registered file in that directory has | refused |
+
+  - **The check at the rename** is that the file at the old name is still the very file the register knows, at the
+    name exported: through the opened directory, the same kind, inode, size and modification time as the last scan
+    recorded (for a symlink, its own). No re-hash: a rename keeps the content, and renaming a large file should not
+    read it; a changed file's typo is still a typo. A file whose register path changed since the export (moved,
+    renamed) is refused, "moved since export #N; export again"; one no longer present is refused. A file edited,
+    replaced or gone on disk since the last scan is skipped, "changed since the last scan; run filo scan and export
+    again". The rename is `renameat2(RENAME_NOREPLACE)` through the open directory, so a name taken on disk (by a file
+    not registered yet) is never replaced: skipped, "a file named X already exists". On a filesystem that ignores
+    case, a case-only rename can be seen as taken: skipped, "this filesystem ignores case; rename it by hand" (not
+    tested). On other platforms than Linux, which have no no-replace rename, renames are refused with one line
+    rather than risk replacing a file (untested). A directory Filo cannot write, or a root not mounted: skipped with
+    the reason. A hard link is renamed alone (its other names stay), as `mv` does; a symlink itself, never its target.
+    In a Syncthing folder it is an ordinary rename, which Syncthing passes on.
+  - **In the update.** Renames are checked, against the register and on disk, with the other rows before the one
+    question, and listed in its summary, so every rename asks (or needs `-y`); a fill-down on `name` shows there. After
+    yes, the register's changes (retentions, tags, policies) are recorded first, in one transaction, as without
+    renames; then each rename is checked again and done, and recorded straight after, so Ctrl-C between them leaves
+    an accurate record (it stops after the current one). A rename skipped then leaves its row's retention and tags
+    as recorded: they belong to the file, whatever its name. The exit code is 1 if any rename was refused or skipped.
+  - **Recording**, as a delete is: each root with a rename gets one `scans` row of kind `rename`; the old path
+    closes at it and the new one opens on the same file row, so retention, tags and history stay with the file; a
+    `moved` event says "renamed by filo update". The next scan finds the file at its new path, re-hashes it once
+    (a rename changes its ctime) and records no change.
+  - **Output.** The summary's renames part lists old and new names side by side under each directory, the first
+    ones (`l` lists all), with a note on a rename that changes only spaces at the start or end, or the extension
+    (`2023 return.pdf` → `2023 return.pd`); neither note refuses anything. In that list a name that starts or ends
+    with a space is shown in double quotes (`"notes.txt "`), a `"` in a quoted name as `\"`; other lists keep
+    `\x20`. After the run: `N files renamed`, and the renames skipped, each with its reason, under "Skipped: run
+    filo scan, then export again". A dry run says "would be renamed".
 - **Register (schema version 11)**: a `tags` table on file ids (the key, the value as spelled and its folded form),
   and `tag_changes`, the history of every tag added or removed and by which command, so each change can be written
   to the journal later (9c) without rework. `export_rows` gain `tags`, the cell as exported.
@@ -1886,7 +1944,8 @@ on the person's phone opens the file).
   root) is shown as `./~/…`, so it never reads as a path in the home directory. The CSV export guards against
   spreadsheet formulas separately.
 - **Prompts only in a terminal** (2026-11-12, replacing "no interactive prompts"). A command asks only where a person
-  should look first: `filo update` before clearing dates, removing tags or creating policies, and `filo delete`. Declining, or having no
+  should look first: `filo update` before clearing dates, removing tags, creating policies or renaming files, and
+  `filo delete`. Declining, or having no
   terminal on standard input, is always the safe choice, so Filo still works the same from a script or a timer.
 - `filo roots` lists roots (settings, mount point, files, size, last scan); `filo roots add DIR [--include-hidden]
   [--ignore NAME]... [--no-scan]` registers one and scans it (absorbing any roots inside it on the same filesystem,
@@ -2331,7 +2390,7 @@ $ filo roots add
 filo: roots add takes exactly one DIR (see filo help roots)
 ```
 
-## 3. Data model (schema version 12)
+## 3. Data model (schema version 13)
 
 The register as `internal/store/schema.go` creates it (`schemaSQL`), with the meaning of each column. Keep the
 interval history and the partial unique index.
@@ -2351,7 +2410,8 @@ CREATE TABLE roots (
 CREATE TABLE scans (
     id INTEGER PRIMARY KEY, started_utc TEXT NOT NULL, finished_utc TEXT,
     root_id INTEGER NOT NULL REFERENCES roots(id),
-    kind TEXT NOT NULL DEFAULT 'scan',  -- 'scan', or 'delete' for a delete run's record in a root
+    kind TEXT NOT NULL DEFAULT 'scan',  -- 'scan'; 'delete' for a delete run's record in a root, 'rename' for an
+                                        -- update's renames in a root (schema 13)
     scope TEXT NOT NULL DEFAULT '',     -- relative to root; '' = the whole root
     include_hidden INTEGER NOT NULL DEFAULT 0, ignores TEXT,  -- the root's settings when it ran
     files_seen INTEGER, new_count INTEGER, changed_count INTEGER, moved_count INTEGER,
@@ -2412,6 +2472,7 @@ CREATE TABLE export_rows (
     dup_group INTEGER,                  -- duplicates exports: the group number in the CSV
     path_id INTEGER REFERENCES paths(id),              -- duplicates exports: the path shown
     tags TEXT,                          -- tags exports: the cell as exported
+    name TEXT,                          -- combined exports: the name cell as exported (schema 13)
     PRIMARY KEY (export_id, file_id));
 CREATE TABLE review_batches (
     id INTEGER PRIMARY KEY, created_utc TEXT NOT NULL,

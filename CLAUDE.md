@@ -25,15 +25,18 @@ rules (`filo rules`); showing and setting a file's details (`filo show`, `filo s
 combined CSV (`filo export [DIR] -o FILE`, on branch `improvements` until merged). What is next is in
 `docs/roadmap.md`, Priority (2026-11-27: 39 renaming by the `name` cell, then 40; then 36 bash completion and the
 sync items).
-**`internal/dispose` is the only code allowed to delete the user's files**, and only from `filo delete`; everything
+**`internal/dispose` is the only code allowed to change the user's files**: deleting them only from `filo delete`,
+renaming them in place only from `filo update` (a changed `name` cell in the combined CSV; being built); everything
 else stays read-only on them, and nothing overwrites an existing file without asking (only an `-o` output file, and
 a tag index's own pages, see the hard rules). Stay inside the current piece of work.
 
 ## Hard rules
 
 - Filo must not modify, move, rename, delete or overwrite any file outside its own data directory (or the `--db` path
-  given, its companion files and its `<db>.snapshots/` directory) except through `filo delete`, or the later work
-  that calls for it, and the output file named with `-o`: if that file exists, Filo asks before replacing it (no
+  given, its companion files and its `<db>.snapshots/` directory) except through `filo delete`; renaming a file in
+  its own directory through `filo update`, only after the update has listed it and been confirmed (or `-y`), never
+  over an existing file, and never a file that is no longer the one exported (see `docs/design.md`, Tags, "Renaming
+  a file by its `name` cell"); and the output file named with `-o`: if that file exists, Filo asks before replacing it (no
   terminal: refused; `-y` does not answer it; see `docs/design.md`, Lifespan), and the files of a tag index
   (`NAME.html` and `.NAME/` in a directory given to `filo indexes add`), which Filo creates only where nothing
   exists, replaces or removes only while still exactly what it wrote (its hash matches; anything else is left alone
