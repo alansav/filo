@@ -17,7 +17,9 @@ and getting rid of it safely when its time comes. The register is how it does th
 - **Filo knows and decides; it deletes because deletion needs its checks** (the re-hash, the root check and the
   hard-link check at the moment of deleting). **Any other action on files is done by standard tools, from lists
   Filo writes** (a list for `tar`, a script of `mv` lines the person reads and runs). This keeps it one tool, in the
-  Unix sense of programs that work together.
+  Unix sense of programs that work together. Clarified 2026-11-27: this rules out clones of file commands (`filo
+  mv`, `filo cp`), not changes made through the export and bulk update, such as renaming a file by editing its
+  `name` cell (39).
 - **Filo stays outside the file system.** Making Filo a file system (every move seen as it happens, no scans) was
   considered and not taken: a bug in it could then lose data on every read and write, while today a broken Filo
   leaves the files untouched and the worst case is a wrong register, which the snapshots cover (principle 3, fail
@@ -351,11 +353,10 @@ Agreed with the person on 2026-11-20. Tab completes Filo's commands, flags and a
 Agreed as wanted on 2026-11-27, design not started. Editing a CSV, the person often sees a typo in a file name; a
 changed `name` cell in the combined CSV asks for the file to be renamed, with no second column (each row is keyed on
 (export, id), so the cell is compared with the name exported; that name is stored with the export row).
-- **To decide first:** it changes a hard rule (Filo changes the person's files only through `filo delete`) and the
-  Direction above ("any other action on files is done by standard tools, from lists Filo writes"). Either Filo
-  renames, with checks as careful as a delete's, or the update writes a script of `mv` lines the person reads and
-  runs.
-- If Filo renames: the file is still the one exported (as at delete: re-read, unchanged), inside its root, never
+- **Filo renames** (decided 2026-11-27): it is part of the export and bulk update, not a clone of `mv`, so it fits
+  the Direction above. It still changes a hard rule (Filo changes the person's files only through `filo delete`),
+  which the design must word.
+- Checks: the file is still the one exported (as at delete: re-read, unchanged), inside its root, never
   over an existing name (`renameat2(RENAME_NOREPLACE)`, as `internal/dispose` uses), a name that is one path
   component (no `/`, not `.` or `..`, no NUL); recorded as a move, so retention and tags follow; listed in the
   update's one summary before anything is done, and `-y` answers it as it does the rest.
