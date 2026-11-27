@@ -1707,7 +1707,7 @@ so files can be found by tag; a project is a tag (`project:house sale`).
   name, the formula guard, `-o` asked about if it exists. The export is recorded as kind `files`; each row keeps the
   hash, `file_date`, `retention`, `keep_until` and the tags cell as exported (no schema change: `exports.kind` is
   text). A first argument `retention`, `tags` or `duplicates` is still that export (until roadmap 40), so a directory
-  with one of those names is given as `./tags`.
+  with one of those names is given with `./` before it (`./tags`).
   - **Read back by `filo update FILE [--dry-run] [-y]`**, which takes a CSV with both a `retention` and a `tags`
     column, whose rows name `files` exports, as a combined CSV (a retention CSV of an older export with a `tags`
     column of the person's own stays a retention CSV). Each row is checked with the rules of both: the retention
