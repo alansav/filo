@@ -11,22 +11,26 @@ import (
 	"testing"
 )
 
-// ownFiles are the only files outside package dispose that may delete or rename anything, each only Filo's own
-// files (CLAUDE.md, Hard rules): the register's snapshots, an -o output file, and a tag index's pages.
-var ownFiles = map[string]bool{
-	"internal/store/snapshot.go": true,
-	"internal/cli/output.go":     true,
-	"internal/tagindex/write.go": true,
+// ownFiles are the only files outside package dispose that may delete, rename or make anything, each only Filo's
+// own files (CLAUDE.md, Hard rules), and each only with the calls named: the register's snapshots, its data
+// directory, an -o output file, and a tag index's pages.
+var ownFiles = map[string]map[string]bool{
+	"internal/store/snapshot.go": {"Remove": true, "Rename": true, "Mkdir": true},
+	"internal/store/store.go":    {"MkdirAll": true},
+	"internal/cli/output.go":     {"Remove": true, "Rename": true},
+	"internal/tagindex/write.go": {"Remove": true, "Rename": true, "Mkdir": true},
 }
 
-// TestOnlyDisposeChangesUserFiles guards the hard rule that internal/dispose is the only code that deletes or
-// renames the user's files: in every Go file of the module but dispose's and ownFiles, any call that removes or
-// renames (os.Remove, os.RemoveAll, os.Rename, os.Truncate, the syscall package's unlink and rename calls, or a
-// Remove, RemoveAll or Rename method, such as os.Root's) fails. A call to another package's function of that name
-// (tagindex.Remove) is that package's, and checked there.
+// TestOnlyDisposeChangesUserFiles guards the hard rule that internal/dispose is the only code that deletes, renames
+// or moves the user's files, and makes the directories a move needs: in every Go file of the module but dispose's,
+// any call that removes, renames or makes a directory (os.Remove, os.RemoveAll, os.Rename, os.Truncate, os.Mkdir,
+// os.MkdirAll, the syscall package's unlink, rename and mkdir calls, or a method of those names, such as os.Root's)
+// fails, but the calls ownFiles allows. A call to another package's function of that name (tagindex.Remove) is that
+// package's, and checked there.
 func TestOnlyDisposeChangesUserFiles(t *testing.T) {
 	changing := map[string]bool{"Remove": true, "RemoveAll": true, "Rename": true, "Truncate": true,
-		"Unlink": true, "Unlinkat": true, "Renameat": true, "Renameat2": true, "Rmdir": true}
+		"Unlink": true, "Unlinkat": true, "Renameat": true, "Renameat2": true, "Rmdir": true, "Mkdir": true,
+		"MkdirAll": true, "Mkdirat": true}
 	module := filepath.Join("..", "..")
 	fset := token.NewFileSet()
 	checked := 0
@@ -42,9 +46,10 @@ func TestOnlyDisposeChangesUserFiles(t *testing.T) {
 			}
 			return nil
 		}
-		if !strings.HasSuffix(p, ".go") || strings.HasSuffix(p, "_test.go") || ownFiles[rel] {
+		if !strings.HasSuffix(p, ".go") || strings.HasSuffix(p, "_test.go") {
 			return nil
 		}
+		allowed := ownFiles[rel]
 		f, err := parser.ParseFile(fset, p, nil, 0)
 		if err != nil {
 			return err
@@ -61,15 +66,21 @@ func TestOnlyDisposeChangesUserFiles(t *testing.T) {
 		}
 		ast.Inspect(f, func(n ast.Node) bool {
 			sel, ok := n.(*ast.SelectorExpr)
-			if !ok || !changing[sel.Sel.Name] {
+			if !ok || !changing[sel.Sel.Name] || allowed[sel.Sel.Name] {
 				return true
 			}
-			if pkg, ok := sel.X.(*ast.Ident); ok {
-				if ip, isPkg := imported[pkg.Name]; isPkg && ip != "os" && ip != "syscall" && ip != "golang.org/x/sys/unix" {
-					return true // another package's function: checked in that package
-				}
+			pkg, isIdent := sel.X.(*ast.Ident)
+			ip, isPkg := "", false
+			if isIdent {
+				ip, isPkg = imported[pkg.Name]
 			}
-			t.Errorf("%s: %s removes or renames on the disk; only internal/dispose may change the user's files",
+			if isPkg && ip != "os" && ip != "syscall" && ip != "golang.org/x/sys/unix" {
+				return true // another package's function: checked in that package
+			}
+			if sel.Sel.Name == "Truncate" && !isPkg {
+				return true // a method of that name is time.Time's as often as a file's: only os.Truncate counts
+			}
+			t.Errorf("%s: %s changes the disk; only internal/dispose may change the user's files",
 				fset.Position(sel.Pos()), sel.Sel.Name)
 			return true
 		})
