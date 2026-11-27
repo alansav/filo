@@ -924,6 +924,24 @@ drawing code on a fake DOM), `TestFindScript`, `TestRenderFindPage` (the policy 
 the page's data parses and its script's hash is in the policy. Not checked in a browser or on the devices yet: how
 the page looks and behaves there, PDF previews on each device.
 
+**The PDF preview on the iPad** (2026-11-27). The person found the page worked on the desktop and laptop, but on the
+iPad, in Textastic, the preview was white and Open did nothing. Checked with throwaway pages copied to the iPad (not
+committed), one question at a time. Textastic serves the page from its own local web server
+(`http://localhost:8080/External/<id>/…`); once it was opened from there, Open, pictures and text files all worked
+with the policy unchanged. Open doing nothing was most likely a one-off: the first page checked once loaded as
+`about:blank` with no address, so no relative link could work, and never did again. What stayed broken was the PDF:
+the console showed `connect-src` blocking it, since Safari's PDF viewer fetches the embedded file. With `connect-src
+'self'` an `embed` (and an `object`) showed both pages of a two-page test PDF; a frame, sandboxed or not, showed only
+the first. The person agreed to the change: the policy was there so the page never loads scripts or stylesheets
+from the internet and works offline, not to stop it reaching the server that serves it. Replaces "no network" above
+with "nothing from any other origin".
+
+Commits: the design; the policy; one review (medium), no bugs, five nits fixed: the design overclaimed ("cannot send
+a name anywhere"), asserted untested what `'self'` matches on a `file:` page, and held dated device notes (now here);
+a test that the script has no call that could fetch (it fails on a planted `fetch`); and this note. Tests:
+`TestRenderFindPage` (the policy, no fetching call), the goldens. Not checked yet: a PDF in the real find page on the
+iPad, and the other devices since the change.
+
 ## Notes on decisions
 
 Short notes taken out of `design.md` on 2026-11-17, by the section they were in.
