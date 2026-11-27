@@ -288,7 +288,10 @@ the database, on the same disk. Copying the register's snapshots to a separate p
 - The inode is only used to decide what to rehash, never to pair moves.
 
 ### Lifespan
-The retention CSV and `filo update` write only the register and the CSV file the user names; they never touch the files.
+The combined CSV (`filo export [DIR] -o FILE`, see Tags, "The combined CSV") is where retentions are set in bulk:
+its `file_date`, `retention` and `keep_until` columns are described here and in Retention CSV columns, its `tags`
+column under Tags. `filo export` and `filo update` write only the register and the CSV file the user names; they
+never touch the files, except for the renames and moves an edited `name` or `directory` cell asks for (see Tags).
 
 - **Forever** (decided 2026-11-12): the retention (and so `keep_until`) may be the word `forever` instead of a date, for files kept
   indefinitely. It is stored as that word, never as a far-off date such as 9999-12-31 (which would look like a
@@ -329,8 +332,8 @@ The retention CSV and `filo update` write only the register and the CSV file the
 
   | Export | Scans first |
   |---|---|
-  | `export retention DIR` | DIR only (a scan of part of a root is safe, see Scan) |
-  | `export retention`, no DIR | every root |
+  | `export DIR` | DIR only (a scan of part of a root is safe, see Scan) |
+  | `export`, no DIR | every root |
   | `export duplicates [DIR]` | every root: a group's copies can be anywhere |
 
   It is the ordinary scan, with its block on stdout before the export's (see Terminal output, Scan and roots), so the
@@ -347,17 +350,18 @@ The retention CSV and `filo update` write only the register and the CSV file the
     leaves out a file saved since, unnoticed; watching the disk needs a process running all the time.
 - **Columns**, in order: `id` (file row ID), `export` (export number), `directory` (absolute), `name`, `size`
   (bytes), `modified` (local time; a cue to when the file was last worked on), `file_date`, `retention`, `keep_until`
-  (see Retention CSV columns). The name is a column of its own because file names often carry dates. Left out on purpose: a reason (one purpose only), an action (a
+  (see Retention CSV columns), `tags` (see Tags). The name is a column of its own because file names often carry dates. Left out on purpose: a reason (one purpose only), an action (a
   delete column in a spreadsheet is unsafe: a one-column sort or a fill-down puts it on the wrong rows), and creation
   or first-seen dates (not reliable: many filesystems do not record a birth time, and a copy, restore or sync resets
-  it). `filo update` finds columns by header name and reads only `id`, `export`, `file_date` and `retention` (and
-  checks `keep_until` was left alone), so a spreadsheet may reorder columns or add its own. Rows are keyed on (export, id). Each export's rows, hashes and dates are stored in
+  it). `filo update` finds columns by header name and reads `id`, `export`, `file_date`, `retention` and `tags`
+  (and checks `keep_until` was left alone, and whether `name` or `directory` changed), so a spreadsheet may reorder
+  columns or add its own. Rows are keyed on (export, id). Each export's rows, hashes and dates are stored in
   the register (`export_rows`).
 - **Encoding.** UTF-8 with a byte order mark (so spreadsheets detect UTF-8), standard quoting. File names are written
   as they are, emoji and all; bytes that are not valid UTF-8 are shown as U+FFFD, which is harmless because the update
   never reads the name. A display cell that starts with `= + - @`, tab or CR gets a leading `'` so a spreadsheet does
   not run it as a formula. The update accepts a byte order mark, CRLF, `;` or tab separators, and empty rows.
-- **Limits on a CSV read back** (security review, issue #18), for the retention and duplicates CSVs alike, all in
+- **Limits on a CSV read back** (security review, issue #18), for the combined and duplicates CSVs alike, all in
   package `sheet`: at most 256 MB (no more than that is ever read), 1,048,576 rows (header and empty rows included)
   and 16,384 fields in a row, the most a spreadsheet keeps, and 1 MB in one row. A CSV over any of them is refused
   whole, before a row is read, saying which limit and on which line; the limits follow the quotes, so a separator or
@@ -370,7 +374,7 @@ The retention CSV and `filo update` write only the register and the CSV file the
   `file_date` (`7y`) replaced them. Dates only: a time (`2026-12-31 15:00`) is refused, not cut off.
 - **`-o FILE` is required**: the CSV is never written to the terminal. FILE is created with mode 0600.
 - **An existing FILE is replaced only after asking**. Refusing would make people delete the old CSV or invent
-  `retention2.csv`. Filo asks `Replace retention.csv? [y/N]`; with no terminal it refuses. `-y` does not answer it: a
+  `files2.csv`. Filo asks `Replace files.csv? [y/N]`; with no terminal it refuses. `-y` does not answer it: a
   timer or script never replaces a file silently. Only a regular file is replaced, never a directory, symlink or device.
   The new CSV is written to a temporary file next to it (mode 0600) and renamed over it, so a crash never leaves half a
   CSV. The question is asked first, before the scan, so a no costs nothing (`Nothing exported.`); if the file is no
@@ -394,27 +398,31 @@ The retention CSV and `filo update` write only the register and the CSV file the
     again and updating again replaces them again;
   - a blank `retention` where one is stored: clears it, so the file is undated again. Clearing a retention does not
     clear `file_date`; blanking the `file_date` cell as well is a separate change and clears it too. Before
-    clearing, the update lists those files (the first ten, then a count) and asks once,
-    `Clear the retention of N files? [y/n]`. Anything but `y` or `yes`, or no terminal on standard input, leaves those
-    rows alone, and the summary says how many and why. `--dry-run` counts them without asking.
+    clearing, the update lists those files and asks, in the update's one question (see Tags, "The combined CSV"):
+    no, or no terminal and no `-y`, records nothing. `--dry-run` lists them without asking.
 - **The update refuses a row**, with one line naming the CSV line and the file, and still applies the others, when:
   a value does not parse, or is typed past the last column; the export is not in the register, or the file is not in
   that export (a row added in the spreadsheet); the file is no longer present; the file's hash differs from the
   export's (changed since the export); its date was changed from a later export since (an old CSV never overwrites a
   newer decision); a retention period has no `file_date`; `keep_until` was changed; the same (export, id) appears
   more than once (every copy is refused). A deleted row changes nothing. The applied rows go in one transaction;
-  `--dry-run` checks everything and writes nothing. The exit code is 1 if any row was refused. A CSV without a
-  `retention` header is refused as a whole: with a pointer to `filo export retention` if it is a review CSV or a
-  retention CSV from before schema version 5, or, if it has a `file_date` column (a current CSV whose `retention`
-  column was deleted or renamed), saying the `retention` column is missing.
+  `--dry-run` checks everything and writes nothing. The exit code is 1 if any row was refused.
+- **The update refuses a CSV as a whole** when it is not a combined CSV, before a row is applied: a duplicates CSV
+  points to `filo delete FILE`, a combined CSV that lost a column is named so (see Tags, "The combined CSV"), and
+  anything else is not a filo CSV. The retention and tags exports were removed on 2026-11-27 (roadmap 40); their
+  CSVs get no pointer of their own, since only the person had used them: one without a `tags` or `retention` column
+  is not a filo CSV, and a row of one under both headers is from another kind of export.
 - **Bulk dates**: set in the spreadsheet (filter on `directory`, fill down). There is no command for them.
 - The hash at export is stored; it is **re-checked at action time** (`filo delete`) against `files.reviewed_hash`.
 
 ### Retention CSV columns
 Retention is usually counted from a document's own date ("keep tax records for seven years"), not from today or from
-when the file reached the disk. So the CSV has a date to count from and a retention that can be a period.
+when the file reached the disk. So the combined CSV has a date to count from and a retention that can be a period.
+(Until 2026-11-27 these columns were also a CSV of their own, from `filo export retention`; see Tags, "The combined
+CSV".)
 
-- **Columns**, in order: `id, export, directory, name, size, modified, file_date, retention, keep_until`.
+- **Columns**, in order: `id, export, directory, name, size, modified, file_date, retention, keep_until`, then
+  `tags`.
   - `file_date`: the date the file is about or was issued, the date a retention period counts from. Typed by the
     person, or suggested by the export from the file name, marked `!` (below). Not the filesystem's creation date, which is not
     reliable. Kept in the register even when no retention uses it.
@@ -434,7 +442,7 @@ when the file reached the disk. So the CSV has a date to count from and a retent
     "keep_until is worked out; change retention instead", and one holding a value that is not a date at all (a
     spreadsheet rewrote it as `3/14/2030`) is refused with the same "format the column as text" hint as the other
     date columns.
-  - The update reads `id`, `export`, `file_date` and `retention`.
+  - Of these, the update reads `id`, `export`, `file_date` and `retention`.
 - **Past dates are accepted**, whether typed
   or worked out from a period: a 2015 invoice with `7y` ends in 2022, which means it is already past its retention.
   The file simply becomes a deletion candidate. Since that also lets a typo through (`7d` for `7y`, 2016 for 2026),
@@ -444,7 +452,7 @@ when the file reached the disk. So the CSV has a date to count from and a retent
   file_date") and nothing is set for that file. The other rows still apply.
 - **Changing `file_date`** on a file whose retention is a period works its `keep_until` out again; a fixed date or
   `forever` does not depend on it.
-- **A blank `retention`** where one is stored clears it, behind the prompt described above.
+- **A blank `retention`** where one is stored clears it, behind the update's question described above.
 - **Dates read from file names**, to fill in `file_date` on export where it is blank. Accepted, with non-digit
   characters (or the start or end of the name) on both sides:
   - `YYYY-MM-DD`, also with `_` or `.` as the separator;
@@ -471,9 +479,8 @@ when the file reached the disk. So the CSV has a date to count from and a retent
   | the `!` removed | an ordinary date, as if typed |
 
   So a guess nobody looked at never reaches the register, not even when a period is filled down a whole directory.
-  (Before 2026-11-24 the date was written unmarked and stored, untouched, when the row's retention was a period; a
-  CSV from then still works that way. Found in a code review on 2026-11-12: `scan 20190101 id.pdf` would otherwise
-  keep 2019-01-01 as its file_date.)
+  (Before 2026-11-24 the date was written unmarked and stored, untouched, when the row's retention was a period.
+  Found in a code review on 2026-11-12: `scan 20190101 id.pdf` would otherwise keep 2019-01-01 as its file_date.)
 - **Register (schema version 5)**: `files.file_date` (YYYY-MM-DD, NULL = none), `files.retention` (the value as
   given: a period, `forever` or a date; NULL = none), and `files.keep_until`, now always worked out from those two
   (YYYY-MM-DD or `forever`). Statuses and `filo delete` keep using `keep_until` only. Migration: an existing
@@ -527,8 +534,8 @@ place: if the law moves financial records from 7 to 10 years, `filo policies set
   policy with no value yet ("its policy payslip has no value yet"). It is a status of its own (below *possible move*, before *undated*), so the fix is
   named: never a deletion candidate; counted in the report's decisions with the directories holding most of them (`! 3
   files need a file_date: their policy counts from it (bills, 7y)`); flagged by `filo policies`; listed first by
-  `show`, with `Next: filo export retention DIR -o FILE, fill in file_date, then filo update FILE`.
-- **The retention CSV**: the `retention` cell holds the policy name; `keep_until` shows the date worked out, as
+  `show`, with `Next: filo export DIR -o FILE, fill in file_date, then filo update FILE`.
+- **The combined CSV**: the `retention` cell holds the policy name; `keep_until` shows the date worked out, as
   today. A policy whose value is a period, on a row with no `file_date`, refuses the row ("retention bills (7y) needs
   a file_date"); a policy with no value is accepted. An untouched cell is recognised by what was exported (`bils`),
   so an old CSV does nothing after a `move` or `set`.
@@ -723,7 +730,7 @@ Dry run: nothing was changed.
 $ filo rules add <root>/bank *Statement* statements
 Done   bank . *Statement* -> statements (7y) . policy set on 3 files . 3 need a file_date . <root>
 
-Next: filo export retention <root>/bank -o FILE, fill in file_date, then filo update FILE
+Next: filo export <root>/bank -o FILE, fill in file_date, then filo update FILE
 
 $ filo rules add <root>/bank *bank* banking
 Done   bank . *bank* -> banking . policy set on 1 file . <root>
@@ -805,7 +812,7 @@ Retention   …
   …
   [!] 1 not given a policy: two rules match it equally
     bank/new-2024-bank.pdf   rules of bank: *2024*, *bank*
-    Next: filo export retention [DIR] -o FILE, then filo update FILE, or filo rules add DIR POLICY
+    Next: filo export [DIR] -o FILE, then filo update FILE, or filo rules add DIR POLICY
 ```
 - **Register (schema version 10)**: `rules` (id, root, directory relative to the root, empty for the root itself,
   pattern as typed, its length (column `letters`: every character but `*`; a `?` counted from 2026-11-17), policy, when
@@ -979,7 +986,7 @@ rules, the listing before the question and the check at the moment of deleting b
   deciding and deleting, so a second export never disagrees with a first, and an old CSV is safe to run: a group is
   acted on only if its files are still exactly as exported. The only duplicates state stored is what is meant to
   exist: excluded directories, contents *always*, and sets of *records* (below). Setting a retention stays a separate
-  step (`filo update` on a retention CSV), since it never deletes: deletes happen later.
+  step (`filo update` on a combined CSV), since it never deletes: deletes happen later.
 - **A group** is a content (hash) held by two or more *copies*: present regular files, size above zero, not deleted,
   not under an excluded directory, the content not *always*, and not all members of one set of records. Hard links
   (same inode in the same root; a root never leaves its filesystem) are one copy: two paths to one file are not a
@@ -1006,7 +1013,7 @@ rules, the listing before the question and the check at the moment of deleting b
   left out entirely: filo duplicates exclude DIR" (see Output, below). Expected to be used rarely, mainly for backups.
 - **`filo export duplicates [DIR] -o FILE [--no-scan] [--workers N]`** writes every group with at least one copy under DIR, and all of that
   group's copies, also those outside DIR (the copy to keep may live elsewhere), so exports of different directories
-  can overlap. One row per copy, groups numbered in order of their first path. Same CSV rules as the retention CSV
+  can overlap. One row per copy, groups numbered in order of their first path. Same CSV rules as the combined CSV
   (byte order mark, formula guard, `-o` required, mode 0600, an existing file replaced only after asking). Columns: `id, export, group, copies,
   directory, name, size, modified, file_date, retention, keep_until, action`. `copies` is the group's size, so a
   filtered view shows when copies are hidden. The retention columns are display only. `export_rows` records each
@@ -1055,7 +1062,7 @@ rules, the listing before the question and the check at the moment of deleting b
   deleted, so by then every copy's retention has passed.
 - **`filo delete FILE.csv [-y]`**, in order:
   1. Read the CSV: a CSV from the first design (a `delete` column) is refused ("this CSV is from an older export:
-     export again"); a retention CSV is refused; each group's values and structure are checked. A row not in its
+     export again"); a combined CSV is refused; each group's values and structure are checked. A row not in its
      export, or whose `group` is not the export's group for that file (its `group` edited, pasted from another
      export, added or duplicated), refuses both groups it touches; the other groups are still processed, and the
      output advises a new export. Sorting is fine: groups are found by each row's `group` cell, not by row order. A file in groups of two exports (overlapping
@@ -1320,8 +1327,8 @@ the tool for many). Replaces "Later b, setting dates in place".
 - **`filo set FILE... [--file-date DATE | --no-file-date] [--retention R | --no-retention] [--duplicates
   always|records|counted]`.** Several flags at once, in any order. A contradiction (`--file-date` with
   `--no-file-date`) or no flag at all is refused before anything is checked. All or nothing: if any file is
-  refused, nothing is written and every refusal is listed. The retention CSV's rules apply unchanged: a period needs
-  a `file_date` (stored, or given in the same command), so `--no-file-date` on a file whose retention is a period is
+  refused, nothing is written and every refusal is listed. The combined CSV's retention rules apply unchanged: a
+  period needs a `file_date` (stored, or given in the same command), so `--no-file-date` on a file whose retention is a period is
   refused; a new `file_date` works a period out again; past dates are accepted and listed with the hint to check for
   a typo; clearing asks first (or `-y`); no date is read from the file name (the CSV only suggests one where the
   person sees it). Recorded as a review batch, like an update. `--duplicates` is about the content, not the one
@@ -1688,47 +1695,38 @@ so files can be found by tag; a project is a tag (`project:house sale`).
   each link as a file of its own, each with its own tags: `find` takes the tags of all its links together, so a file
   tagged through one link is tagged. `filo show FILE` has a Tags part: how many, then one tag a line (or `none`), so
   a tag named `none` cannot be mistaken; a file deleted by Filo shows the tags it had, `as when it was deleted`.
-- **The tags CSV**: `filo export tags [DIR] -o FILE [--no-scan] [--workers N]`, a scan first as every export, and
-  read back by `filo update FILE [--dry-run] [-y]`, which tells it from a retention or duplicates CSV by its header.
-  Columns: `id, export, directory, name, size, modified, tags`; every present file under DIR (every root with no
-  DIR). The `tags` cell holds the file's tags, separated by `; `, in the order `filo tags` lists them. **The cell
-  replaces the file's tags:** a tag not in it is removed, so an untouched cell changes nothing and an emptied one
-  removes all. Cells are read with the spelling rules, so `type:Bill` on a file tagged `type:bill` changes nothing
-  (the first spelling stays: `filo tags rename` changes it), and a tag typed twice is one. A cell left as exported
-  is no decision, whatever happened to the file since, and a cell with the tags the file has already changes nothing
-  (a CSV applied twice). A row whose file's tags changed since the export (by `tag`, `untag` or `tags rename`) to
-  others than the cell's is refused, as a changed file is for retention, and so are a row with a tag that breaks the
-  spelling rules, a file deleted by Filo since, and a file listed twice (even under two exports); the other rows still
-  apply. A cell that starts with a character a spreadsheet would read as a formula (`=`, `+`, `-`, `@`), or with an
-  apostrophe, is written after an apostrophe, which the update drops. An update that removes tags lists those rows
-  and asks first (`Remove them? [y/N/l]`), as clearing a retention does, since an emptied column (a spreadsheet that
-  lost it on a save) would remove every tag at once. `-y` answers yes, for a script (the person's decision,
-  2026-11-22); it answers only this question, so `filo update -y` of a retention CSV is a usage error (clearing a
-  retention has no `-y`). No, or no terminal and no `-y`, leaves those rows as they were; the other rows are
-  recorded either way. Ctrl-C at the question records nothing.
 - **The combined CSV** (decided 2026-11-27): `filo export [DIR] -o FILE [--no-scan] [--workers N]`, with no word
   after `export`, writes every column a person edits in one CSV, so a tag seen while dating files, or a date seen
-  while tagging, is set in the same pass. It is the retention export's CSV with the tags CSV's column after it:
-  `id, export, directory, name, size, modified, file_date, retention, keep_until, tags`. Everything else is as for
-  those two: a scan of DIR (or every root) first, every present file, the `!` mark on a `file_date` read from the
-  name, the formula guard, `-o` asked about if it exists. The export is recorded as kind `files`; each row keeps the
-  hash, `file_date`, `retention`, `keep_until` and the tags cell as exported (no schema change: `exports.kind` is
-  text). A first argument `retention`, `tags` or `duplicates` is still that export (until roadmap 40), so a directory
-  with one of those names is given with `./` before it (`./tags`).
-  - **Read back by `filo update FILE [--dry-run] [-y]`**, which takes a CSV with both a `retention` and a `tags`
-    column, whose rows name `files` exports, as a combined CSV (a retention CSV of an older export with a `tags`
-    column of the person's own stays a retention CSV). Each row is checked with the rules of both: the retention
-    half as a retention CSV's row (file_date, retention, the `!` mark, keep_until left alone, the file unchanged
-    since the export, a newer decision not overwritten), the tags half as a tags CSV's row. A symlink's row (the
-    retention CSV has them, the tags CSV does not) has an empty `tags` cell, and tags typed in it are refused, as
-    `filo tag` refuses a symlink ("give the file it points to"). **A row refused by
-    either half is refused whole**, with each reason, so a file never ends up half updated; the other rows still
-    apply. A row from another kind of export is refused. A CSV whose rows name `files` exports but which has lost
-    its `retention` or its `tags` column (deleted or renamed in the spreadsheet) is refused as a whole, naming the
-    column, since a lost `tags` column would otherwise read as every tag removed.
+  while tagging, is set in the same pass: `id, export, directory, name, size, modified, file_date, retention,
+  keep_until, tags`. A scan of DIR (or every root) first, every present file (see Lifespan), the `!` mark on a
+  `file_date` read from the name, the formula guard, `-o` asked about if it exists. The export is recorded as kind
+  `files`; each row keeps the hash, `file_date`, `retention`, `keep_until` and the tags cell as exported (no schema
+  change: `exports.kind` is text). It replaced the retention CSV (`filo export retention`) and the tags CSV (`filo
+  export tags`), each with half its columns, which were removed on 2026-11-27 (roadmap 40) once it had been used.
+  - **The `tags` cell** holds the file's tags, separated by `; `, in the order `filo tags` lists them. **The cell
+    replaces the file's tags:** a tag not in it is removed, so an untouched cell changes nothing and an emptied one
+    removes all. Cells are read with the spelling rules, so `type:Bill` on a file tagged `type:bill` changes nothing
+    (the first spelling stays: `filo tags rename` changes it), and a tag typed twice is one. A cell left as exported
+    is no decision, whatever happened to the file since, and a cell with the tags the file has already changes
+    nothing (a CSV applied twice). A row whose file's tags changed since the export (by `tag`, `untag` or `tags
+    rename`) to others than the cell's is refused, as a changed file is for retention, and so are a row with a tag
+    that breaks the spelling rules and a file deleted by Filo since. A cell that starts with a character a
+    spreadsheet would read as a formula (`=`, `+`, `-`, `@`), or with an apostrophe, is written after an apostrophe,
+    which the update drops. A symlink's row has an empty `tags` cell, and tags typed in it are refused, as `filo
+    tag` refuses a symlink ("give the file it points to").
+  - **Read back by `filo update FILE [--dry-run] [-y]`**, which takes a CSV with `id`, `export`, `retention` and
+    `tags` columns. Each row is checked with the rules of both halves: the retention half as described under
+    Lifespan and Retention CSV columns (file_date, retention, the `!` mark, keep_until left alone, the file unchanged
+    since the export, a newer decision not overwritten), the tags half as above. **A row refused by either half is
+    refused whole**, with each reason, so a file never ends up half updated; the other rows still apply. A file
+    listed twice (even under two exports) is refused every time it appears. A row from another kind of export is
+    refused. A CSV whose rows name `files` exports but which has lost its `retention` or its `tags` column (deleted
+    or renamed in the spreadsheet) is refused as a whole, naming the column, since a lost `tags` column would
+    otherwise read as every tag removed.
   - **One question, before anything is written.** If any row clears a stored retention, removes a tag, or names a
     policy that does not exist yet, the update first lists them (the first ones of each, `l` lists all) and asks
-    once, `Apply the update? Nothing is recorded otherwise. [y/N/l]`. Yes records every row that was not refused,
+    once, `Apply the update? Nothing is recorded otherwise. [y/N/l]`, since an emptied column (a spreadsheet that
+    lost it on a save) would clear or remove everything at once. Yes records every row that was not refused,
     in one transaction. **No, end of input, Ctrl-C, or no terminal: nothing is recorded**, not even the rows that
     needed no question, and one line says why and how to go on; so an emptied column never half applies. With no
     terminal (and no `-y`) the exit code is 1, so a script or timer can tell nothing was done (the person's
@@ -1739,9 +1737,7 @@ so files can be found by tag; a project is a tag (`project:house sale`).
   - The output: `Update   FILE . export #N . R rows . <root>`, then the counts (files given a retention, files put
     on a policy with no value yet, retentions cleared, files whose tags changed, rows unchanged, rows refused, and
     the policies created), the files whose tags changed, the refused rows, and the files left past their retention
-    with the hint to check for a typo, as the two updates show them.
-  - The retention and tags CSVs keep their own rules (their questions keep the other rows, and `-y` is refused for
-    a retention CSV) until roadmap 40 removes them.
+    with the hint to check for a typo.
 - **Renaming a file by its `name` cell** (decided 2026-11-27, roadmap 39; schema version 13). In the combined CSV, a
   `name` cell changed from what was exported asks for the file to be renamed in its own directory; no second column.
   This is part of the export and bulk update, not a clone of `mv`: Filo has no command that moves or copies files. It
@@ -1997,7 +1993,7 @@ on the person's phone opens the file).
   details), `find` (2026-11-21, see Finding files), `tag`, `untag` and `tags` (2026-11-22, see Tags), `indexes`
   (2026-11-22, see Tag index pages). No
   themed subcommands. There is no `restore`: a file restored from a backup comes back as a new file. "Update" says
-  that only existing files change; `filo review` only says it was replaced by `export retention` and `update`.
+  that only existing files change; `filo review` only says it was replaced by `export` and `update`.
 - **Keep flags and options to a minimum** (2026-11-11). Prefer a safe default and clear output over a flag; prefer
   doing the obvious thing and saying what was done over asking.
 - **Output cannot act on the terminal** (2026-11-13). File names can hold any byte but `/` and NUL and come from
@@ -2030,16 +2026,14 @@ on the person's phone opens the file).
   scanned. `--workers` is 1–64, default 4.
 - `filo report [--top N]`: see section 4.
 - `filo export [DIR] -o FILE [--no-scan] [--workers N]` and `filo update FILE [--dry-run] [-y]`: the combined CSV,
-  see Tags.
-- `filo export retention [DIR] -o FILE [--no-scan] [--workers N]` and `filo update FILE [--dry-run]`: see Lifespan. Every export
+  see Tags and Lifespan. Every export
   scans first unless `--no-scan` is given (see Lifespan, "A scan first"), with `--workers` as for `filo scan`
-  (refused with `--no-scan`). The word after `export`
-  names the CSV, so a later CSV is a new word, not a new command, and no word is the combined CSV (2026-11-27);
-  `update` tells the kind from the CSV's header (and, for a CSV with both `retention` and `tags`, from its exports).
+  (refused with `--no-scan`). A word after `export` names another CSV (`duplicates`, see Duplicates), so a later CSV
+  is a new word, not a new command, and no word is the combined CSV (2026-11-27); a directory named `duplicates` is
+  given as `./duplicates`. `update` tells the kind from the CSV's header.
 - `filo find [DIR] [--name PATTERN] [--tag TAG]... [--no-tag TAG]... [-0] [--no-scan] [--workers N]`: see Finding
   files and Tags.
-- `filo tag FILE... TAG...`, `filo untag FILE... TAG...`, `filo tags`, `filo tags rename OLD NEW`, and `filo export
-  tags [DIR] -o FILE [--no-scan] [--workers N]`, read back by `filo update`: see Tags.
+- `filo tag FILE... TAG...`, `filo untag FILE... TAG...`, `filo tags` and `filo tags rename OLD NEW`: see Tags.
 - `filo indexes`, `filo indexes add [DIR] [--name NAME]`, `filo indexes remove [DIR] [--name NAME] [-y]` and `filo
   indexes refresh [DIR] [--name NAME]`: see Tag index pages.
 - `filo delete [DIR] [-y]`: lists the files past their keep-until date and deletes the ones chosen (see Disposal).
@@ -2145,7 +2139,7 @@ Examples, from the golden files (plain form, as when piped; `<root>` is the test
 typed at a prompt is not echoed):
 
 ```
-Retention update   r.csv . export #1 . 4 rows . <root>
+Update   r.csv . export #1 . 4 rows . <root>
 
   [ok] 2 files given a retention
   [refused] 2 rows refused
@@ -2358,14 +2352,15 @@ Next: filo scan <root>
   `Next:` lines: hiding the scan's would hide where its findings are listed.
   With `--no-scan`, no scan block, and a `·` line in the export block: `not scanned first: as of the last scan,
   <when>`.
-- **`filo export retention`**: a heading, `Export #18 (retention)`: the export number marked as an ID by `#` (the
+- **`filo export`**: a heading, `Export #18`: the export number marked as an ID by `#` (the
   one in the CSV's `export` column and `filo update`'s heading; one sequence for every kind of export), then the
-  number of files and the place (`~/Documents, under tax/`, as everywhere); a count line of files
-  without a retention and with one (`·`); a `!` line when file_dates were read from file names, saying they are
-  marked `!` and count only once it is removed; then `Next:` with the forms a retention takes and the `filo update`
-  command. The CSV's path appears once, in that `Next:` line, in full and quoted when needed (see "Paths in a `Next:`
-  line"), not also on a "written to" line. The full explanation stays in `filo help export`. Nothing to export:
-  `Export (retention)   no files · <place>` (no number is used) and `Nothing exported.` A scan's heading names its
+  number of files and the place (`~/Documents, under tax/`, as everywhere); count lines of files
+  without a retention and with one, and of files tagged and without a tag (`·`); a `!` line when file_dates were
+  read from file names, saying they are marked `!` and count only once it is removed; then `Next:` with the forms a
+  retention and tags take, the cells that rename or move, and the `filo update` command. The CSV's path appears
+  once, in that `Next:` line, in full and quoted when needed (see "Paths in a `Next:` line"), not also on a
+  "written to" line. The full explanation stays in `filo help export`. Nothing to export:
+  `Export   no files · <place>` (no number is used) and `Nothing exported.` A scan's heading names its
   number the same way, `Scan #2`; an update's heading names the export it reads as a fact, `export #1`. Every
   message that names an export or a scan writes its number the same way (`changed since export #3`, `first seen
   2026-11-12 (scan #3)`, `last scan #4`), so one number never shows in two forms; only the CSV's `export` column
@@ -2376,22 +2371,23 @@ Next: filo scan <root>
   comes with all its copies).
 
 ```
-$ filo export retention tax
+$ filo export tax
 Scan #2   2 files seen . under 0.1 s . <root>, under tax/
   [ok] no changes
 
-Export #1 (retention)   2 files . <root>, under tax/
+Export #1   2 files . <root>, under tax/
 
   - 2 without a retention, 0 with one
+  - 0 tagged, 2 without a tag
   [!] 1 file_date read from the file name, marked !: remove the ! to accept it
 
-Next: fill in retention (7y, 18m, forever or a date), then filo update <work>/l.csv
+Next: fill in retention (7y, 18m, forever or a date) and tags (key:value or a bare value, separated by ;), or correct a name or a directory, then filo update <work>/l.csv
 
-$ filo export retention empty
+$ filo export empty
 Scan #3   0 files seen . under 0.1 s . <root>, under empty/
   [ok] no changes
 
-Export (retention)   no files . <root>, under empty/
+Export   no files . <root>, under empty/
 Nothing exported.
 ```
 
@@ -2536,7 +2532,8 @@ CREATE TABLE exports (
     id INTEGER PRIMARY KEY, created_utc TEXT NOT NULL,
     path TEXT,                          -- the CSV written
     after_scan INTEGER REFERENCES scans(id),           -- the latest finished scan at export
-    kind TEXT NOT NULL DEFAULT 'retention');           -- 'retention' or 'duplicates'
+    kind TEXT NOT NULL DEFAULT 'retention');           -- 'files' (combined) or 'duplicates'; 'retention' and
+                                                       -- 'tags' in a register from before 2026-11-27
 CREATE TABLE export_rows (
     export_id INTEGER NOT NULL REFERENCES exports(id), file_id INTEGER NOT NULL REFERENCES files(id),
     hash TEXT,                          -- the content shown; the update refuses the row if it has changed
@@ -2545,7 +2542,7 @@ CREATE TABLE export_rows (
                                         -- policy's name for a file on one); cells left as these are untouched
     dup_group INTEGER,                  -- duplicates exports: the group number in the CSV
     path_id INTEGER REFERENCES paths(id),              -- duplicates and combined exports: the path shown
-    tags TEXT,                          -- tags exports: the cell as exported
+    tags TEXT,                          -- combined exports: the tags cell as exported
     name TEXT,                          -- combined exports: the name cell as exported (schema 13)
     PRIMARY KEY (export_id, file_id));
 CREATE TABLE review_batches (

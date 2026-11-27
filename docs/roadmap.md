@@ -55,8 +55,8 @@ complexity scores (1 to 10, Claude's estimates) are still to be settled with the
 43 are not placed yet.
 
 Next, agreed 2026-11-27 (friction week, on the `improvements` branch, after the combined CSV, 39 renaming by the
-`name` cell, 41 no `bin`/`obj` special case and 42 moving by the `directory` cell, all built that day): 40 once the
-combined CSV has been used in practice; then the list below.
+`name` cell, 41 no `bin`/`obj` special case and 42 moving by the `directory` cell, all built that day): 40 removing
+the retention and tags exports (being built, see `design.md`); then the list below.
 
 1. 36 bash completion
 2. 9b device ID, 9a marking synced directories, 9c sharing decisions
@@ -80,7 +80,7 @@ starting points for the design, not decisions, unless they say so.
 A line in `filo report` showing how far dating has got: files with a `file_date`, files with a retention, and per
 directory what is left. The report's "Where most need one" list already covers part of the last.
 
-### 5b. `filo export retention --needing-retention` (V6, C2)
+### 5b. `filo export --needing-retention` (V6, C2)
 Writes only the files the report counts as needing a retention, so each CSV is shorter and holds only work still to
 do.
 
@@ -351,12 +351,6 @@ Agreed with the person on 2026-11-20. Tab completes Filo's commands, flags and a
   and tag names (tags are built).
 - Bash only at first (zsh can load bash completions). No framework: Cobra would be a new dependency and a rewrite of
   every command's parsing.
-
-### 40. Removing `export retention` and `export tags` (V4, C2)
-Agreed 2026-11-27: once the combined CSV has been used in practice, the retention and tags exports and their
-updates go, leaving `filo export [DIR] -o FILE` and `filo export duplicates`. Open: whether `filo update` keeps
-reading an old retention or tags CSV for a while, or points to the new export; `-y` then means the same for every
-update.
 
 ### 43. Restoring a register snapshot (V5, C3)
 Agreed as wanted on 2026-11-27, design not started; promoted from the deferred improvements, where it was one line.
