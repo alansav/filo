@@ -2008,11 +2008,14 @@ on the person's phone opens the file).
     A "Browse by key" link opens `.NAME/index.html`.
   - **Preview.** Selecting a result previews it, with "Open" to open the file itself: an image (`jpg`, `jpeg`,
     `png`, `gif`, `webp`, `heic`), a video or an audio file (`mp4`, `mov`, `webm`, `mp3`, `m4a`, `ogg`, `wav`) in
-    the page; a PDF or a text file (`txt`, `md`, `csv`) in a frame with every script switched off (`sandbox`), as
-    is anything shown in a frame, so a file from the person's directories never runs in the index; anything else,
-    "No preview". A pane beside the results on a wide screen, the whole screen with Open and Close on a narrow one.
-    Known gaps, not checked on the devices yet: GrapheneOS's browser shows no PDF in a frame, and iOS may show only
-    a PDF's first page.
+    the page; a text file (`txt`, `md`, `csv`) in a frame with every script switched off (`sandbox`), as is
+    anything shown in a frame, so a file from the person's directories never runs in the index; a PDF in an embed
+    declared `application/pdf`, so the browser's own PDF viewer shows it and never reads it as a page (Chrome blocks
+    its viewer in a sandboxed frame: found in the code review, the person's choice, 2026-11-27); anything else, "No
+    preview". What the browser cannot show (a HEIC picture outside Safari, a video it has no codec for) switches to
+    "No preview" too, found by the element's load error, not by the browser's name. A pane beside the results on a
+    wide screen, the whole screen with Open and Close on a narrow one. Known gaps, not checked on the devices yet:
+    GrapheneOS's browser has no PDF viewer, and iOS may show only a PDF's first page.
   - **One file.** The data (as JSON), the script and its styles are all inside `NAME.html`, so nothing else has to
     load (the form checked on every device); it is written again whenever the index's data changes, about 150 bytes
     a file, deterministic as every page.
@@ -2020,11 +2023,12 @@ on the person's phone opens the file).
     no name or tag can end the script; each file's link is worked out in Go, with the static pages' encoding, and
     used as given; the page is built with `createElement` and `textContent`, never by parsing HTML; the address is
     read only as text to compare. A Content-Security-Policy meta tag allows only the page's own script and style
-    (by their hashes) and the person's local files for a preview, and no network at all: even a mistake cannot load
-    anything or send a name anywhere.
-  - **Tests.** The script's logic (matching, counts, suggestions, directories, the address) is plain functions,
-    tested with Node's own test runner (`node --test`, no packages), run from `go test`; Node is in the dev
-    container. What only a browser shows (the page itself, the preview) is checked by hand.
+    (by their hashes) and the person's local files for a preview (`img`, `media`, `frame`, `object`), and no
+    network at all: even a mistake cannot load anything or send a name anywhere.
+  - **Tests.** The script's logic (matching, counts, suggestions, directories, the address, the kind of preview) is
+    plain functions, tested with Node's own test runner (`node --test`, no packages), run from `go test`; Node is in
+    the dev container. The drawing code runs there too, on a small fake of the DOM. What only a browser shows (the
+    page itself, the preview) is checked by hand.
 - **Look.** One local stylesheet, `.NAME/style.css`: system fonts and nothing remote (it works offline), a viewport
   meta tag, one column, rows as cards on a narrow screen, tap targets of at least 44px, tags as chips, dark mode by
   `prefers-color-scheme`.
