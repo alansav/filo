@@ -247,7 +247,7 @@ func TestRenderEscapes(t *testing.T) {
 	for rel, h := range map[string]string{
 		`<script>alert(1)</script> "q" & 'a'.pdf`: "./%3Cscript%3Ealert%281%29%3C/script%3E%20%22q%22%20&%20%27a%27.pdf",
 		"javascript:alert(1)":                     "./javascript:alert%281%29",
-		"line\u2028sep\u2029.pdf":                "./line%E2%80%A8sep%E2%80%A9.pdf",
+		"line\u2028sep\u2029.pdf":                 "./line%E2%80%A8sep%E2%80%A9.pdf",
 		"</script><script>x()</script>.pdf":       "./%3C/script%3E%3Cscript%3Ex%28%29%3C/script%3E.pdf",
 	} {
 		if got, ok := links[rel]; !ok || got != h {

@@ -49,10 +49,10 @@ type fileRow struct {
 
 type page struct {
 	Title, Style, Find, Heading, Counts, Empty string
-	Trail                                []link
-	Rows                                 []row
-	Files                                []fileRow
-	Note                                 *link
+	Trail                                      []link
+	Rows                                       []row
+	Files                                      []fileRow
+	Note                                       *link
 }
 
 // Pages are an index's rendered files, by path relative to its directory ('/'-separated), and the directories that
