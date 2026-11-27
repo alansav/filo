@@ -172,3 +172,32 @@ func TestCheckRename(t *testing.T) {
 		t.Errorf("the directory holds %d entries after CheckRename, want it untouched", len(entries))
 	}
 }
+
+// ctxRenames fails, as the register does, when given a cancelled context.
+type ctxRenames struct{ recorded bool }
+
+func (f *ctxRenames) Renamed(ctx context.Context, _ store.Candidate, _ string, _ time.Time) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	f.recorded = true
+	return nil
+}
+
+// TestRenameRecordedAfterCtrlC: a Ctrl-C that lands once the checks are done still leaves the rename recorded.
+func TestRenameRecordedAfterCtrlC(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("renames need renameat2 (Linux)")
+	}
+	root := canonicalTemp(t)
+	write(t, filepath.Join(root, "a.txt"), "a")
+	c := candidate(t, root, "a.txt")
+	ctx, cancel := context.WithCancel(context.Background())
+	beforeRename = func(string) { cancel() }
+	t.Cleanup(func() { beforeRename = nil })
+	rec := &ctxRenames{}
+	o, err := Rename(ctx, rec, c, "b.txt", time.Now())
+	if err != nil || !o.Done || !rec.recorded {
+		t.Errorf("outcome %+v, %v, recorded %v; want renamed and recorded", o, err, rec.recorded)
+	}
+}

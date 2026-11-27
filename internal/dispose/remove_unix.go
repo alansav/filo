@@ -66,3 +66,6 @@ func removeVerified(dir *os.Root, name, path string, _ fs.FileInfo) error {
 // renameInPlace refuses: these systems' syscall package has no rename that never replaces its target. Untested:
 // only Linux builds are tested.
 func renameInPlace(dir *os.Root, old, name string) error { return errNoReplace }
+
+// canRename reports whether this system has a rename that never replaces its target, which renames need.
+var canRename = false

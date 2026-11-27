@@ -308,3 +308,6 @@ func renameInPlace(dir *os.Root, old, name string) error {
 	}
 	return renameat(dir, old, dir, name, renameNoReplace)
 }
+
+// canRename reports whether this system has a rename that never replaces its target, which renames need.
+var canRename = sysRenameat2 != 0

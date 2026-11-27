@@ -63,7 +63,9 @@ func Rename(ctx context.Context, rec RenameRecorder, c store.Candidate, name str
 	case err != nil:
 		return Outcome{Reason: "could not be renamed: " + store.ErrDetail(err), Failed: true}, nil
 	}
-	if err := rec.Renamed(ctx, c, name, now); err != nil {
+	// Recorded whatever happens to ctx now: the file has its new name, and a Ctrl-C landing here must not leave the
+	// register at the old one.
+	if err := rec.Renamed(context.WithoutCancel(ctx), c, name, now); err != nil {
 		return Outcome{Done: true}, fmt.Errorf("%w (%s was renamed to %s; the next scan will record it as moved)",
 			err, p, name)
 	}
@@ -87,6 +89,9 @@ func CheckRename(c store.Candidate, name string) string {
 // lookBeforeRename is the check before a rename: the open directory that holds c, what lstat saw of it there and
 // its absolute path, or (ok false) the outcome that stops the rename. The caller closes dir.
 func lookBeforeRename(c store.Candidate, name string) (dir *heldDir, fi fs.FileInfo, p string, o Outcome, ok bool) {
+	if !canRename {
+		return nil, nil, "", Outcome{Reason: errNoReplace.Error(), Failed: true}, false
+	}
 	if name == "" || name == "." || name == ".." || strings.ContainsAny(name, "/\x00") {
 		return nil, nil, "", Outcome{Reason: fmt.Sprintf("%q is not a file name", name), Failed: true}, false
 	}
