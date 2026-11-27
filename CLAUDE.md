@@ -80,7 +80,8 @@ prefix.)
 
 - Build: `make build` (a static `bin/filo`; `scripts/install.sh` copies it to `~/.local/bin` and is for the user to
   run on the host, not you)
-- Test: `go test ./...`
+- Test: `go test ./...` (it also runs the tag index's find page script tests with `node --test`; Node is in the dev
+  container, and a container built before Node was added needs a rebuild)
 - Vet and lint: `go vet ./...` and `staticcheck ./...`
 - Format: `gofmt -l -w .`
 - Throwaway test tree: `scripts/testtree.sh init DIR` then `scripts/testtree.sh mutate DIR`, with DIR under your own
