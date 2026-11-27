@@ -263,25 +263,10 @@ func ParseCSV(data []byte) (Parsed, error) {
 			bad("%s", problem)
 			return
 		}
-		rr := store.RetentionRow{Line: row.Line, ExportID: ex, FileID: id}
-		var err error
-		if rr.Retention, err = ParseRetention(row.Get("retention")); err != nil {
-			bad("retention %v", err)
+		rr, problem := ReadRow(sh, row, id, ex)
+		if problem != "" {
+			bad("%s", problem)
 			return
-		}
-		if sh.Has("file_date") {
-			rr.HasFileDate = true
-			if rr.FileDate, err = parseFileDate(row.Get("file_date")); err != nil {
-				bad("file_date %v", err)
-				return
-			}
-		}
-		if sh.Has("keep_until") {
-			rr.HasKeepUntil = true
-			if rr.KeepUntil, err = parseKeepUntil(row.Get("keep_until")); err != nil {
-				bad("keep_until %v", err)
-				return
-			}
 		}
 		p.Rows = append(p.Rows, rr)
 	})
@@ -294,4 +279,27 @@ func ParseCSV(data []byte) (Parsed, error) {
 				Msg: fmt.Sprintf("file %d of export #%d is listed more than once", r.FileID, r.ExportID)})
 		})
 	return p, nil
+}
+
+// ReadRow reads a row's retention cells, the file_date and keep_until ones if the sheet has them, for the file id of
+// export ex: the row, or why it is refused. The combined CSV reads its retention half with it too.
+func ReadRow(sh *sheet.Sheet, row sheet.Row, id, ex int64) (store.RetentionRow, string) {
+	rr := store.RetentionRow{Line: row.Line, ExportID: ex, FileID: id}
+	var err error
+	if rr.Retention, err = ParseRetention(row.Get("retention")); err != nil {
+		return rr, fmt.Sprintf("retention %v", err)
+	}
+	if sh.Has("file_date") {
+		rr.HasFileDate = true
+		if rr.FileDate, err = parseFileDate(row.Get("file_date")); err != nil {
+			return rr, fmt.Sprintf("file_date %v", err)
+		}
+	}
+	if sh.Has("keep_until") {
+		rr.HasKeepUntil = true
+		if rr.KeepUntil, err = parseKeepUntil(row.Get("keep_until")); err != nil {
+			return rr, fmt.Sprintf("keep_until %v", err)
+		}
+	}
+	return rr, ""
 }

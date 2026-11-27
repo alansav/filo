@@ -61,7 +61,7 @@ func WriteCSV(w io.Writer, exportID int64, items []store.TagItem, loc *time.Loca
 	for _, it := range items {
 		rec := append([]string{strconv.FormatInt(it.FileID, 10), ex},
 			sheet.FileCells(it.Root, it.Rel, it.Size, it.MtimeNS, loc)...)
-		rec = append(rec, guardCell(store.JoinTags(it.Tags)))
+		rec = append(rec, GuardCell(store.JoinTags(it.Tags)))
 		if err := cw.Write(rec); err != nil {
 			return err
 		}
@@ -121,17 +121,17 @@ func ParseCSV(data []byte) (Parsed, error) {
 	return p, nil
 }
 
-// guardCell is a tags cell as written: sheet.Cell's apostrophe before a cell a spreadsheet would read as a formula
+// GuardCell is a tags cell as written: sheet.Cell's apostrophe before a cell a spreadsheet would read as a formula
 // (=, +, -, @), and one before a cell that starts with an apostrophe itself, so that ParseCell, dropping one, always
 // gives back the tags as they are.
-func guardCell(cell string) string {
+func GuardCell(cell string) string {
 	if strings.HasPrefix(cell, "'") {
 		return "'" + cell
 	}
 	return sheet.Cell(cell)
 }
 
-// ParseCell reads a tags cell: the tags separated by ";", each once. The apostrophe guardCell puts before a cell is
+// ParseCell reads a tags cell: the tags separated by ";", each once. The apostrophe GuardCell puts before a cell is
 // dropped first: one before =, +, -, @ or another apostrophe.
 func ParseCell(cell string) ([]tags.Tag, error) {
 	cell = strings.TrimSpace(cell)
