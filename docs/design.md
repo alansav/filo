@@ -1723,7 +1723,9 @@ so files can be found by tag; a project is a tag (`project:house sale`).
     policy that does not exist yet, the update first lists them (the first ones of each, `l` lists all) and asks
     once, `Apply the update? Nothing is recorded otherwise. [y/N/l]`. Yes records every row that was not refused,
     in one transaction. **No, end of input, Ctrl-C, or no terminal: nothing is recorded**, not even the rows that
-    needed no question, and one line says why and how to go on; so an emptied column never half applies. `-y`
+    needed no question, and one line says why and how to go on; so an emptied column never half applies. With no
+    terminal (and no `-y`) the exit code is 1, so a script or timer can tell nothing was done (the person's
+    decision, 2026-11-27); a no typed at the question is the person's choice, exit 0. `-y`
     answers yes, for a script (the person's decision, 2026-11-27: the same `-y` for clearing, removing and new
     policies). An update with none of these asks nothing. `--dry-run` shows the same lists, asks nothing and
     writes nothing.
