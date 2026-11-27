@@ -821,6 +821,41 @@ files too; the README's sample scan count; the replaced decision moved here from
 `TestSkipsPath`, the walk table's "bin and obj beside a project file are directories like any other",
 `TestTestTree` (walk, reconcile) and `TestEndToEnd` with the new count.
 
+## Moving by the directory cell
+
+Roadmap 42, built 2026-11-27 on branch `improvements`, after 41. A changed `directory` cell in the combined CSV moves
+the file within its root, making the directories it needs. Designed in seven topics with the person: within the
+file's own root only; directories made as needed, listed as new first (the person chose this over existing
+directories only); what the next scan sees (the scan's own rule, which led to 41: the person asked that `bin`/`obj`
+be dropped from the scan rather than repeated); nothing re-done for directory rules (a retention of its own overrides
+any directory's, the person added); emptied directories removed as `filo delete` does (the person's decision, over
+leaving them: an emptied `inbox/` goes too); absolute cells only; edge cases (relative symlinks refused, breaking
+symlinks noted, Syncthing noted for 9a).
+
+Commits: the design; the store's move checks (behind an option, so no commit in between moved anything); `dispose.
+CheckPath`; the `Mover` (a rename is now a move within one directory; `pruneDirs` shared with `filo delete`); the guard
+test extended to making directories, each of Filo's own files allowed only the calls it needs; `filecsv` reading the
+directory cell; the view's `Moves`; the symlinks a move breaks; the CLI. No schema change: the directory cell as
+exported is worked out again from the path the export recorded.
+
+Found while building: the first end-to-end run hung. The question is asked inside the update's transaction, and the
+summary read the symlinks through the store, which has one connection; they are now read inside the transaction.
+
+The code review (medium) found two important issues, both fixed: a combined export that recorded no path had every
+row refused (its directory cell is now compared with the file's directory now); and the path checks judged the
+directories and name the file already had, so a plain rename under an oddly named directory was refused (only what
+changes is judged now). Nits fixed: on a filesystem that ignores case, a directory spelled otherwise than on disk is
+refused (not tested: the dev container's filesystems are case-sensitive); a move into Filo's own directory names the
+directory; a file on another filesystem is refused before the question; a directory changed only by spaces is noted;
+the unused `Rename` and `CheckRename` became test helpers. One was older than this work: a rename breaks symlinks too,
+and now says so.
+
+Tests: `TestCheckPath`, `TestMove`, `TestMoveUnmakesDirs`, `TestMovePrunes`, `TestOnlyDisposeChangesUserFiles` (now
+with directories made; checked by planting calls), `TestDirInRoot`, `TestUpdateFilesMoves`, `TestMoves`,
+`TestMoveRowNotes`, `TestMoveGolden` (`move.txt`), and the rename tests, now through the `Mover`. Checked by hand on a
+throwaway tree: three files moved (one renamed too), four directories made, the emptied `notes/` removed, and the next
+scan found no changes.
+
 ## Notes on decisions
 
 Short notes taken out of `design.md` on 2026-11-17, by the section they were in.
