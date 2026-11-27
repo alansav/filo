@@ -295,7 +295,8 @@ func (r *renderer) find(style []byte) ([]byte, error) {
 		Counts: count(len(r.d.Files), "file", "files") + " · " + count(r.d.Tags(), "tag", "tags"),
 		Browse: fd.Browse,
 		Policy: "default-src 'none'; script-src " + cspHash(script) + "; style-src " + cspHash([]byte(css)) +
-			"; base-uri 'none'; form-action 'none'",
+			"; img-src 'self' file:; media-src 'self' file:; frame-src 'self' file:; base-uri 'none'; " +
+			"form-action 'none'",
 		Data:   template.JS(data),   // safe: JSON from encoding/json (see findPage)
 		Script: template.JS(script), // safe: the embedded script
 		Style:  template.CSS(css),   // safe: the embedded stylesheets

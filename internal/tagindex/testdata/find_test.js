@@ -112,6 +112,16 @@ test('the address: written and read back; unknown tags and directories ignored; 
   assert.deepEqual(names(Find.matches(model, hostile)), []);
 });
 
+test('previewKind: by extension, ignoring case; nothing for an unknown one, a hidden file or no extension', () => {
+  const cases = {
+    'a.JPG': 'image', 'b.heic': 'image', 'c.mov': 'video', 'd.m4a': 'audio', 'e.pdf': 'frame', 'notes.md': 'frame',
+    'f.docx': '', 'README': '', '.pdf': '', 'archive.tar.gz': '', 'x.toString': '', 'y.constructor': '',
+  };
+  for (const [name, want] of Object.entries(cases)) {
+    assert.equal(Find.previewKind(name), want, name);
+  }
+});
+
 // A fake of the few DOM calls the page makes, enough to run the drawing code in Node and catch mistakes in it. What
 // the page looks like is checked by hand in a browser.
 function fakeDOM(hash) {
@@ -139,19 +149,23 @@ function fakeDOM(hash) {
     return e;
   }
   for (const id of ['q', 'suggest', 'chips', 'crumbs', 'subdirs', 'keys', 'none', 'results', 'more', 'counts',
-    'find', 'data']) {
+    'find', 'data', 'preview', 'preview-name', 'preview-open', 'preview-close', 'preview-body']) {
     byId.set(id, element(id === 'q' ? 'input' : 'div'));
   }
   byId.get('data').textContent = JSON.stringify(data);
+  const classes = new Set();
   const doc = {
     activeElement: null,
+    body: { classList: { add: (c) => classes.add(c), remove: (c) => classes.delete(c) } },
+    listeners: new Map(),
+    addEventListener(t, fn) { this.listeners.set(t, fn); },
     getElementById: (id) => byId.get(id),
     createElement: element,
   };
   const loc = { hash: hash, pathname: '/x/index.html', search: '', replace(h) { this.hash = h; } };
   const win = { listeners: new Map(), addEventListener(t, fn) { this.listeners.set(t, fn); } };
   const hist = { replaceState(_s, _t, url) { loc.hash = url.startsWith('#') ? url : ''; } };
-  return { byId, doc, loc, win, hist };
+  return { byId, doc, loc, win, hist, classes };
 }
 
 test('the page: drawn from the data, and the box, a suggestion, a chip and the address work', () => {
@@ -187,6 +201,28 @@ test('the page: drawn from the data, and the box, a suggestion, a chip and the a
   assert.equal(dom.loc.hash, '#tag=sender%3AEDF');
   $('subdirs').all((e) => e.tagName === 'button')[0].fire('click');
   assert.match(dom.loc.hash, /dir=received/);
+  // A result's name previews it: an image in the page, a PDF in a frame with scripts off, a .txt too, other
+  // files not at all; Open links to the file; Close (or Escape) empties the pane.
+  dom.loc.hash = '';
+  dom.win.listeners.get('hashchange')();
+  const rows = () => $('results').all((e) => e.tagName === 'button' && e.className === 'file');
+  rows()[0].fire('click');
+  assert.equal($('preview').hidden, false);
+  assert.equal($('preview-name').textContent, 'gas-oct.pdf');
+  assert.equal($('preview-open').href, './received/2026/10/gas-oct.pdf');
+  const frame = $('preview-body').children[0];
+  assert.equal(frame.tagName, 'iframe');
+  assert.equal(frame.attributes.get('sandbox'), '');
+  assert.equal(frame.src, './received/2026/10/gas-oct.pdf');
+  assert.ok(dom.classes.has('previewing'));
+  $('preview-close').fire('click');
+  assert.equal($('preview').hidden, true);
+  assert.equal($('preview-body').children.length, 0);
+  assert.ok(!dom.classes.has('previewing'));
+  rows()[4].fire('click'); // notes.txt
+  assert.equal($('preview-body').children[0].tagName, 'iframe');
+  dom.doc.listeners.get('keydown')({ key: 'Escape' });
+  assert.equal($('preview').hidden, true);
   // The address changed by hand (back, a bookmark) is read again.
   dom.loc.hash = '#q=welcome';
   dom.win.listeners.get('hashchange')();

@@ -216,9 +216,26 @@
     return s === '' ? '' : '#' + s;
   }
 
+  // previewKind is how a file is previewed, by its extension (ignoring case): 'image', 'video' or 'audio' in the
+  // page, 'frame' (a PDF or a text file) in a frame with every script switched off, or '' for no preview.
+  const kinds = {
+    jpg: 'image', jpeg: 'image', png: 'image', gif: 'image', webp: 'image', heic: 'image',
+    mp4: 'video', mov: 'video', webm: 'video',
+    mp3: 'audio', m4a: 'audio', ogg: 'audio', wav: 'audio',
+    pdf: 'frame', txt: 'frame', md: 'frame', csv: 'frame',
+  };
+  function previewKind(name) {
+    const dot = name.lastIndexOf('.');
+    if (dot <= 0) {
+      return '';
+    }
+    const ext = name.slice(dot + 1).toLowerCase();
+    return Object.prototype.hasOwnProperty.call(kinds, ext) ? kinds[ext] : '';
+  }
+
   const Find = {
     prepare: prepare, emptyState: emptyState, matches: matches, facets: facets, suggest: suggest,
-    subdirs: subdirs, parseAddress: parseAddress, formatAddress: formatAddress,
+    subdirs: subdirs, parseAddress: parseAddress, formatAddress: formatAddress, previewKind: previewKind,
   };
 
   if (typeof module === 'object' && module.exports) {
@@ -388,11 +405,50 @@
       }
     }
 
+    function preview(f) {
+      const pane = $('preview');
+      $('preview-name').textContent = f.name;
+      $('preview-open').href = f.href; // worked out by Filo: relative and URL-encoded, used as given
+      const body = $('preview-body');
+      body.replaceChildren();
+      const kind = previewKind(f.name);
+      let shown;
+      if (kind === 'image') {
+        shown = el('img');
+        shown.alt = f.name;
+      } else if (kind === 'video' || kind === 'audio') {
+        shown = el(kind);
+        shown.controls = true;
+        shown.preload = 'metadata';
+      } else if (kind === 'frame') {
+        shown = el('iframe');
+        shown.setAttribute('sandbox', ''); // no script, ever, from a file shown here
+        shown.title = f.name;
+      } else {
+        shown = el('p', 'empty', 'No preview for this kind of file: open it.');
+      }
+      if (kind !== '') {
+        shown.src = f.href;
+      }
+      body.appendChild(shown);
+      pane.hidden = false;
+      document.body.classList.add('previewing');
+      $('preview-close').focus();
+    }
+
+    function closePreview() {
+      $('preview').hidden = true;
+      $('preview-body').replaceChildren(); // stops a video or audio
+      document.body.classList.remove('previewing');
+    }
+
     function fileRow(f) {
       const li = el('li');
-      const a = el('a', 'file', f.name);
-      a.href = f.href; // worked out by Filo: relative and URL-encoded, used as given
-      li.appendChild(a);
+      const name = el('button', 'file', f.name);
+      name.type = 'button';
+      name.setAttribute('aria-label', 'Preview ' + f.name);
+      name.addEventListener('click', function () { preview(f); });
+      li.appendChild(name);
       const meta = el('div', 'meta');
       if (f.dir !== '') {
         meta.appendChild(el('span', 'dir', f.dir));
@@ -434,6 +490,12 @@
       drawResults();
     }
 
+    $('preview-close').addEventListener('click', closePreview);
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && !$('preview').hidden) {
+        closePreview();
+      }
+    });
     box.addEventListener('input', function () { update(function () { state.q = box.value; }); });
     box.addEventListener('focus', drawSuggest);
     box.addEventListener('blur', drawSuggest);

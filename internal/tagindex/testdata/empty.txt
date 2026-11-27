@@ -27,7 +27,7 @@ dirs: .index
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src &#39;none&#39;; script-src &#39;sha256-UMmH7E9MYM2nERFGqAPEKkiLtnKnLr/QZiskz38Y8Go=&#39;; style-src &#39;sha256-TziSgzJFp36/eLkatejb8bcgn9tedwTw7TJ6UgJ6f/8=&#39;; base-uri &#39;none&#39;; form-action &#39;none&#39;">
+<meta http-equiv="Content-Security-Policy" content="default-src &#39;none&#39;; script-src &#39;sha256-HpQdH8xWBQ/p8jBVBj5XxC3ZNDZa4z8hhRrBExeSIUo=&#39;; style-src &#39;sha256-jRKyVRdkrsxk/LMhneixHcAfiYgEV7Dkveh5HY4fmuw=&#39;; img-src &#39;self&#39; file:; media-src &#39;self&#39; file:; frame-src &#39;self&#39; file:; base-uri &#39;none&#39;; form-action &#39;none&#39;">
 <meta name="generator" content="filo">
 <title>bills</title>
 [the inline styles]
@@ -51,6 +51,10 @@ dirs: .index
 <ul id="results" class="files"></ul>
 <button id="more" class="more" type="button" hidden>Show more</button>
 </main>
+<aside id="preview" class="preview" hidden aria-label="Preview">
+<div class="preview-bar"><span id="preview-name" class="preview-name"></span><a id="preview-open" class="open">Open</a><button id="preview-close" class="close" type="button">Close</button></div>
+<div id="preview-body" class="preview-body"></div>
+</aside>
 <script type="application/json" id="data">{"title":"bills","browse":"./.index/index.html","tags":[],"files":[]}</script>
 [the find page's script]
 </body>

@@ -224,7 +224,7 @@ dirs: .index .index/sender .index/type
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src &#39;none&#39;; script-src &#39;sha256-UMmH7E9MYM2nERFGqAPEKkiLtnKnLr/QZiskz38Y8Go=&#39;; style-src &#39;sha256-TziSgzJFp36/eLkatejb8bcgn9tedwTw7TJ6UgJ6f/8=&#39;; base-uri &#39;none&#39;; form-action &#39;none&#39;">
+<meta http-equiv="Content-Security-Policy" content="default-src &#39;none&#39;; script-src &#39;sha256-HpQdH8xWBQ/p8jBVBj5XxC3ZNDZa4z8hhRrBExeSIUo=&#39;; style-src &#39;sha256-jRKyVRdkrsxk/LMhneixHcAfiYgEV7Dkveh5HY4fmuw=&#39;; img-src &#39;self&#39; file:; media-src &#39;self&#39; file:; frame-src &#39;self&#39; file:; base-uri &#39;none&#39;; form-action &#39;none&#39;">
 <meta name="generator" content="filo">
 <title>bills</title>
 [the inline styles]
@@ -248,6 +248,10 @@ dirs: .index .index/sender .index/type
 <ul id="results" class="files"></ul>
 <button id="more" class="more" type="button" hidden>Show more</button>
 </main>
+<aside id="preview" class="preview" hidden aria-label="Preview">
+<div class="preview-bar"><span id="preview-name" class="preview-name"></span><a id="preview-open" class="open">Open</a><button id="preview-close" class="close" type="button">Close</button></div>
+<div id="preview-body" class="preview-body"></div>
+</aside>
 <script type="application/json" id="data">{"title":"bills","browse":"./.index/index.html","tags":[{"k":"sender","v":"\u003cb\u003eBold\u003c/b\u003e \u0026 \"Co\"","p":"sender/b-bold-b-co-638a96af.html"},{"k":"type","v":"bill","p":"type/bill-8b4c672e.html"}],"files":[{"n":"script\u003e.pdf","d":"\u003c/script\u003e\u003cscript\u003ex()\u003c","h":"./%3C/script%3E%3Cscript%3Ex%28%29%3C/script%3E.pdf","t":"2026-01-02","g":[1]},{"n":"script\u003e \"q\" \u0026 'a'.pdf","d":"\u003cscript\u003ealert(1)\u003c","h":"./%3Cscript%3Ealert%281%29%3C/script%3E%20%22q%22%20\u0026%20%27a%27.pdf","t":"2026-01-02","g":[0]},{"n":"a #1 ?x=%41 100%.pdf","d":"","h":"./a%20%231%20%3Fx=%2541%20100%25.pdf","t":"2026-01-02","g":[1]},{"n":"b.pdf","d":"dir with space","h":"./dir%20with%20space/b.pdf","t":"2026-01-02","g":[1]},{"n":"javascript:alert(1)","d":"","h":"./javascript:alert%281%29","t":"2026-01-02","g":[1]},{"n":"line\u2028sep\u2029.pdf","d":"","h":"./line%E2%80%A8sep%E2%80%A9.pdf","t":"2026-01-02","g":[1]}]}</script>
 [the find page's script]
 </body>

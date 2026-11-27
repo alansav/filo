@@ -342,7 +342,7 @@ dirs: .index .index/sender .index/type .index/_
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src &#39;none&#39;; script-src &#39;sha256-UMmH7E9MYM2nERFGqAPEKkiLtnKnLr/QZiskz38Y8Go=&#39;; style-src &#39;sha256-TziSgzJFp36/eLkatejb8bcgn9tedwTw7TJ6UgJ6f/8=&#39;; base-uri &#39;none&#39;; form-action &#39;none&#39;">
+<meta http-equiv="Content-Security-Policy" content="default-src &#39;none&#39;; script-src &#39;sha256-HpQdH8xWBQ/p8jBVBj5XxC3ZNDZa4z8hhRrBExeSIUo=&#39;; style-src &#39;sha256-jRKyVRdkrsxk/LMhneixHcAfiYgEV7Dkveh5HY4fmuw=&#39;; img-src &#39;self&#39; file:; media-src &#39;self&#39; file:; frame-src &#39;self&#39; file:; base-uri &#39;none&#39;; form-action &#39;none&#39;">
 <meta name="generator" content="filo">
 <title>bills</title>
 [the inline styles]
@@ -366,6 +366,10 @@ dirs: .index .index/sender .index/type .index/_
 <ul id="results" class="files"></ul>
 <button id="more" class="more" type="button" hidden>Show more</button>
 </main>
+<aside id="preview" class="preview" hidden aria-label="Preview">
+<div class="preview-bar"><span id="preview-name" class="preview-name"></span><a id="preview-open" class="open">Open</a><button id="preview-close" class="close" type="button">Close</button></div>
+<div id="preview-body" class="preview-body"></div>
+</aside>
 <script type="application/json" id="data">{"title":"bills","browse":"./.index/index.html","tags":[{"k":"sender","v":"British Gas","p":"sender/british-gas-9ee21461.html"},{"k":"sender","v":"Thames Water","p":"sender/thames-water-1b8c2ce2.html"},{"k":"type","v":"bill","p":"type/bill-8b4c672e.html"},{"k":"type","v":"note","p":"type/note-cde8004b.html"},{"k":"","v":"urgent","p":"_/urgent-5d21bec1.html"}],"files":[{"n":"gas.pdf","d":"2026/10","h":"./2026/10/gas.pdf","t":"2026-10-03","g":[0,2]},{"n":"gas.pdf","d":"2026/09","h":"./2026/09/gas.pdf","t":"2026-09-02","g":[4,0,2]},{"n":"note.txt","d":"","h":"./note.txt","t":"2026-05-01","g":[3]},{"n":"scan.pdf","d":"","h":"./scan.pdf","t":"2026-05-01","g":[]},{"n":"water.pdf","d":"","h":"./water.pdf","t":"2026-05-01","g":[1]}]}</script>
 [the find page's script]
 </body>

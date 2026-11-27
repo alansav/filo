@@ -27,6 +27,10 @@
 <ul id="results" class="files"></ul>
 <button id="more" class="more" type="button" hidden>Show more</button>
 </main>
+<aside id="preview" class="preview" hidden aria-label="Preview">
+<div class="preview-bar"><span id="preview-name" class="preview-name"></span><a id="preview-open" class="open">Open</a><button id="preview-close" class="close" type="button">Close</button></div>
+<div id="preview-body" class="preview-body"></div>
+</aside>
 <script type="application/json" id="data">{{.Data}}</script>
 <script>{{.Script}}</script>
 </body>
