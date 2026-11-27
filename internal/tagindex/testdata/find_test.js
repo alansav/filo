@@ -179,14 +179,14 @@ test('the page: drawn from the data, and the box, a suggestion, a chip and the a
   });
   const $ = (id) => dom.byId.get(id);
   assert.equal($('find').hidden, false, 'the page is shown');
-  assert.equal($('counts').textContent, '3 of 5 files', 'type:bill from the address');
+  assert.equal($('counts').textContent, '3 of 5 files \u00b7 6 tags', 'type:bill from the address');
   assert.equal($('results').children.length, 3);
   assert.match($('chips').text(), /type: bill/);
   // Typing in the box searches and suggests.
   $('q').focus();
   $('q').value = 'edf';
   $('q').fire('input');
-  assert.equal($('counts').textContent, '1 of 5 files');
+  assert.equal($('counts').textContent, '1 of 5 files \u00b7 6 tags');
   assert.equal(dom.loc.hash, '#tag=type%3Abill&q=edf');
   const suggested = $('suggest').all((e) => e.tagName === 'button');
   assert.equal($('suggest').hidden, false);
@@ -194,7 +194,7 @@ test('the page: drawn from the data, and the box, a suggestion, a chip and the a
   // Tapping the suggestion adds the tag and clears the box.
   suggested[0].fire('click');
   assert.equal($('q').value, '');
-  assert.equal($('counts').textContent, '1 of 5 files');
+  assert.equal($('counts').textContent, '1 of 5 files \u00b7 6 tags');
   assert.equal(dom.loc.hash, '#tag=type%3Abill&tag=sender%3AEDF');
   // Removing a chip; going into a directory.
   $('chips').children[0].fire('click');
@@ -226,6 +226,14 @@ test('the page: drawn from the data, and the box, a suggestion, a chip and the a
   // The address changed by hand (back, a bookmark) is read again.
   dom.loc.hash = '#q=welcome';
   dom.win.listeners.get('hashchange')();
-  assert.equal($('counts').textContent, '1 of 5 files');
+  assert.equal($('counts').textContent, '1 of 5 files \u00b7 6 tags');
   assert.equal($('q').value, 'welcome');
+  // A tag no file name holds is still suggested: typing 'british' finds sender:British Gas, though no name holds it.
+  dom.loc.hash = '';
+  dom.win.listeners.get('hashchange')();
+  $('q').focus();
+  $('q').value = 'british';
+  $('q').fire('input');
+  assert.equal($('counts').textContent, '0 of 5 files \u00b7 6 tags');
+  assert.match($('suggest').all((e) => e.tagName === 'button')[0].text(), /sender:British Gas/);
 });

@@ -3,6 +3,7 @@ package tagindex
 import (
 	"encoding/json"
 	"flag"
+	"html"
 	"maps"
 	"os"
 	"path"
@@ -78,9 +79,12 @@ func abbreviate(page, open, close, what string) string {
 func inline(t *testing.T, page, open, close string) string {
 	t.Helper()
 	i := strings.Index(page, open)
+	if i < 0 {
+		t.Fatalf("no %s in the page", open)
+	}
 	j := strings.Index(page[i+len(open):], close)
-	if i < 0 || j < 0 {
-		t.Fatalf("no %s…%s in the page", open, close)
+	if j < 0 {
+		t.Fatalf("no %s after %s in the page", close, open)
 	}
 	return page[i+len(open) : i+len(open)+j]
 }
@@ -134,7 +138,7 @@ func TestRenderFindPage(t *testing.T) {
 	if gotScript != string(script) || gotStyle != string(style)+string(extra) {
 		t.Error("the script or the styles are not inlined as embedded")
 	}
-	policy := strings.ReplaceAll(inline(t, page, `http-equiv="Content-Security-Policy" content="`, `"`), "&#39;", "'")
+	policy := html.UnescapeString(inline(t, page, `http-equiv="Content-Security-Policy" content="`, `"`)) // as read
 	want := "default-src 'none'; script-src " + cspHash([]byte(gotScript)) + "; style-src " +
 		cspHash([]byte(gotStyle)) + "; img-src 'self' file:; media-src 'self' file:; frame-src 'self' file:; " +
 		"base-uri 'none'; form-action 'none'"

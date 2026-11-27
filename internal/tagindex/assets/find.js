@@ -309,7 +309,10 @@
     function drawSuggest() {
       const list = $('suggest');
       list.replaceChildren();
-      const found = document.activeElement === box ? suggest(model, state, box.value, 8) : [];
+      // The tags are suggested among the files the rest of the selection gives, not only those whose names hold
+      // the typed text: that text is what the tag is being looked for by.
+      const unsearched = { tags: state.tags, dir: state.dir, q: '' };
+      const found = document.activeElement === box ? suggest(model, unsearched, box.value, 8) : [];
       for (const v of found) {
         const li = el('li');
         const b = tagButton(v.id, '', v.label, plural(v.count, 'file', 'files'));
@@ -469,8 +472,8 @@
     function drawResults() {
       const found = matches(model, state);
       const total = model.files.length;
-      $('counts').textContent = found.length === total ? plural(total, 'file', 'files') :
-        found.length + ' of ' + plural(total, 'file', 'files');
+      $('counts').textContent = (found.length === total ? plural(total, 'file', 'files') :
+        found.length + ' of ' + plural(total, 'file', 'files')) + ' \u00b7 ' + plural(model.tags.length, 'tag', 'tags');
       const list = $('results');
       list.replaceChildren();
       for (const f of found.slice(0, shown)) {

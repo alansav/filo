@@ -138,7 +138,7 @@ func (r *renderer) execute() error {
 			for i := range next {
 				var b bytes.Buffer
 				if err := pageTemplate.Execute(&b, r.todo[i].p); err != nil {
-					// Named as before: relative to the pages directory, the main page by its own name.
+					// Named relative to the pages directory (the find page renders apart, in find).
 					errs[i] = fmt.Errorf("render %s: %w", strings.TrimPrefix(r.todo[i].name, r.dir+"/"), err)
 					continue
 				}
@@ -282,7 +282,12 @@ func (r *renderer) find(style []byte) ([]byte, error) {
 			ff.D = d
 		}
 		for _, t := range f.Tags {
-			ff.G = append(ff.G, ids[t.Key+"\x00"+t.Folded()])
+			id, ok := ids[t.Key+"\x00"+t.Folded()]
+			if !ok { // Build lists every file's tags: never list a file under another tag
+				return nil, fmt.Errorf("render %s.html: %s has the tag %s, which the index does not list", r.d.Name,
+					f.Rel, t)
+			}
+			ff.G = append(ff.G, id)
 		}
 		fd.Files = append(fd.Files, ff)
 	}

@@ -27,7 +27,7 @@ dirs: .index
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src &#39;none&#39;; script-src &#39;sha256-HpQdH8xWBQ/p8jBVBj5XxC3ZNDZa4z8hhRrBExeSIUo=&#39;; style-src &#39;sha256-jRKyVRdkrsxk/LMhneixHcAfiYgEV7Dkveh5HY4fmuw=&#39;; img-src &#39;self&#39; file:; media-src &#39;self&#39; file:; frame-src &#39;self&#39; file:; base-uri &#39;none&#39;; form-action &#39;none&#39;">
+<meta http-equiv="Content-Security-Policy" content="default-src &#39;none&#39;; script-src &#39;sha256-OsQJso8DItMw14PC9wI5OjtPyOQucPcvNh9Ahg8uoww=&#39;; style-src &#39;sha256-p&#43;WtWxtLMYL4UhDM7NcOe7ef0YBj4UNvvkq&#43;3M&#43;0Ifs=&#39;; img-src &#39;self&#39; file:; media-src &#39;self&#39; file:; frame-src &#39;self&#39; file:; base-uri &#39;none&#39;; form-action &#39;none&#39;">
 <meta name="generator" content="filo">
 <title>bills</title>
 [the inline styles]
