@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/alansav/filo/internal/store"
 )
 
 // edits returns a CSV edit that applies each edit in turn.
@@ -253,4 +255,27 @@ func TestRenameNoTerminal(t *testing.T) {
 	ct.filo(ExitOK, "", false, "update", newer, "-y")
 	ct.contains("moved since", ct.filo(ExitError, "", false, "update", old, "-y").stdout,
 		"moved or renamed since export #2")
+}
+
+func TestRenameRowNotes(t *testing.T) {
+	rn := func(rel, name string) store.Rename {
+		return store.Rename{Candidate: store.Candidate{FileItem: store.FileItem{RootPath: "/r", Path: rel}}, Name: name}
+	}
+	for _, tc := range []struct{ rel, name, note string }{
+		{"d/Britsh.pdf", "British.pdf", ""},
+		{"d/notes.txt ", "notes.txt", "only spaces changed"},
+		{"tax/2023 return.pdf", "2023 return.pd", "extension changed"},
+		{".bashrc", ".bashrc_old", ""}, // a hidden name's dot is not an extension
+		{".notes.txt", ".notes.md", "extension changed"},
+		{"top.txt", "top.md", "extension changed"},
+	} {
+		rows := renameRows([]store.Rename{rn(tc.rel, tc.name)})
+		if rows[0].Note != tc.note {
+			t.Errorf("%s -> %s: note %q, want %q", tc.rel, tc.name, rows[0].Note, tc.note)
+		}
+	}
+	rows := renameRows([]store.Rename{rn("top.txt", "x")})
+	if rows[0].Dir != "" || rows[0].Old != "top.txt" {
+		t.Errorf("a file in the root: %+v", rows[0])
+	}
 }

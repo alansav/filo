@@ -152,10 +152,7 @@ func (e *env) updateFiles(ctx context.Context, s *store.Store, path string, pars
 	// The renames, after the register's changes (docs/design.md, Tags, "Renaming a file by its name cell").
 	var renames renameResult
 	if !dry && !res.Declined {
-		renames, err = e.makeRenames(ctx, s, res.Pending.Renames)
-		if err != nil && ctx.Err() == nil {
-			return err
-		}
+		renames = e.makeRenames(ctx, s, res.Pending.Renames) // what it did is shown below, an error last
 	}
 	refused := refusalProblems(roots, parsed.Problems, res.Refusals)
 	if res.Declined {
@@ -181,12 +178,20 @@ func (e *env) updateFiles(ctx context.Context, s *store.Store, path string, pars
 	}
 	if len(renames.skipped) > 0 {
 		r.Blank()
-		r.Problems("Not renamed: run filo scan, then export again", view.Attention, renames.skipped)
+		r.Problems("Skipped: run filo scan, then export again", view.Attention, renames.skipped)
+	}
+	if len(renames.failed) > 0 {
+		r.Blank()
+		r.Problems("Not renamed", view.Refused, renames.failed)
 	}
 	if !res.Declined {
 		nowPast(r, roots, res.NowPast, dry, r.Overview())
 	}
-	if ctx.Err() != nil { // Ctrl-C between renames: those done are recorded, the rest were not made
+	switch {
+	case renames.err != nil && ctx.Err() == nil: // the register could not be written: stop, after showing what was done
+		return fmt.Errorf("%w; %d renames not tried", renames.err, renames.untried)
+	case ctx.Err() != nil && renames.untried > 0:
+		// Ctrl-C between renames: those made are recorded, the rest were not made.
 		return fmt.Errorf("interrupted: %d of %d renames made and recorded; the others were not made",
 			renames.done, len(res.Pending.Renames))
 	}
@@ -198,7 +203,7 @@ func (e *env) updateFiles(ctx context.Context, s *store.Store, path string, pars
 		r.Blank()
 		r.Next("Nothing has been deleted. Next: filo delete")
 	}
-	if len(refused) > 0 || len(renames.skipped) > 0 || (res.Declined && !asked) { // nothing done, no one was asked
+	if len(refused)+len(renames.skipped)+len(renames.failed) > 0 || (res.Declined && !asked) { // or no one was asked
 		return errReported
 	}
 	return nil
@@ -246,7 +251,7 @@ func (e *env) filesCounts(res store.FilesUpdateResult, dry bool, refused int, re
 	if renames.done > 0 {
 		r.Count(view.Done, report.Plural(int64(renames.done), "file", "files")+" renamed")
 	}
-	if n := len(renames.skipped); n > 0 {
+	if n := len(renames.skipped) + len(renames.failed); n > 0 {
 		r.Count(view.Attention, report.Plural(int64(n), "rename", "renames")+" not made")
 	}
 	if res.Unchanged > 0 {
@@ -292,7 +297,7 @@ func renameRows(rs []store.Rename) []view.RenameRow {
 		switch {
 		case strings.TrimSpace(old) == strings.TrimSpace(rn.Name):
 			row.Note = "only spaces changed"
-		case pathpkg.Ext(old) != pathpkg.Ext(rn.Name):
+		case extension(old) != extension(rn.Name):
 			row.Note = "extension changed"
 		}
 		rows[i] = row
@@ -303,22 +308,30 @@ func renameRows(rs []store.Rename) []view.RenameRow {
 	return rows
 }
 
-// renameResult is what making an update's renames did: how many were made, and those not made, with why.
+// extension is a name's extension, a hidden name's leading dot not counted as one (.bashrc has none).
+func extension(name string) string { return pathpkg.Ext(strings.TrimPrefix(name, ".")) }
+
+// renameResult is what making an update's renames did: how many were made, those not made with why (skipped: the
+// disk changed, so a scan and a new export put it right; failed: something a scan does not change), and, if the run
+// stopped (Ctrl-C, or err: the register could not be written), how many were not tried.
 type renameResult struct {
-	done    int
-	skipped []view.Problem
+	done            int
+	skipped, failed []view.Problem
+	untried         int
+	err             error
 }
 
 // makeRenames makes each rename, checked again on disk just before, and records each straight after; one not made
-// is listed with why. Ctrl-C stops after the current one (the error is then the context's).
-func (e *env) makeRenames(ctx context.Context, s *store.Store, rs []store.Rename) (renameResult, error) {
+// is listed with why. Ctrl-C stops after the current one, as does a register that cannot be written (err).
+func (e *env) makeRenames(ctx context.Context, s *store.Store, rs []store.Rename) renameResult {
 	var out renameResult
 	if len(rs) == 0 {
-		return out, nil
+		return out
 	}
-	roots, err := registeredRoots(ctx, s)
+	roots, err := registeredRoots(context.WithoutCancel(ctx), s)
 	if err != nil {
-		return out, err
+		out.err, out.untried = err, len(rs)
+		return out
 	}
 	run := s.BeginRenameRun(now())
 	defer func() {
@@ -326,20 +339,33 @@ func (e *env) makeRenames(ctx context.Context, s *store.Store, rs []store.Rename
 			e.errorLine(err.Error())
 		}
 	}()
-	for _, rn := range rs {
+	for i, rn := range rs {
 		o, err := dispose.Rename(ctx, run, rn.Candidate, rn.Name, now())
+		if o.Done {
+			out.done++ // made, even when its record failed (the error says so)
+		}
 		if err != nil {
-			return out, err
+			if ctx.Err() == nil {
+				out.err = err
+			}
+			out.untried = len(rs) - i - 1
+			if !o.Done {
+				out.untried++
+			}
+			return out
 		}
 		if o.Done {
-			out.done++
 			continue
 		}
 		p := view.Problem{Reason: o.Reason}
 		p.Root, p.Rel = view.SplitRoot(roots, rn.AbsPath())
-		out.skipped = append(out.skipped, p)
+		if o.Failed {
+			out.failed = append(out.failed, p)
+		} else {
+			out.skipped = append(out.skipped, p)
+		}
 	}
-	return out, nil
+	return out
 }
 
 // confirmPending shows what the update asks about (the first ones, or all with l) and asks once. Only a yes
