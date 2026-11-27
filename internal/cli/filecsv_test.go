@@ -257,6 +257,24 @@ func TestRenameNoTerminal(t *testing.T) {
 		"moved or renamed since export #2")
 }
 
+func TestMoveRowNotes(t *testing.T) {
+	rn := func(rel, dir, name string) store.Rename {
+		return store.Rename{Candidate: store.Candidate{FileItem: store.FileItem{RootPath: "/r", Path: rel}},
+			Dir: dir, Name: name}
+	}
+	for _, tc := range []struct{ rel, dir, name, note string }{
+		{"inbox/bill.pdf", "archive", "bill.pdf", ""},
+		{"inbox/bill.pdf", "inbox ", "bill.pdf", "only spaces in the directory changed"},
+		{"a/b/bill.pdf", "a/ b", "bill.pdf", "only spaces in the directory changed"},
+		{"inbox/bill.pdf", "archive", "bill.pd", "extension changed"},
+	} {
+		rows := moveRows([]store.Rename{rn(tc.rel, tc.dir, tc.name)})
+		if len(rows) != 1 || rows[0].Note != tc.note {
+			t.Errorf("%s -> %s/%s: rows %+v, want note %q", tc.rel, tc.dir, tc.name, rows, tc.note)
+		}
+	}
+}
+
 func TestRenameRowNotes(t *testing.T) {
 	rn := func(rel, name string) store.Rename {
 		return store.Rename{Candidate: store.Candidate{FileItem: store.FileItem{RootPath: "/r", Path: rel}}, Name: name}

@@ -336,6 +336,9 @@ func moveRows(rs []store.Rename) []view.MoveRow {
 		if old := pathpkg.Base(rn.Path); rn.Name != old {
 			row.Name, row.Note = rn.Name, renameNote(old, rn.Name)
 		}
+		if row.Note == "" && sameButSpaces(dirOf(rn.Path), rn.Dir) {
+			row.Note = "only spaces in the directory changed" // a stray space would make a new directory beside it
+		}
 		fi, err := os.Lstat(filepath.Join(rn.RootPath, filepath.FromSlash(rn.Dir)))
 		row.New = err != nil || !fi.IsDir()
 		rows = append(rows, row)
@@ -353,7 +356,7 @@ func renameRows(rs []store.Rename) []view.RenameRow {
 	for i, rn := range rs {
 		dir, old := pathpkg.Split(rn.Path)
 		rows[i] = view.RenameRow{Root: rn.RootPath, Dir: strings.TrimSuffix(dir, "/"), Old: old, New: rn.Name,
-			Note: renameNote(old, rn.Name)}
+			Note: renameNote(old, rn.Name), Symlinks: rn.Symlinks}
 	}
 	slices.SortStableFunc(rows, func(a, b view.RenameRow) int {
 		return strings.Compare(a.Root+"\x00"+a.Dir, b.Root+"\x00"+b.Dir)
@@ -371,6 +374,29 @@ func renameNote(old, name string) string {
 		return "only spaces changed"
 	case extension(old) != extension(name):
 		return "extension changed"
+	}
+	return ""
+}
+
+// sameButSpaces reports whether two directories ('/'-separated) differ only by spaces at the start or end of their
+// parts.
+func sameButSpaces(a, b string) bool {
+	pa, pb := strings.Split(a, "/"), strings.Split(b, "/")
+	if a == b || len(pa) != len(pb) {
+		return false
+	}
+	for i := range pa {
+		if strings.TrimSpace(pa[i]) != strings.TrimSpace(pb[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+// dirOf is the directory of rel ('/'-separated), "" for the root.
+func dirOf(rel string) string {
+	if d := pathpkg.Dir(rel); d != "." {
+		return d
 	}
 	return ""
 }
