@@ -3,6 +3,9 @@ package store
 import (
 	"context"
 	"database/sql"
+	"fmt"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/alansav/filo/internal/tags"
@@ -61,4 +64,185 @@ func (s *Store) RecordFilesExport(ctx context.Context, path string, now time.Tim
 		}
 		return nil
 	}, write)
+}
+
+// FilesRow is one row of an edited combined CSV: its retention half, and the tags its cell holds, each once.
+type FilesRow struct {
+	RetentionRow
+	Tags []tags.Tag
+}
+
+// FilesPending is what the combined update asks about before it records anything: the retentions blank cells clear,
+// the changes that remove a tag, and the policies the rows name that do not exist yet.
+type FilesPending struct {
+	Clears      []Clear
+	Removals    []TagChange
+	NewPolicies []NewPolicy
+}
+
+// Empty reports whether there is nothing to ask about.
+func (p FilesPending) Empty() bool { return len(p.Clears)+len(p.Removals)+len(p.NewPolicies) == 0 }
+
+// FilesUpdateOptions are how a combined update runs: a dry run, and its one question (nil declines, as with no
+// terminal).
+type FilesUpdateOptions struct {
+	DryRun  bool
+	Confirm func(FilesPending) bool // given what is pending, once, when there is any
+}
+
+// FilesUpdateResult is what a combined update did (or, in a dry run, would do).
+type FilesUpdateResult struct {
+	Pending         FilesPending
+	Declined        bool        // the question was not confirmed: nothing was recorded
+	Set             int         // files whose file_date or retention changed, clears not included
+	NoValue         int         // of Set: files put on a policy with no value yet
+	Cleared         int         // retentions cleared by a blank cell
+	PoliciesCreated int         // new policies created
+	NowPast         []Past      // of Set: files whose keep_until is today or earlier
+	TagsChanged     []TagChange // the files whose tags changed
+	Unchanged       int         // rows with nothing to change in either half
+	Refusals        []Refusal
+}
+
+// UpdateFiles checks each row of a combined CSV against the register with the rules of both a retention and a tags
+// update, and records the ones that pass in one transaction (docs/design.md, Tags, "The combined CSV"). A row
+// refused by either half is refused whole, with each reason. If any row clears a retention, removes a tag or names a
+// new policy, Confirm is given all of them, once, before anything is written; unless it returns true nothing is
+// recorded (Declined). A dry run asks nothing and writes nothing. today is the local date (YYYY-MM-DD); detail names
+// the source for the history.
+func (s *Store) UpdateFiles(ctx context.Context, rows []FilesRow, now time.Time, today, detail string,
+	opt FilesUpdateOptions) (FilesUpdateResult, error) {
+	var res FilesUpdateResult
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return res, err
+	}
+	defer tx.Rollback()
+	q := newStmtCache(tx)
+	exports := map[int64]exportInfo{}
+	policies := policyCache{}
+	spelled := map[string]tags.Tag{}
+	var sets, clears []retentionChange
+	var tagChanges []TagChange
+	for _, r := range rows {
+		ex, found := exports[r.ExportID]
+		if !found {
+			if ex, err = readExport(ctx, tx, r.ExportID); err != nil {
+				return res, err
+			}
+			exports[r.ExportID] = ex
+		}
+		c, err := checkRow(ctx, tx, r.RetentionRow, ex, ExportFiles, policies)
+		if err != nil {
+			return res, err
+		}
+		tr := TagRow{Line: r.Line, ExportID: r.ExportID, FileID: r.FileID, Tags: r.Tags}
+		var ch TagChange
+		var why string
+		if ex.found && ex.kind == ExportFiles { // otherwise checkRow says why, once
+			if ch, why, err = checkTagRow(ctx, q, tr, ex, ExportFiles, spelled); err != nil {
+				return res, err
+			}
+		}
+		tagsChange := len(ch.Added)+len(ch.Removed) > 0
+		if why == "" && len(ch.Added) > 0 {
+			if why, err = untaggable(ctx, q, r.FileID); err != nil {
+				return res, err
+			}
+		}
+		if reasons := joinReasons(c.refusal, why); reasons != "" {
+			path := c.path
+			if path == "" {
+				path = ch.Path
+			}
+			res.Refusals = append(res.Refusals, Refusal{Line: r.Line, FileID: r.FileID, Path: path, Reason: reasons})
+			continue
+		}
+		if c.unchanged && !tagsChange {
+			res.Unchanged++
+			continue
+		}
+		switch {
+		case c.unchanged:
+		case c.clear:
+			clears = append(clears, retentionChange{r: r.RetentionRow, c: c, afterScan: ex.afterScan})
+			res.Pending.Clears = append(res.Pending.Clears, Clear{FileID: r.FileID, Path: c.path,
+				Retention: c.storedRetention, KeepUntil: c.storedKeepUntil})
+		default:
+			sets = append(sets, retentionChange{r: r.RetentionRow, c: c, afterScan: ex.afterScan})
+			if c.keepUntil != "" && c.keepUntil != Forever && c.keepUntil <= today {
+				res.NowPast = append(res.NowPast, Past{Path: c.path, Retention: c.retention, KeepUntil: c.keepUntil})
+			}
+			if c.policy && c.keepUntil == "" {
+				res.NoValue++
+			}
+		}
+		if tagsChange {
+			tagChanges = append(tagChanges, ch)
+			if len(ch.Removed) > 0 {
+				res.Pending.Removals = append(res.Pending.Removals, ch)
+			}
+		}
+	}
+	newRows := map[string]int{}
+	for _, a := range sets {
+		if a.c.newPolicy {
+			newRows[a.c.retention]++
+		}
+	}
+	for name, n := range newRows {
+		res.Pending.NewPolicies = append(res.Pending.NewPolicies, NewPolicy{Name: name, Rows: n})
+	}
+	slices.SortFunc(res.Pending.NewPolicies, func(a, b NewPolicy) int { return strings.Compare(a.Name, b.Name) })
+	res.Set, res.Cleared, res.TagsChanged = len(sets), len(clears), tagChanges
+	if opt.DryRun {
+		return res, nil
+	}
+	if !res.Pending.Empty() && (opt.Confirm == nil || !opt.Confirm(res.Pending)) {
+		return FilesUpdateResult{Pending: res.Pending, Declined: true, Refusals: res.Refusals}, nil
+	}
+	if len(sets)+len(clears)+len(tagChanges) == 0 {
+		return res, nil
+	}
+	created, err := createPolicies(ctx, tx, res.Pending.NewPolicies, now)
+	if err != nil {
+		return res, err
+	}
+	res.PoliciesCreated = len(created)
+	if apply := append(sets, clears...); len(apply) > 0 {
+		if err := applyRetentions(ctx, tx, apply, created, now, detail); err != nil {
+			return res, err
+		}
+	}
+	if err := applyTagChanges(ctx, q, tagChanges, now); err != nil {
+		return res, err
+	}
+	if err := s.commit(tx); err != nil {
+		return res, fmt.Errorf("record update: %w", err)
+	}
+	return res, nil
+}
+
+// untaggable says why a file cannot be given tags: a symlink, which filo tag refuses too; "" if it can.
+func untaggable(ctx context.Context, q querier, fileID int64) (string, error) {
+	var kind string
+	if err := q.QueryRowContext(ctx, `SELECT kind FROM files WHERE id = ?`, fileID).Scan(&kind); err != nil {
+		return "", fmt.Errorf("read file %d: %w", fileID, err)
+	}
+	if kind == "symlink" {
+		return "a symlink cannot have tags: give them to the file it points to", nil
+	}
+	return "", nil
+}
+
+// joinReasons joins a row's refusals from its two halves, each once (a file not in the export is refused by both);
+// "" if neither refused it.
+func joinReasons(reasons ...string) string {
+	var out []string
+	for _, r := range reasons {
+		if r != "" && !slices.Contains(out, r) {
+			out = append(out, r)
+		}
+	}
+	return strings.Join(out, "; ")
 }
