@@ -289,7 +289,7 @@ func TestUpdateFilesMoves(t *testing.T) {
 			t.Fatal(err)
 		}
 		want := map[int]string{2: "not a full path", 3: "another file's name in archive/", 4: "relative target",
-			5: "filo's own files", 6: "outside the file's root"}
+			5: ".bills/x/ is inside one of filo's own directories", 6: "outside the file's root"}
 		if len(res.Refusals) != len(want) {
 			t.Fatalf("refusals %+v", res.Refusals)
 		}
@@ -297,6 +297,22 @@ func TestUpdateFilesMoves(t *testing.T) {
 			if !strings.Contains(rf.Reason, want[rf.Line]) {
 				t.Errorf("line %d: %q, want %q", rf.Line, rf.Reason, want[rf.Line])
 			}
+		}
+	})
+
+	t.Run("an export that did not record its paths: a directory cell left alone is no change", func(t *testing.T) {
+		e, id, it := setup(t)
+		rawExec(t, e.db, `UPDATE export_rows SET path_id = NULL`)
+		root := e.root.Path
+		res, err := e.s.UpdateFiles(e.ctx, []FilesRow{
+			row(e, 2, id, it["inbox/bill.pdf"], root+"/inbox"), // as it was
+			row(e, 3, id, it["inbox/scan.pdf"], root+"/new"),   // changed: refused, export again
+		}, now, today, "f.csv", opt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.Unchanged != 1 || len(res.Refusals) != 1 || !strings.Contains(res.Refusals[0].Reason, "export again") {
+			t.Errorf("result %+v", res)
 		}
 	})
 

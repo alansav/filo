@@ -398,16 +398,25 @@ func checkRename(ctx context.Context, q querier, r FilesRow, settings map[int64]
 	nameChanged := r.HasName && !(cell.Valid && r.NameCell == cell.String)
 	// The directory cell as the export wrote it, worked out again from the path it showed (sheet.FileCells).
 	dirChanged := false
-	if r.HasDirectory && opt.Moves {
-		dirChanged = !exportedRel.Valid || r.DirectoryCell != sheet.Cell(filepath.Join(rootPath.String,
+	if r.HasDirectory && opt.Moves && exportedRel.Valid {
+		dirChanged = r.DirectoryCell != sheet.Cell(filepath.Join(rootPath.String,
 			filepath.FromSlash(relDir(exportedRel.String))))
 	}
-	if !nameChanged && !dirChanged {
+	// An export that did not record the path it showed (made before moves): its directory cell is compared with the
+	// file's directory now, so a cell left alone is no change.
+	unrecorded := r.HasDirectory && opt.Moves && !exportedRel.Valid
+	if !nameChanged && !dirChanged && !unrecorded {
 		return nil, 0, "", nil
 	}
 	c, present, err := renameCandidate(ctx, q, r.FileID)
 	if err != nil {
 		return nil, 0, "", err
+	}
+	if unrecorded && present {
+		dirChanged = r.DirectoryCell != sheet.Cell(filepath.Join(c.RootPath, filepath.FromSlash(relDir(c.Path))))
+		if !nameChanged && !dirChanged {
+			return nil, 0, "", nil
+		}
 	}
 	if !present {
 		return nil, 0, "no longer present, so it cannot be renamed or moved", nil
@@ -457,9 +466,13 @@ func checkRename(ctx context.Context, q querier, r FilesRow, settings map[int64]
 	}
 	newAbs := filepath.Join(c.RootPath, filepath.FromSlash(rn.NewPath()))
 	for _, o := range own {
-		if newAbs == o || strings.HasPrefix(newAbs, o+string(filepath.Separator)) {
+		switch {
+		case newAbs == o:
 			return nil, 0, fmt.Sprintf("%s is the name of one of filo's own files there (its database or a tag "+
 				"index's pages), which no scan records", rn.Name), nil
+		case strings.HasPrefix(newAbs, o+string(filepath.Separator)):
+			return nil, 0, fmt.Sprintf("%s is inside one of filo's own directories (a tag index's pages or the "+
+				"register's snapshots), which no scan records", dirLabel(rn.Dir)), nil
 		}
 	}
 	var other int64
