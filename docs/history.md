@@ -734,6 +734,32 @@ by the review and older than this work: with a root at `/`, the CSVs wrote a dir
 `TestFileCells`). Tests: `TestNewWriter`, `TestFileCells`, `TestReadIDs`; the CSV golden files and the message tests of the
 retention and tags updates, unchanged.
 
+## One CSV with every column
+
+A friction fix, built 2026-11-27 on branch `improvements`, the first of three parts agreed that day (then roadmap 39,
+renaming by the `name` cell, and 40, removing the retention and tags exports). Editing a retention CSV the person kept
+seeing tags to set, and dates while tagging; `filo export [DIR] -o FILE` now writes `file_date`, `retention`,
+`keep_until` and `tags` in one CSV, recorded as an export of kind `files` (no schema change). Decided with the person:
+`-y` means the same for clearing a retention, removing a tag and creating a policy, and the update shows them all
+before it writes anything and asks once; no records nothing. Decided while building, and checked with the person
+afterwards: a row refused by either half is refused whole; a CSV with both columns is combined only if its rows name a
+combined export (so a retention CSV with a `tags` column of the person's own stays one); a combined CSV that lost a
+column is refused as a whole; a symlink's row cannot take tags.
+
+Commits, lower layers first: the roadmap items, the design (and the symlink rule), `FilesItems` and
+`RecordFilesExport`, a refactor giving `checkRow` and `checkTagRow` the export kind and moving the writes into
+`createPolicies`, `applyRetentions` and `applyTagChanges`, `UpdateFiles`, package `filecsv` (with `retention.ReadRow`
+and `tagcsv.GuardCell` exported for it), `ExportKinds`, and the CLI. The code review (medium) found one important
+issue, fixed: a combined CSV whose rows were all refused for their cells was read as a retention CSV, with the wrong
+reasons; `filecsv.Parsed.Exports` now names every export a row names. Nits fixed: a file listed twice, one copy
+refused for its cells, had the other applied; a lost `tags` column given `-y` got the `-y` usage error; that error
+was out of date; messages named the kind `files` (now "combined"); a question that could not be shown read as "not
+confirmed"; the `./tags` wording. One nit was the person's decision: with no terminal and no `-y`, nothing recorded
+now exits 1 (a no typed at the question stays 0). Tests: `TestFilesItemsAndExport`, `TestUpdateFiles`,
+`TestExportKinds`, the `filecsv` tests, `TestFilesCSVGolden` (`files-csv.txt`), `TestFilesCSVKinds`,
+`TestFilesUpdateInterruptedAtPrompt`, and the help golden files. Checked by hand on a throwaway tree: export, update
+without a question, the no-terminal refusal, a dry run and `-y`.
+
 ## Notes on decisions
 
 Short notes taken out of `design.md` on 2026-11-17, by the section they were in.

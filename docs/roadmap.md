@@ -54,8 +54,8 @@ Provisional, agreed 2026-11-17, with the first places reordered on 2026-11-20 fo
 complexity scores (1 to 10, Claude's estimates) are still to be settled with the person. Items 22 to 33, and
 35, are not placed yet.
 
-Next, agreed 2026-11-27 (friction week, on the `improvements` branch): one CSV for every column (`filo export
-[DIR] -o FILE`, being built, see `design.md`), then 39, then 40, each one at a time; then the list below.
+Next, agreed 2026-11-27 (friction week, on the `improvements` branch, after the combined CSV, built that day):
+39, then 40 once the combined CSV has been used in practice, each one at a time; then the list below.
 
 1. 36 bash completion
 2. 9b device ID, 9a marking synced directories, 9c sharing decisions
