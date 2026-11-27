@@ -76,7 +76,8 @@ own pages, see the hard rules). Stay inside the current piece of work.
 ## Commands
 
 You run inside the dev container, so run Go commands directly. (From the host they need the `scripts/dev.sh run`
-prefix.)
+prefix.) The image is built with Claude Code by default (`scripts/dev.sh build`; `--no-claude` leaves it out, and
+`scripts/dev.sh claude` then refuses with how to rebuild).
 
 - Build: `make build` (a static `bin/filo`; `scripts/install.sh` copies it to `~/.local/bin` and is for the user to
   run on the host, not you)

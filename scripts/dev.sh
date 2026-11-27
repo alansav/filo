@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # Dev container helper for Filo. Needs rootless podman. Works from anywhere inside the repo clone.
 #
-#   scripts/dev.sh build          build the image (also done automatically on first use)
-#   scripts/dev.sh shell          interactive shell in the container
-#   scripts/dev.sh run CMD...     run one command, e.g.  scripts/dev.sh run go test ./...
-#   scripts/dev.sh clean          remove the image and the Go cache volumes
-#   scripts/dev.sh claude         Claude Code
+#   scripts/dev.sh build               build the image, with Claude Code (also done automatically on first use)
+#   scripts/dev.sh build --no-claude   build the image without Claude Code
+#   scripts/dev.sh shell               interactive shell in the container
+#   scripts/dev.sh run CMD...          run one command, e.g.  scripts/dev.sh run go test ./...
+#   scripts/dev.sh clean               remove the image and the Go cache volumes
+#   scripts/dev.sh claude              Claude Code (needs an image built with it, the default)
 #
 # Only the repo is mounted (at /workspace). The container has its own home directory, so a scan of
 # "home" inside it can only ever see the container's files, never yours.
@@ -19,8 +20,12 @@ repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 image="${FILO_DEV_IMAGE:-filo-dev}"
 
 build() {
-  local claude=0
-  [ "${1:-}" = "--claude" ] && claude=1
+  local claude=1
+  case "${1:-}" in
+    "") ;;
+    --no-claude) claude=0 ;;
+    *) echo "usage: $0 build [--no-claude]" >&2; exit 2 ;;
+  esac
   podman build \
     --build-arg "UID=$(id -u)" --build-arg "GID=$(id -g)" \
     --build-arg "INSTALL_CLAUDE=$claude" \
@@ -75,7 +80,7 @@ run() {
 }
 
 usage() {
-  sed -n '2,10p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+  sed -n '2,11p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
 }
 
 case "${1:-}" in
@@ -90,6 +95,15 @@ case "${1:-}" in
     podman rmi -f "$image" || true
     podman volume rm -f filo-gomod filo-gocache
     ;;
-  claude) shift; run claude "$@" ;;
+  claude)
+    shift
+    podman image inspect "$image" >/dev/null 2>&1 || build
+    if ! podman run --rm "$image" sh -c 'command -v claude' >/dev/null 2>&1; then
+      echo "dev.sh: Claude Code is not installed in the image $image (it was built with --no-claude, or before" \
+        "Claude Code became the default); rebuild it with: $0 build" >&2
+      exit 1
+    fi
+    run claude "$@"
+    ;;
   *) usage; exit 2 ;;
 esac
