@@ -111,7 +111,7 @@ type Rename struct {
 	Candidate
 	Dir      string
 	Name     string
-	Symlinks []string // a move: the registered symlinks that point at the file (absolute), which it would break
+	Symlinks []string // the registered symlinks that point at the file (absolute), which the rename or move breaks
 }
 
 // NewPath is where the file goes, relative to its root.
@@ -328,22 +328,18 @@ func (s *Store) UpdateFiles(ctx context.Context, rows []FilesRow, now time.Time,
 		res.Pending.NewPolicies = append(res.Pending.NewPolicies, NewPolicy{Name: name, Rows: n})
 	}
 	slices.SortFunc(res.Pending.NewPolicies, func(a, b NewPolicy) int { return strings.Compare(a.Name, b.Name) })
-	// The symlinks each move would break, read in this transaction (the question is asked inside it).
-	var moved []string
-	for _, rn := range res.Pending.Renames {
-		if rn.Moves() {
-			moved = append(moved, rn.AbsPath())
+	// The symlinks each rename or move would break, read in this transaction (the question is asked inside it).
+	if len(res.Pending.Renames) > 0 {
+		targets := make([]string, len(res.Pending.Renames))
+		for i, rn := range res.Pending.Renames {
+			targets[i] = rn.AbsPath()
 		}
-	}
-	if len(moved) > 0 {
-		links, err := symlinksTo(ctx, q, moved)
+		links, err := symlinksTo(ctx, q, targets)
 		if err != nil {
 			return res, err
 		}
-		for i, rn := range res.Pending.Renames {
-			if rn.Moves() {
-				res.Pending.Renames[i].Symlinks = links[rn.AbsPath()]
-			}
+		for i := range res.Pending.Renames {
+			res.Pending.Renames[i].Symlinks = links[targets[i]]
 		}
 	}
 	res.Set, res.Cleared, res.TagsChanged = len(sets), len(clears), tagChanges

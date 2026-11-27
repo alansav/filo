@@ -102,6 +102,9 @@ func TestUpdateFilesRenames(t *testing.T) {
 		if len(res.Pending.Renames) != 1 || res.Unchanged != 1 || len(res.Refusals) != 0 {
 			t.Fatalf("result %+v", res)
 		}
+		if r := res.Pending.Renames[0]; len(r.Symlinks) != 0 {
+			t.Errorf("symlinks %v, want none", r.Symlinks)
+		}
 		if r := res.Pending.Renames[0]; r.Name != "British bill.pdf" || r.Path != "d/Britsh bill.pdf" ||
 			r.FileID != it["d/Britsh bill.pdf"].FileID || r.PathID == 0 {
 			t.Errorf("rename %+v", r)
@@ -257,6 +260,9 @@ func TestUpdateFilesMoves(t *testing.T) {
 		if r := res.Pending.Renames[0]; r.Dir != "received/2026/11" || r.Name != "bill.pdf" || !r.Moves() ||
 			r.NewPath() != "received/2026/11/bill.pdf" {
 			t.Errorf("move %+v", r)
+		}
+		if r := res.Pending.Renames[0]; len(r.Symlinks) != 1 || r.Symlinks[0] != root+"/inbox/rel-link" {
+			t.Errorf("symlinks to inbox/bill.pdf = %v, want inbox/rel-link", r.Symlinks)
 		}
 		if r := res.Pending.Renames[1]; r.Dir != "" || r.NewPath() != "abs-link" {
 			t.Errorf("move to the top of the root %+v", r)
