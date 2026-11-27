@@ -35,6 +35,28 @@ func IsFilesCSV(data []byte) bool {
 	return sh != nil && !sh.Has("group")
 }
 
+// LostColumn reports, for a CSV that is not a combined one, the column it lacks if it has all the others the update
+// reads (id, export, and retention or tags), with every export its rows name, each once; missing is "" otherwise.
+// The caller asks the register whether those exports are combined ones: a combined CSV that lost its retention or
+// tags column (deleted or renamed in the spreadsheet) is refused naming it, since a lost tags column would otherwise
+// read as every tag removed (docs/design.md, Tags, "The combined CSV").
+func LostColumn(data []byte) (missing string, exports []int64) {
+	sh, _ := sheet.Open(data, "id", "export")
+	if sh == nil || sh.Has("group") || sh.Has("retention") == sh.Has("tags") {
+		return "", nil
+	}
+	missing = "tags"
+	if sh.Has("tags") {
+		missing = "retention"
+	}
+	_ = sh.Each(func(row sheet.Row) { // a broken quote ends the list: the exports read so far still say what it is
+		if _, ex, problem := sheet.ReadIDs(row, missing); problem == "" && !slices.Contains(exports, ex) {
+			exports = append(exports, ex)
+		}
+	})
+	return missing, exports
+}
+
 // NameCell is a file name as the combined CSV writes it: as sheet.Cell writes any display cell (valid UTF-8, an
 // apostrophe before one a spreadsheet would read as a formula), and an apostrophe before a name that starts with one
 // itself, so that ReadName, dropping one, always gives back the name as it is (docs/design.md, Tags, "Renaming a

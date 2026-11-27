@@ -115,6 +115,31 @@ func TestParseCSVHeader(t *testing.T) {
 	}
 }
 
+// TestLostColumn: a CSV with id, export and one of retention or tags names the other, with the exports its rows
+// name (rows that cannot be read left out); anything else names none.
+func TestLostColumn(t *testing.T) {
+	for _, tc := range []struct {
+		name, csv string
+		missing   string
+		exports   []int64
+	}{
+		{"tags lost", "id,export,file_date,retention\n1,3,,7y\n2,3,,\nx,4,,\n5,6,,\n", "tags", []int64{3, 6}},
+		{"retention lost", "id;export;tags\n1;2;urgent\n", "retention", []int64{2}},
+		{"no rows", "id,export,tags\n", "retention", nil},
+		{"both there", "id,export,retention,tags\n1,2,,\n", "", nil},
+		{"both lost", "id,export,name\n1,2,a\n", "", nil},
+		{"duplicates CSV", "id,export,group,retention\n1,2,1,\n", "", nil},
+		{"no ids", "name,retention\na,7y\n", "", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			missing, exports := LostColumn([]byte(tc.csv))
+			if missing != tc.missing || !slices.Equal(exports, tc.exports) {
+				t.Errorf("LostColumn = %q, %v; want %q, %v", missing, exports, tc.missing, tc.exports)
+			}
+		})
+	}
+}
+
 func TestNameCell(t *testing.T) {
 	for _, tc := range []struct{ name, cell string }{
 		{"bill.pdf", "bill.pdf"},
