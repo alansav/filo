@@ -250,6 +250,13 @@ func (s *Store) UpdateFiles(ctx context.Context, rows []FilesRow, now time.Time,
 			if p == "" {
 				p = ch.Path
 			}
+			if p == "" && rc.ex.found { // refused for its name: the other halves did not look the file up
+				if f, ok, err := renameCandidate(ctx, q, r.FileID); err != nil {
+					return res, err
+				} else if ok {
+					p = f.AbsPath()
+				}
+			}
 			res.Refusals = append(res.Refusals, Refusal{Line: r.Line, FileID: r.FileID, Path: p, Reason: reasons})
 			continue
 		}
