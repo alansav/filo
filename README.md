@@ -708,7 +708,8 @@ a root `filo find` couldn't scan or a name it had to escape, or a tag index whos
 ## What a scan skips
 
 - Hidden entries (names starting with `.`), unless the root includes them (`--include-hidden`).
-- `node_modules`, `__pycache__`, `.filo`, and `bin`/`obj` next to a `.csproj` or `.fsproj` file.
+- `node_modules`, `__pycache__` and `.filo`. Build directories such as `bin` and `obj` are scanned like any other;
+  `filo roots set DIR --ignore bin --ignore obj` skips them (every directory of those names in the root).
 - Anything the root ignores (`--ignore`).
 - Other filesystems mounted inside the root (each can be its own root).
 - Filo's own database files, and the pages of its tag indexes.
