@@ -1843,11 +1843,9 @@ so files can be found by tag; a project is a tag (`project:house sale`).
     for the directory: a file with its own retention keeps it (no directory rule overrides it); one whose policy a
     rule set keeps it, and does not switch to the new directory's rule; one with neither gets the new directory's
     rule on the next scan, as any file arriving there. A tag index lists it wherever it is on its next refresh.
-  - **What it leaves behind**: as `filo delete` does, the directories the moves empty are removed: a directory the
-    update took a file out of that has no entries at all (hidden ones included), then each parent that removal
-    emptied, never the root, never a directory that was already empty or that nothing was taken from; each listed on
-    disk just before, and removed with the call that refuses a non-empty directory (the person's decision: an
-    emptied `inbox/` goes too).
+  - **What it leaves behind**: nothing is removed. A directory the moves empty stays, unlike one `filo delete`
+    empties: a move is sorting, and the directory it empties is usually one files are dropped into again, such as an
+    `inbox/` cleared through the CSV (the person's decision). Only a directory the update made for a move that then failed is removed again (see above).
   - **Collisions**, as for renames, by the new path: two rows moving files to one name in one directory, and a name
     another registered file has there, are refused together; a chain is refused whole.
   - **Edge cases**: a hard link moves only its own path; a symlink with a relative target is refused (it would point
@@ -1860,7 +1858,7 @@ so files can be found by tag; a project is a tag (`project:house sale`).
     unsynced part of the root is a delete there, to be noted once synced directories are marked (roadmap 9a).
   - **Output**: the summary's moves part lists each move by destination, from where, under its new name if that
     changed (with the rename's notes), each new directory marked, and "only spaces in the directory changed" for a
-    cell that differs from the file's directory only by spaces at the start or end of a part; the result counts files moved, directories made and directories removed;
+    cell that differs from the file's directory only by spaces at the start or end of a part; the result counts files moved and directories made;
     a move not made is listed with why, as a rename is. A move that is also a rename counts as a move.
   - **Recording**, as a rename's: the old path closes and the new opens on the same file row at the run's scan of
     kind `rename`; the `moved` event says "moved by filo update".
