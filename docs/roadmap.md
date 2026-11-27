@@ -55,8 +55,8 @@ complexity scores (1 to 10, Claude's estimates) are still to be settled with the
 43 are not placed yet.
 
 Next, agreed 2026-11-27 (friction week, on the `improvements` branch, after the combined CSV, 39 renaming by the
-`name` cell, 41 no `bin`/`obj` special case and 42 moving by the `directory` cell, all built that day): 40 removing
-the retention and tags exports (being built, see `design.md`); then the list below.
+`name` cell, 41 no `bin`/`obj` special case, 42 moving by the `directory` cell and 40 removing the retention and tags
+exports, all built that day): the list below.
 
 1. 36 bash completion
 2. 9b device ID, 9a marking synced directories, 9c sharing decisions

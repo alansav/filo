@@ -856,6 +856,39 @@ with directories made; checked by planting calls), `TestDirInRoot`, `TestUpdateF
 throwaway tree: three files moved (one renamed too), four directories made, the emptied `notes/` removed, and the next
 scan found no changes.
 
+## Removing the retention and tags exports
+
+Roadmap 40, built 2026-11-27 on branch `improvements`, after 42, once the person had used the combined CSV ("filo
+export works brilliantly"). `filo export retention` and `filo export tags` and their updates went, leaving `filo
+export [DIR] -o FILE` and `filo export duplicates`. The open question, whether `filo update` kept reading an old
+retention or tags CSV for a while, was settled by the person: refuse them. At first with a pointer to `filo export`;
+then, since only the person had used them, with no hint at all: an old CSV is "not a filo CSV", and `retention` and
+`tags` after `export` are directory names like any other (only `./duplicates` needs the `./`). `-y` now means the
+same for every update.
+
+Commits: the design (Lifespan and Retention CSV columns now describe the combined CSV's retention half; the tags
+CSV's cell rules moved under "The combined CSV"); `filecsv.LostColumn`, which tells a combined CSV that lost a column
+without the old readers; the CLI; the README, which had not yet described the combined CSV, renames or moves; the old
+CSVs' readers and writers in `retention`, `tagcsv` and `filecsv` (the retention reader's row tests moved to
+`filecsv.ParseCSV`); the store's own functions for the old exports (`RecordExport`, `UpdateRetention(With)`,
+`RecordTagsExport`, `UpdateTags`, the `retention` and `tags` kind constants), its tests moved to `UpdateFiles`
+through two helpers; the last mentions (the `;` refusal now says it separates tags in a CSV). No schema change:
+older registers keep exports of the old kinds, whose rows the combined update refuses by kind.
+
+The code review (medium) found six nits. Fixed: Named retention policies still described the old update's own
+policy question; a `group` column of the person's own hid a lost column; a row typed past the last column did not
+count its export, so a lost column was reported as "not a filo CSV"; the overview help for `update` left out `-y`,
+names and directories; a test comment said the register was not opened before an old CSV is refused (it is read, to
+tell it from a combined CSV that lost a column). Not fixed, by the person's decision: `export retention` is read as a
+directory, with no pointer.
+
+Tests: `TestLostColumn`, `TestParseCSVRetentionHalf`, `TestParseCSVLimits`, `TestGuardCell`, `TestParseCell`,
+`TestUpdateNotAFilesCSV`, `TestFilesCSVKinds` (both columns lost; `./duplicates`; a directory named `tags`),
+`TestUpdateWithGroupColumn`, `TestTagItems`, `TestUpdateTags` and `TestUpdatePolicies` (now on the combined update:
+a declined question records nothing), the round trips and goldens through `filo export` (`update.txt`,
+`update-dry.txt` and `update-clear.txt`, renamed from `update-retention*`; `tags-csv.txt` removed). Checked by hand on
+a throwaway tree: `export retention` exports a directory named `retention`, an old retention CSV is not a filo CSV.
+
 ## Notes on decisions
 
 Short notes taken out of `design.md` on 2026-11-17, by the section they were in.

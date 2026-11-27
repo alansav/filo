@@ -17,14 +17,15 @@ done, and `design.md` only what exists.
 ## Current state
 
 Everything `docs/design.md` describes is built (schema 13; the newest on branch `improvements` until merged): scan,
-register and report; retention through the retention CSV (`filo export retention`, `filo update`); `filo delete [DIR]
+register and report; retention through the CSV (`filo export`, `filo update`); `filo delete [DIR]
 [-y]`, which deletes a file only after it is re-read and found unchanged; register snapshots; duplicates (`filo delete
 FILE.csv`, `filo duplicates`); the terminal output (every command prints through `internal/view`); named retention
 policies (`filo policies`); directory rules (`filo rules`); showing and setting a file's details (`filo show`, `filo
-set`, `filo get`); finding files (`filo find`); tags (`filo tag`, `untag`, `tags`, `find --tag`, the tags CSV); tag
-index pages (`filo indexes`); the combined CSV (`filo export [DIR] -o FILE`), renaming by its `name` cell and moving
-by its `directory` cell (all on branch `improvements` until merged). What is next is in `docs/roadmap.md`, Priority
-(2026-11-27: 40, once the combined CSV has been used; then 36 bash completion and the sync items).
+set`, `filo get`); finding files (`filo find`); tags (`filo tag`, `untag`, `tags`, `find --tag`); tag index pages
+(`filo indexes`); the combined CSV (`filo export [DIR] -o FILE`, the one CSV for retentions and tags since the
+retention and tags exports were removed), renaming by its `name` cell and moving by its `directory` cell (all on
+branch `improvements` until merged). What is next is in `docs/roadmap.md`, Priority (2026-11-27: 36 bash completion
+and the sync items).
 **`internal/dispose` is the only code allowed to change the user's files**: deleting them only from `filo delete`,
 renaming or moving them within their root only from `filo update` (a changed `name` or `directory` cell in the
 combined CSV, making the directories a move needs; `TestOnlyDisposeChangesUserFiles` guards it); everything else stays
@@ -88,7 +89,7 @@ prefix.)
 - Example dev run, always with a throwaway database and tree, in a private directory (Filo refuses a database in a
   directory others can write to, such as `/tmp`): `T=$(mktemp -d)`, then `bin/filo --db $T/f.db roots add DIR` (adds
   and scans), `bin/filo --db $T/f.db scan`, `bin/filo --db $T/f.db report`, then
-  `bin/filo --db $T/f.db export retention DIR/notes -o $T/l.csv`, fill in `retention`, `update $T/l.csv` and `delete`
+  `bin/filo --db $T/f.db export DIR/notes -o $T/l.csv`, fill in `retention`, `update $T/l.csv` and `delete`
   (export refuses an existing file, so remove `$T/l.csv` between runs).
   `delete` really deletes: run it only with a throwaway `--db` whose roots are a throwaway tree
 
