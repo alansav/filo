@@ -1742,8 +1742,9 @@ so files can be found by tag; a project is a tag (`project:house sale`).
   is the second of the two ways Filo changes the person's files, beside `filo delete`, and is done by
   `internal/dispose` with the same machinery (inside its root, through the opened directories, never by path).
   - **A change is the cell compared with the cell as exported** (`export_rows.name`), so the formula guard
-    (`'=odd.txt`) left alone is no change; on a change, a guard's `'` before `=`, `+`, `-`, `@`, tab or CR is dropped
-    from the new cell. A row of an export made before schema 13 has no exported name: a changed cell is refused,
+    (`'=odd.txt`) left alone is no change. As in the tags cell, a name that starts with `'` itself is written after
+    another `'` in the combined CSV, so on a change one `'` before `=`, `+`, `-`, `@`, tab, CR or `'` is dropped from
+    the new cell and the name is always read back as typed. A row of an export made before schema 13 has no exported name: a changed cell is refused,
     "export again". The `directory` cell stays display only: moving is not a rename.
   - **The new name must be one plain name the next scan sees as the same file in the same place.** A changed cell is
     refused, with one line saying why, when:
