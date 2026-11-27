@@ -300,3 +300,11 @@ func unwrapPath(err error) error {
 	}
 	return err
 }
+
+// renameInPlace renames old to name in dir, never replacing a file at name (renameat2 with RENAME_NOREPLACE).
+func renameInPlace(dir *os.Root, old, name string) error {
+	if sysRenameat2 == 0 {
+		return errNoReplace
+	}
+	return renameat(dir, old, dir, name, renameNoReplace)
+}

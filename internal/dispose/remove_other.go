@@ -43,3 +43,7 @@ func isNotEmpty(err error) bool { return errors.Is(err, fs.ErrExist) }
 func removeVerified(dir *os.Root, name, path string, _ fs.FileInfo) error {
 	return removeFile(dir, name, path)
 }
+
+// renameInPlace refuses: there is no rename that never replaces its target here. Untested: no Windows build is
+// tested.
+func renameInPlace(dir *os.Root, old, name string) error { return errNoReplace }

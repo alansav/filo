@@ -62,3 +62,7 @@ func isNotEmpty(err error) bool {
 func removeVerified(dir *os.Root, name, path string, _ fs.FileInfo) error {
 	return removeFile(dir, name, path)
 }
+
+// renameInPlace refuses: these systems' syscall package has no rename that never replaces its target. Untested:
+// only Linux builds are tested.
+func renameInPlace(dir *os.Root, old, name string) error { return errNoReplace }

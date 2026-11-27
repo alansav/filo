@@ -1,7 +1,7 @@
 // Package dispose deletes deletion candidates, one at a time, each only after the check at the moment of deleting
 // (docs/design.md, Disposal): the file is still at its recorded path as the same file, it can be read, and its
-// content is the content its retention was set on. It then removes the directories the run emptied. This is the only
-// package that deletes the user's files.
+// content is the content its retention was set on. It then removes the directories the run emptied. It also renames
+// a file in its own directory for filo update (Rename). This is the only package that changes the user's files.
 package dispose
 
 import (
@@ -30,8 +30,9 @@ type Recorder interface {
 // Outcome is what happened to one candidate.
 type Outcome struct {
 	Deleted bool
-	Reason  string // why it was not deleted; "" if it was
-	Failed  bool   // it could not be read or deleted (the command then exits 1)
+	Done    bool   // a rename: the file was renamed
+	Reason  string // why it was not deleted (or renamed); "" if it was
+	Failed  bool   // it could not be read, deleted or renamed (the command then exits 1)
 }
 
 // Disposer deletes candidates and remembers the directories it took entries from.
