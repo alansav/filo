@@ -135,7 +135,12 @@ func (e *env) updateFiles(ctx context.Context, s *store.Store, path string, pars
 		return ok && askErr == nil
 	}
 	res, err := s.UpdateFiles(ctx, parsed.Rows, now(), today(), path, store.FilesUpdateOptions{DryRun: dry,
-		Confirm: confirm, CheckName: dispose.CheckName, CheckDisk: dispose.CheckRename})
+		Confirm: confirm,
+		CheckPath: func(oldRel, newRel string, includeHidden bool, ignore []string) string {
+			return dispose.CheckName(pathpkg.Base(oldRel), pathpkg.Base(newRel), includeHidden, ignore)
+		},
+		CheckDisk: func(r store.Rename) string { return dispose.CheckRename(r.Candidate, r.Name) },
+	})
 	switch {
 	case err != nil:
 	case ctx.Err() != nil:

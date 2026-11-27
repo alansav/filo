@@ -1,6 +1,7 @@
 package store
 
 import (
+	"path"
 	"strings"
 	"testing"
 	"time"
@@ -82,15 +83,14 @@ func TestUpdateFilesRenames(t *testing.T) {
 			NameCell: name, Name: name}
 	}
 	untouched := func(line int, ex int64, it FilesItem) FilesRow { return row(line, ex, it, it.NameCell) }
-	checkName := func(old, name string, _ bool, _ []string) string {
-		if name == "bad" {
+	checkName := func(_, newRel string, _ bool, _ []string) string {
+		if path.Base(newRel) == "bad" {
 			return "a bad name"
 		}
 		return ""
 	}
 	disk := ""
-	opt := FilesUpdateOptions{DryRun: true, CheckName: checkName,
-		CheckDisk: func(Candidate, string) string { return disk }}
+	opt := FilesUpdateOptions{DryRun: true, CheckPath: checkName, CheckDisk: func(Rename) string { return disk }}
 
 	t.Run("a name cell edited asks for a rename; one left as exported does not", func(t *testing.T) {
 		e, id, it := setup(t)
@@ -195,9 +195,117 @@ func TestUpdateFilesRenames(t *testing.T) {
 		e, id, it := setup(t)
 		asked := false
 		res, err := e.s.UpdateFiles(e.ctx, []FilesRow{row(2, id, it["d/b.pdf"], "x.pdf")}, now, today, "f.csv",
-			FilesUpdateOptions{CheckName: checkName, Confirm: func(p FilesPending) bool { asked = len(p.Renames) == 1; return false }})
+			FilesUpdateOptions{CheckPath: checkName, Confirm: func(p FilesPending) bool { asked = len(p.Renames) == 1; return false }})
 		if err != nil || !asked || !res.Declined {
 			t.Errorf("result %+v, %v, asked %v", res, err, asked)
+		}
+	})
+}
+
+func TestDirInRoot(t *testing.T) {
+	const root = "/home/u/Documents"
+	for _, tc := range []struct{ cell, dir, why string }{
+		{"/home/u/Documents/received/2026/11", "received/2026/11", ""},
+		{"/home/u/Documents//received/2026/11/", "received/2026/11", ""},
+		{"/home/u/Documents", "", ""},
+		{"/home/u/Documents/", "", ""},
+		{"received/2026/11", "", "not a full path"},
+		{"~/Documents/received", "", "not a full path"},
+		{"/home/u/Documents/../x", "", "holds .. as a part"},
+		{"/home/u/Documents/./x", "", "holds . as a part"},
+		{"/home/u/Documentsx/a", "", "outside the file's root"},
+		{"/home/u", "", "outside the file's root"},
+	} {
+		dir, why := dirInRoot(root, tc.cell)
+		if dir != tc.dir || (tc.why == "") != (why == "") || !strings.Contains(why, tc.why) {
+			t.Errorf("dirInRoot(%q) = %q, %q; want %q, %q", tc.cell, dir, why, tc.dir, tc.why)
+		}
+	}
+}
+
+func TestUpdateFilesMoves(t *testing.T) {
+	const today = "2026-11-27"
+	now := time.Date(2026, 11, 27, 12, 0, 0, 0, time.UTC)
+	setup := func(t *testing.T) (*reviewEnv, int64, map[string]FilesItem) {
+		e := newReviewEnv(t)
+		e.apply(Changes{New: []NewFile{f("inbox/bill.pdf", "ha"), f("inbox/scan.pdf", "hb"), f("archive/scan.pdf", "hc"),
+			{Path: "inbox/rel-link", Kind: "symlink", LinkTarget: "bill.pdf"},
+			{Path: "inbox/abs-link", Kind: "symlink", LinkTarget: "/etc/hosts"}}})
+		id, items := e.filesExport(today, now)
+		return e, id, items
+	}
+	row := func(e *reviewEnv, line int, ex int64, it FilesItem, dir string) FilesRow {
+		return FilesRow{RetentionRow: RetentionRow{Line: line, ExportID: ex, FileID: it.FileID}, HasName: true,
+			NameCell: it.NameCell, Name: it.NameCell, HasDirectory: true, DirectoryCell: dir}
+	}
+	opt := FilesUpdateOptions{DryRun: true, Moves: true}
+
+	t.Run("a directory cell edited asks for a move; one left as exported does not", func(t *testing.T) {
+		e, id, it := setup(t)
+		root := e.root.Path
+		res, err := e.s.UpdateFiles(e.ctx, []FilesRow{
+			row(e, 2, id, it["inbox/bill.pdf"], root+"/received/2026/11"),
+			row(e, 3, id, it["archive/scan.pdf"], root+"/archive"),
+			row(e, 4, id, it["inbox/abs-link"], root+"/"),
+		}, now, today, "f.csv", opt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(res.Pending.Renames) != 2 || res.Unchanged != 1 || len(res.Refusals) != 0 {
+			t.Fatalf("result %+v", res)
+		}
+		if r := res.Pending.Renames[0]; r.Dir != "received/2026/11" || r.Name != "bill.pdf" || !r.Moves() ||
+			r.NewPath() != "received/2026/11/bill.pdf" {
+			t.Errorf("move %+v", r)
+		}
+		if r := res.Pending.Renames[1]; r.Dir != "" || r.NewPath() != "abs-link" {
+			t.Errorf("move to the top of the root %+v", r)
+		}
+	})
+
+	t.Run("without Moves the directory cell is display only", func(t *testing.T) {
+		e, id, it := setup(t)
+		res, err := e.s.UpdateFiles(e.ctx, []FilesRow{row(e, 2, id, it["inbox/bill.pdf"], "/elsewhere")}, now,
+			today, "f.csv", FilesUpdateOptions{DryRun: true})
+		if err != nil || res.Unchanged != 1 || len(res.Pending.Renames)+len(res.Refusals) != 0 {
+			t.Errorf("result %+v, %v", res, err)
+		}
+	})
+
+	t.Run("refused", func(t *testing.T) {
+		e, id, it := setup(t)
+		root := e.root.Path
+		if _, err := e.s.AddTagIndex(e.ctx, e.root.ID, "", "bills", now); err != nil {
+			t.Fatal(err)
+		}
+		res, err := e.s.UpdateFiles(e.ctx, []FilesRow{
+			row(e, 2, id, it["inbox/bill.pdf"], "received"),                 // not a full path
+			row(e, 3, id, it["inbox/scan.pdf"], root+"/archive"),            // another file's name there
+			row(e, 4, id, it["inbox/rel-link"], root+"/archive"),            // a relative symlink
+			row(e, 5, id, it["archive/scan.pdf"], root+"/.bills/x"),         // inside a tag index's pages
+			row(e, 6, id, it["inbox/abs-link"], "/somewhere/else/entirely"), // outside the root
+		}, now, today, "f.csv", opt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := map[int]string{2: "not a full path", 3: "another file's name in archive/", 4: "relative target",
+			5: "filo's own files", 6: "outside the file's root"}
+		if len(res.Refusals) != len(want) {
+			t.Fatalf("refusals %+v", res.Refusals)
+		}
+		for _, rf := range res.Refusals {
+			if !strings.Contains(rf.Reason, want[rf.Line]) {
+				t.Errorf("line %d: %q, want %q", rf.Line, rf.Reason, want[rf.Line])
+			}
+		}
+	})
+
+	t.Run("two files moved to one name in a directory are both refused", func(t *testing.T) {
+		e, id, it := setup(t)
+		res, err := e.s.UpdateFiles(e.ctx, []FilesRow{row(e, 2, id, it["inbox/scan.pdf"], e.root.Path+"/new"),
+			row(e, 3, id, it["archive/scan.pdf"], e.root.Path+"/new")}, now, today, "f.csv", opt)
+		if err != nil || len(res.Refusals) != 2 || !strings.Contains(res.Refusals[0].Reason, "2 rows give a file the name scan.pdf in new/") {
+			t.Errorf("result %+v, %v", res, err)
 		}
 	})
 }
