@@ -29,21 +29,26 @@ var Header = append(append([]string{}, retention.Header...), "tags")
 var ErrNotFilesCSV = errors.New("not a filo CSV: the header needs id, export, retention and tags columns")
 
 // LostColumn reports, for a CSV that is not a combined one, the column it lacks if it has all the others the update
-// reads (id, export, and retention or tags), with every export its rows name, each once; missing is "" otherwise.
+// reads (id, export, and retention or tags), with every export its rows name, each once; missing is "" otherwise. A
+// duplicates CSV is told before this (duplicates.IsDuplicatesCSV), so a group column of the person's own counts for
+// nothing.
 // The caller asks the register whether those exports are combined ones: a combined CSV that lost its retention or
 // tags column (deleted or renamed in the spreadsheet) is refused naming it, since a lost tags column would otherwise
 // read as every tag removed (docs/design.md, Tags, "The combined CSV").
 func LostColumn(data []byte) (missing string, exports []int64) {
 	sh, _ := sheet.Open(data, "id", "export")
-	if sh == nil || sh.Has("group") || sh.Has("retention") == sh.Has("tags") {
+	if sh == nil || sh.Has("retention") == sh.Has("tags") {
 		return "", nil
 	}
 	missing = "tags"
 	if sh.Has("tags") {
 		missing = "retention"
 	}
-	_ = sh.Each(func(row sheet.Row) { // a broken quote ends the list: the exports read so far still say what it is
-		if _, ex, problem := sheet.ReadIDs(row, missing); problem == "" && !slices.Contains(exports, ex) {
+	// Only the export cell counts: a row refused for its other cells (typed past the last column) still names its
+	// export. A broken quote ends the list; the exports read so far still say what the CSV is.
+	_ = sh.Each(func(row sheet.Row) {
+		ex, err := strconv.ParseInt(row.Get("export"), 10, 64)
+		if err == nil && ex > 0 && !slices.Contains(exports, ex) {
 			exports = append(exports, ex)
 		}
 	})

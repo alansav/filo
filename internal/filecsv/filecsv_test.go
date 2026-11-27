@@ -214,19 +214,21 @@ func TestParseCSVHeader(t *testing.T) {
 }
 
 // TestLostColumn: a CSV with id, export and one of retention or tags names the other, with the exports its rows
-// name (rows that cannot be read left out); anything else names none.
+// name (a row whose export cell cannot be read left out); anything else names none.
 func TestLostColumn(t *testing.T) {
 	for _, tc := range []struct {
 		name, csv string
 		missing   string
 		exports   []int64
 	}{
-		{"tags lost", "id,export,file_date,retention\n1,3,,7y\n2,3,,\nx,4,,\n5,6,,\n", "tags", []int64{3, 6}},
+		{"tags lost", "id,export,file_date,retention\n1,3,,7y\n2,3,,\nx,4,,\n5,6,,\n7,8,,,past\n9,x,,\n", "tags",
+			[]int64{3, 4, 6, 8}}, // a row with a bad id, or a cell past the columns, still names its export
+		{"broken quote", "id,export,retention\n1,3,\n2,4,\"7y\n", "tags", []int64{3}},
 		{"retention lost", "id;export;tags\n1;2;urgent\n", "retention", []int64{2}},
 		{"no rows", "id,export,tags\n", "retention", nil},
 		{"both there", "id,export,retention,tags\n1,2,,\n", "", nil},
 		{"both lost", "id,export,name\n1,2,a\n", "", nil},
-		{"duplicates CSV", "id,export,group,retention\n1,2,1,\n", "", nil},
+		{"a group column of the person's own", "id,export,group,retention\n1,2,1,\n", "tags", []int64{2}},
 		{"no ids", "name,retention\na,7y\n", "", nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
