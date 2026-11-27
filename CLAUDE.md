@@ -26,8 +26,8 @@ combined CSV (`filo export [DIR] -o FILE`, on branch `improvements` until merged
 `docs/roadmap.md`, Priority (2026-11-27: 39 renaming by the `name` cell, then 40; then 36 bash completion and the
 sync items).
 **`internal/dispose` is the only code allowed to change the user's files**: deleting them only from `filo delete`,
-renaming them in place only from `filo update` (a changed `name` cell in the combined CSV; being built); everything
-else stays read-only on them, and nothing overwrites an existing file without asking (only an `-o` output file, and
+renaming them in place only from `filo update` (a changed `name` cell in the combined CSV; being built;
+`TestOnlyDisposeChangesUserFiles` guards it); everything else stays read-only on them, and nothing overwrites an existing file without asking (only an `-o` output file, and
 a tag index's own pages, see the hard rules). Stay inside the current piece of work.
 
 ## Hard rules
