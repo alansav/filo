@@ -55,7 +55,8 @@ complexity scores (1 to 10, Claude's estimates) are still to be settled with the
 35, are not placed yet.
 
 Next, agreed 2026-11-27 (friction week, on the `improvements` branch, after the combined CSV and 39 renaming by
-the `name` cell, both built that day): 41 (no `bin`/`obj` special case, being built, see `design.md`), then 42; 40 once the combined CSV has been used in practice; then the
+the `name` cell, both built that day): 41 (no `bin`/`obj` special case) and 42 (moving by the `directory` cell),
+being built, see `design.md`; 40 once the combined CSV has been used in practice; then the
 list below.
 
 1. 36 bash completion
@@ -351,41 +352,6 @@ Agreed with the person on 2026-11-20. Tab completes Filo's commands, flags and a
   and tag names (tags are built).
 - Bash only at first (zsh can load bash completions). No framework: Cobra would be a new dependency and a rewrite of
   every command's parsing.
-
-### 42. Moving a file by its `directory` cell (V7, C6)
-Agreed 2026-11-27, designed in seven topics with the person; built after 41. In the combined CSV, a changed
-`directory` cell moves the file there (with its name cell, under its new name), as part of the export and bulk
-update, like 39's rename, which it builds on.
-- **How far:** only within the file's own root (one `renameat2`, through the two opened directories). Another root,
-  and another filesystem (a copy and a delete), are out.
-- **New directories:** a move may create the directories it needs, inside the root: each listed in the summary as
-  new before the question, made just before the first move into it, each step checked to be a real directory (never
-  through a symlink), with the permissions `mkdir` gives; one the update made that no move filled is removed again
-  while empty. The hard rule then reads: deleting, and moving or renaming within the root, creating the directories
-  a move needs.
-- **What the next scan sees:** the new path must be one the scan records (`walk.SkipsPath`: no ignored or noise
-  directory; no special case for `bin`/`obj` once 41 is built), not inside one of Filo's own paths (`OwnPaths`, a
-  `.filo-delete-*` directory), never hiding or unhiding the file (moving between hidden directories, in a root that
-  includes them, is allowed), and each new directory's name as a new file name would be (no control character, at
-  most 255 bytes).
-- **What follows the file:** its row, so retention, tags, history and policy. Nothing is re-done for the directory:
-  a file with its own retention keeps it (no directory rule overrides it); one whose policy a rule set keeps it,
-  and does not switch to the new directory's rule; one with neither gets the new directory's rule on the next scan,
-  as any new arrival. Tag index pages list it wherever it is on their next refresh.
-- **What it leaves behind:** as `filo delete`, the directories a move empties are removed: a directory the update
-  took a file out of with no entries at all (hidden ones included), then each parent that removal emptied, never the
-  root, never a directory that was already empty or that nothing was taken from; listed on disk just before and
-  removed with the call that refuses a non-empty directory. The summary after the run counts them.
-- **The cell:** an absolute path, as exported, inside the file's root; the root itself moves the file to its top. A
-  relative path, one outside the root, `..` or `.` in it, or a leading `~` is refused; a doubled or trailing `/` is
-  tidied. A changed `directory` and `name` in one row is one move. Two files arriving under one name in a directory,
-  or a name another file has there, are refused together, as for renames. A fill-down shows in the summary, which
-  lists the moves by destination.
-- **Edge cases:** a hard link moves only its own path; a symlink with a relative target is refused (it would point
-  elsewhere); a file registered symlinks point to is moved with a note that they would break; a directory on another
-  filesystem inside the root is refused before the question; a directory that cannot be written, or a filesystem
-  that ignores case, is listed under "Not moved" (exit 1). Syncthing: a move inside one synced folder is a rename to
-  it; a move out of one is a delete on the other devices, to be noted once 9a marks synced directories.
 
 ### 40. Removing `export retention` and `export tags` (V4, C2)
 Agreed 2026-11-27: once the combined CSV has been used in practice, the retention and tags exports and their

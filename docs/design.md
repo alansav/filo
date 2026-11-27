@@ -842,7 +842,8 @@ Retention   …
 
 ### Disposal
 Package `internal/dispose`, the only code that changes the user's files: deleting them from `filo delete`, and
-renaming them in place from `filo update` (see Tags, "Renaming a file by its `name` cell"). A test
+renaming or moving them within their root from `filo update`, making the directories a move needs (see Tags,
+"Renaming a file by its `name` cell" and "Moving a file by its `directory` cell"). A test
 (`TestOnlyDisposeChangesUserFiles`) fails on any call that removes or renames on the disk anywhere else, but in the
 three files that handle only Filo's own files: the register's snapshots, an `-o` output file, and a tag index's pages.
 
@@ -1744,7 +1745,8 @@ so files can be found by tag; a project is a tag (`project:house sale`).
 - **Renaming a file by its `name` cell** (decided 2026-11-27, roadmap 39; schema version 13). In the combined CSV, a
   `name` cell changed from what was exported asks for the file to be renamed in its own directory; no second column.
   This is part of the export and bulk update, not a clone of `mv`: Filo has no command that moves or copies files. It
-  is the second of the two ways Filo changes the person's files, beside `filo delete`, and is done by
+  is one of the two ways Filo changes the person's files, beside `filo delete` (a move by the `directory` cell is the
+  same way), and is done by
   `internal/dispose` with the same machinery (inside its root, through the opened directories, never by path).
   - **A change is the cell compared with the cell as exported** (`export_rows.name`; the row also keeps the path
     shown, `path_id`, so a file moved since is told), so the formula guard
@@ -1806,6 +1808,59 @@ so files can be found by tag; a project is a tag (`project:house sale`).
     change (no permission, a filesystem that ignores case) under "Not renamed". A dry run says "would be renamed". If
     the register cannot be written part-way, the run still shows what it did before the error, and how many renames
     it did not try.
+- **Moving a file by its `directory` cell** (decided 2026-11-27, roadmap 42, in seven topics with the person). In the
+  combined CSV, a `directory` cell changed from what was exported moves the file there, within its own root; with
+  its `name` cell changed too, under its new name, in one move. It builds on the rename above (the same check, the
+  same no-replace `renameat2`, now between two opened directories, the same summary, question and recording), and is
+  done by `internal/dispose`.
+  - **Within the file's own root only.** Another root, and another filesystem (a copy then a delete, which would need
+    `filo delete`'s care), are not moves.
+  - **The cell** is an absolute path, as the export writes it: compared with the cell as exported, as the name cell
+    is; tidied of a doubled or trailing `/`; then it must be the file's root or a directory inside it. The root itself
+    moves the file to its top.
+
+    | `directory` cell | Result |
+    |---|---|
+    | as exported | no move |
+    | `/home/u/Documents/received/2026/11`, inside the root `/home/u/Documents` | moved (directories made as needed) |
+    | `/home/u/Documents//received/2026/11/` | tidied to `/home/u/Documents/received/2026/11`: moved |
+    | relative (`received/2026/11`), outside the root, or starting `~` | refused: "give the full path of a directory inside the root" |
+    | with `..` or `.` as a part | refused: never guessed at |
+    | a changed `directory` and `name` in one row | one move, to the new directory under the new name |
+
+  - **What the next scan must still see**, checked with the scan's own rule (`walk.SkipsPath`) for the new path and
+    with `OwnPaths`: no directory on it that the root ignores, or noise (`node_modules`, `__pycache__`); not inside
+    one of Filo's own paths (a tag index's `.NAME/`, the snapshot directory, a `.filo-delete-*` directory); a move
+    never hides or unhides a file (no hidden directory on one path and not the other; between hidden directories, in
+    a root that includes them, it moves); each new directory's name as a new file name would be (no control
+    character, at most 255 bytes); not into a directory on another filesystem mounted inside the root (refused before
+    the question: no scan walks it, and no rename crosses filesystems).
+  - **Directories that do not exist yet** are made, inside the root: each listed in the summary as new before the
+    question (`received/2026/11/ (new)`), so a typo shows as a directory nobody expected; made just before the first
+    move into it, each step down from the root through the opened directory above it and checked to be a real
+    directory (never through a symlink); with the permissions `mkdir` gives (the umask). One the update made that no
+    move filled is removed again while empty.
+  - **What follows the file**: its row, so retention, tags, history and policy, as for a rename. Nothing is re-done
+    for the directory: a file with its own retention keeps it (no directory rule overrides it); one whose policy a
+    rule set keeps it, and does not switch to the new directory's rule; one with neither gets the new directory's
+    rule on the next scan, as any file arriving there. A tag index lists it wherever it is on its next refresh.
+  - **What it leaves behind**: as `filo delete` does, the directories the moves empty are removed: a directory the
+    update took a file out of that has no entries at all (hidden ones included), then each parent that removal
+    emptied, never the root, never a directory that was already empty or that nothing was taken from; each listed on
+    disk just before, and removed with the call that refuses a non-empty directory (the person's decision: an
+    emptied `inbox/` goes too).
+  - **Collisions**, as for renames, by the new path: two rows moving files to one name in one directory, and a name
+    another registered file has there, are refused together; a chain is refused whole.
+  - **Edge cases**: a hard link moves only its own path; a symlink with a relative target is refused (it would point
+    elsewhere); a file that registered symlinks point to is moved with a note in the summary that they would break; a
+    directory that cannot be written, or a filesystem that ignores case, is listed under "Not moved", exit 1.
+    Syncthing: a move inside one synced folder reaches the other devices as a rename; a move out of one into an
+    unsynced part of the root is a delete there, to be noted once synced directories are marked (roadmap 9a).
+  - **Output**: the summary's moves part lists each move by destination, from where, under its new name if that
+    changed, each new directory marked; the result counts files moved, directories made and directories removed;
+    a move not made is listed with why, as a rename is. A move that is also a rename counts as a move.
+  - **Recording**, as a rename's: the old path closes and the new opens on the same file row at the run's scan of
+    kind `rename`; the `moved` event says "moved by filo update".
 - **Register (schema version 11)**: a `tags` table on file ids (the key, the value as spelled and its folded form),
   and `tag_changes`, the history of every tag added or removed and by which command, so each change can be written
   to the journal later (9c) without rework. `export_rows` gain `tags`, the cell as exported.
