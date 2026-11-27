@@ -1712,7 +1712,9 @@ so files can be found by tag; a project is a tag (`project:house sale`).
     column, whose rows name `files` exports, as a combined CSV (a retention CSV of an older export with a `tags`
     column of the person's own stays a retention CSV). Each row is checked with the rules of both: the retention
     half as a retention CSV's row (file_date, retention, the `!` mark, keep_until left alone, the file unchanged
-    since the export, a newer decision not overwritten), the tags half as a tags CSV's row. **A row refused by
+    since the export, a newer decision not overwritten), the tags half as a tags CSV's row. A symlink's row (the
+    retention CSV has them, the tags CSV does not) has an empty `tags` cell, and tags typed in it are refused, as
+    `filo tag` refuses a symlink ("give the file it points to"). **A row refused by
     either half is refused whole**, with each reason, so a file never ends up half updated; the other rows still
     apply. A row from another kind of export is refused. A CSV whose rows name `files` exports but which has lost
     its `retention` or its `tags` column (deleted or renamed in the spreadsheet) is refused as a whole, naming the
