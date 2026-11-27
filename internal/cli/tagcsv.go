@@ -64,17 +64,20 @@ func (e *env) updateTags(ctx context.Context, db, path string, data []byte, dry,
 		return err
 	}
 	defer e.closeStore(s)
-	roots, err := registeredRoots(ctx, s)
-	if err != nil {
-		return err
-	}
-	r := e.view
 	var exports []int64
 	for _, row := range parsed.Rows {
 		if !slices.Contains(exports, row.ExportID) {
 			exports = append(exports, row.ExportID)
 		}
 	}
+	if err := lostColumn(ctx, s, path, exports, "retention"); err != nil {
+		return err
+	}
+	roots, err := registeredRoots(ctx, s)
+	if err != nil {
+		return err
+	}
+	r := e.view
 	title := "Tags update"
 	if dry {
 		title += " (dry run)"

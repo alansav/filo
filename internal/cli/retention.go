@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/alansav/filo/internal/duplicates"
+	"github.com/alansav/filo/internal/filecsv"
 	"github.com/alansav/filo/internal/reconcile"
 	"github.com/alansav/filo/internal/report"
 	"github.com/alansav/filo/internal/retention"
@@ -60,16 +61,14 @@ func (e *env) export(ctx context.Context, dbBefore string, args []string) error 
 	if err != nil {
 		return err
 	}
-	if len(pos) == 0 {
-		return usageError{"export needs what to export: filo export retention|duplicates|tags [DIR] -o FILE"}
+	// No word is the combined CSV (docs/design.md, Tags, "The combined CSV"); a directory named like an export is
+	// given as ./tags.
+	kind := ""
+	if len(pos) > 0 && slices.Contains(exportKinds, pos[0]) {
+		kind, pos = pos[0], pos[1:]
 	}
-	kind := pos[0]
-	if !slices.Contains(exportKinds, kind) {
-		return usageError{fmt.Sprintf("unknown export %q; the exports are retention, duplicates and tags", kind)}
-	}
-	pos = pos[1:]
 	if len(pos) > 1 {
-		return usageError{"export " + kind + " takes at most one DIR"}
+		return usageError{strings.TrimSpace("export "+kind) + " takes at most one DIR"}
 	}
 	if err := checkWorkers(fl, *workers, *noScan); err != nil {
 		return err
@@ -126,23 +125,14 @@ func (e *env) export(ctx context.Context, dbBefore string, args []string) error 
 		return e.exportDuplicates(ctx, s, f, where, csvPath, asked, notScanned)
 	case "tags":
 		return e.exportTags(ctx, s, f, where, csvPath, asked, notScanned)
+	case "":
+		return e.exportFiles(ctx, s, f, where, csvPath, asked, notScanned)
 	}
 	items, err := s.Files(ctx, today(), f)
 	if err != nil {
 		return err
 	}
-	// Fill in a blank file_date from the file name where it holds one unambiguous date, marked (!2023-07-14) so it
-	// counts only once the person removes the mark. The export records it as written, so an untouched one is no change.
-	suggested := 0
-	names := retention.NewDateReader(today()) // one day for the whole export
-	for i := range items {
-		if items[i].FileDate == "" {
-			if d := names.Read(path.Base(items[i].Path)); d != "" {
-				items[i].FileDate = store.MarkedDate(d)
-				suggested++
-			}
-		}
-	}
+	suggested := markNameDates(len(items), func(i int) *store.FileItem { return &items[i] })
 	v := e.view
 	if len(items) == 0 {
 		v.Heading("Export (retention)", where, "no files")
@@ -168,15 +158,38 @@ func (e *env) export(ctx context.Context, dbBefore string, args []string) error 
 	v.Blank()
 	v.Count(view.Neutral, report.Count(int64(undated))+" without a retention, "+
 		report.Count(int64(len(items)-undated))+" with one")
+	markedLine(v, suggested)
+	notScannedLine(v, notScanned)
+	v.Blank()
+	v.Next("Next: fill in retention (7y, 18m, forever or a date), then filo update " + shellQuote(csvPath))
+	return nil
+}
+
+// markNameDates fills in each blank file_date of the n items (item(i) is the i-th) from the file name where it holds
+// one unambiguous date, marked (!2023-07-14) so it counts only once the person removes the mark, and returns how many
+// it filled in. The export records them as written, so an untouched one is no change.
+func markNameDates(n int, item func(int) *store.FileItem) int {
+	suggested := 0
+	names := retention.NewDateReader(today()) // one day for the whole export
+	for i := range n {
+		it := item(i)
+		if it.FileDate == "" {
+			if d := names.Read(path.Base(it.Path)); d != "" {
+				it.FileDate = store.MarkedDate(d)
+				suggested++
+			}
+		}
+	}
+	return suggested
+}
+
+// markedLine is the line an export shows when it read file_dates from the file names.
+func markedLine(v *view.Renderer, suggested int) {
 	if suggested > 0 {
 		v.Count(view.Attention, report.Plural(int64(suggested), "file_date", "file_dates")+
 			" read from the file name, marked !: remove the ! "+pluralWord(suggested, "to accept it",
 			"from each one you accept"))
 	}
-	notScannedLine(v, notScanned)
-	v.Blank()
-	v.Next("Next: fill in retention (7y, 18m, forever or a date), then filo update " + shellQuote(csvPath))
-	return nil
 }
 
 // scanFirst is an export's scan (docs/design.md, Lifespan, "A scan first"): a retention or tags export of DIR scans
@@ -277,6 +290,12 @@ func (e *env) update(ctx context.Context, dbBefore string, args []string) error 
 	if tagcsv.IsTagsCSV(data) || tagcsv.LostTags(data) {
 		return e.updateTags(ctx, *db, path, data, *dry, *yes)
 	}
+	if filecsv.IsFilesCSV(data) {
+		done, err := e.maybeUpdateFiles(ctx, *db, path, data, *dry, *yes)
+		if done || err != nil {
+			return err
+		}
+	}
 	parsed, err := retention.ParseCSV(data)
 	if err != nil {
 		return fmt.Errorf("%s: %w", path, err)
@@ -291,6 +310,11 @@ func (e *env) update(ctx context.Context, dbBefore string, args []string) error 
 		return err
 	}
 	defer e.closeStore(s)
+	if !filecsv.IsFilesCSV(data) { // with a tags column, its exports were found not to be combined ones
+		if err := lostColumn(ctx, s, path, retentionExports(parsed.Rows), "tags"); err != nil {
+			return err
+		}
+	}
 	roots, err := registeredRoots(ctx, s)
 	if err != nil {
 		return err
@@ -491,19 +515,8 @@ func refusalProblems(roots []string, problems []sheet.Problem, refusals []store.
 // yes confirms; the other rows are recorded either way.
 func (e *env) confirmClears(ctx context.Context, pr *prompter, roots []string, cs []store.Clear) (bool, error) {
 	r := e.view
-	rows := make([]view.FileRow, len(cs))
-	for i, c := range cs {
-		row := view.FileRow{Cells: []string{c.Retention, c.KeepUntil}}
-		if c.Path == "" {
-			row.Label = fmt.Sprintf("file %d, no current path", c.FileID)
-		} else {
-			row.Root, row.Rel = view.SplitRoot(roots, c.Path)
-		}
-		rows[i] = row
-	}
 	list := func(max int) {
-		r.Files(view.FileList{Columns: []view.Column{{Header: "retention"}, {Header: "until"}}, Rows: rows,
-			Max: max, More: "files", MoreOne: "file"})
+		clearList(r, roots, cs, max)
 		r.Blank()
 	}
 	r.Note(view.Attention, report.Plural(int64(len(cs)), "row has", "rows have")+" a blank retention where one is "+
@@ -515,6 +528,23 @@ func (e *env) confirmClears(ctx context.Context, pr *prompter, roots []string, c
 			report.Count(int64(len(cs))))
 	}
 	return e.askYesNo(ctx, pr, question, func() { list(0) })
+}
+
+// clearList lists the retentions blank cells clear, each with the retention and date it had, max of them before
+// "… N more" (0: all).
+func clearList(r *view.Renderer, roots []string, cs []store.Clear, max int) {
+	rows := make([]view.FileRow, len(cs))
+	for i, c := range cs {
+		row := view.FileRow{Cells: []string{c.Retention, c.KeepUntil}}
+		if c.Path == "" {
+			row.Label = fmt.Sprintf("file %d, no current path", c.FileID)
+		} else {
+			row.Root, row.Rel = view.SplitRoot(roots, c.Path)
+		}
+		rows[i] = row
+	}
+	r.Files(view.FileList{Columns: []view.Column{{Header: "retention"}, {Header: "until"}}, Rows: rows,
+		Max: max, More: "files", MoreOne: "file"})
 }
 
 // showNewPolicies lists the policies a CSV names that do not exist yet (docs/design.md, Named retention policies).

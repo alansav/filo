@@ -1,3 +1,4 @@
+filo export [DIR] -o FILE [--no-scan] [--workers N]
 filo export retention [DIR] -o FILE [--no-scan] [--workers N]
 filo export duplicates [DIR] -o FILE [--no-scan] [--workers N]
 filo export tags [DIR] -o FILE [--no-scan] [--workers N]
@@ -6,14 +7,18 @@ filo export tags [DIR] -o FILE [--no-scan] [--workers N]
   file under DIR (inside a root), or under every root, as CSV (UTF-8) to FILE. A
   root that cannot be scanned stops the export. If FILE exists, filo asks before
   replacing it (only a regular file, and only at a terminal). Columns: id,
-  export, directory, name, size, modified, file_date, retention, keep_until.
-  Fill in retention in a spreadsheet (a period such as 7y counted from
-  file_date, a date, forever, or a policy name: filo help policies), then run
-  filo update FILE. A blank file_date is filled in from the file name when the
-  name holds one clear date (2023-03-14, 20230314, or 2023-03 for the month's
-  last day), marked with ! (!2023-03-14): check it and remove the ! to accept
-  it; a period on a row whose date is still marked is refused. On a large
-  system, export one directory at a time.
+  export, directory, name, size, modified, file_date, retention, keep_until,
+  tags. Fill in retention in a spreadsheet (a period such as 7y counted from
+  file_date, a date, forever, or a policy name: filo help policies) and tags
+  (separated by ;, see filo help tag), then run filo update FILE. A directory
+  named retention, duplicates or tags is given as ./tags. A blank file_date is
+  filled in from the file name when the name holds one clear date (2023-03-14,
+  20230314, or 2023-03 for the month's last day), marked with ! (!2023-03-14):
+  check it and remove the ! to accept it; a period on a row whose date is still
+  marked is refused. On a large system, export one directory at a time.
+
+  export retention writes the same without the tags column; export tags (below)
+  only the tags.
 
   export duplicates writes each duplicate group (two or more copies of the same
   content; hard links to one file are one copy) with a copy under DIR, with all

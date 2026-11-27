@@ -133,7 +133,7 @@ func TestRetentionRoundTrip(t *testing.T) {
 	// Export: -o is required, and an existing file is not replaced without a terminal to ask in (TestExportReplace).
 	r1 := filepath.Join(work, "r1.csv")
 	filo(ExitUsage, "", false, "export", "retention")
-	filo(ExitUsage, "", false, "export", "-o", r1)
+	filo(ExitUsage, "", false, "export", "docs", "notes", "-o", r1) // at most one DIR
 	contains("export", filo(ExitOK, "", false, "export", "retention", "-o", r1).stdout,
 		"Export #1 (retention)   4 files", "  - 4 without a retention, 0 with one\n",
 		"  [!] 1 file_date read from the file name, marked !: remove the ! to accept it\n",

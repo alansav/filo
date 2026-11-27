@@ -119,6 +119,7 @@ var commandHelps = map[string]commandHelp{
 	},
 	"export": {
 		usage: []string{
+			"filo export [DIR] -o FILE [--no-scan] [--workers N]",
 			"filo export retention [DIR] -o FILE [--no-scan] [--workers N]",
 			"filo export duplicates [DIR] -o FILE [--no-scan] [--workers N]",
 			"filo export tags [DIR] -o FILE [--no-scan] [--workers N]",
@@ -128,12 +129,14 @@ var commandHelps = map[string]commandHelp{
 				"root), or under every root, as CSV (UTF-8) to FILE. A root that cannot be scanned stops the export. " +
 				"If FILE " +
 				"exists, filo asks before replacing it (only a regular file, and only at a terminal). Columns: id, " +
-				"export, directory, name, size, modified, file_date, retention, keep_until. " +
+				"export, directory, name, size, modified, file_date, retention, keep_until, tags. " +
 				"Fill in retention in a spreadsheet (a period such as 7y counted from file_date, a date, forever, or " +
-				"a policy name: filo help policies), then run filo update FILE. A blank file_date is filled in from " +
+				"a policy name: filo help policies) and tags (separated by ;, see filo help tag), then run filo " +
+				"update FILE. A directory named retention, duplicates or tags is given as ./tags. A blank file_date is filled in from " +
 				"the file name when the name holds one clear date (2023-03-14, 20230314, or 2023-03 for the month's " +
 				"last day), marked with ! (!2023-03-14): check it and remove the ! to accept it; a period on a " +
 				"row whose date is still marked is refused. On a large system, export one directory at a time.",
+			"export retention writes the same without the tags column; export tags (below) only the tags.",
 			"export duplicates writes each duplicate group (two or more copies of the same content; hard links to " +
 				"one file are one copy) with a copy under DIR, with all its copies. Columns: id, export, group, " +
 				"copies, directory, name, size, modified, file_date, retention, keep_until, action. In each group " +
@@ -153,16 +156,21 @@ var commandHelps = map[string]commandHelp{
 	"update": {
 		usage: []string{"filo update FILE [--dry-run] [-y]"},
 		before: []string{
-			"Reads an exported retention CSV and applies the file_date and retention you changed. retention is a " +
+			"Reads an exported CSV and applies the file_date, retention and tags you changed. retention is a " +
 				"period counted from file_date (7y, 18m, 6w, 30d), forever, or a date (YYYY-MM-DD); file_date is " +
 				"a date. keep_until is worked out by filo: leave it alone. Dates in the past are fine: the file is " +
 				"then past its retention (see filo delete). Rows can be sorted, filtered or deleted, but not added. " +
-				"A blank retention clears a stored one; filo lists those files and asks first, and without a " +
-				"terminal leaves them alone. A row is refused, with one line saying why, if a value does not parse, " +
-				"a period has no file_date, the file changed since the export, or its retention was changed from a " +
-				"later export. The other rows are still applied.",
-			"A tags CSV (from export tags) is told by its header: each tags cell replaces its file's tags, so an " +
-				"untouched cell changes nothing and an emptied one removes them all. Before removing any tag, filo " +
+				"Each tags cell replaces its file's tags, so an untouched cell changes nothing and an emptied one " +
+				"removes them all. A row is refused, with one line saying why, if a value does not parse, a period " +
+				"has no file_date, the file changed since the export, its retention or tags were changed after " +
+				"the export, or a tag breaks the spelling rules (see filo help tag). The other rows are still " +
+				"applied.",
+			"If any row clears a retention, removes a tag or names a policy that does not exist yet, filo lists " +
+				"them first and asks once (-y answers yes); no, or no terminal without -y, records nothing at all.",
+			"A CSV from export retention is read the same way without tags; a blank retention there clears a " +
+				"stored one after asking, and without a terminal those rows are left alone.",
+			"A tags CSV (from export tags) is told by its header: each tags cell replaces its file's tags. " +
+				"Before removing any tag, filo " +
 				"lists those rows and asks (-y answers yes); without a terminal, and without -y, it leaves them " +
 				"alone. A row is refused, with one line " +
 				"saying why, if for example a tag breaks the spelling rules (see filo help tag), the file's tags " +
@@ -172,7 +180,7 @@ var commandHelps = map[string]commandHelp{
 		},
 		flags: []view.Term{
 			{Name: "--dry-run", Text: "check everything and write nothing"},
-			{Name: "-y", Text: "a tags CSV: remove the tags its cells no longer hold without asking"},
+			{Name: "-y", Text: "apply without asking (not for a CSV from export retention)"},
 		},
 	},
 	"delete": {
