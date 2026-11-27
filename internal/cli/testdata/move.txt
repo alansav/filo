@@ -43,6 +43,6 @@ Update   again.csv . export #2 . 8 rows . <work>/home
 Refused: fix these rows in the CSV and run filo update again
   [refused] line 6    received/2026/11/bill.pdf: the directory "received/2026" is not a full path: give the full path of a directory inside the root <work>/home
   [refused] line 7    scan-link: the root's scan skips a directory on the new path (an ignored name), so the next scan would lose the file
-  [refused] line 8    sorted/y.txt: a move never hides or unhides a file (a directory on one path starts with . and not on the other); move it by hand if you mean to
+  [refused] line 8    sorted/y.txt: a rename or move never hides a file (a name or directory starting with . is hidden); rename or move it by hand if you mean to
   [refused] line 9    x.txt: the directory "/elsewhere" is outside the file's root: a move stays inside it; give the full path of a directory inside the root <work>/home
 

@@ -15,8 +15,9 @@ const maxName = 255
 // CheckName says why a file named old cannot be renamed to name in its own directory, in a root with these scan
 // settings (docs/design.md, Tags, "Renaming a file by its name cell"); "" if it can. The new name must be one plain
 // name that the next scan sees as the same file in the same place: no "/", not "." or "..", no control character, not
-// longer than the filesystem takes, neither hiding nor unhiding the file, not Filo's own, and not one the root's scan
-// skips. old must be valid UTF-8: one that is not was exported with U+FFFD, so its real name cannot be written back.
+// longer than the filesystem takes, not Filo's own, and not one the root's scan skips. old must be valid UTF-8: one
+// that is not was exported with U+FFFD, so its real name cannot be written back. Hidden names are CheckPath's: a
+// hidden file is never renamed, and no file is renamed to a hidden name.
 func CheckName(old, name string, includeHidden bool, ignore []string) string {
 	switch {
 	case !utf8.ValidString(old):
@@ -33,10 +34,6 @@ func CheckName(old, name string, includeHidden bool, ignore []string) string {
 		return fmt.Sprintf("the new name is %d bytes long; the most a file name can be is %d", len(name), maxName)
 	case strings.HasPrefix(name, walk.DeletingPrefix):
 		return "names starting " + walk.DeletingPrefix + " are filo's own"
-	case hidden(name) && !hidden(old):
-		return "a rename never hides a file (a name starting with . is hidden); rename it by hand if you mean to"
-	case !hidden(name) && hidden(old):
-		return "a rename never unhides a file (a name starting with . is hidden); rename it by hand if you mean to"
 	case walk.Skips(name, includeHidden, ignore):
 		return "the root's scan skips that name (an ignored name), so the next scan would lose the file"
 	}
@@ -48,12 +45,21 @@ func hidden(name string) bool { return strings.HasPrefix(name, ".") }
 
 // CheckPath says why a file at oldRel cannot be renamed or moved to newRel within its root, with these scan
 // settings (both '/'-separated, relative to the root); "" if it can (docs/design.md, Tags, "Moving a file by its
-// directory cell"). A new name follows CheckName's rules; each directory of the new path that is not on the old one
-// must be a plain name as a new file name must be (what the file has now is not judged again); the root's scan must
-// record the new path (walk.SkipsPath), and a move never hides or unhides the file: a hidden directory on one path
-// and not the other.
+// directory cell"). A hidden file, or one under a hidden directory, is never renamed or moved ("A hidden file is
+// never renamed or moved by the CSV"), and the new path has no hidden part, so no file is hidden. Then a new name
+// follows CheckName's rules; each directory of the new path that is not on the old one must be a plain name as a new
+// file name must be (what the file has now is not judged again); and the root's scan must record the new path
+// (walk.SkipsPath). These come after the hidden parts, so a hidden new path says so, not that the scan skips it.
 func CheckPath(oldRel, newRel string, includeHidden bool, ignore []string) string {
 	oldParts, newParts := strings.Split(oldRel, "/"), strings.Split(newRel, "/")
+	if hiddenPart(oldParts) {
+		return "a hidden file, or one in a hidden directory, is never renamed or moved by filo update; rename or " +
+			"move it by hand if you mean to"
+	}
+	if hiddenPart(newParts) {
+		return "a rename or move never hides a file (a name or directory starting with . is hidden); rename or move " +
+			"it by hand if you mean to"
+	}
 	oldName, newName := oldParts[len(oldParts)-1], newParts[len(newParts)-1]
 	if oldName != newName {
 		if why := CheckName(oldName, newName, includeHidden, ignore); why != "" {
@@ -80,19 +86,15 @@ func CheckPath(oldRel, newRel string, includeHidden bool, ignore []string) strin
 			return "directories starting " + walk.DeletingPrefix + " are filo's own"
 		}
 	}
-	if hiddenOnPath(oldParts) != hiddenOnPath(newParts) {
-		return "a move never hides or unhides a file (a directory on one path starts with . and not on the other); " +
-			"move it by hand if you mean to"
-	}
 	if walk.SkipsPath(newRel, includeHidden, ignore) {
 		return "the root's scan skips a directory on the new path (an ignored name), so the next scan would lose the file"
 	}
 	return ""
 }
 
-// hiddenOnPath reports whether a directory on the path (not the file itself) is hidden.
-func hiddenOnPath(parts []string) bool {
-	for _, p := range parts[:len(parts)-1] {
+// hiddenPart reports whether a part of the path, the file's name or a directory above it, is hidden.
+func hiddenPart(parts []string) bool {
+	for _, p := range parts {
 		if hidden(p) {
 			return true
 		}

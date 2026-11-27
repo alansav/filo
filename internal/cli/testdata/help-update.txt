@@ -14,10 +14,11 @@ filo update FILE [--dry-run] [-y]
 
   A changed name cell renames the file, and a changed directory cell (the full
   path of a directory in the file's root) moves it there, making the directories
-  it needs; never hiding or unhiding it, leaving its root, or replacing another
-  file, and only if the file is still the one the last scan saw; otherwise the
-  row is refused or the rename or move not made, with why (run filo scan and
-  export again). The directories the moves empty stay.
+  it needs; never a hidden file or one in a hidden directory, never hiding one,
+  leaving its root, or replacing another file, and only if the file is still the
+  one the last scan saw; otherwise the row is refused or the rename or move not
+  made, with why (run filo scan and export again). The directories the moves
+  empty stay.
 
   If any row clears a retention, removes a tag, names a policy that does not
   exist yet or renames a file or moves one, filo lists them first and asks once

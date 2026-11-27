@@ -39,7 +39,7 @@ Update   again.csv . export #2 . 6 rows . <work>/home
 
 Refused: fix these rows in the CSV and run filo update again
   [refused] line 2    notes/ideas.md: changed since the last scan; run filo scan and export again
-  [refused] line 3    notes/plan.txt: a rename never hides a file (a name starting with . is hidden); rename it by hand if you mean to
+  [refused] line 3    notes/plan.txt: a rename or move never hides a file (a name or directory starting with . is hidden); rename or move it by hand if you mean to
   [refused] line 4    received/2026/09/2026-09-02 British Gas Bill.pdf: a new name cannot hold /: to move the file, change its directory cell
   [refused] line 6    tax/2023 return.pdf: other.pdf is another file's name in tax/; rename or move one at a time
 

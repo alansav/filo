@@ -363,3 +363,39 @@ func TestMoveGolden(t *testing.T) {
 	got = regexp.MustCompile(`\d{4}-\d\d-\d\d \d\d:\d\d`).ReplaceAllString(got, "<time>")
 	golden(t, "move.txt", ct.root, got)
 }
+
+// TestUpdateNeverMovesHiddenFiles: in a root that includes hidden files, a changed CSV can neither move a private
+// key out of .ssh/ nor move a key a synced directory received into it (docs/design.md, Tags, "A hidden file is never
+// renamed or moved by the CSV"); a hidden file's retention is still set.
+func TestUpdateNeverMovesHiddenFiles(t *testing.T) {
+	ct := newCLITest(t)
+	filo, in := ct.filo, ct.in
+	ct.write(".ssh/id_ed25519", "private key")
+	ct.write("Sync/.peer/authorized_keys", "someone else's key")
+	ct.write("inbox/.notes", "notes")
+	ct.write("inbox/bill.pdf", "bill")
+	filo(ExitOK, "", false, "roots", "add", ct.root, "--include-hidden")
+	csvPath := filepath.Join(ct.work, "all.csv")
+	filo(ExitOK, "", false, "export", "-o", csvPath, "--no-scan")
+	editCSV(t, csvPath, edits(
+		setDirs(map[string]string{"id_ed25519": in("Sync/.peer"), "authorized_keys": in(".ssh"),
+			"bill.pdf": in(".archive")}),
+		setNames(map[string]string{".notes": "notes"}),
+		setCells("retention", map[string]string{"id_ed25519": "forever"})))
+	got := filo(ExitError, "", false, "update", csvPath, "-y")
+	ct.contains("update", got.stdout, "4 rows refused", "never renamed or moved", "never hides")
+	for rel, want := range map[string]bool{".ssh/id_ed25519": true, "Sync/.peer/id_ed25519": false,
+		"Sync/.peer/authorized_keys": true, ".ssh/authorized_keys": false, "inbox/.notes": true, "inbox/notes": false,
+		"inbox/bill.pdf": true, ".archive": false} {
+		if ct.exists(rel) != want {
+			t.Errorf("%s exists = %v, want %v", rel, !want, want)
+		}
+	}
+
+	// With its directory cell left alone, the key's retention is set.
+	again := filepath.Join(ct.work, "again.csv")
+	filo(ExitOK, "", false, "export", "-o", again, "--no-scan")
+	editCSV(t, again, setCells("retention", map[string]string{"id_ed25519": "forever"}))
+	filo(ExitOK, "", false, "update", again, "-y")
+	ct.contains("show", filo(ExitOK, "", false, "show", in(".ssh/id_ed25519")).stdout, "forever")
+}

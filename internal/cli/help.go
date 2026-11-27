@@ -160,7 +160,8 @@ var commandHelps = map[string]commandHelp{
 				"the export, or a tag breaks the spelling rules (see filo help tag). The other rows are still " +
 				"applied.",
 			"A changed name cell renames the file, and a changed directory cell (the full path of a directory in " +
-				"the file's root) moves it there, making the directories it needs; never hiding or unhiding it, " +
+				"the file's root) moves it there, making the directories it needs; never a hidden file or one in a " +
+				"hidden directory, never hiding one, " +
 				"leaving its root, or replacing another file, and only if the file is still the one the last scan " +
 				"saw; otherwise the row is refused or the rename or move not made, with why (run filo scan and " +
 				"export again). The directories the moves empty stay.",
