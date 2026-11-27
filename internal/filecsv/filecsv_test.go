@@ -124,11 +124,12 @@ func TestNameCell(t *testing.T) {
 		{"'=both", "''=both"},
 		{" spaced ", " spaced "},
 		{"bad\xffname", "bad\ufffdname"},
+		{"'caf\xe9.txt", "''caf\ufffd.txt"},
 	} {
 		if got := NameCell(tc.name); got != tc.cell {
 			t.Errorf("NameCell(%q) = %q, want %q", tc.name, got, tc.cell)
 		}
-		if tc.name != "bad\xffname" {
+		if !strings.ContainsRune(tc.cell, '\ufffd') {
 			if got := ReadName(NameCell(tc.name)); got != tc.name {
 				t.Errorf("ReadName(NameCell(%q)) = %q, want it back as it was", tc.name, got)
 			}

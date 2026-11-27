@@ -41,7 +41,7 @@ func IsFilesCSV(data []byte) bool {
 // file by its name cell").
 func NameCell(name string) string {
 	if strings.HasPrefix(name, "'") {
-		return "'" + name
+		return "'" + strings.ToValidUTF8(name, "\uFFFD")
 	}
 	return sheet.Cell(name)
 }
