@@ -119,7 +119,8 @@ func TestRender(t *testing.T) {
 
 // TestRenderFindPage: NAME.html holds the embedded script and styles as they are, allowed by the
 // Content-Security-Policy by their hashes, local files for a preview, fetching from its own origin (for Safari's PDF
-// viewer) and nothing else (nothing from the internet), and the data as JSON that reads back.
+// viewer) and nothing else (nothing from the internet), the data as JSON that reads back, and no call in the script
+// that could fetch.
 func TestRenderFindPage(t *testing.T) {
 	d, err := Build(bills, sample(t))
 	if err != nil {
@@ -137,6 +138,13 @@ func TestRenderFindPage(t *testing.T) {
 	gotStyle := inline(t, page, "<style>", "</style>")
 	if gotScript != string(script) || gotStyle != string(style)+string(extra) {
 		t.Error("the script or the styles are not inlined as embedded")
+	}
+	// The policy lets the page fetch from its own origin (for Safari's PDF viewer), so the script itself must not.
+	for _, call := range []string{"fetch", "XMLHttpRequest", "sendBeacon", "EventSource", "WebSocket", "Worker",
+		"import("} {
+		if strings.Contains(string(script), call) {
+			t.Errorf("the find page script uses %s: it must never fetch", call)
+		}
 	}
 	policy := html.UnescapeString(inline(t, page, `http-equiv="Content-Security-Policy" content="`, `"`)) // as read
 	want := "default-src 'none'; script-src " + cspHash([]byte(gotScript)) + "; style-src " +
