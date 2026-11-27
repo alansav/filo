@@ -136,7 +136,7 @@ func (s *Store) UpdateTags(ctx context.Context, rows []TagRow, now time.Time, op
 			}
 			exports[r.ExportID] = ex
 		}
-		ch, why, err := checkTagRow(ctx, q, r, ex, spelled)
+		ch, why, err := checkTagRow(ctx, q, r, ex, ExportTags, spelled)
 		switch {
 		case err != nil:
 			return res, err
@@ -170,23 +170,8 @@ func (s *Store) UpdateTags(ctx context.Context, rows []TagRow, now time.Time, op
 		}
 		changes = kept
 	}
-	for i, ch := range changes {
-		for _, t := range ch.Removed {
-			if _, err := removeTags(ctx, q, ch.FileID, tags.Search{Key: t.Key, Value: t.Value}, tagByUpdate,
-				now); err != nil {
-				return res, err
-			}
-		}
-		for j, t := range ch.Added {
-			sp, err := spelling(ctx, q, t) // again: an earlier row may have removed the tag's only other spelling
-			if err != nil {
-				return res, err
-			}
-			if _, err := addTag(ctx, q, ch.FileID, sp, tagByUpdate, now); err != nil {
-				return res, err
-			}
-			changes[i].Added[j] = sp
-		}
+	if err := applyTagChanges(ctx, q, changes, now); err != nil {
+		return res, err
 	}
 	res.Changed = changes
 	if len(changes) == 0 {
@@ -198,15 +183,40 @@ func (s *Store) UpdateTags(ctx context.Context, rows []TagRow, now time.Time, op
 	return res, nil
 }
 
-// checkTagRow applies a tags update's rules to one row: what it changes, or why it is refused.
-func checkTagRow(ctx context.Context, tx querier, r TagRow, ex exportInfo, spelled map[string]tags.Tag) (TagChange,
-	string, error) {
+// applyTagChanges makes the changes, each tag added with the spelling the register has for it then (written back
+// into changes).
+func applyTagChanges(ctx context.Context, q *stmtCache, changes []TagChange, now time.Time) error {
+	for i, ch := range changes {
+		for _, t := range ch.Removed {
+			if _, err := removeTags(ctx, q, ch.FileID, tags.Search{Key: t.Key, Value: t.Value}, tagByUpdate,
+				now); err != nil {
+				return err
+			}
+		}
+		for j, t := range ch.Added {
+			sp, err := spelling(ctx, q, t) // again: an earlier row may have removed the tag's only other spelling
+			if err != nil {
+				return err
+			}
+			if _, err := addTag(ctx, q, ch.FileID, sp, tagByUpdate, now); err != nil {
+				return err
+			}
+			changes[i].Added[j] = sp
+		}
+	}
+	return nil
+}
+
+// checkTagRow applies a tags update's rules to one row, from an export of the given kind (a tags export, or the
+// combined one): what it changes, or why it is refused.
+func checkTagRow(ctx context.Context, tx querier, r TagRow, ex exportInfo, kind string,
+	spelled map[string]tags.Tag) (TagChange, string, error) {
 	ch := TagChange{FileID: r.FileID}
 	if !ex.found {
 		return ch, fmt.Sprintf("export #%d is not in this register", r.ExportID), nil
 	}
-	if ex.kind != ExportTags {
-		return ch, fmt.Sprintf("export #%d is a %s export, not a tags export", r.ExportID, ex.kind), nil
+	if ex.kind != kind {
+		return ch, fmt.Sprintf("export #%d is a %s export, not a %s export", r.ExportID, ex.kind, kind), nil
 	}
 	var exported sql.NullString
 	err := tx.QueryRowContext(ctx, `SELECT tags FROM export_rows WHERE export_id = ? AND file_id = ?`, r.ExportID,

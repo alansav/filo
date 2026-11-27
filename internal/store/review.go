@@ -359,12 +359,7 @@ func (s *Store) UpdateRetentionWith(ctx context.Context, rows []RetentionRow, no
 	}
 	defer tx.Rollback()
 
-	type ok struct {
-		r         RetentionRow
-		c         checked
-		afterScan sql.NullInt64
-	}
-	var sets, clears []ok
+	var sets, clears []retentionChange
 	var clearList []Clear
 	exports := map[int64]exportInfo{}
 	policies := policyCache{}
@@ -376,7 +371,7 @@ func (s *Store) UpdateRetentionWith(ctx context.Context, rows []RetentionRow, no
 			}
 			exports[r.ExportID] = ex
 		}
-		c, err := checkRow(ctx, tx, r, ex, policies)
+		c, err := checkRow(ctx, tx, r, ex, ExportRetention, policies)
 		if err != nil {
 			return res, err
 		}
@@ -386,11 +381,11 @@ func (s *Store) UpdateRetentionWith(ctx context.Context, rows []RetentionRow, no
 		case c.unchanged:
 			res.Unchanged++
 		case c.clear:
-			clears = append(clears, ok{r: r, c: c, afterScan: ex.afterScan})
+			clears = append(clears, retentionChange{r: r, c: c, afterScan: ex.afterScan})
 			clearList = append(clearList, Clear{FileID: r.FileID, Path: c.path, Retention: c.storedRetention,
 				KeepUntil: c.storedKeepUntil})
 		default:
-			sets = append(sets, ok{r: r, c: c, afterScan: ex.afterScan})
+			sets = append(sets, retentionChange{r: r, c: c, afterScan: ex.afterScan})
 			if c.keepUntil != "" && c.keepUntil != Forever && c.keepUntil <= today {
 				res.NowPast = append(res.NowPast, Past{Path: c.path, Retention: c.retention, KeepUntil: c.keepUntil})
 			}
@@ -420,12 +415,8 @@ func (s *Store) UpdateRetentionWith(ctx context.Context, rows []RetentionRow, no
 	created := map[string]int64{} // new policy -> its ID, once created
 	if len(res.NewPolicies) > 0 {
 		if opt.ConfirmPolicies != nil && opt.ConfirmPolicies(res.NewPolicies) {
-			for _, np := range res.NewPolicies {
-				id, err := addPolicy(ctx, tx, np.Name, "", now)
-				if err != nil {
-					return res, err
-				}
-				created[np.Name] = id
+			if created, err = createPolicies(ctx, tx, res.NewPolicies, now); err != nil {
+				return res, err
 			}
 			res.PoliciesCreated = len(res.NewPolicies)
 		} else {
@@ -455,17 +446,49 @@ func (s *Store) UpdateRetentionWith(ctx context.Context, rows []RetentionRow, no
 	if len(apply) == 0 {
 		return res, nil
 	}
+	if err := applyRetentions(ctx, tx, apply, created, now, detail); err != nil {
+		return res, err
+	}
+	if err := s.commit(tx); err != nil {
+		return res, fmt.Errorf("record retention: %w", err)
+	}
+	return res, nil
+}
 
+// retentionChange is a row of an update that passed its checks, to apply.
+type retentionChange struct {
+	r         RetentionRow
+	c         checked
+	afterScan sql.NullInt64 // its export's
+}
+
+// createPolicies creates the new policies an update names, with no value, and returns each one's ID by name.
+func createPolicies(ctx context.Context, tx *sql.Tx, nps []NewPolicy, now time.Time) (map[string]int64, error) {
+	created := map[string]int64{}
+	for _, np := range nps {
+		id, err := addPolicy(ctx, tx, np.Name, "", now)
+		if err != nil {
+			return nil, err
+		}
+		created[np.Name] = id
+	}
+	return created, nil
+}
+
+// applyRetentions records the rows' file_date and retention in one update batch (detail names its source), each with
+// its review. created gives the ID of each new policy the rows name.
+func applyRetentions(ctx context.Context, tx *sql.Tx, apply []retentionChange, created map[string]int64,
+	now time.Time, detail string) error {
 	batch, err := newBatch(ctx, tx, now, "update", detail)
 	if err != nil {
-		return res, err
+		return err
 	}
 	for _, a := range apply {
 		r, c := a.r, a.c
 		if _, err := tx.ExecContext(ctx, `INSERT INTO reviews (batch_id, file_id, export_id, file_date, retention,
 			keep_until, hash) VALUES (?, ?, ?, ?, ?, ?, ?)`, batch, r.FileID, r.ExportID, nullString(c.fileDate),
 			nullString(c.retention), nullString(c.keepUntil), c.exportHash); err != nil {
-			return res, fmt.Errorf("record retention: %w", err)
+			return fmt.Errorf("record retention: %w", err)
 		}
 		// A file has a policy or a retention of its own, never both: a policy name goes in policy_id (the policy
 		// created above if it is new), anything else in retention, taking the file off its policy.
@@ -483,13 +506,10 @@ func (s *Store) UpdateRetentionWith(ctx context.Context, rows []RetentionRow, no
 			rule_id = CASE WHEN policy_id IS ? THEN rule_id END WHERE id = ?`,
 			nullString(c.fileDate), own, policy, nullString(c.keepUntil), utc(now), a.afterScan, c.exportHash, policy,
 			r.FileID); err != nil {
-			return res, fmt.Errorf("record retention: %w", err)
+			return fmt.Errorf("record retention: %w", err)
 		}
 	}
-	if err := s.commit(tx); err != nil {
-		return res, fmt.Errorf("record retention: %w", err)
-	}
-	return res, nil
+	return nil
 }
 
 type exportInfo struct {
@@ -531,15 +551,17 @@ type checked struct {
 	newPolicy                        bool   // one that does not exist yet: created with no value, once confirmed
 }
 
-// checkRow applies the update's rules to one row (docs/design.md, Retention CSV columns).
-func checkRow(ctx context.Context, tx *sql.Tx, r RetentionRow, ex exportInfo, policies policyCache) (checked, error) {
+// checkRow applies the update's rules to one row (docs/design.md, Retention CSV columns), from an export of the given
+// kind: a retention export, or the combined one.
+func checkRow(ctx context.Context, tx *sql.Tx, r RetentionRow, ex exportInfo, kind string,
+	policies policyCache) (checked, error) {
 	var c checked
 	if !ex.found {
 		c.refusal = fmt.Sprintf("export #%d is not in this register", r.ExportID)
 		return c, nil
 	}
-	if ex.kind != ExportRetention {
-		c.refusal = fmt.Sprintf("export #%d is a %s export, not a retention export", r.ExportID, ex.kind)
+	if ex.kind != kind {
+		c.refusal = fmt.Sprintf("export #%d is a %s export, not a %s export", r.ExportID, ex.kind, kind)
 		return c, nil
 	}
 	var expDate, expRetention, expKeep sql.NullString
