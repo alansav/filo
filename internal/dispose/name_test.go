@@ -62,6 +62,9 @@ func TestCheckPath(t *testing.T) {
 		{"inbox/bill.pdf", ".filo-delete-1/bill.pdf", true, "filo's own"},
 		{"inbox/bill.pdf", "inbox/.bill.pdf", true, "never hides"},
 		{"inbox/bill.pdf", "x/bad\xff/bill.pdf", false, "not valid UTF-8"},
+		{"caf\xe9/bill.pdf", "caf\xe9/Bill.pdf", false, ""},     // a directory the file is in already is not judged
+		{"a\tb/bill.pdf", "a\tb/new/bill.pdf", false, ""},       // nor one it stays under
+		{"inbox/bad\xffname", "archive/bad\xffname", false, ""}, // a name that does not change is not judged
 	} {
 		got := CheckPath(tc.old, tc.new, tc.includeHidden, ignore)
 		if (tc.want == "") != (got == "") || !strings.Contains(got, tc.want) {

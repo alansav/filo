@@ -48,15 +48,24 @@ func hidden(name string) bool { return strings.HasPrefix(name, ".") }
 
 // CheckPath says why a file at oldRel cannot be renamed or moved to newRel within its root, with these scan
 // settings (both '/'-separated, relative to the root); "" if it can (docs/design.md, Tags, "Moving a file by its
-// directory cell"). The new name follows CheckName's rules; each directory on the new path must be a plain name as a
-// new file name must be, the root's scan must record the new path (walk.SkipsPath), and a move never hides or
-// unhides the file: a hidden directory on one path and not the other.
+// directory cell"). A new name follows CheckName's rules; each directory of the new path that is not on the old one
+// must be a plain name as a new file name must be (what the file has now is not judged again); the root's scan must
+// record the new path (walk.SkipsPath), and a move never hides or unhides the file: a hidden directory on one path
+// and not the other.
 func CheckPath(oldRel, newRel string, includeHidden bool, ignore []string) string {
 	oldParts, newParts := strings.Split(oldRel, "/"), strings.Split(newRel, "/")
-	if why := CheckName(oldParts[len(oldParts)-1], newParts[len(newParts)-1], includeHidden, ignore); why != "" {
-		return why
+	oldName, newName := oldParts[len(oldParts)-1], newParts[len(newParts)-1]
+	if oldName != newName {
+		if why := CheckName(oldName, newName, includeHidden, ignore); why != "" {
+			return why
+		}
 	}
-	for _, dir := range newParts[:len(newParts)-1] {
+	oldDirs, newDirs := oldParts[:len(oldParts)-1], newParts[:len(newParts)-1]
+	same := 0 // the directories the two paths share, from the root down
+	for same < len(oldDirs) && same < len(newDirs) && oldDirs[same] == newDirs[same] {
+		same++
+	}
+	for _, dir := range newDirs[same:] {
 		switch {
 		case !utf8.ValidString(dir):
 			return fmt.Sprintf("the directory %q is not valid UTF-8", dir)
