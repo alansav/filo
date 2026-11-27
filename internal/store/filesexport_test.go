@@ -250,3 +250,14 @@ func TestUpdateFiles(t *testing.T) {
 		}
 	})
 }
+
+func TestExportKinds(t *testing.T) {
+	e := newReviewEnv(t)
+	e.apply(Changes{New: []NewFile{f("a", "ha")}})
+	files, _ := e.filesExport("2026-11-27", tagNow)
+	tagsID, _ := e.tagsExport()
+	got, err := e.s.ExportKinds(e.ctx, []int64{files, tagsID, 999})
+	if err != nil || len(got) != 2 || got[files] != ExportFiles || got[tagsID] != ExportTags {
+		t.Errorf("ExportKinds = %v, %v", got, err)
+	}
+}

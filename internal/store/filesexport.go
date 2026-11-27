@@ -246,3 +246,29 @@ func joinReasons(reasons ...string) string {
 	}
 	return strings.Join(out, "; ")
 }
+
+// ExportKinds returns the kind of each of the given exports that is in the register, so filo update can tell a
+// combined CSV that lost a column from a retention or tags CSV.
+func (s *Store) ExportKinds(ctx context.Context, ids []int64) (map[int64]string, error) {
+	out := map[int64]string{}
+	err := inBatches(ids, func(in string, args []any) error {
+		rows, err := s.db.QueryContext(ctx, `SELECT id, kind FROM exports WHERE id IN (`+in+`)`, args...)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var id int64
+			var kind string
+			if err := rows.Scan(&id, &kind); err != nil {
+				return err
+			}
+			out[id] = kind
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, fmt.Errorf("read exports: %w", err)
+	}
+	return out, nil
+}
