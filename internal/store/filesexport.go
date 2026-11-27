@@ -27,7 +27,8 @@ func KindName(kind string) string {
 // FilesItem is one present file for the combined CSV: its retention and its tags. A symlink has no tags.
 type FilesItem struct {
 	FileItem
-	Tags []tags.Tag
+	Tags     []tags.Tag
+	NameCell string // the name cell the CSV shows (package filecsv fills it in), recorded so an edit can be told
 }
 
 // FilesItems returns every present file (regular files and symlinks) under the filter with its status and its tags,
@@ -55,19 +56,20 @@ func (s *Store) FilesItems(ctx context.Context, today string, f Filter) ([]Files
 // RecordFilesExport stores a combined export of items (made at now, written to path) and calls write with its ID.
 // Each row keeps what both a retention and a tags export keep: the file's hash, the file_date (as filled in from the
 // name, if it was), retention and keep_until it was exported with, and its tags cell, so the update can tell an
-// untouched cell in either half. The export is committed only if write succeeds.
+// untouched cell in either half, and its name cell, so a changed one can ask for a rename. The export is committed
+// only if write succeeds.
 func (s *Store) RecordFilesExport(ctx context.Context, path string, now time.Time, items []FilesItem,
 	write func(exportID int64) error) (int64, error) {
 	return s.recordExport(ctx, path, now, ExportFiles, func(tx *sql.Tx, id int64) error {
 		stmt, err := tx.PrepareContext(ctx, `INSERT INTO export_rows (export_id, file_id, hash, file_date, retention,
-			keep_until, tags) VALUES (?, ?, ?, ?, ?, ?, ?)`)
+			keep_until, tags, name) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
 		if err != nil {
 			return err
 		}
 		defer stmt.Close()
 		for _, it := range items {
 			if _, err := stmt.ExecContext(ctx, id, it.FileID, nullString(it.Hash), nullString(it.FileDate),
-				nullString(it.Retention), nullString(it.KeepUntil), JoinTags(it.Tags)); err != nil {
+				nullString(it.Retention), nullString(it.KeepUntil), JoinTags(it.Tags), nullString(it.NameCell)); err != nil {
 				return err
 			}
 		}

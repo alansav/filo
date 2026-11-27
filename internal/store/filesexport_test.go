@@ -17,6 +17,9 @@ func (e *reviewEnv) filesExport(today string, now time.Time) (int64, map[string]
 	if err != nil {
 		e.t.Fatal(err)
 	}
+	for i := range items {
+		items[i].NameCell = "cell:" + items[i].Path // as the CSV shows it; package filecsv works it out
+	}
 	id, err := e.s.RecordFilesExport(e.ctx, "/x/files.csv", now, items, func(int64) error { return nil })
 	if err != nil {
 		e.t.Fatal(err)
@@ -69,6 +72,24 @@ func TestFilesItemsAndExport(t *testing.T) {
 	if v := rawQueryString(t, e.db, `SELECT coalesce(retention, 'NULL') || ' ' || tags FROM export_rows
 		WHERE export_id = `+itoa(id)+` AND file_id = `+itoa(k["b"].FileID)); v != "NULL " {
 		t.Errorf("export row of b = %q, want no retention and an empty tags cell", v)
+	}
+	if v := rawQueryString(t, e.db, `SELECT name FROM export_rows WHERE export_id = `+itoa(id)+` AND file_id = `+
+		itoa(k["a"].FileID)); v != "cell:a" {
+		t.Errorf("exported name cell of a = %q, want the cell as shown", v)
+	}
+}
+
+func TestMigrateFromV12(t *testing.T) {
+	db := tempDB(t)
+	mustClose(t, mustOpen(t, Options{DBPath: db}))
+	rawExec(t, db, dropExportNames, `UPDATE meta SET value = '12' WHERE key = 'schema_version'`)
+	s := mustOpen(t, Options{DBPath: db})
+	defer mustClose(t, s)
+	if v := readMeta(t, s)[metaSchemaVersion]; v != "13" {
+		t.Fatalf("schema_version = %s after upgrade, want 13", v)
+	}
+	if _, err := s.db.Exec(`SELECT name FROM export_rows`); err != nil {
+		t.Errorf("export_rows.name after the upgrade: %v", err)
 	}
 }
 
