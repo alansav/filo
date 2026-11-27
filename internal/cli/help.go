@@ -310,11 +310,12 @@ var commandHelps = map[string]commandHelp{
 		usage: []string{"filo indexes", "filo indexes add [DIR] [--name NAME]",
 			"filo indexes remove [DIR] [--name NAME] [-y]", "filo indexes refresh [DIR] [--name NAME]"},
 		before: []string{
-			"A tag index is a set of HTML pages that list the files under a directory, at any depth, by tag, to " +
-				"browse and tap instead of typing searches: a main page of keys, a page per key of its values, a " +
-				"page per tag of its files, and the files with no tags. Each file opens from its page. The links " +
-				"are relative, so the pages work on any device that syncs the directory, and nothing is fetched " +
-				"from the network.",
+			"A tag index is a set of HTML pages that list the files under a directory, at any depth, by tag. " +
+				"NAME.html is the find page: pick several tags (two values of one key match either, different " +
+				"keys must all match), search names and directories, narrow to a directory, and preview a file " +
+				"before opening it. Behind it, pages to browse one tag at a time: the keys, a page per key of its " +
+				"values, a page per tag of its files, and the files with no tags. The links are relative, so the " +
+				"pages work on any device that syncs the directory, and nothing is fetched from the network.",
 			"add declares an index on DIR (the current directory if not given) and writes its pages: NAME.html in " +
 				"DIR, and the other pages and a stylesheet in DIR/.NAME/ (NAME is index unless given). From then " +
 				"on every command that changes the register brings them up to date, and says nothing unless it " +

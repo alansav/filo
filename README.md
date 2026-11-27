@@ -51,8 +51,9 @@ See [Roadmap](#roadmap) for what comes next.
 - **Tags files**, so you find them by what they are rather than where they are: `filo tag bill.pdf 'sender:British
   Gas' type:bill`. A project is a tag (`project:house sale`). Tags follow a file when it moves or is edited, and a
   new copy of a tagged file takes its tags. See [Tags](#tags).
-- **Writes pages to browse files by tag**: `filo indexes add ~/Documents/bills` writes HTML pages listing the files
-  under it by tag, each file a link that opens it, and keeps them up to date. See [Tag index pages](#tag-index-pages).
+- **Writes pages to find files by tag**: `filo indexes add ~/Documents/bills` writes an HTML page to find the files
+  under it by several tags, by name and by directory, with a preview, and pages to browse them one tag at a time,
+  and keeps them up to date. See [Tag index pages](#tag-index-pages).
 - **Deletes what you confirm**, after reading each file again just before deleting it: a file that changed since its
   retention was set, moved, or can't be read is skipped, never deleted.
 - **Clears out duplicates you decide on**: export the groups of identical copies, write `keep` or `delete` against
@@ -582,10 +583,16 @@ Tagged   1 file · sender:British Gas · type:bill · ~/Documents
 
 ## Tag index pages
 
-A tag index is a set of HTML pages listing the files under a directory by tag, to browse and tap instead of typing
-searches: a main page of keys (`sender`, `type`), a page per key of its values, a page per tag of its files, and the
-files with no tags (or none for a key: the tagging to-do list). Each file name opens the file, and each of its tags
-leads to that tag's page.
+A tag index is a set of HTML pages for the files under a directory, to find and open them by tag on any device.
+
+- **The find page** (`index.html`): type in the box to search file names and directories; it also suggests the tags
+  that match, and a tap adds one. Or open a key (`sender · 23 values`) and pick from its values. Two values of one
+  key match either (`sender:British Gas` or `sender:EDF`); tags of different keys must all match. Narrow to a
+  directory, and see the counts shrink as you go. The selection stays in the page's address, so a search can be
+  bookmarked. Tap a file to preview it (pictures, video, audio, PDFs and text files; on some phones a PDF only
+  opens), then Open it.
+- **Browse by key**, linked from the find page: a page of keys, a page per key of its values, a page per tag of its
+  files, and the files with no tags (or none for a key: the tagging to-do list). These need no script.
 
 ```sh
 filo indexes add ~/Documents/bills                 # writes bills/index.html and bills/.index/
@@ -606,7 +613,9 @@ Next: open ~/Documents/bills/index.html in a browser
 - **Kept up to date.** Every command that changes the register (a scan, a tag, a deletion) brings the pages up to
   date, and says nothing unless it cannot. Only the pages that changed are written.
 - **The links are relative**, so the pages work on any device that syncs the directory, a phone included, and
-  nothing is fetched from the network: the stylesheet is a local file, and there is no JavaScript.
+  nothing is fetched from the network: the find page holds its data and script itself and is forbidden any network
+  access, and file names can't run as code in it. For a synced directory, keep its index on one machine until Filo
+  shares tags between devices.
 - **Only Filo's own files.** Filo replaces or removes a page only while it is exactly as Filo wrote it. A page you
   edit, or a file you put in `.index/`, is left alone and reported, and the command exits 1: move it aside, then
   `filo indexes refresh`. `add` refuses a directory where `index.html` or `.index` already exists (`--name` picks
