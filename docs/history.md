@@ -803,6 +803,24 @@ Tests: `TestCheckName`, `TestRename`, `TestRenameNeverReplaces`, `TestRenameSyml
 throwaway tree: two renames from the CSV (one only removing a trailing space), a dry run, `-y`, and a scan after
 finding no changes.
 
+## No special case for bin and obj
+
+Roadmap 41, built 2026-11-27 on branch `improvements`, agreed while designing 42 (moving by the `directory` cell),
+whose check of what the next scan sees would otherwise have had to repeat it. Until then a scan skipped `bin` and
+`obj` in a directory holding a `.csproj` or `.fsproj`: a hard-coded case, which the person judged "a can of worms".
+Now they are scanned like any directory. **On upgrading**, the next scan of a root holding a .NET project registers
+everything its build directories hold, as new files needing a retention (and Debug and Release copies of one output
+as duplicates); adding `--ignore bin --ignore obj` to the root's settings, with its other settings given again since
+`filo roots set` replaces them all, keeps them out.
+
+Commits: the roadmap item, the design, the walk (`skipName` and `SkipsPath` lose the case; `SkipsPath` its root
+parameter, used only to look for project files), the README. The test tree's `bin/out.dll` is now scanned, so its
+first scan finds 16 files. The code review (medium) found one important issue, fixed: the README's `--ignore` hint,
+typed as given, replaced the root's other settings (`roots set` replaces them all). Nits fixed: an ignored name skips
+files too; the README's sample scan count; the replaced decision moved here from `design.md`. Tests:
+`TestSkipsPath`, the walk table's "bin and obj beside a project file are directories like any other",
+`TestTestTree` (walk, reconcile) and `TestEndToEnd` with the new count.
+
 ## Notes on decisions
 
 Short notes taken out of `design.md` on 2026-11-17, by the section they were in.
