@@ -268,6 +268,13 @@ func TestRenameRowNotes(t *testing.T) {
 		{".bashrc", ".bashrc_old", ""}, // a hidden name's dot is not an extension
 		{".notes.txt", ".notes.md", "extension changed"},
 		{"top.txt", "top.md", "extension changed"},
+		{"d/0012", "12", "looks reformatted by a spreadsheet"},
+		{"d/1E5", "100000", "looks reformatted by a spreadsheet"},
+		{"d/1.50", "1.5", "looks reformatted by a spreadsheet"},
+		{"d/1-2", "02-Jan", "looks reformatted by a spreadsheet"},
+		{"d/3.4.25", "2025-03-04", "looks reformatted by a spreadsheet"},
+		{"d/0012.pdf", "12.pdf", ""}, // a name with an extension is text to a spreadsheet
+		{"d/2023 report", "2023 Report", ""},
 	} {
 		rows := renameRows([]store.Rename{rn(tc.rel, tc.name)})
 		if rows[0].Note != tc.note {

@@ -6,6 +6,7 @@ import (
 	"io"
 	"io/fs"
 	pathpkg "path"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -295,6 +296,8 @@ func renameRows(rs []store.Rename) []view.RenameRow {
 		dir, old := pathpkg.Split(rn.Path)
 		row := view.RenameRow{Root: rn.RootPath, Dir: strings.TrimSuffix(dir, "/"), Old: old, New: rn.Name}
 		switch {
+		case reformattable.MatchString(old):
+			row.Note = "looks reformatted by a spreadsheet"
 		case strings.TrimSpace(old) == strings.TrimSpace(rn.Name):
 			row.Note = "only spaces changed"
 		case extension(old) != extension(rn.Name):
@@ -307,6 +310,10 @@ func renameRows(rs []store.Rename) []view.RenameRow {
 	})
 	return rows
 }
+
+// reformattable matches a name a spreadsheet may rewrite when it saves the CSV (docs/design.md, Tags, "Renaming a
+// file by its name cell"): all digits (0012 becomes 12), a number (1E5, 1.50), or a short date (1-2, 3.4.25).
+var reformattable = regexp.MustCompile(`^(\d+|\d*\.\d+|\d+(\.\d+)?[eE][+-]?\d+|\d{1,4}[-.]\d{1,2}([-.]\d{1,4})?)$`)
 
 // extension is a name's extension, a hidden name's leading dot not counted as one (.bashrc has none).
 func extension(name string) string { return pathpkg.Ext(strings.TrimPrefix(name, ".")) }
