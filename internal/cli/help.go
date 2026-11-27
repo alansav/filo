@@ -163,7 +163,7 @@ var commandHelps = map[string]commandHelp{
 				"the file's root) moves it there, making the directories it needs; never hiding or unhiding it, " +
 				"leaving its root, or replacing another file, and only if the file is still the one the last scan " +
 				"saw; otherwise the row is refused or the rename or move not made, with why (run filo scan and " +
-				"export again). The directories the moves empty are removed.",
+				"export again). The directories the moves empty stay.",
 			"If any row clears a retention, removes a tag, names a policy that does not exist yet or renames a " +
 				"file or moves one, filo lists " +
 				"them first and asks once (-y answers yes); no, or no terminal without -y, records nothing at all " +

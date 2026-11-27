@@ -312,7 +312,7 @@ func setDirs(values map[string]string) func(map[string]string) { return setCells
 
 // TestMoveGolden: moving by the directory cell (docs/design.md, Tags, "Moving a file by its directory cell"): a dry
 // run, moves into new directories (one under a new name) and to the top of the root, a symlink that would break, the
-// emptied directories removed, the next scan, and the refusals.
+// emptied directories left, the next scan, and the refusals.
 func TestMoveGolden(t *testing.T) {
 	ct := newTagTest(t)
 	filo, in, work := ct.filo, ct.in, ct.work
@@ -320,7 +320,6 @@ func TestMoveGolden(t *testing.T) {
 	ct.write("inbox/scan.pdf", "scan")
 	ct.write("old/x.txt", "x")
 	ct.write("kept/y.txt", "y")
-	ct.write("kept/.DS_Store", "") // hidden: not in the register, but it keeps kept/ from being removed
 	if err := os.Symlink(in("inbox/scan.pdf"), in("scan-link")); err != nil {
 		t.Fatal(err)
 	}
@@ -340,7 +339,7 @@ func TestMoveGolden(t *testing.T) {
 	step("update all.csv --dry-run", "", ExitOK, "update", csvPath, "--dry-run")
 	step("update all.csv (yes)", "y\n", ExitOK, "update", csvPath)
 	for rel, want := range map[string]bool{"received/2026/11/bill.pdf": true, "received/2026/11/Scan (council).pdf": true,
-		"x.txt": true, "sorted/y.txt": true, "inbox": false, "old": false, "kept/.DS_Store": true} {
+		"x.txt": true, "sorted/y.txt": true, "inbox": true, "old": true, "kept": true} {
 		if ct.exists(rel) != want {
 			t.Errorf("%s exists = %v, want %v", rel, !want, want)
 		}

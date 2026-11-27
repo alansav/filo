@@ -32,7 +32,6 @@ Update   all.csv . export #1 . 8 rows . <work>/home
 Apply the update? Nothing is recorded otherwise. [y/N/l] 
   [ok] 4 files moved
   [ok] 2 directories made
-  [ok] 2 empty directories removed
   - 4 rows unchanged
 
 $ filo update again.csv (refused)

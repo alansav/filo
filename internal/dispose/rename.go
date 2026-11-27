@@ -31,17 +31,16 @@ var errNoReplace = errors.New("renaming needs a rename that never replaces a fil
 var beforeRename func(path string)
 
 // Mover renames and moves files within their roots for filo update (docs/design.md, Tags, "Renaming a file by its
-// name cell" and "Moving a file by its directory cell"), and remembers the directories it took files out of, to
-// prune those the moves emptied.
+// name cell" and "Moving a file by its directory cell"). It leaves the directories its moves empty: a move is
+// sorting, and the directory it empties (an inbox) is usually filled again.
 type Mover struct {
-	rec  RenameRecorder
-	now  func() time.Time
-	dirs map[string]string // directory a file was moved out of -> its root
+	rec RenameRecorder
+	now func() time.Time
 }
 
 // NewMover returns a Mover that records through rec and stamps its records with now.
 func NewMover(rec RenameRecorder, now func() time.Time) *Mover {
-	return &Mover{rec: rec, now: now, dirs: map[string]string{}}
+	return &Mover{rec: rec, now: now}
 }
 
 // Move renames or moves rn's file to rn.NewPath() within its root, if it is still the very file the register knows
@@ -95,9 +94,6 @@ func (m *Mover) Move(ctx context.Context, rn store.Rename) (Outcome, error) {
 		l.unmake(made)
 		return o, nil
 	}
-	if rn.Moves() {
-		m.dirs[filepath.Dir(l.path)] = rn.RootPath
-	}
 	o = Outcome{Done: true, Made: made}
 	// Recorded whatever happens to ctx now: the file is at its new path, and a Ctrl-C landing here must not leave the
 	// register at the old one.
@@ -107,9 +103,6 @@ func (m *Mover) Move(ctx context.Context, rn store.Rename) (Outcome, error) {
 	}
 	return o, nil
 }
-
-// PruneDirs removes the directories the moves emptied, as filo delete does (see Disposer.PruneDirs).
-func (m *Mover) PruneDirs() (removed []string, problems []error) { return pruneDirs(m.dirs) }
 
 // CheckMove says why rn's file cannot be renamed or moved now, looking at the disk without changing it; "" if it can,
 // as far as can be told before the move itself (filo update asks it before its question). The file must be the very

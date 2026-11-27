@@ -272,9 +272,6 @@ func (e *env) filesCounts(res store.FilesUpdateResult, dry bool, refused int, re
 	if renames.made > 0 {
 		r.Count(view.Done, report.Plural(int64(renames.made), "directory", "directories")+" made")
 	}
-	if n := len(renames.pruned); n > 0 {
-		r.Count(view.Done, report.Plural(int64(n), "empty directory", "empty directories")+" removed")
-	}
 	if n := len(renames.skipped) + len(renames.failed); n > 0 {
 		r.Count(view.Attention, report.Plural(int64(n), "rename or move", "renames and moves")+" not made")
 	}
@@ -412,9 +409,8 @@ func extension(name string) string { return pathpkg.Ext(strings.TrimPrefix(name,
 // disk changed, so a scan and a new export put it right; failed: something a scan does not change), and, if the run
 // stopped (Ctrl-C, or err: the register could not be written), how many were not tried.
 type renameResult struct {
-	renamed, moved  int      // made (a move that is also a rename counts as a move)
-	made            int      // directories made for the moves
-	pruned          []string // empty directories the moves left, removed
+	renamed, moved  int // made (a move that is also a rename counts as a move)
+	made            int // directories made for the moves
 	skipped, failed []view.Problem
 	untried         int
 	err             error
@@ -424,7 +420,7 @@ func (r renameResult) done() int { return r.renamed + r.moved }
 
 // makeRenames makes each rename or move, checked again on disk just before, and records each straight after; one
 // not made is listed with why. Ctrl-C stops after the current one, as does a register that cannot be written (err).
-// Then the directories the moves emptied are removed.
+// The directories the moves empty stay.
 func (e *env) makeRenames(ctx context.Context, s *store.Store, rs []store.Rename) (out renameResult) {
 	if len(rs) == 0 {
 		return out
@@ -441,13 +437,6 @@ func (e *env) makeRenames(ctx context.Context, s *store.Store, rs []store.Rename
 		}
 	}()
 	m := dispose.NewMover(run, now)
-	defer func() {
-		removed, problems := m.PruneDirs()
-		out.pruned = removed
-		for _, p := range problems {
-			e.errorLine(p.Error())
-		}
-	}()
 	for i, rn := range rs {
 		o, err := m.Move(ctx, rn)
 		switch {

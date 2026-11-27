@@ -325,33 +325,26 @@ func TestMoveUnmakesDirs(t *testing.T) {
 	}
 }
 
-// TestMovePrunes: the directories the moves emptied are removed, as filo delete does; one with a hidden file stays,
-// and so does the root.
-func TestMovePrunes(t *testing.T) {
+// TestMoveLeavesDirectories: the directories the moves empty stay (docs/design.md, Tags, "Moving a file by its
+// directory cell", "What it leaves behind"): a move is sorting, and an emptied inbox is filled again.
+func TestMoveLeavesDirectories(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("moves need renameat2 (Linux)")
 	}
 	root := canonicalTemp(t)
 	write(t, filepath.Join(root, "inbox", "a", "x.pdf"), "x")
-	write(t, filepath.Join(root, "other", "y.pdf"), "y")
-	write(t, filepath.Join(root, "other", ".DS_Store"), "")
 	write(t, filepath.Join(root, "top.pdf"), "t")
 	m := NewMover(&fakeRenames{}, time.Now)
-	for _, mv := range []struct{ from, dir string }{{"inbox/a/x.pdf", "sorted"}, {"other/y.pdf", "sorted"},
-		{"top.pdf", "sorted"}} {
+	for _, mv := range []struct{ from, dir string }{{"inbox/a/x.pdf", "sorted"}, {"top.pdf", "sorted"}} {
 		c := candidate(t, root, filepath.FromSlash(mv.from))
 		if o, err := m.Move(context.Background(), store.Rename{Candidate: c, Dir: mv.dir,
 			Name: filepath.Base(mv.from)}); err != nil || !o.Done {
 			t.Fatalf("move %s: %+v, %v", mv.from, o, err)
 		}
 	}
-	removed, problems := m.PruneDirs()
-	if len(problems) != 0 || len(removed) != 2 {
-		t.Errorf("removed %v, problems %v; want inbox/a and inbox", removed, problems)
-	}
-	for p, want := range map[string]bool{"inbox": false, "other": true, ".": true, "sorted": true} {
-		if _, err := os.Lstat(filepath.Join(root, p)); (err == nil) != want {
-			t.Errorf("%s exists = %v, want %v", p, err == nil, want)
+	for _, p := range []string{"inbox", "inbox/a", "sorted/x.pdf", "sorted/top.pdf"} {
+		if _, err := os.Lstat(filepath.Join(root, filepath.FromSlash(p))); err != nil {
+			t.Errorf("%s: %v, want it there", p, err)
 		}
 	}
 }
