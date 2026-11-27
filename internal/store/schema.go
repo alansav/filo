@@ -30,7 +30,8 @@ CREATE TABLE scans (
     started_utc TEXT NOT NULL,
     finished_utc TEXT,
     root_id INTEGER NOT NULL REFERENCES roots(id),
-    kind TEXT NOT NULL DEFAULT 'scan',  -- 'scan', or 'delete' for a delete run's record of what it did in a root
+    kind TEXT NOT NULL DEFAULT 'scan',  -- 'scan'; 'delete' for a delete run's record of what it did in a root;
+                                        -- 'rename' for an update's renames in a root
     scope TEXT NOT NULL DEFAULT '',
     include_hidden INTEGER NOT NULL DEFAULT 0,
     ignores TEXT,
@@ -109,7 +110,7 @@ CREATE TABLE export_rows (
     file_date TEXT,
     retention TEXT,
     dup_group INTEGER,                      -- duplicates exports: the group number in the CSV
-    path_id INTEGER REFERENCES paths(id),   -- duplicates exports: the path shown
+    path_id INTEGER REFERENCES paths(id),   -- duplicates and combined exports: the path shown
     tags TEXT,                              -- tags exports: the cell as exported
     name TEXT,                              -- combined exports: the name cell as exported (schema 13)
     PRIMARY KEY (export_id, file_id)

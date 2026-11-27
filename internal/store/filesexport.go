@@ -61,8 +61,10 @@ func (s *Store) FilesItems(ctx context.Context, today string, f Filter) ([]Files
 func (s *Store) RecordFilesExport(ctx context.Context, path string, now time.Time, items []FilesItem,
 	write func(exportID int64) error) (int64, error) {
 	return s.recordExport(ctx, path, now, ExportFiles, func(tx *sql.Tx, id int64) error {
+		// path_id is the file's current path, so a rename can tell a file moved since the export.
 		stmt, err := tx.PrepareContext(ctx, `INSERT INTO export_rows (export_id, file_id, hash, file_date, retention,
-			keep_until, tags, name) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+			keep_until, tags, name, path_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?,
+			(SELECT id FROM paths WHERE file_id = ?2 AND valid_to_scan IS NULL))`)
 		if err != nil {
 			return err
 		}
