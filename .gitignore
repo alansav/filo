@@ -11,3 +11,7 @@
 
 # personal Claude Code settings (CLAUDE.md itself is committed)
 CLAUDE.local.md
+
+# CSVs exported from a real register (file names, tags, retentions): never committed. Tests write theirs in temporary
+# directories; a CSV fixture would need git add -f.
+*.csv
