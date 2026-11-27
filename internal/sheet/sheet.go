@@ -177,6 +177,16 @@ func (r Row) Get(name string) string {
 	return strings.TrimSpace(r.rec[i])
 }
 
+// Raw is the cell under the column named, as it is, spaces included ("" if the row is shorter): for a cell whose
+// spaces are part of its value, such as a file name.
+func (r Row) Raw(name string) string {
+	i, ok := r.s.cols[name]
+	if !ok || i >= len(r.rec) {
+		return ""
+	}
+	return r.rec[i]
+}
+
 // Beyond returns the first value typed past the header's columns, or "": it would otherwise be lost silently.
 func (r Row) Beyond() string {
 	for i := r.s.width; i < len(r.rec); i++ {

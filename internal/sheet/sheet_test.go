@@ -62,6 +62,17 @@ func TestOpen(t *testing.T) {
 	}
 }
 
+func TestRowRaw(t *testing.T) {
+	sh, _ := Open([]byte("id,export,name\n1,2,\" notes.txt \"\n3,4\n"), "id", "export")
+	var got []string
+	if err := sh.Each(func(r Row) { got = append(got, r.Raw("name")+"|"+r.Get("name")+"|"+r.Raw("missing")) }); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(got, []string{" notes.txt |notes.txt|", "||"}) {
+		t.Errorf("rows %q, want the cell with its spaces from Raw, trimmed from Get", got)
+	}
+}
+
 // TestReadAllLimit: no more than MaxSize+1 bytes are read, and a file over MaxSize is refused.
 func TestReadAllLimit(t *testing.T) {
 	r := &counter{}
