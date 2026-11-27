@@ -503,8 +503,9 @@ place: if the law moves financial records from 7 to 10 years, `filo policies set
   per file. Nothing is deleted on that day: the file is listed by the next `filo delete`, which asks.
 - **Creating a policy** (the person's choice over creating them by command only: a policy created ahead may never be
   used): a name in the CSV that is not a policy yet creates one **with no value**. `filo update` lists the policies it
-  is about to create, with how many rows name each, and asks once (`Create 2 policies? [y/N]`). Declined, or no
-  terminal, the rows naming them are left alone and the summary says how many; `--dry-run` lists them. Its files
+  is about to create, with how many rows name each, in the update's one question (`Apply the update? Nothing is
+  recorded otherwise. [y/N/l]`, see Tags, "The combined CSV"). Declined, or no terminal and no `-y`, nothing is
+  recorded; `--dry-run` lists them. Its files
   need a retention until the policy gets a value. A policy made in error (`bils`) is fixed with `filo policies move
   bils bills`, then `remove bils`.
 - **`filo policies`**:
@@ -578,7 +579,7 @@ Nothing has been deleted. Next: filo delete
 
   Lengthening: `Done   bills is 10y · 2 files updated`. `filo update` naming new policies: a `New policies   2 ·
   bils, payslip` block with a line per policy and its rows, "they have no value yet: their files need a retention
-  until filo policies set NAME VALUE", then `Create 2 policies? [y/N]` (`testdata/update-policies.txt`). `move` asks
+  until filo policies set NAME VALUE", then the update's one question (`testdata/update-policies.txt`). `move` asks
   `Move 1 file from bils to bills (3y)? [y/N]` and ends `Next: filo policies remove bils, now it has no files`; `add`
   is `Added   bills · 7y`; the report's Retention section ends with `! 4 policies, 1 needs
   attention (filo policies)` when there are policies (`·` when none needs attention), even with no files.
@@ -593,7 +594,7 @@ Nothing has been deleted. Next: filo delete
   | scenario | outcome |
   |---|---|
   | A1 a CSV names a new policy, confirmed | created with no value; its files need a retention |
-  | A2 declined, or no terminal | those rows left alone, counted in the summary |
+  | A2 declined, or no terminal | nothing recorded, not even the other rows |
   | A3 `Bills`, `7y`, `forever`, `2030-12-31`, `bills!` in the cell | the policy bills; a period; forever; a date; the row refused |
   | A4 `policies add` an existing name, or `forever` | refused |
   | B1 `bills` (7y) on a row with a file_date | keep_until is file_date plus 7 years |
