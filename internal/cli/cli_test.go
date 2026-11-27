@@ -229,7 +229,7 @@ func TestEndToEnd(t *testing.T) {
 	sh("init")
 	// roots add scans the new root straight away.
 	if out := must("roots", "add", tree); !strings.Contains(out, "Root added   "+tree+"\n  - hidden files skipped\n") ||
-		!strings.Contains(out, "15 files seen") || !strings.Contains(out, "\n  - 15 new\n") {
+		!strings.Contains(out, "16 files seen") || !strings.Contains(out, "\n  - 16 new\n") {
 		t.Errorf("roots add: %s", out)
 	}
 	if out := must("roots"); !strings.Contains(out, "last scan") || !strings.Contains(out, "\n    hidden files skipped\n") {

@@ -2,8 +2,6 @@ package walk
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 )
 
@@ -14,7 +12,7 @@ func isHidden(name string) bool {
 }
 
 // Skips reports whether a walk with these settings skips an entry with this name: noise, an ignored name, or a hidden
-// one unless includeHidden. (bin and obj beside a project file are skipped too, but that depends on their siblings.)
+// one unless includeHidden.
 func Skips(name string, includeHidden bool, ignore []string) bool {
 	if noise[name] || (!includeHidden && isHidden(name)) {
 		return true
@@ -35,36 +33,15 @@ func CheckIgnore(name string) error {
 	return nil
 }
 
-// SkipsPath reports whether a walk of root with these settings never records the file at rel ('/'-separated,
-// relative to root): a name on the way that Skips, a directory filo delete left behind (DeletingPrefix), or bin or
-// obj in a directory that holds a project file. A directory that cannot be listed counts as holding none.
-func SkipsPath(root, rel string, includeHidden bool, ignore []string) bool {
+// SkipsPath reports whether a walk of a root with these settings never records the file at rel ('/'-separated,
+// relative to the root): a name on the way that Skips, or a directory filo delete left behind (DeletingPrefix).
+func SkipsPath(rel string, includeHidden bool, ignore []string) bool {
 	names := strings.Split(rel, "/")
-	dir := root
 	for i, name := range names {
 		if Skips(name, includeHidden, ignore) {
 			return true
 		}
-		last := i == len(names)-1
-		if !last && strings.HasPrefix(name, DeletingPrefix) {
-			return true
-		}
-		if !last && (name == "bin" || name == "obj") && holdsProject(dir) {
-			return true
-		}
-		dir = filepath.Join(dir, name)
-	}
-	return false
-}
-
-// holdsProject reports whether the directory holds a project file (.csproj, .fsproj), whose bin and obj a walk skips.
-func holdsProject(dir string) bool {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return false
-	}
-	for _, de := range entries {
-		if de.Type().IsRegular() && isProjectFile(de.Name()) {
+		if i < len(names)-1 && strings.HasPrefix(name, DeletingPrefix) {
 			return true
 		}
 	}

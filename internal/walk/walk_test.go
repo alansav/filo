@@ -162,16 +162,15 @@ func TestWalk(t *testing.T) {
 			},
 		},
 		{
-			name: "bin and obj beside a project file",
+			name: "bin and obj beside a project file are directories like any other",
 			spec: map[string]string{
 				"p/app.csproj": "<P/>", "p/bin/x": "x", "p/obj/y": "y", "p/src/z": "z",
-				"q/lib.fsproj": "<P/>", "q/bin/a": "a",
-				"r/bin/b": "b", // no project file: kept
+				"r/bin/b": "b",
 			},
 			want: map[string]string{
-				"p/app.csproj": "file", "p/src/z": "file", "q/lib.fsproj": "file", "r/bin/b": "file",
+				"p/app.csproj": "file", "p/bin/x": "file", "p/obj/y": "file", "p/src/z": "file", "r/bin/b": "file",
 			},
-			covers: map[string]bool{"p/bin/x": false, "p/obj/y": false, "q/bin/a": false, "r/bin/b": true},
+			covers: map[string]bool{"p/bin/x": true, "p/obj/y": true, "r/bin/b": true},
 		},
 		{
 			name: "symlinks are recorded, never followed",
@@ -412,7 +411,7 @@ func TestTestTree(t *testing.T) {
 	common := map[string]string{
 		"photos/img1.bin": "file", "photos/img1-copy.bin": "file",
 		"notes/ideas.md": "file", "notes/todo.md": "file",
-		"projects/app/app.csproj": "file", "projects/app/src/main.cs": "file",
+		"projects/app/app.csproj": "file", "projects/app/src/main.cs": "file", "projects/app/bin/out.dll": "file",
 		"empty.txt": "file", "broken-link": "broken:nowhere",
 		"docs/private.txt": "file", // listed even when unreadable: listing needs no read access to the file
 	}
@@ -476,7 +475,7 @@ func TestTestTree(t *testing.T) {
 		if len(st.wantFailed) > 0 && res.Covers("locked/kept.txt") {
 			t.Errorf("after %s: Covers(locked/kept.txt) = true under a directory that failed to list", st.cmd)
 		}
-		for _, p := range []string{"projects/app/bin/out.dll", ".hiddendir/secret.txt"} {
+		for _, p := range []string{".hiddendir/secret.txt"} {
 			if res.Covers(p) {
 				t.Errorf("after %s: Covers(%s) = true, want false (skipped)", st.cmd, p)
 			}

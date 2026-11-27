@@ -103,7 +103,7 @@ func (e *env) indexAdd(ctx context.Context, s *store.Store, arg, name string) er
 	if err != nil {
 		return err
 	}
-	if dir != "" && walk.SkipsPath(root.Path, dir, root.IncludeHidden, root.Ignore) {
+	if dir != "" && walk.SkipsPath(dir, root.IncludeHidden, root.Ignore) {
 		return fmt.Errorf("%s is skipped by its root's settings (hidden or ignored), so its files are not in the "+
 			"register; filo roots set changes them", store.AbsPath(root.Path, dir))
 	}

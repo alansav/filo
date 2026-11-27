@@ -37,7 +37,7 @@ func (p *Pending) Rel() string { return p.rel }
 // guesses. Writing nothing, it can run for every file before any is registered.
 func PrepareFile(ctx context.Context, s *store.Store, root store.Root, rel string) (*Pending, string, error) {
 	abs := filepath.Join(root.Path, filepath.FromSlash(rel))
-	if walk.SkipsPath(root.Path, rel, root.IncludeHidden, root.Ignore) {
+	if walk.SkipsPath(rel, root.IncludeHidden, root.Ignore) {
 		return nil, "its root's settings skip it (hidden or ignored); filo roots set changes them", nil
 	}
 	if own, err := ownPath(ctx, s, abs); err != nil {
