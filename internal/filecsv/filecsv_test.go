@@ -3,6 +3,7 @@ package filecsv
 import (
 	"bytes"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -64,7 +65,9 @@ func TestParseCSVRows(t *testing.T) {
 		"4,3,,,,type:bill; Type:Bill,\n" + // a tag typed twice is one
 		"5,3,,,,,\n" +
 		"5,4,,,,,\n" + // one file under two exports: both refused
-		"x,3,,,,,\n"
+		"x,3,,,,,\n" +
+		"6,7,,,,a*b,\n" + // refused for its tags ...
+		"6,7,,7y,,,\n" // ... and the other copy refused too, not applied
 	p, err := ParseCSV([]byte(csv))
 	if err != nil {
 		t.Fatal(err)
@@ -77,10 +80,13 @@ func TestParseCSVRows(t *testing.T) {
 		lines[pr.Line] = pr.Msg
 	}
 	for line, want := range map[int]string{3: "file_date", 4: "tags", 6: "more than once", 7: "more than once",
-		8: "id"} {
+		8: "id", 9: "tags", 10: "more than once"} {
 		if !strings.Contains(lines[line], want) {
 			t.Errorf("line %d: %q, want it to say %q (all: %v)", line, lines[line], want, lines)
 		}
+	}
+	if !slices.Equal(p.Exports, []int64{3, 4, 7}) {
+		t.Errorf("exports = %v, want every export a row names, refused rows included", p.Exports)
 	}
 }
 

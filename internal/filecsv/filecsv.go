@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strconv"
 	"time"
 
@@ -57,11 +58,12 @@ func WriteCSV(w io.Writer, exportID int64, items []store.FilesItem, loc *time.Lo
 type Parsed struct {
 	Rows     []store.FilesRow // every readable row; the register decides which changed
 	Problems []sheet.Problem
+	Exports  []int64 // every export a row names, refused rows included, each once
 }
 
 // ParseCSV reads an edited combined CSV already read (with sheet.ReadFile), as spreadsheets save it (see package
 // sheet). A row is refused whole if either half cannot be read, and so is a file listed more than once (under one
-// export or several), every time it appears.
+// export or several), every time it appears, even where another of its rows is refused for its cells.
 func ParseCSV(data []byte) (Parsed, error) {
 	var p Parsed
 	if len(data) > sheet.MaxSize {
@@ -71,12 +73,17 @@ func ParseCSV(data []byte) (Parsed, error) {
 	if sh == nil {
 		return p, ErrNotFilesCSV
 	}
+	listed := map[int64]int{} // file -> the rows naming it, refused or not
 	err := sh.Each(func(row sheet.Row) {
 		bad := func(msg string) { p.Problems = append(p.Problems, sheet.Problem{Line: row.Line, Msg: msg}) }
 		id, ex, problem := sheet.ReadIDs(row, "file_date, retention or tags")
 		if problem != "" {
 			bad(problem)
 			return
+		}
+		listed[id]++
+		if !slices.Contains(p.Exports, ex) {
+			p.Exports = append(p.Exports, ex)
 		}
 		rr, problem := retention.ReadRow(sh, row, id, ex)
 		if problem != "" {
@@ -95,9 +102,16 @@ func ParseCSV(data []byte) (Parsed, error) {
 	}
 	// One file, one row: a file under two exports in one CSV would be changed by both, each checked against what it
 	// had before either.
-	p.Rows = sheet.DropRepeated(p.Rows, func(r store.FilesRow) int64 { return r.FileID }, func(r store.FilesRow) {
-		p.Problems = append(p.Problems, sheet.Problem{Line: r.Line,
-			Msg: fmt.Sprintf("file %d is listed more than once", r.FileID)})
-	})
+	kept := p.Rows[:0]
+	for _, r := range p.Rows {
+		if listed[r.FileID] > 1 {
+			p.Problems = append(p.Problems, sheet.Problem{Line: r.Line,
+				Msg: fmt.Sprintf("file %d is listed more than once", r.FileID)})
+			continue
+		}
+		kept = append(kept, r)
+	}
+	p.Rows = kept
+	slices.SortStableFunc(p.Problems, func(a, b sheet.Problem) int { return a.Line - b.Line })
 	return p, nil
 }
