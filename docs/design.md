@@ -839,7 +839,9 @@ Retention   …
 
 ### Disposal
 Package `internal/dispose`, the only code that changes the user's files: deleting them from `filo delete`, and
-renaming them in place from `filo update` (see Tags, "Renaming a file by its `name` cell").
+renaming them in place from `filo update` (see Tags, "Renaming a file by its `name` cell"). A test
+(`TestOnlyDisposeChangesUserFiles`) fails on any call that removes or renames on the disk anywhere else, but in the
+three files that handle only Filo's own files: the register's snapshots, an `-o` output file, and a tag index's pages.
 
 - **Deletion is permanent.** No quarantine and no recycle bin: the bin can fill up with large files, and is
   missing on network disks; backups are what make a deletion recoverable. (The private directory a file passes
