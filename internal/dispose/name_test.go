@@ -40,3 +40,32 @@ func TestCheckName(t *testing.T) {
 		}
 	}
 }
+
+func TestCheckPath(t *testing.T) {
+	ignore := []string{"build"}
+	for _, tc := range []struct {
+		old, new      string
+		includeHidden bool
+		want          string
+	}{
+		{"inbox/bill.pdf", "received/2026/11/bill.pdf", false, ""},
+		{"inbox/bill.pdf", "bill.pdf", false, ""},
+		{"bill.pdf", "inbox/Bill (paid).pdf", false, ""},
+		{".config/a/x", ".config/b/x", true, ""},
+		{"inbox/bill.pdf", ".archive/bill.pdf", true, "never hides or unhides"},
+		{".archive/bill.pdf", "inbox/bill.pdf", true, "never hides or unhides"},
+		{"inbox/bill.pdf", "x/build/bill.pdf", false, "skips a directory"},
+		{"inbox/bill.pdf", "x/node_modules/bill.pdf", false, "skips a directory"},
+		{"inbox/bill.pdf", "x/bin/bill.pdf", false, ""}, // no special case for bin and obj
+		{"inbox/bill.pdf", "x\ty/bill.pdf", false, "control character"},
+		{"inbox/bill.pdf", strings.Repeat("d", 256) + "/bill.pdf", false, "256 bytes"},
+		{"inbox/bill.pdf", ".filo-delete-1/bill.pdf", true, "filo's own"},
+		{"inbox/bill.pdf", "inbox/.bill.pdf", true, "never hides"},
+		{"inbox/bill.pdf", "x/bad\xff/bill.pdf", false, "not valid UTF-8"},
+	} {
+		got := CheckPath(tc.old, tc.new, tc.includeHidden, ignore)
+		if (tc.want == "") != (got == "") || !strings.Contains(got, tc.want) {
+			t.Errorf("CheckPath(%q, %q) = %q, want %q", tc.old, tc.new, got, tc.want)
+		}
+	}
+}
