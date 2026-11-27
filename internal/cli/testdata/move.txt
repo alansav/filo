@@ -1,0 +1,49 @@
+$ filo update all.csv --dry-run
+Update (dry run)   all.csv . export #1 . 8 rows . <work>/home
+
+[!] 4 files are moved:
+    ./
+      old/x.txt
+    received/2026/11/   (new)
+      inbox/bill.pdf
+      inbox/scan.pdf   as  Scan (council).pdf
+        -> the symlink <work>/home/scan-link points here and would break
+    sorted/   (new)
+      kept/y.txt
+
+  - 4 files would be moved
+  - 4 rows unchanged
+
+Dry run: nothing was written.
+
+$ filo update all.csv (yes)
+Update   all.csv . export #1 . 8 rows . <work>/home
+
+[!] 4 files are moved:
+    ./
+      old/x.txt
+    received/2026/11/   (new)
+      inbox/bill.pdf
+      inbox/scan.pdf   as  Scan (council).pdf
+        -> the symlink <work>/home/scan-link points here and would break
+    sorted/   (new)
+      kept/y.txt
+
+Apply the update? Nothing is recorded otherwise. [y/N/l] 
+  [ok] 4 files moved
+  [ok] 2 directories made
+  [ok] 2 empty directories removed
+  - 4 rows unchanged
+
+$ filo update again.csv (refused)
+Update   again.csv . export #2 . 8 rows . <work>/home
+
+  - 4 rows unchanged
+  [refused] 4 rows refused
+
+Refused: fix these rows in the CSV and run filo update again
+  [refused] line 6    received/2026/11/bill.pdf: the directory "received/2026" is not a full path: give the full path of a directory inside the root <work>/home
+  [refused] line 7    scan-link: the root's scan skips a directory on the new path (an ignored name), so the next scan would lose the file
+  [refused] line 8    sorted/y.txt: a move never hides or unhides a file (a directory on one path starts with . and not on the other); move it by hand if you mean to
+  [refused] line 9    x.txt: the directory "/elsewhere" is outside the file's root: a move stays inside it; give the full path of a directory inside the root <work>/home
+

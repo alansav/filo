@@ -6,7 +6,7 @@ Export #1   3 files . <work>/home
   [!] 2 file_dates read from the file name, marked !: remove the ! from each one you accept
   - not scanned first: as of the last scan, <time>
 
-Next: fill in retention (7y, 18m, forever or a date) and tags (key:value or a bare value, separated by ;), or correct a name, then filo update <work>/all.csv
+Next: fill in retention (7y, 18m, forever or a date) and tags (key:value or a bare value, separated by ;), or correct a name or a directory, then filo update <work>/all.csv
 
 $ filo update all.csv (no question)
 Update   all.csv . export #1 . 3 rows . <work>/home

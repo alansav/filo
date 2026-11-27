@@ -131,8 +131,9 @@ var commandHelps = map[string]commandHelp{
 				"exists, filo asks before replacing it (only a regular file, and only at a terminal). Columns: id, " +
 				"export, directory, name, size, modified, file_date, retention, keep_until, tags. " +
 				"Fill in retention in a spreadsheet (a period such as 7y counted from file_date, a date, forever, or " +
-				"a policy name: filo help policies) and tags (separated by ;, see filo help tag), or correct a " +
-				"name to rename the file in its directory, then run filo update FILE. A directory named retention, duplicates or tags is given with ./ before it (./tags). A " +
+				"a policy name: filo help policies) and tags (separated by ;, see filo help tag), correct a " +
+				"name to rename the file, or change its directory to move it within its root, then run filo update " +
+				"FILE. A directory named retention, duplicates or tags is given with ./ before it (./tags). A " +
 				"blank file_date is filled in from " +
 				"the file name when the name holds one clear date (2023-03-14, 20230314, or 2023-03 for the month's " +
 				"last day), marked with ! (!2023-03-14): check it and remove the ! to accept it; a period on a " +
@@ -166,11 +167,13 @@ var commandHelps = map[string]commandHelp{
 				"has no file_date, the file changed since the export, its retention or tags were changed after " +
 				"the export, or a tag breaks the spelling rules (see filo help tag). The other rows are still " +
 				"applied.",
-			"A changed name cell renames the file in its own directory (never moving it, hiding or unhiding it, or " +
-				"replacing another file), if the file is still the one the last scan saw; otherwise the row is " +
-				"refused or the rename not made, with why (run filo scan and export again).",
+			"A changed name cell renames the file, and a changed directory cell (the full path of a directory in " +
+				"the file's root) moves it there, making the directories it needs; never hiding or unhiding it, " +
+				"leaving its root, or replacing another file, and only if the file is still the one the last scan " +
+				"saw; otherwise the row is refused or the rename or move not made, with why (run filo scan and " +
+				"export again). The directories the moves empty are removed.",
 			"If any row clears a retention, removes a tag, names a policy that does not exist yet or renames a " +
-				"file, filo lists " +
+				"file or moves one, filo lists " +
 				"them first and asks once (-y answers yes); no, or no terminal without -y, records nothing at all " +
 				"(exit 1 when there was no terminal to ask in).",
 			"A CSV from export retention is read the same way without tags; a blank retention there clears a " +

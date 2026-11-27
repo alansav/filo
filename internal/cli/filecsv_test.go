@@ -286,3 +286,61 @@ func TestRenameRowNotes(t *testing.T) {
 		t.Errorf("a file in the root: %+v", rows[0])
 	}
 }
+
+// setDirs returns a CSV edit that sets the directory cell of the rows whose name is a key.
+func setDirs(values map[string]string) func(map[string]string) { return setCells("directory", values) }
+
+// TestMoveGolden: moving by the directory cell (docs/design.md, Tags, "Moving a file by its directory cell"): a dry
+// run, moves into new directories (one under a new name) and to the top of the root, a symlink that would break, the
+// emptied directories removed, the next scan, and the refusals.
+func TestMoveGolden(t *testing.T) {
+	ct := newTagTest(t)
+	filo, in, work := ct.filo, ct.in, ct.work
+	ct.write("inbox/bill.pdf", "bill")
+	ct.write("inbox/scan.pdf", "scan")
+	ct.write("old/x.txt", "x")
+	ct.write("kept/y.txt", "y")
+	ct.write("kept/.DS_Store", "") // hidden: not in the register, but it keeps kept/ from being removed
+	if err := os.Symlink(in("inbox/scan.pdf"), in("scan-link")); err != nil {
+		t.Fatal(err)
+	}
+	filo(ExitOK, "", false, "scan")
+	filo(ExitOK, "", false, "tag", in("inbox/bill.pdf"), "type:bill")
+	var out strings.Builder
+	step := func(title, stdin string, code int, args ...string) {
+		t.Helper()
+		out.WriteString("$ filo " + title + "\n" + filo(code, stdin, true, args...).stdout + "\n")
+	}
+	csvPath := filepath.Join(work, "all.csv")
+	filo(ExitOK, "", false, "export", "-o", csvPath, "--no-scan")
+	month := in("received/2026/11")
+	editCSV(t, csvPath, edits(
+		setDirs(map[string]string{"bill.pdf": month, "scan.pdf": month, "x.txt": ct.root + "/", "y.txt": in("sorted")}),
+		setNames(map[string]string{"scan.pdf": "Scan (council).pdf"})))
+	step("update all.csv --dry-run", "", ExitOK, "update", csvPath, "--dry-run")
+	step("update all.csv (yes)", "y\n", ExitOK, "update", csvPath)
+	for rel, want := range map[string]bool{"received/2026/11/bill.pdf": true, "received/2026/11/Scan (council).pdf": true,
+		"x.txt": true, "sorted/y.txt": true, "inbox": false, "old": false, "kept/.DS_Store": true} {
+		if ct.exists(rel) != want {
+			t.Errorf("%s exists = %v, want %v", rel, !want, want)
+		}
+	}
+	ct.contains("tags kept", filo(ExitOK, "", false, "find", "--tag", "type:bill", "--no-scan").stdout,
+		in("received/2026/11/bill.pdf"))
+	ct.contains("show", filo(ExitOK, "", false, "show", in("received/2026/11/bill.pdf")).stdout,
+		"moved from  "+in("inbox/bill.pdf"))
+
+	// Refused before the question.
+	again := filepath.Join(work, "again.csv")
+	filo(ExitOK, "", false, "export", "-o", again, "--no-scan")
+	editCSV(t, again, setDirs(map[string]string{
+		"bill.pdf":  "received/2026",             // not a full path
+		"x.txt":     "/elsewhere",                // outside the root
+		"y.txt":     in(".archive"),              // hidden
+		"scan-link": in("received/node_modules"), // a name the scan skips
+	}))
+	step("update again.csv (refused)", "", ExitError, "update", again)
+	got := strings.ReplaceAll(out.String(), work, "<work>")
+	got = regexp.MustCompile(`\d{4}-\d\d-\d\d \d\d:\d\d`).ReplaceAllString(got, "<time>")
+	golden(t, "move.txt", ct.root, got)
+}

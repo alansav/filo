@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"os"
 	pathpkg "path"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
@@ -60,7 +62,7 @@ func (e *env) exportFiles(ctx context.Context, s *store.Store, f store.Filter, w
 	notScannedLine(v, notScanned)
 	v.Blank()
 	v.Next("Next: fill in retention (7y, 18m, forever or a date) and tags (key:value or a bare value, separated " +
-		"by ;), or correct a name, then filo update " + shellQuote(csvPath))
+		"by ;), or correct a name or a directory, then filo update " + shellQuote(csvPath))
 	return nil
 }
 
@@ -135,12 +137,7 @@ func (e *env) updateFiles(ctx context.Context, s *store.Store, path string, pars
 		return ok && askErr == nil
 	}
 	res, err := s.UpdateFiles(ctx, parsed.Rows, now(), today(), path, store.FilesUpdateOptions{DryRun: dry,
-		Confirm: confirm,
-		CheckPath: func(oldRel, newRel string, includeHidden bool, ignore []string) string {
-			return dispose.CheckName(pathpkg.Base(oldRel), pathpkg.Base(newRel), includeHidden, ignore)
-		},
-		CheckDisk: func(r store.Rename) string { return dispose.CheckRename(r.Candidate, r.Name) },
-	})
+		Confirm: confirm, CheckPath: dispose.CheckPath, CheckDisk: dispose.CheckMove, Moves: true})
 	switch {
 	case err != nil:
 	case ctx.Err() != nil:
@@ -155,7 +152,8 @@ func (e *env) updateFiles(ctx context.Context, s *store.Store, path string, pars
 		e.showPending(roots, res.Pending, r.Overview())
 	}
 
-	// The renames, after the register's changes (docs/design.md, Tags, "Renaming a file by its name cell").
+	// The renames and moves, after the register's changes (docs/design.md, Tags, "Renaming a file by its name cell"
+	// and "Moving a file by its directory cell").
 	var renames renameResult
 	if !dry && !res.Declined {
 		renames = e.makeRenames(ctx, s, res.Pending.Renames) // what it did is shown below, an error last
@@ -188,18 +186,18 @@ func (e *env) updateFiles(ctx context.Context, s *store.Store, path string, pars
 	}
 	if len(renames.failed) > 0 {
 		r.Blank()
-		r.Problems("Not renamed", view.Refused, renames.failed)
+		r.Problems("Not renamed or moved", view.Refused, renames.failed)
 	}
 	if !res.Declined {
 		nowPast(r, roots, res.NowPast, dry, r.Overview())
 	}
 	switch {
 	case renames.err != nil && ctx.Err() == nil: // the register could not be written: stop, after showing what was done
-		return fmt.Errorf("%w; %d renames not tried", renames.err, renames.untried)
+		return fmt.Errorf("%w; %d renames or moves not tried", renames.err, renames.untried)
 	case ctx.Err() != nil && renames.untried > 0:
-		// Ctrl-C between renames: those made are recorded, the rest were not made.
-		return fmt.Errorf("interrupted: %d of %d renames made and recorded; the others were not made",
-			renames.done, len(res.Pending.Renames))
+		// Ctrl-C between them: those made are recorded, the rest were not made.
+		return fmt.Errorf("interrupted: %d of %d renames and moves made and recorded; the others were not made",
+			renames.done(), len(res.Pending.Renames))
 	}
 	switch {
 	case dry:
@@ -251,14 +249,34 @@ func (e *env) filesCounts(res store.FilesUpdateResult, dry bool, refused int, re
 		r.Count(view.Done, report.Plural(int64(n), "file", "files")+would(pluralWord(n, " had its tags changed",
 			" had their tags changed"), pluralWord(n, " would have its tags changed", " would have their tags changed")))
 	}
-	if n := len(res.Pending.Renames); dry && n > 0 {
-		r.Count(view.Neutral, report.Plural(int64(n), "file", "files")+" would be renamed")
+	if dry {
+		moving := 0
+		for _, rn := range res.Pending.Renames {
+			if rn.Moves() {
+				moving++
+			}
+		}
+		if n := len(res.Pending.Renames) - moving; n > 0 {
+			r.Count(view.Neutral, report.Plural(int64(n), "file", "files")+" would be renamed")
+		}
+		if moving > 0 {
+			r.Count(view.Neutral, report.Plural(int64(moving), "file", "files")+" would be moved")
+		}
 	}
-	if renames.done > 0 {
-		r.Count(view.Done, report.Plural(int64(renames.done), "file", "files")+" renamed")
+	if renames.renamed > 0 {
+		r.Count(view.Done, report.Plural(int64(renames.renamed), "file", "files")+" renamed")
+	}
+	if renames.moved > 0 {
+		r.Count(view.Done, report.Plural(int64(renames.moved), "file", "files")+" moved")
+	}
+	if renames.made > 0 {
+		r.Count(view.Done, report.Plural(int64(renames.made), "directory", "directories")+" made")
+	}
+	if n := len(renames.pruned); n > 0 {
+		r.Count(view.Done, report.Plural(int64(n), "empty directory", "empty directories")+" removed")
 	}
 	if n := len(renames.skipped) + len(renames.failed); n > 0 {
-		r.Count(view.Attention, report.Plural(int64(n), "rename", "renames")+" not made")
+		r.Count(view.Attention, report.Plural(int64(n), "rename or move", "renames and moves")+" not made")
 	}
 	if res.Unchanged > 0 {
 		r.Count(view.Neutral, report.Plural(int64(res.Unchanged), "row", "rows")+" unchanged")
@@ -268,8 +286,8 @@ func (e *env) filesCounts(res store.FilesUpdateResult, dry bool, refused int, re
 	}
 }
 
-// showPending lists what a combined update asks about: the retentions cleared, the tags removed and the new
-// policies, max of each before "… N more" (0: all), each part followed by a blank line.
+// showPending lists what a combined update asks about: the retentions cleared, the tags removed, the new policies,
+// the renames and the moves, max of each before "… N more" (0: all), each part followed by a blank line.
 func (e *env) showPending(roots []string, p store.FilesPending, max int) {
 	r := e.view
 	if n := len(p.Clears); n > 0 {
@@ -286,11 +304,46 @@ func (e *env) showPending(roots []string, p store.FilesPending, max int) {
 		showNewPolicies(r, p.NewPolicies)
 		r.Blank()
 	}
-	if n := len(p.Renames); n > 0 {
+	var renames []store.Rename
+	for _, rn := range p.Renames {
+		if !rn.Moves() {
+			renames = append(renames, rn)
+		}
+	}
+	if n := len(renames); n > 0 {
 		r.Note(view.Attention, report.Plural(int64(n), "file is", "files are")+" renamed:")
-		r.Renames(view.RenameList{Rows: renameRows(p.Renames), Max: max})
+		r.Renames(view.RenameList{Rows: renameRows(renames), Max: max})
 		r.Blank()
 	}
+	if moves := moveRows(p.Renames); len(moves) > 0 {
+		n := len(moves)
+		r.Note(view.Attention, report.Plural(int64(n), "file is", "files are")+" moved:")
+		r.Moves(view.MoveList{Rows: moves, Max: max})
+		r.Blank()
+	}
+}
+
+// moveRows are the moves among rs as the summary lists them: by root and destination, the destination marked new if
+// it does not exist yet, the new name if it changes (with renameNote's note), and the registered symlinks that point
+// at the file, which the move would break.
+func moveRows(rs []store.Rename) []view.MoveRow {
+	var rows []view.MoveRow
+	for _, rn := range rs {
+		if !rn.Moves() {
+			continue
+		}
+		row := view.MoveRow{Root: rn.RootPath, Dir: rn.Dir, From: rn.Path, Symlinks: rn.Symlinks}
+		if old := pathpkg.Base(rn.Path); rn.Name != old {
+			row.Name, row.Note = rn.Name, renameNote(old, rn.Name)
+		}
+		fi, err := os.Lstat(filepath.Join(rn.RootPath, filepath.FromSlash(rn.Dir)))
+		row.New = err != nil || !fi.IsDir()
+		rows = append(rows, row)
+	}
+	slices.SortStableFunc(rows, func(a, b view.MoveRow) int {
+		return strings.Compare(a.Root+"\x00"+a.Dir, b.Root+"\x00"+b.Dir)
+	})
+	return rows
 }
 
 // renameRows are the renames as the summary lists them: by root and directory, each with a note on a rename that
@@ -299,21 +352,27 @@ func renameRows(rs []store.Rename) []view.RenameRow {
 	rows := make([]view.RenameRow, len(rs))
 	for i, rn := range rs {
 		dir, old := pathpkg.Split(rn.Path)
-		row := view.RenameRow{Root: rn.RootPath, Dir: strings.TrimSuffix(dir, "/"), Old: old, New: rn.Name}
-		switch {
-		case reformattable.MatchString(old):
-			row.Note = "looks reformatted by a spreadsheet"
-		case strings.TrimSpace(old) == strings.TrimSpace(rn.Name):
-			row.Note = "only spaces changed"
-		case extension(old) != extension(rn.Name):
-			row.Note = "extension changed"
-		}
-		rows[i] = row
+		rows[i] = view.RenameRow{Root: rn.RootPath, Dir: strings.TrimSuffix(dir, "/"), Old: old, New: rn.Name,
+			Note: renameNote(old, rn.Name)}
 	}
 	slices.SortStableFunc(rows, func(a, b view.RenameRow) int {
 		return strings.Compare(a.Root+"\x00"+a.Dir, b.Root+"\x00"+b.Dir)
 	})
 	return rows
+}
+
+// renameNote is the note on a new name that may be an accident: a name a spreadsheet may have reformatted, only
+// spaces at the start or end changed, or the extension; "" for none.
+func renameNote(old, name string) string {
+	switch {
+	case reformattable.MatchString(old):
+		return "looks reformatted by a spreadsheet"
+	case strings.TrimSpace(old) == strings.TrimSpace(name):
+		return "only spaces changed"
+	case extension(old) != extension(name):
+		return "extension changed"
+	}
+	return ""
 }
 
 // reformattable matches a name a spreadsheet may rewrite when it saves the CSV (docs/design.md, Tags, "Renaming a
@@ -327,16 +386,20 @@ func extension(name string) string { return pathpkg.Ext(strings.TrimPrefix(name,
 // disk changed, so a scan and a new export put it right; failed: something a scan does not change), and, if the run
 // stopped (Ctrl-C, or err: the register could not be written), how many were not tried.
 type renameResult struct {
-	done            int
+	renamed, moved  int      // made (a move that is also a rename counts as a move)
+	made            int      // directories made for the moves
+	pruned          []string // empty directories the moves left, removed
 	skipped, failed []view.Problem
 	untried         int
 	err             error
 }
 
-// makeRenames makes each rename, checked again on disk just before, and records each straight after; one not made
-// is listed with why. Ctrl-C stops after the current one, as does a register that cannot be written (err).
-func (e *env) makeRenames(ctx context.Context, s *store.Store, rs []store.Rename) renameResult {
-	var out renameResult
+func (r renameResult) done() int { return r.renamed + r.moved }
+
+// makeRenames makes each rename or move, checked again on disk just before, and records each straight after; one
+// not made is listed with why. Ctrl-C stops after the current one, as does a register that cannot be written (err).
+// Then the directories the moves emptied are removed.
+func (e *env) makeRenames(ctx context.Context, s *store.Store, rs []store.Rename) (out renameResult) {
 	if len(rs) == 0 {
 		return out
 	}
@@ -351,11 +414,23 @@ func (e *env) makeRenames(ctx context.Context, s *store.Store, rs []store.Rename
 			e.errorLine(err.Error())
 		}
 	}()
-	for i, rn := range rs {
-		o, err := dispose.Rename(ctx, run, rn.Candidate, rn.Name, now())
-		if o.Done {
-			out.done++ // made, even when its record failed (the error says so)
+	m := dispose.NewMover(run, now)
+	defer func() {
+		removed, problems := m.PruneDirs()
+		out.pruned = removed
+		for _, p := range problems {
+			e.errorLine(p.Error())
 		}
+	}()
+	for i, rn := range rs {
+		o, err := m.Move(ctx, rn)
+		switch {
+		case o.Done && rn.Moves():
+			out.moved++ // made, even when its record failed (the error says so)
+		case o.Done:
+			out.renamed++
+		}
+		out.made += len(o.Made)
 		if err != nil {
 			if ctx.Err() == nil {
 				out.err = err
