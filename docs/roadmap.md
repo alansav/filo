@@ -51,8 +51,8 @@ nothing extra; meanwhile tags are used on one device.
 ## Priority
 
 Provisional, agreed 2026-11-17, with the first places reordered on 2026-11-20 for the goal above; the value and
-complexity scores (1 to 10, Claude's estimates) are still to be settled with the person. Items 22 to 33, and
-35, are not placed yet.
+complexity scores (1 to 10, Claude's estimates) are still to be settled with the person. Items 22 to 33, 35 and
+43 are not placed yet.
 
 Next, agreed 2026-11-27 (friction week, on the `improvements` branch, after the combined CSV, 39 renaming by the
 `name` cell, 41 no `bin`/`obj` special case and 42 moving by the `directory` cell, all built that day): 40 once the
@@ -358,6 +358,20 @@ updates go, leaving `filo export [DIR] -o FILE` and `filo export duplicates`. Op
 reading an old retention or tags CSV for a while, or points to the new export; `-y` then means the same for every
 update.
 
+### 43. Restoring a register snapshot (V5, C3)
+Agreed as wanted on 2026-11-27, design not started; promoted from the deferred improvements, where it was one line.
+Restoring is by hand today (see `design.md`, Register snapshots, "Restoring"): with no filo running, move `filo.db`
+and its `-wal` and `-shm` files aside and copy a snapshot in, where forgetting the `-wal` file can let SQLite apply
+newer changes to the old copy. Worth more now that one update can clear retentions, remove tags, and rename and move
+files: the snapshots are the safety net for a bad CSV, so going back should be one command.
+- A first idea, not decided: `filo snapshots` lists them; a restore takes the lock, checks the snapshot opens as a
+  register, shows what it goes back to, asks, keeps the current register as a snapshot of its own (so a restore can
+  be undone), and swaps the files in without a moment with no register.
+- **To decide first:** a snapshot restores the register, never the files. A file Filo deleted, renamed or moved
+  after the snapshot stays so on disk; the next scan pairs a rename or move by its hash, but a file deleted since
+  comes back in the register only to be reported missing, not "deleted by filo". The command should say so before
+  it asks.
+
 ### Docs
 
 Improvements to the three documents themselves, suggested on 2026-11-17 after the split.
@@ -415,7 +429,7 @@ one watch per directory and drops events when its queue fills.
 
 Smaller improvements to what exists, noted while it was built. Not prioritised.
 
-- **Register:** a restore command for snapshots (restoring is by hand today); skipping a snapshot when a scan changed
+- **Register:** skipping a snapshot when a scan changed
   nothing, if registers grow large (every run that writes copies the whole register); an atomic no-replace rename
   for snapshots (needs `golang.org/x/sys`), so a program not taking Filo's lock cannot slip a file in under the
   snapshot's name.
