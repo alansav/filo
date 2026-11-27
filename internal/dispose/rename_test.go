@@ -151,3 +151,24 @@ func TestRenameSymlink(t *testing.T) {
 		t.Errorf("target: %v, want it untouched", err)
 	}
 }
+
+func TestCheckRename(t *testing.T) {
+	root := canonicalTemp(t)
+	write(t, filepath.Join(root, "a.txt"), "a")
+	write(t, filepath.Join(root, "b.txt"), "b")
+	c := candidate(t, root, "a.txt")
+	if why := CheckRename(c, "c.txt"); why != "" {
+		t.Errorf("CheckRename to a free name = %q", why)
+	}
+	if why := CheckRename(c, "b.txt"); !strings.Contains(why, "already exists") {
+		t.Errorf("CheckRename to a taken name = %q", why)
+	}
+	write(t, filepath.Join(root, "a.txt"), "edited")
+	if why := CheckRename(c, "c.txt"); !strings.Contains(why, "changed since the last scan") {
+		t.Errorf("CheckRename of an edited file = %q", why)
+	}
+	entries, _ := os.ReadDir(root)
+	if len(entries) != 2 {
+		t.Errorf("the directory holds %d entries after CheckRename, want it untouched", len(entries))
+	}
+}

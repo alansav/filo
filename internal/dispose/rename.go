@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"path"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -28,61 +27,23 @@ var errNoReplace = errors.New("renaming needs a rename that never replaces a fil
 var beforeRename func(path string)
 
 // Rename renames the file c to name in its own directory (docs/design.md, Tags, "Renaming a file by its name cell"),
-// if it is still the very file the register knows at that path: through the directory opened from the root down, the
-// same kind, inode, size and modification time as the last scan recorded (a symlink: its own, and its target). It
-// does not read the file. The rename never replaces anything (renameat2 with RENAME_NOREPLACE), so a name taken on
-// disk is never lost. A file renamed is recorded through rec straight after. The caller has checked the name with
-// CheckName; one that is not a single name is refused here too. Outcome.Done says it was renamed; the error is for a
-// cancelled run or a register that could not be written.
+// if it is still the very file the register knows at that path (see CheckRename). It does not read the file. The
+// rename never replaces anything (renameat2 with RENAME_NOREPLACE), so a name taken on disk, even in the instant
+// before, is never lost. A file renamed is recorded through rec straight after. Outcome.Done says it was renamed; the
+// error is for a cancelled run or a register that could not be written.
 func Rename(ctx context.Context, rec RenameRecorder, c store.Candidate, name string, now time.Time) (Outcome,
 	error) {
 	if err := ctx.Err(); err != nil {
 		return Outcome{}, err
 	}
-	old := path.Base(c.Path)
-	if name == "" || name == "." || name == ".." || strings.ContainsAny(name, "/\x00") {
-		return Outcome{Reason: fmt.Sprintf("%q is not a file name", name), Failed: true}, nil
-	}
-	p, o, ok := within(c)
+	dir, _, p, o, ok := lookBeforeRename(c, name)
 	if !ok {
-		if o.Failed {
-			o.Reason = "its recorded path is not inside its root; the register may have been altered, so it is not " +
-				"renamed"
-		}
 		return o, nil
 	}
-	changed := skip("changed since the last scan; run filo scan and export again")
-	dir, why, err := openDir(c.RootPath, filepath.FromSlash(c.Path))
-	switch {
-	case why != "":
-		return skip(why), nil
-	case errors.Is(err, fs.ErrNotExist):
-		return changed, nil
-	case err != nil:
-		return Outcome{Reason: "could not be renamed: " + store.ErrDetail(err), Failed: true}, nil
-	}
 	defer dir.Close()
-	fi, err := dir.Lstat(old)
-	switch {
-	case errors.Is(err, fs.ErrNotExist):
-		return changed, nil
-	case err != nil:
-		return Outcome{Reason: "could not be renamed: " + store.ErrDetail(err), Failed: true}, nil
-	}
-	if _, bad := sameKind(c, fi); bad || !sameIno(c.Ino, ino(fi)) || fi.Size() != c.Size ||
-		fi.ModTime().UnixNano() != c.MtimeNS {
-		return changed, nil
-	}
-	if c.Kind == "symlink" {
-		if target, err := dir.Readlink(old); err != nil || target != c.LinkTarget {
-			return changed, nil
-		}
-	}
+	old := dir.name
+	changed := skip("changed since the last scan; run filo scan and export again")
 	taken := skip(fmt.Sprintf("a file named %s already exists there; nothing was replaced", name))
-	// A case-only rename on a filesystem that ignores case finds the file itself at the new name: not taken.
-	if at, err := dir.Lstat(name); err == nil && !os.SameFile(at, fi) {
-		return taken, nil
-	}
 	if beforeRename != nil {
 		beforeRename(p)
 	}
@@ -107,4 +68,73 @@ func Rename(ctx context.Context, rec RenameRecorder, c store.Candidate, name str
 			err, p, name)
 	}
 	return Outcome{Done: true}, nil
+}
+
+// CheckRename says why the file c cannot be renamed to name now, looking at the disk without changing it; "" if it
+// can, as far as can be told before the rename itself (filo update asks it before its question). The file must be
+// the very one the register knows at its path: through the directory opened from the root down, the same kind,
+// inode, size and modification time as the last scan recorded (a symlink: its own, and its target), and no other
+// file may have the name there.
+func CheckRename(c store.Candidate, name string) string {
+	dir, _, _, o, ok := lookBeforeRename(c, name)
+	if !ok {
+		return o.Reason
+	}
+	dir.Close()
+	return ""
+}
+
+// lookBeforeRename is the check before a rename: the open directory that holds c, what lstat saw of it there and
+// its absolute path, or (ok false) the outcome that stops the rename. The caller closes dir.
+func lookBeforeRename(c store.Candidate, name string) (dir *heldDir, fi fs.FileInfo, p string, o Outcome, ok bool) {
+	if name == "" || name == "." || name == ".." || strings.ContainsAny(name, "/\x00") {
+		return nil, nil, "", Outcome{Reason: fmt.Sprintf("%q is not a file name", name), Failed: true}, false
+	}
+	p, o, ok = within(c)
+	if !ok {
+		if o.Failed {
+			o.Reason = "its recorded path is not inside its root; the register may have been altered, so it is not " +
+				"renamed"
+		}
+		return nil, nil, "", o, false
+	}
+	changed := skip("changed since the last scan; run filo scan and export again")
+	failed := func(err error) Outcome {
+		return Outcome{Reason: "could not be renamed: " + store.ErrDetail(err), Failed: true}
+	}
+	dir, why, err := openDir(c.RootPath, filepath.FromSlash(c.Path))
+	switch {
+	case why != "":
+		return nil, nil, "", skip(why), false
+	case errors.Is(err, fs.ErrNotExist):
+		return nil, nil, "", changed, false
+	case err != nil:
+		return nil, nil, "", failed(err), false
+	}
+	old := dir.name
+	stop := func(o Outcome) (*heldDir, fs.FileInfo, string, Outcome, bool) {
+		dir.Close()
+		return nil, nil, "", o, false
+	}
+	fi, err = dir.Lstat(old)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return stop(changed)
+	case err != nil:
+		return stop(failed(err))
+	}
+	if _, bad := sameKind(c, fi); bad || !sameIno(c.Ino, ino(fi)) || fi.Size() != c.Size ||
+		fi.ModTime().UnixNano() != c.MtimeNS {
+		return stop(changed)
+	}
+	if c.Kind == "symlink" {
+		if target, err := dir.Readlink(old); err != nil || target != c.LinkTarget {
+			return stop(changed)
+		}
+	}
+	// A case-only rename on a filesystem that ignores case finds the file itself at the new name: not taken.
+	if at, err := dir.Lstat(name); err == nil && !os.SameFile(at, fi) {
+		return stop(skip(fmt.Sprintf("a file named %s already exists there; nothing was replaced", name)))
+	}
+	return dir, fi, p, Outcome{}, true
 }
