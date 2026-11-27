@@ -118,8 +118,8 @@ func TestRender(t *testing.T) {
 }
 
 // TestRenderFindPage: NAME.html holds the embedded script and styles as they are, allowed by the
-// Content-Security-Policy by their hashes, local files for a preview and nothing else (no network), and the data as
-// JSON that reads back.
+// Content-Security-Policy by their hashes, local files for a preview, fetching from its own origin (for Safari's PDF
+// viewer) and nothing else (nothing from the internet), and the data as JSON that reads back.
 func TestRenderFindPage(t *testing.T) {
 	d, err := Build(bills, sample(t))
 	if err != nil {
@@ -141,7 +141,7 @@ func TestRenderFindPage(t *testing.T) {
 	policy := html.UnescapeString(inline(t, page, `http-equiv="Content-Security-Policy" content="`, `"`)) // as read
 	want := "default-src 'none'; script-src " + cspHash([]byte(gotScript)) + "; style-src " +
 		cspHash([]byte(gotStyle)) + "; img-src 'self' file:; media-src 'self' file:; frame-src 'self' file:; " +
-		"object-src 'self' file:; base-uri 'none'; form-action 'none'"
+		"object-src 'self' file:; connect-src 'self'; base-uri 'none'; form-action 'none'"
 	if policy != want {
 		t.Errorf("policy %q\nwant   %q", policy, want)
 	}

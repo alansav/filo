@@ -224,7 +224,7 @@ dirs: .index .index/sender .index/type
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src &#39;none&#39;; script-src &#39;sha256-M&#43;Nq2E8LdB1BwSX9dpJPKx4C5w1P4mv&#43;6fTdHWcuAvU=&#39;; style-src &#39;sha256-Nhge7hPUGLHPAuprUsOf7KntXJXh6M8cPXs84roPaQc=&#39;; img-src &#39;self&#39; file:; media-src &#39;self&#39; file:; frame-src &#39;self&#39; file:; object-src &#39;self&#39; file:; base-uri &#39;none&#39;; form-action &#39;none&#39;">
+<meta http-equiv="Content-Security-Policy" content="default-src &#39;none&#39;; script-src &#39;sha256-M&#43;Nq2E8LdB1BwSX9dpJPKx4C5w1P4mv&#43;6fTdHWcuAvU=&#39;; style-src &#39;sha256-Nhge7hPUGLHPAuprUsOf7KntXJXh6M8cPXs84roPaQc=&#39;; img-src &#39;self&#39; file:; media-src &#39;self&#39; file:; frame-src &#39;self&#39; file:; object-src &#39;self&#39; file:; connect-src &#39;self&#39;; base-uri &#39;none&#39;; form-action &#39;none&#39;">
 <meta name="generator" content="filo">
 <title>bills</title>
 [the inline styles]

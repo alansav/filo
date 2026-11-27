@@ -299,9 +299,10 @@ func (r *renderer) find(style []byte) ([]byte, error) {
 		Title:  r.d.Title,
 		Counts: count(len(r.d.Files), "file", "files") + " · " + count(r.d.Tags(), "tag", "tags"),
 		Browse: fd.Browse,
+		// connect-src 'self': Safari's PDF viewer fetches an embedded PDF (a white box without it, on the iPad).
 		Policy: "default-src 'none'; script-src " + cspHash(script) + "; style-src " + cspHash([]byte(css)) +
 			"; img-src 'self' file:; media-src 'self' file:; frame-src 'self' file:; object-src 'self' file:; " +
-			"base-uri 'none'; form-action 'none'",
+			"connect-src 'self'; base-uri 'none'; form-action 'none'",
 		Data:   template.JS(data),   // safe: JSON from encoding/json (see findPage)
 		Script: template.JS(script), // safe: the embedded script
 		Style:  template.CSS(css),   // safe: the embedded stylesheets
