@@ -56,7 +56,8 @@ complexity scores (1 to 10, Claude's estimates) are still to be settled with the
 
 Next, agreed 2026-11-27 (friction week, on the `improvements` branch, after the combined CSV, 39 renaming by the
 `name` cell, 41 no `bin`/`obj` special case, 42 moving by the `directory` cell and 40 removing the retention and tags
-exports, all built that day): the list below.
+exports, all built that day): 44 the tag index's find page (agreed the same day, being built, see `design.md`, Tag
+index pages); then the list below.
 
 1. 36 bash completion
 2. 9b device ID, 9a marking synced directories, 9c sharing decisions
@@ -127,7 +128,8 @@ directory inside one (a root `~` holding `~/Sync`), and whether one can contain 
 differently: a sync service propagates deletes (see `design.md`, Disposal), and a list of name patterns for
 conflict copies, set by the person because every service names them differently, could be surfaced. Noted
 2026-11-27 with 42: a move by the `directory` cell out of a synced directory into an unsynced part of its root is a
-delete on the other devices, so the update's summary should note it once synced directories are marked.
+delete on the other devices, so the update's summary should note it once synced directories are marked. Noted
+2026-11-27 with 44: marking a synced directory could offer a tag index at its top, the one every device opens.
 
 ### 9b. A device ID (V3, C1)
 A random device ID in `meta`, made when the database is created, and recorded with each decision, so no decision

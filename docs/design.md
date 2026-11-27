@@ -1954,15 +1954,19 @@ on the person's phone opens the file).
   replaced (filo indexes lists it)`, and exit 1; the command's own change stands, and the next run that changes what
   the index shows tries again. Only a fully written index records its new data hash, and `filo indexes` shows the
   problem until then.
-- **Rendering.** Go's `html/template`, with the templates and stylesheet embedded in the binary; no dependency and
-  no JavaScript. Not XSLT: Go has none (a cgo binding would be a dependency and break the static build, and
+- **Rendering.** Go's `html/template`, with the templates, stylesheets and the find page's script embedded in the
+  binary; no dependency. The static pages have no JavaScript; the find page has one script, written for it (below).
+  Not XSLT: Go has none (a cgo binding would be a dependency and break the static build, and
   `xsltproc` would have to be installed on every device), and `html/template` escapes each value for where it lands
   (text, attribute, link), as untrusted file names and tags need. Links are relative, each part of the path
   URL-encoded (`%20` for a space, so a `#` or `?` in a name cannot break one). The output is deterministic (sorted,
   no times), so syncing it makes no conflict copies.
-- **Pages.** Each has a trail at the top (`bills › sender › British Gas`).
-  - `NAME.html`: each key with its number of values and files; "other tags", the bare tags; and in a section of
-    its own, "11 files have no tags", linking to `.NAME/_untagged.html`.
+- **Pages.** `NAME.html` is the find page (below). The static pages are in `.NAME/`, for browsing one tag at a time
+  and as the fallback where a viewer runs no script; each has a trail at the top (`bills › sender › British Gas`),
+  whose first part opens the list of keys, and a "Find" link to `NAME.html`.
+  - `.NAME/index.html`: each key with its number of values and files; "other tags", the bare tags; and in a section
+    of its own, "11 files have no tags", linking to `.NAME/_untagged.html`. (Until roadmap 44, 2026-11-27, this was
+    `NAME.html`.) No key's directory is named `index.html`: a key holds no dot.
   - `.NAME/<key>/index.html`: the key's values, each with its number of files; and in a section of its own, "34
     files have no sender tag", linking to `.NAME/<key>/_none.html`. The bare tags have `.NAME/_/index.html`: a key
     has a letter, so none is named `_`. A key with a letter outside `a-z` (`café:`) has a directory named by a slug,
@@ -1977,10 +1981,50 @@ on the person's phone opens the file).
   - A tag can be spelled almost any way (`sender:no sender` is one), so the "no …" pages are told apart from tags
     by their place and wording, and by names no tag page has (`_` first; a slug never starts with one).
   - Each file row: its name (a link that opens the file), its directory, its date, and its other tags, each a link
-    to its tag's page. No size, retention, keep-until or duplicates: the pages are for finding files.
+    to its tag's page (on the find page, a tag adds itself to the selection). No size, retention, keep-until or duplicates: the pages are for finding files.
   - The files: regular files in the register, present now, under DIR at any depth, each path its own row (a hard
     link too); newest first by `file_date`, else modification time, then path. A link is as fresh as the last scan.
     Indexes nested in one another are independent.
+- **The find page** (roadmap 44, designed with the person on 2026-11-27), `NAME.html`: one page to find files by
+  several tags at once, by name, and by directory, instead of browsing one tag at a time (the person has about 100
+  tags). Indexes stay as they are (any number, on any directory, nested ones independent), and each find page covers
+  the files under its directory; the person keeps one at `~` on the laptop and one at the top of the synced
+  directory, opened on every device (desktop, laptop, iPad, iPhone and GrapheneOS, where a script was checked to
+  run from a local page). A synced directory's index is kept by one machine until decisions are shared (9c): two
+  registers would write two pages over each other.
+  - **Matching.** The selected tags of one key match either value (`sender:British Gas` or `sender:EDF`); tags of
+    different keys, and the bare tags, must all match. The directory filter and the search combine with them. The
+    search matches the file's name and directory, ignoring case. Counts narrow: only the tags still found among the
+    results are offered, each with its count among them, so a tap never leads to no files.
+  - **Picking tags.** One box at the top: as the person types, it suggests the matching tags (`sender:British Gas ·
+    12 files`), a tap adding one to the selection, and the text left searches names and directories. Below it, the
+    keys, collapsed, each with its number of values (`sender · 23 values`, "other" for the bare tags), opening to
+    its values still found, most files first. The selection is a row of removable chips above the results
+    (`sender: British Gas ×`, `in received/2026 ×`). The directory is chosen by drilling down from the index's
+    directory (`bills › received › 2026`), one directory at a time.
+  - **Results.** The file rows of the static pages, newest first, 200 at a time with "Show more", so a phone stays
+    fast with thousands of files. The selection and the search are kept in the address (`#tag=type%3Abill&dir=
+    received&q=gas`), so a search can be bookmarked; an address naming a tag the index no longer has ignores it.
+    A "Browse by key" link opens `.NAME/index.html`.
+  - **Preview.** Selecting a result previews it, with "Open" to open the file itself: an image (`jpg`, `jpeg`,
+    `png`, `gif`, `webp`, `heic`), a video or an audio file (`mp4`, `mov`, `webm`, `mp3`, `m4a`, `ogg`, `wav`) in
+    the page; a PDF or a text file (`txt`, `md`, `csv`) in a frame with every script switched off (`sandbox`), as
+    is anything shown in a frame, so a file from the person's directories never runs in the index; anything else,
+    "No preview". A pane beside the results on a wide screen, the whole screen with Open and Close on a narrow one.
+    Known gaps, not checked on the devices yet: GrapheneOS's browser shows no PDF in a frame, and iOS may show only
+    a PDF's first page.
+  - **One file.** The data (as JSON), the script and its styles are all inside `NAME.html`, so nothing else has to
+    load (the form checked on every device); it is written again whenever the index's data changes, about 150 bytes
+    a file, deterministic as every page.
+  - **Untrusted names.** The data is written by Go's `encoding/json`, which escapes `<`, `>`, `&` and U+2028/9, so
+    no name or tag can end the script; each file's link is worked out in Go, with the static pages' encoding, and
+    used as given; the page is built with `createElement` and `textContent`, never by parsing HTML; the address is
+    read only as text to compare. A Content-Security-Policy meta tag allows only the page's own script and style
+    (by their hashes) and the person's local files for a preview, and no network at all: even a mistake cannot load
+    anything or send a name anywhere.
+  - **Tests.** The script's logic (matching, counts, suggestions, directories, the address) is plain functions,
+    tested with Node's own test runner (`node --test`, no packages), run from `go test`; Node is in the dev
+    container. What only a browser shows (the page itself, the preview) is checked by hand.
 - **Look.** One local stylesheet, `.NAME/style.css`: system fonts and nothing remote (it works offline), a viewport
   meta tag, one column, rows as cards on a narrow screen, tap targets of at least 44px, tags as chips, dark mode by
   `prefers-color-scheme`.
