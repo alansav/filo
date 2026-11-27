@@ -115,13 +115,13 @@ func TestUpdateFilesRenames(t *testing.T) {
 		res, err := e.s.UpdateFiles(e.ctx, []FilesRow{
 			row(2, id, it["d/Britsh bill.pdf"], "bad"), // the name rules
 			row(3, id, it["d/b.pdf"], "c.pdf"),         // another file's name in the directory
-			row(4, id, it["d/c.pdf"], "x.pdf"),         // renamed, but the disk check fails ...
-			row(5, id, it["e/c.pdf"], "c2.pdf"),        // ... for every rename nothing else refused
+			row(4, id, it["d/c.pdf"], "x.pdf"),         // the file line 3 wants the name of: refused too
+			row(5, id, it["e/c.pdf"], "c2.pdf"),        // the disk check, for a rename nothing else refused
 		}, now, today, "f.csv", opt)
 		if err != nil {
 			t.Fatal(err)
 		}
-		want := map[int]string{2: "a bad name", 3: "another file's name", 4: "changed since the last scan",
+		want := map[int]string{2: "a bad name", 3: "another file's name", 4: "another row renames a file to its name",
 			5: "changed since the last scan"}
 		if len(res.Refusals) != len(want) || len(res.Pending.Renames) != 0 {
 			t.Fatalf("result %+v", res)
