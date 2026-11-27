@@ -1741,7 +1741,8 @@ so files can be found by tag; a project is a tag (`project:house sale`).
   This is part of the export and bulk update, not a clone of `mv`: Filo has no command that moves or copies files. It
   is the second of the two ways Filo changes the person's files, beside `filo delete`, and is done by
   `internal/dispose` with the same machinery (inside its root, through the opened directories, never by path).
-  - **A change is the cell compared with the cell as exported** (`export_rows.name`), so the formula guard
+  - **A change is the cell compared with the cell as exported** (`export_rows.name`; the row also keeps the path
+    shown, `path_id`, so a file moved since is told), so the formula guard
     (`'=odd.txt`) left alone is no change. As in the tags cell, a name that starts with `'` itself is written after
     another `'` in the combined CSV, so on a change one `'` before `=`, `+`, `-`, `@`, tab, CR or `'` is dropped from
     the new cell and the name is always read back as typed. A row of an export made before schema 13 has no exported name: a changed cell is refused,
@@ -2471,7 +2472,7 @@ CREATE TABLE export_rows (
     file_date TEXT, retention TEXT,     -- as exported (file_date as read from the name, marked !; retention a
                                         -- policy's name for a file on one); cells left as these are untouched
     dup_group INTEGER,                  -- duplicates exports: the group number in the CSV
-    path_id INTEGER REFERENCES paths(id),              -- duplicates exports: the path shown
+    path_id INTEGER REFERENCES paths(id),              -- duplicates and combined exports: the path shown
     tags TEXT,                          -- tags exports: the cell as exported
     name TEXT,                          -- combined exports: the name cell as exported (schema 13)
     PRIMARY KEY (export_id, file_id));
