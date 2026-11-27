@@ -1795,7 +1795,7 @@ so files can be found by tag; a project is a tag (`project:house sale`).
     ones (`l` lists all), with a note on a rename that may be an accident: one that changes only spaces at the start
     or end; the extension (`2023 return.pdf` → `2023 return.pd`; a hidden name's leading dot is no extension); or a
     name a spreadsheet may have reformatted on saving, "looks reformatted by a spreadsheet", when the old name is all
-    digits (`0012` saved as `12`), a number (`1E5`, `1.50`) or a short date (`1-2`, `3/4/25`). No note refuses
+    digits (`0012` saved as `12`), a number (`1E5`, `1.50`) or a short date (`1-2`, `3.4.25`; a name cannot hold `/`). No note refuses
     anything: a real rename of such a name stays possible (the person's decision, 2026-11-27). In that list a name that starts or ends
     with a space is shown in double quotes (`"notes.txt "`), a `"` in a quoted name as `\"`; other lists keep
     `\x20`. After the run: `N files renamed`, and the renames skipped, each with its reason, under "Skipped: run
