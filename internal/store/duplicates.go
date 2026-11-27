@@ -299,6 +299,11 @@ type NotCounted struct {
 // SymlinksTo returns, for each of the given absolute paths, the present symlinks in the register that point at it
 // (absolute paths). A relative target counts from the link's directory.
 func (s *Store) SymlinksTo(ctx context.Context, targets []string) (map[string][]string, error) {
+	return symlinksTo(ctx, s.db, targets)
+}
+
+// symlinksTo is SymlinksTo through q: the store, or a transaction (filo update asks it inside its own).
+func symlinksTo(ctx context.Context, q querier, targets []string) (map[string][]string, error) {
 	want := map[string]bool{}
 	for _, t := range targets {
 		want[t] = true
@@ -307,7 +312,7 @@ func (s *Store) SymlinksTo(ctx context.Context, targets []string) (map[string][]
 	if len(want) == 0 {
 		return out, nil
 	}
-	links, err := queryAll(ctx, s.db, func(rows *sql.Rows) ([2]string, error) {
+	links, err := queryAll(ctx, q, func(rows *sql.Rows) ([2]string, error) {
 		var root, rel, target string
 		err := rows.Scan(&root, &rel, &target)
 		return [2]string{absPath(root, rel), target}, err

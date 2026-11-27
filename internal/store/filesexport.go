@@ -109,8 +109,9 @@ type FilesPending struct {
 // goes to ('/'-separated, relative to the root, "" for the root itself) and its name there.
 type Rename struct {
 	Candidate
-	Dir  string
-	Name string
+	Dir      string
+	Name     string
+	Symlinks []string // a move: the registered symlinks that point at the file (absolute), which it would break
 }
 
 // NewPath is where the file goes, relative to its root.
@@ -327,6 +328,24 @@ func (s *Store) UpdateFiles(ctx context.Context, rows []FilesRow, now time.Time,
 		res.Pending.NewPolicies = append(res.Pending.NewPolicies, NewPolicy{Name: name, Rows: n})
 	}
 	slices.SortFunc(res.Pending.NewPolicies, func(a, b NewPolicy) int { return strings.Compare(a.Name, b.Name) })
+	// The symlinks each move would break, read in this transaction (the question is asked inside it).
+	var moved []string
+	for _, rn := range res.Pending.Renames {
+		if rn.Moves() {
+			moved = append(moved, rn.AbsPath())
+		}
+	}
+	if len(moved) > 0 {
+		links, err := symlinksTo(ctx, q, moved)
+		if err != nil {
+			return res, err
+		}
+		for i, rn := range res.Pending.Renames {
+			if rn.Moves() {
+				res.Pending.Renames[i].Symlinks = links[rn.AbsPath()]
+			}
+		}
+	}
 	res.Set, res.Cleared, res.TagsChanged = len(sets), len(clears), tagChanges
 	if opt.DryRun {
 		return res, nil
