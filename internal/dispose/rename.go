@@ -11,6 +11,7 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"unicode"
 
 	"github.com/alansav/filo/internal/fsid"
 	"github.com/alansav/filo/internal/store"
@@ -110,13 +111,6 @@ func (m *Mover) Move(ctx context.Context, rn store.Rename) (Outcome, error) {
 // PruneDirs removes the directories the moves emptied, as filo delete does (see Disposer.PruneDirs).
 func (m *Mover) PruneDirs() (removed []string, problems []error) { return pruneDirs(m.dirs) }
 
-// Rename renames the file c to name in its own directory: a Move that stays there, for a caller with no Mover.
-func Rename(ctx context.Context, rec RenameRecorder, c store.Candidate, name string, now time.Time) (Outcome,
-	error) {
-	return NewMover(rec, func() time.Time { return now }).Move(ctx, store.Rename{Candidate: c,
-		Dir: dirOf(c.Path), Name: name})
-}
-
 // CheckMove says why rn's file cannot be renamed or moved now, looking at the disk without changing it; "" if it can,
 // as far as can be told before the move itself (filo update asks it before its question). The file must be the very
 // one the register knows at its path: through the directory opened from the root down, the same kind, inode, size
@@ -128,19 +122,6 @@ func CheckMove(rn store.Rename) string {
 		return o.Reason
 	}
 	l.close()
-	return ""
-}
-
-// CheckRename is CheckMove for a rename in the file's own directory.
-func CheckRename(c store.Candidate, name string) string {
-	return CheckMove(store.Rename{Candidate: c, Dir: dirOf(c.Path), Name: name})
-}
-
-// dirOf is the directory of rel ('/'-separated), "" for the root.
-func dirOf(rel string) string {
-	if d := path.Dir(rel); d != "." {
-		return d
-	}
 	return ""
 }
 
@@ -272,8 +253,16 @@ func lookBeforeMove(rn store.Rename) (*moveLook, Outcome, bool) {
 	}
 	if !rn.Moves() {
 		l.dst, l.same = src, true
-	} else if o, ok := l.openDst(); !ok {
-		return stop(o)
+	} else {
+		// A file on another filesystem than its root's (one mounted inside it) can never be moved by a rename: said
+		// now, before anything is made.
+		if rootFi, err := os.Lstat(c.RootPath); err == nil && devOf(rootFi) != devOf(fi) {
+			return stop(Outcome{Reason: "it is on another filesystem than its root's; a move stays on the root's",
+				Failed: true})
+		}
+		if o, ok := l.openDst(); !ok {
+			return stop(o)
+		}
 	}
 	if len(l.missing) == 0 {
 		// A case-only rename on a filesystem that ignores case finds the file itself at the new name: not taken.
@@ -294,7 +283,6 @@ func (l *moveLook) openDst() (Outcome, bool) {
 	if err != nil {
 		return Outcome{Reason: "could not be moved: " + store.ErrDetail(err), Failed: true}, false
 	}
-	dev := func(fi fs.FileInfo) uint64 { id, _ := fsid.FromFileInfo(fi); return id.Dev }
 	parts := strings.Split(l.rn.Dir, "/")
 	if l.rn.Dir == "" {
 		parts = nil
@@ -329,9 +317,14 @@ func (l *moveLook) openDst() (Outcome, bool) {
 				dst.Close()
 				return skip(strings.Replace(why, "a directory on its path", "a directory on the new path", 1)), false
 			}
-			if dev(fi) != dev(rootFi) {
+			if devOf(fi) != devOf(rootFi) {
 				dst.Close()
 				return other, false
+			}
+			if onDisk, ok := nameOnDisk(dst.Root, name, fi); !ok {
+				dst.Close()
+				return Outcome{Reason: fmt.Sprintf("the directory %s is named %s on disk, and this filesystem ignores "+
+					"case; give the directory as it is named", name, onDisk), Failed: true}, false
 			}
 			sub, fi, why, err := openSub(dst.Root, name, p)
 			dst.Close()
@@ -343,4 +336,43 @@ func (l *moveLook) openDst() (Outcome, bool) {
 	}
 	l.dst = dst
 	return Outcome{}, true
+}
+
+// devOf is the device a file is on.
+func devOf(fi fs.FileInfo) uint64 { id, _ := fsid.FromFileInfo(fi); return id.Dev }
+
+// nameOnDisk checks that name, which lstat found in dir (fi), is spelled so on disk: on a filesystem that ignores
+// case, lstat finds Received for received, and a move into it would be recorded under the wrong name. Only when the
+// name with its case swapped is the same directory (the filesystem ignores case) is the directory listed to find
+// the name as written. ok is false, with that name, when it is spelled otherwise.
+func nameOnDisk(dir *os.Root, name string, fi fs.FileInfo) (string, bool) {
+	swapped := strings.Map(func(r rune) rune {
+		if unicode.IsUpper(r) {
+			return unicode.ToLower(r)
+		}
+		return unicode.ToUpper(r)
+	}, name)
+	if swapped == name {
+		return name, true
+	}
+	if at, err := dir.Lstat(swapped); err != nil || !os.SameFile(at, fi) {
+		return name, true // the filesystem tells the two apart
+	}
+	f, err := dir.Open(".")
+	if err != nil {
+		return name, true
+	}
+	defer f.Close()
+	names, _ := f.Readdirnames(-1)
+	for _, n := range names {
+		if n == name {
+			return name, true
+		}
+	}
+	for _, n := range names {
+		if strings.EqualFold(n, name) {
+			return n, false
+		}
+	}
+	return name, true
 }

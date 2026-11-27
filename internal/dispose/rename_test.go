@@ -3,6 +3,7 @@ package dispose
 import (
 	"context"
 	"os"
+	"path"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -11,6 +12,24 @@ import (
 
 	"github.com/alansav/filo/internal/store"
 )
+
+// Rename and CheckRename are a Move and a CheckMove in the file's own directory, as the rename tests use them.
+func Rename(ctx context.Context, rec RenameRecorder, c store.Candidate, name string, now time.Time) (Outcome,
+	error) {
+	return NewMover(rec, func() time.Time { return now }).Move(ctx, store.Rename{Candidate: c,
+		Dir: dirOf(c.Path), Name: name})
+}
+
+func CheckRename(c store.Candidate, name string) string {
+	return CheckMove(store.Rename{Candidate: c, Dir: dirOf(c.Path), Name: name})
+}
+
+func dirOf(rel string) string {
+	if d := path.Dir(rel); d != "." {
+		return d
+	}
+	return ""
+}
 
 // fakeRenames records what Rename reported.
 type fakeRenames struct{ names []string }
