@@ -55,7 +55,7 @@ complexity scores (1 to 10, Claude's estimates) are still to be settled with the
 35, are not placed yet.
 
 Next, agreed 2026-11-27 (friction week, on the `improvements` branch, after the combined CSV and 39 renaming by
-the `name` cell, both built that day): 41, then 42; 40 once the combined CSV has been used in practice; then the
+the `name` cell, both built that day): 41 (no `bin`/`obj` special case, being built, see `design.md`), then 42; 40 once the combined CSV has been used in practice; then the
 list below.
 
 1. 36 bash completion
@@ -351,14 +351,6 @@ Agreed with the person on 2026-11-20. Tab completes Filo's commands, flags and a
   and tag names (tags are built).
 - Bash only at first (zsh can load bash completions). No framework: Cobra would be a new dependency and a rewrite of
   every command's parsing.
-
-### 41. No special case for `bin` and `obj` in the scan (V3, C1)
-Agreed 2026-11-27, while designing 42. A scan skips `bin` and `obj` beside a `.csproj` or `.fsproj` (see
-`design.md`, Scan): a hard-coded special case, which 42's check of what the next scan sees would have to repeat. It
-goes: those directories are scanned like any other, and a root that should skip them says so with `--ignore bin
---ignore obj` (which skips every directory of those names in the root, not only those beside a project file). The
-next scan of a root holding a .NET project then registers what its build directories hold: the release notes and
-`design.md` say so, with that `--ignore` hint.
 
 ### 42. Moving a file by its `directory` cell (V7, C6)
 Agreed 2026-11-27, designed in seven topics with the person; built after 41. In the combined CSV, a changed
