@@ -132,17 +132,41 @@ func (e *reviewEnv) statuses(today string) map[string]Status {
 	return m
 }
 
+// export records a combined export of every present file, as filo export does, and returns its ID and the files.
 func (e *reviewEnv) export(today string, now time.Time) (int64, []FileItem) {
 	e.t.Helper()
-	q, err := e.s.Files(e.ctx, today, Filter{})
+	items, err := e.s.FilesItems(e.ctx, today, Filter{})
 	if err != nil {
 		e.t.Fatal(err)
 	}
-	id, err := e.s.RecordExport(e.ctx, "", now, q, func(int64) error { return nil })
+	id, err := e.s.RecordFilesExport(e.ctx, "", now, items, func(int64) error { return nil })
 	if err != nil {
 		e.t.Fatal(err)
+	}
+	q := make([]FileItem, len(items))
+	for i, it := range items {
+		q[i] = it.FileItem
 	}
 	return id, q
+}
+
+// update records the retention half of rows through the combined update, as filo update does, each row's tags cell
+// left as exported. confirm answers its one question (nil declines, as with no terminal); a dry run asks nothing and
+// writes nothing.
+func (e *reviewEnv) update(rows []RetentionRow, now time.Time, today string, dry bool,
+	confirm func(FilesPending) bool) (FilesUpdateResult, error) {
+	e.t.Helper()
+	frs := make([]FilesRow, len(rows))
+	for i, r := range rows {
+		var cell sql.NullString
+		err := e.s.db.QueryRowContext(e.ctx, `SELECT tags FROM export_rows WHERE export_id = ? AND file_id = ?`,
+			r.ExportID, r.FileID).Scan(&cell)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			e.t.Fatal(err)
+		}
+		frs[i] = FilesRow{RetentionRow: r, Tags: splitCell(cell.String)}
+	}
+	return e.s.UpdateFiles(e.ctx, frs, now, today, "r.csv", FilesUpdateOptions{DryRun: dry, Confirm: confirm})
 }
 
 func f(path, hash string) NewFile {
@@ -234,8 +258,8 @@ func TestUpdateRetention(t *testing.T) {
 
 	// Give dated a retention first, so the export carries it.
 	ex0, _ := e.export(today, now.Add(-time.Hour))
-	if res, err := e.s.UpdateRetention(e.ctx, []RetentionRow{row(2, ex0, "dated", "2020-05-01", "10y")},
-		now.Add(-time.Hour), today, "first.csv", false, nil); err != nil || res.Set != 1 {
+	if res, err := e.update([]RetentionRow{row(2, ex0, "dated", "2020-05-01", "10y")},
+		now.Add(-time.Hour), today, false, nil); err != nil || res.Set != 1 {
 		t.Fatalf("first update = %+v, %v", res, err)
 	}
 
@@ -275,7 +299,7 @@ func TestUpdateRetention(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	dry, err := e.s.UpdateRetention(e.ctx, rows, now, today, "dry.csv", true, nil)
+	dry, err := e.update(rows, now, today, true, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -287,7 +311,7 @@ func TestUpdateRetention(t *testing.T) {
 		t.Errorf("dry run wrote: before %v after %v", before, after)
 	}
 
-	res, err := e.s.UpdateRetention(e.ctx, rows, now, today, "retention.csv", false, nil)
+	res, err := e.update(rows, now, today, false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -339,12 +363,12 @@ func TestUpdateRetention(t *testing.T) {
 
 	// The same rows again: nothing to do. An edited row from the same export replaces the retention, and a new
 	// file_date works keep_until out again.
-	res, err = e.s.UpdateRetention(e.ctx, rows[:1], now, today, "retention.csv", false, nil)
+	res, err = e.update(rows[:1], now, today, false, nil)
 	if err != nil || res.Set != 0 || res.Unchanged != 1 {
 		t.Errorf("same rows again = %+v, %v; want 1 unchanged", res, err)
 	}
-	res, err = e.s.UpdateRetention(e.ctx, []RetentionRow{row(2, exportID, "keep", "", "2028-11-11"),
-		row(8, exportID, "past", "2024-03-31", "7y")}, now.Add(time.Minute), today, "retention.csv", false, nil)
+	res, err = e.update([]RetentionRow{row(2, exportID, "keep", "", "2028-11-11"),
+		row(8, exportID, "past", "2024-03-31", "7y")}, now.Add(time.Minute), today, false, nil)
 	if err != nil || res.Set != 2 || len(res.NowPast) != 0 {
 		t.Errorf("re-edited rows = %+v, %v; want both set, none past", res, err)
 	}
@@ -357,8 +381,8 @@ func TestUpdateRetention(t *testing.T) {
 		AND file_id IN (?, ?)`, exportID, id("nodate"), id("untouched")); err != nil {
 		t.Fatal(err)
 	}
-	res, err = e.s.UpdateRetention(e.ctx, []RetentionRow{row(2, exportID, "nodate", "2019-01-01", "forever"),
-		row(3, exportID, "untouched", "2019-01-01", "7y")}, now.Add(2*time.Minute), today, "s.csv", false, nil)
+	res, err = e.update([]RetentionRow{row(2, exportID, "nodate", "2019-01-01", "forever"),
+		row(3, exportID, "untouched", "2019-01-01", "7y")}, now.Add(2*time.Minute), today, false, nil)
 	if err != nil || res.Set != 2 {
 		t.Errorf("suggested file_dates = %+v, %v", res, err)
 	}
@@ -372,21 +396,21 @@ func TestUpdateRetention(t *testing.T) {
 	// A blank retention where one is stored is a clear: only when confirmed.
 	clear := []RetentionRow{row(2, exportID, "dated", "2020-05-01", "")}
 	var asked []Clear
-	res, err = e.s.UpdateRetention(e.ctx, clear, now, today, "c.csv", false, func(cs []Clear) bool {
-		asked = cs
+	res, err = e.update(clear, now, today, false, func(p FilesPending) bool {
+		asked = p.Clears
 		return false
 	})
-	if err != nil || res.ClearsSkipped != 1 || res.Cleared != 0 {
+	if err != nil || !res.Declined || res.Cleared != 0 {
 		t.Errorf("declined clear = %+v, %v", res, err)
 	}
 	if len(asked) != 1 || asked[0].Retention != "10y" || asked[0].KeepUntil != "2030-05-01" ||
 		asked[0].Path != filepath.Join(e.root.Path, "dated") {
 		t.Errorf("asked about %+v", asked)
 	}
-	if res, err = e.s.UpdateRetention(e.ctx, clear, now, today, "c.csv", false, nil); err != nil || res.ClearsSkipped != 1 {
-		t.Errorf("clear with no one to ask = %+v, %v; want it skipped", res, err)
+	if res, err = e.update(clear, now, today, false, nil); err != nil || !res.Declined {
+		t.Errorf("clear with no one to ask = %+v, %v; want nothing recorded", res, err)
 	}
-	if res, err = e.s.UpdateRetention(e.ctx, clear, now, today, "c.csv", true, func([]Clear) bool {
+	if res, err = e.update(clear, now, today, true, func(FilesPending) bool {
 		t.Error("asked in a dry run")
 		return true
 	}); err != nil || res.Cleared != 1 {
@@ -395,7 +419,7 @@ func TestUpdateRetention(t *testing.T) {
 	if got := e.statuses(today)["dated"]; got != StatusKept {
 		t.Errorf("dated after declined clears: %q, want kept", got)
 	}
-	res, err = e.s.UpdateRetention(e.ctx, clear, now, today, "c.csv", false, func([]Clear) bool { return true })
+	res, err = e.update(clear, now, today, false, func(FilesPending) bool { return true })
 	if err != nil || res.Cleared != 1 {
 		t.Errorf("confirmed clear = %+v, %v", res, err)
 	}
@@ -406,12 +430,12 @@ func TestUpdateRetention(t *testing.T) {
 	// A newer export's retention wins; the older export can no longer override it.
 	later := now.Add(time.Hour)
 	export2, _ := e.export(today, later)
-	if _, err := e.s.UpdateRetention(e.ctx, []RetentionRow{row(2, export2, "untouched", "2019-01-01", "2028-01-01")},
-		later, today, "second.csv", false, nil); err != nil {
+	if _, err := e.update([]RetentionRow{row(2, export2, "untouched", "2019-01-01", "2028-01-01")},
+		later, today, false, nil); err != nil {
 		t.Fatal(err)
 	}
-	res, err = e.s.UpdateRetention(e.ctx, []RetentionRow{row(2, exportID, "untouched", "2019-01-01", "2029-01-01")},
-		later.Add(time.Hour), today, "retention.csv", false, nil)
+	res, err = e.update([]RetentionRow{row(2, exportID, "untouched", "2019-01-01", "2029-01-01")},
+		later.Add(time.Hour), today, false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -465,15 +489,15 @@ func TestKeepUntil(t *testing.T) {
 	}
 }
 
-func TestRecordExportRollsBackOnWriteError(t *testing.T) {
+func TestRecordFilesExportRollsBackOnWriteError(t *testing.T) {
 	e := newReviewEnv(t)
 	e.apply(Changes{New: []NewFile{f("a", "h1")}})
-	q, err := e.s.Files(e.ctx, "2026-11-11", Filter{})
+	q, err := e.s.FilesItems(e.ctx, "2026-11-11", Filter{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	boom := errors.New("disk full")
-	if _, err := e.s.RecordExport(e.ctx, "/x.csv", time.Now(), q, func(int64) error { return boom }); !errors.Is(err, boom) {
+	if _, err := e.s.RecordFilesExport(e.ctx, "/x.csv", time.Now(), q, func(int64) error { return boom }); !errors.Is(err, boom) {
 		t.Fatalf("err = %v, want the write error", err)
 	}
 	counts, err := e.s.RowCounts(e.ctx)
@@ -531,7 +555,7 @@ func TestUpdateMarkedFileDate(t *testing.T) {
 		rows = append(rows, RetentionRow{Line: i + 2, ExportID: exportID, FileID: k[tc.file].FileID,
 			FileDate: tc.date, HasFileDate: true, Retention: tc.retention})
 	}
-	res, err := e.s.UpdateRetention(e.ctx, rows, now, today, "m.csv", false, nil)
+	res, err := e.update(rows, now, today, false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

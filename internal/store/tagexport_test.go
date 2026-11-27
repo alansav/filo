@@ -7,23 +7,39 @@ import (
 	"github.com/alansav/filo/internal/tags"
 )
 
-// Tags (docs/design.md, Tags, "The tags CSV"): the register side, slice 5.
+// The tags half of the combined CSV (docs/design.md, Tags, "The combined CSV"): the register side.
 
-func (e *reviewEnv) tagsExport() (int64, map[string]TagItem) {
+// oldExport records an export of a kind filo no longer writes ("retention" or "tags", as a register from before
+// 2026-11-27 holds them), with no rows, and returns its ID.
+func (e *reviewEnv) oldExport(kind string) int64 {
 	e.t.Helper()
-	items, err := e.s.TagItems(e.ctx, 0, "")
+	res, err := e.s.exec(e.ctx, `INSERT INTO exports (created_utc, path, kind) VALUES ('2026-11-20T00:00:00Z', '/x/old.csv',
+		?)`, kind)
 	if err != nil {
 		e.t.Fatal(err)
 	}
-	id, err := e.s.RecordTagsExport(e.ctx, "/x/tags.csv", tagNow, items, func(int64) error { return nil })
+	id, err := res.LastInsertId()
 	if err != nil {
 		e.t.Fatal(err)
 	}
-	m := map[string]TagItem{}
-	for _, it := range items {
-		m[it.Rel] = it
+	return id
+}
+
+// updateTags records the tags half of rows through the combined update, each row's retention cells left as exported
+// (blank: these tests give no file a retention). confirm answers its one question (nil declines).
+func (e *reviewEnv) updateTags(rows []TagRow, dry bool, confirm func(FilesPending) bool) FilesUpdateResult {
+	e.t.Helper()
+	frs := make([]FilesRow, len(rows))
+	for i, r := range rows {
+		frs[i] = FilesRow{RetentionRow: RetentionRow{Line: r.Line, ExportID: r.ExportID, FileID: r.FileID},
+			Tags: r.Tags}
 	}
-	return id, m
+	res, err := e.s.UpdateFiles(e.ctx, frs, tagNow, "2026-11-27", "t.csv", FilesUpdateOptions{DryRun: dry,
+		Confirm: confirm})
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	return res
 }
 
 func cell(t *testing.T, s string) []tags.Tag {
@@ -38,7 +54,8 @@ func cell(t *testing.T, s string) []tags.Tag {
 	return out
 }
 
-func TestTagItemsAndExport(t *testing.T) {
+// TestTagItems: every present regular file with its tags, for a tag index: no missing file, no symlink.
+func TestTagItems(t *testing.T) {
 	e := newReviewEnv(t)
 	e.apply(Changes{New: []NewFile{f("a", "ha"), f("b", "hb"), f("gone", "hg"),
 		{Path: "link", Kind: "symlink", LinkTarget: "a"}}})
@@ -48,18 +65,16 @@ func TestTagItemsAndExport(t *testing.T) {
 		t.Fatal(err)
 	}
 	e.apply(Changes{Close: []int64{k["gone"].PathID}})
-	id, items := e.tagsExport()
-	if len(items) != 2 || JoinTags(items["a"].Tags) != "urgent; type:bill" || len(items["b"].Tags) != 0 {
-		t.Errorf("items = %+v", items)
+	items, err := e.s.TagItems(e.ctx, 0, "")
+	if err != nil {
+		t.Fatal(err)
 	}
-	var kind, cellA, cellB string
-	if err := e.s.db.QueryRow(`SELECT kind FROM exports WHERE id = ?`, id).Scan(&kind); err != nil || kind != ExportTags {
-		t.Errorf("export kind %q, %v", kind, err)
+	got := map[string]string{}
+	for _, it := range items {
+		got[it.Rel] = JoinTags(it.Tags)
 	}
-	if err := e.s.db.QueryRow(`SELECT (SELECT tags FROM export_rows WHERE export_id = ?1 AND file_id = ?2),
-		(SELECT tags FROM export_rows WHERE export_id = ?1 AND file_id = ?3)`, id, k["a"].FileID, k["b"].FileID).
-		Scan(&cellA, &cellB); err != nil || cellA != "urgent; type:bill" || cellB != "" {
-		t.Errorf("export rows %q, %q, %v", cellA, cellB, err)
+	if len(got) != 2 || got["a"] != "urgent; type:bill" || got["b"] != "" {
+		t.Errorf("items = %v", got)
 	}
 }
 
@@ -72,22 +87,19 @@ func TestUpdateTags(t *testing.T) {
 			mustTag(t, "sender:British Gas")}, tagNow); err != nil {
 			t.Fatal(err)
 		}
-		id, _ := e.tagsExport()
+		id, _ := e.filesExport("2026-11-27", tagNow)
 		return e, id, k
 	}
 
 	t.Run("cells replace the tags; an untouched cell or one in another case changes nothing", func(t *testing.T) {
 		e, id, k := setup(t)
 		var asked []TagChange
-		res, err := e.s.UpdateTags(e.ctx, []TagRow{
+		res := e.updateTags([]TagRow{
 			{Line: 2, ExportID: id, FileID: k["a"].FileID, Tags: cell(t, "SENDER:British Gas")},
 			{Line: 3, ExportID: id, FileID: k["b"].FileID, Tags: cell(t, "sender:british gas; urgent; urgent")},
 			{Line: 4, ExportID: id, FileID: k["c"].FileID, Tags: nil},
-		}, tagNow, TagUpdateOptions{ConfirmRemovals: func(cs []TagChange) bool { asked = cs; return true }})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(res.Changed) != 2 || res.Unchanged != 1 || res.Removing != 1 || len(asked) != 1 ||
+		}, false, func(p FilesPending) bool { asked = p.Removals; return true })
+		if len(res.TagsChanged) != 2 || res.Unchanged != 1 || len(asked) != 1 ||
 			asked[0].Removed[0].String() != "type:bill" {
 			t.Errorf("result %+v, asked %+v", res, asked)
 		}
@@ -107,31 +119,26 @@ func TestUpdateTags(t *testing.T) {
 	t.Run("a CSV applied twice changes nothing the second time", func(t *testing.T) {
 		e, id, k := setup(t)
 		rows := []TagRow{{Line: 2, ExportID: id, FileID: k["b"].FileID, Tags: cell(t, "urgent")}}
-		if _, err := e.s.UpdateTags(e.ctx, rows, tagNow, TagUpdateOptions{}); err != nil {
-			t.Fatal(err)
-		}
-		res, err := e.s.UpdateTags(e.ctx, rows, tagNow, TagUpdateOptions{})
-		if err != nil || res.Unchanged != 1 || len(res.Refusals)+len(res.Changed) != 0 {
-			t.Errorf("again: %+v, %v", res, err)
+		e.updateTags(rows, false, nil)
+		res := e.updateTags(rows, false, nil)
+		if res.Unchanged != 1 || len(res.Refusals)+len(res.TagsChanged) != 0 {
+			t.Errorf("again: %+v", res)
 		}
 	})
 
-	t.Run("removals not confirmed are left alone; additions still apply", func(t *testing.T) {
+	t.Run("a removal not confirmed records nothing, not even additions", func(t *testing.T) {
 		e, id, k := setup(t)
-		res, err := e.s.UpdateTags(e.ctx, []TagRow{
+		res := e.updateTags([]TagRow{
 			{Line: 2, ExportID: id, FileID: k["a"].FileID, Tags: cell(t, "type:bill; urgent")},
 			{Line: 3, ExportID: id, FileID: k["b"].FileID, Tags: cell(t, "urgent")},
-		}, tagNow, TagUpdateOptions{})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(res.Changed) != 1 || res.Skipped != 1 {
+		}, false, nil)
+		if !res.Declined || len(res.Pending.Removals) != 1 {
 			t.Errorf("result %+v", res)
 		}
 		if got := e.tagList(k["a"].FileID); got != "sender:British Gas; type:bill" {
 			t.Errorf("a's tags = %q", got)
 		}
-		if got := e.tagList(k["b"].FileID); got != "urgent" {
+		if got := e.tagList(k["b"].FileID); got != "" {
 			t.Errorf("b's tags = %q", got)
 		}
 	})
@@ -139,13 +146,13 @@ func TestUpdateTags(t *testing.T) {
 	t.Run("a dry run writes nothing, and shows the spelling the run would give", func(t *testing.T) {
 		e, id, k := setup(t)
 		e.s.changed = false
-		res, err := e.s.UpdateTags(e.ctx, []TagRow{{Line: 2, ExportID: id, FileID: k["a"].FileID},
-			{Line: 3, ExportID: id, FileID: k["b"].FileID, Tags: cell(t, "TYPE:BILL")}}, tagNow,
-			TagUpdateOptions{DryRun: true, ConfirmRemovals: func([]TagChange) bool { t.Error("asked"); return true }})
-		if err != nil || len(res.Changed) != 2 || res.Removing != 1 || e.s.changed {
-			t.Errorf("dry run: %+v, %v, changed %v", res, err, e.s.changed)
+		res := e.updateTags([]TagRow{{Line: 2, ExportID: id, FileID: k["a"].FileID},
+			{Line: 3, ExportID: id, FileID: k["b"].FileID, Tags: cell(t, "TYPE:BILL")}}, true,
+			func(FilesPending) bool { t.Error("asked"); return true })
+		if len(res.TagsChanged) != 2 || len(res.Pending.Removals) != 1 || e.s.changed {
+			t.Errorf("dry run: %+v, changed %v", res, e.s.changed)
 		}
-		if got := JoinTags(res.Changed[1].Added); got != "type:bill" {
+		if got := JoinTags(res.TagsChanged[1].Added); got != "type:bill" {
 			t.Errorf("dry run adds %q, want type:bill", got)
 		}
 		if got := e.tagList(k["a"].FileID); got != "sender:British Gas; type:bill" {
@@ -159,18 +166,16 @@ func TestUpdateTags(t *testing.T) {
 			{Line: 2, ExportID: id, FileID: k["b"].FileID, Tags: cell(t, "SENDER:british gas; batch:New")},
 			{Line: 3, ExportID: id, FileID: k["c"].FileID, Tags: cell(t, "sender:british gas; batch:NEW")},
 		}
-		res, err := e.s.UpdateTags(e.ctx, rows, tagNow, TagUpdateOptions{DryRun: true})
-		if err != nil || len(res.Changed) != 2 {
-			t.Fatalf("dry run: %+v, %v", res, err)
+		res := e.updateTags(rows, true, nil)
+		if len(res.TagsChanged) != 2 {
+			t.Fatalf("dry run: %+v", res)
 		}
 		for i, want := range []string{"sender:British Gas; batch:New", "sender:British Gas; batch:NEW"} {
-			if got := JoinTags(res.Changed[i].Added); got != want {
+			if got := JoinTags(res.TagsChanged[i].Added); got != want {
 				t.Errorf("dry run row %d adds %q, want %q", i, got, want)
 			}
 		}
-		if _, err := e.s.UpdateTags(e.ctx, rows, tagNow, TagUpdateOptions{}); err != nil {
-			t.Fatal(err)
-		}
+		e.updateTags(rows, false, nil)
 		for _, f := range []string{"b", "c"} {
 			if got := e.tagList(k[f].FileID); got != "batch:New; sender:British Gas" {
 				t.Errorf("%s's tags = %q", f, got)
@@ -186,35 +191,32 @@ func TestUpdateTags(t *testing.T) {
 		if _, err := e.s.exec(e.ctx, `UPDATE files SET deleted_utc = 'x' WHERE id = ?`, k["c"].FileID); err != nil {
 			t.Fatal(err)
 		}
-		retID, err := e.s.RecordExport(e.ctx, "/x/r.csv", tagNow, nil, func(int64) error { return nil })
-		if err != nil {
-			t.Fatal(err)
-		}
-		res, err := e.s.UpdateTags(e.ctx, []TagRow{
+		tagsID, retID := e.oldExport("tags"), e.oldExport("retention")
+		res := e.updateTags([]TagRow{
 			{Line: 2, ExportID: id, FileID: k["b"].FileID, Tags: cell(t, "x")},
 			{Line: 3, ExportID: id, FileID: k["c"].FileID, Tags: cell(t, "x")},
 			{Line: 7, ExportID: id, FileID: k["b"].FileID}, // left as exported: unchanged, though b was tagged since
-			{Line: 8, ExportID: id, FileID: k["c"].FileID}, // and though c was deleted since
 			{Line: 4, ExportID: 99, FileID: k["a"].FileID, Tags: cell(t, "x")},
-			{Line: 5, ExportID: retID, FileID: k["a"].FileID, Tags: cell(t, "x")},
-			{Line: 6, ExportID: id, FileID: 999, Tags: cell(t, "x")},
-		}, tagNow, TagUpdateOptions{})
-		if err != nil {
-			t.Fatal(err)
+			{Line: 5, ExportID: tagsID, FileID: k["a"].FileID, Tags: cell(t, "x")},
+			{Line: 6, ExportID: retID, FileID: k["a"].FileID, Tags: cell(t, "x")},
+			{Line: 8, ExportID: id, FileID: 999, Tags: cell(t, "x")},
+		}, false, nil)
+		want := map[int]string{
+			2: "its tags were changed after export #1 (now later); export again",
+			3: "deleted by filo since the export",
+			4: "export #99 is not in this register",
+			5: "export #2 is a tags export, not a combined export",
+			6: "export #3 is a retention export, not a combined export",
+			8: "file 999 is not in export #1 (rows cannot be added)",
 		}
-		want := []string{
-			"its tags were changed after export #1 (now later); export again",
-			"deleted by filo since the export",
-			"export #99 is not in this register",
-			"export #2 is a retention export, not a tags export",
-			"file 999 is not in export #1 (rows cannot be added)",
-		}
-		var got []string
 		for _, rf := range res.Refusals {
-			got = append(got, rf.Reason)
+			if w, ok := want[rf.Line]; !ok || !strings.Contains(rf.Reason, w) {
+				t.Errorf("line %d refused: %q, want %q", rf.Line, rf.Reason, w)
+			}
+			delete(want, rf.Line)
 		}
-		if strings.Join(got, "\n") != strings.Join(want, "\n") || len(res.Changed) != 0 || res.Unchanged != 2 {
-			t.Errorf("refusals:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+		if len(want) != 0 || len(res.TagsChanged) != 0 || res.Unchanged != 1 {
+			t.Errorf("not refused: %v; result %+v", want, res)
 		}
 	})
 }

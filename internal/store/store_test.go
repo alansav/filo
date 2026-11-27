@@ -695,8 +695,8 @@ func TestMigrateFromV6(t *testing.T) {
 	if err := s.db.QueryRow(`SELECT kind FROM exports WHERE id = 1`).Scan(&kind); err != nil {
 		t.Fatal(err)
 	}
-	if kind != ExportRetention {
-		t.Errorf("an existing export's kind = %q, want %q", kind, ExportRetention)
+	if kind != "retention" { // the column's default, the only kind then
+		t.Errorf("an existing export's kind = %q, want retention", kind)
 	}
 	if _, err := s.RowCounts(context.Background()); err != nil {
 		t.Errorf("the duplicates tables after upgrade: %v", err)

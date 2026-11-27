@@ -43,8 +43,8 @@ func TestFilesItemsAndExport(t *testing.T) {
 		t.Fatal(err)
 	}
 	ex0, _ := e.export(today, now.Add(-time.Hour))
-	if _, err := e.s.UpdateRetention(e.ctx, []RetentionRow{{Line: 2, ExportID: ex0, FileID: k["a"].FileID,
-		FileDate: "2020-05-01", HasFileDate: true, Retention: "10y"}}, now.Add(-time.Hour), today, "r.csv", false,
+	if _, err := e.update([]RetentionRow{{Line: 2, ExportID: ex0, FileID: k["a"].FileID,
+		FileDate: "2020-05-01", HasFileDate: true, Retention: "10y"}}, now.Add(-time.Hour), today, false,
 		nil); err != nil {
 		t.Fatal(err)
 	}
@@ -107,8 +107,8 @@ func TestUpdateFiles(t *testing.T) {
 			t.Fatal(err)
 		}
 		ex0, _ := e.export(today, now.Add(-time.Hour))
-		if _, err := e.s.UpdateRetention(e.ctx, []RetentionRow{{Line: 2, ExportID: ex0, FileID: k["a"].FileID,
-			FileDate: "2020-05-01", HasFileDate: true, Retention: "10y"}}, now.Add(-time.Hour), today, "r.csv",
+		if _, err := e.update([]RetentionRow{{Line: 2, ExportID: ex0, FileID: k["a"].FileID,
+			FileDate: "2020-05-01", HasFileDate: true, Retention: "10y"}}, now.Add(-time.Hour), today,
 			false, nil); err != nil {
 			t.Fatal(err)
 		}
@@ -173,7 +173,7 @@ func TestUpdateFiles(t *testing.T) {
 
 	t.Run("a row from another kind of export is refused", func(t *testing.T) {
 		e, _, it := setup(t)
-		ex, _ := e.tagsExport()
+		ex := e.oldExport("tags")
 		res, err := e.s.UpdateFiles(e.ctx, []FilesRow{row(2, ex, it["b"], "", "", "urgent")}, now, today, "f.csv",
 			FilesUpdateOptions{})
 		if err != nil || len(res.Refusals) != 1 || !strings.Contains(res.Refusals[0].Reason, "is a tags export, not a combined export") {
@@ -276,9 +276,9 @@ func TestExportKinds(t *testing.T) {
 	e := newReviewEnv(t)
 	e.apply(Changes{New: []NewFile{f("a", "ha")}})
 	files, _ := e.filesExport("2026-11-27", tagNow)
-	tagsID, _ := e.tagsExport()
+	tagsID := e.oldExport("tags")
 	got, err := e.s.ExportKinds(e.ctx, []int64{files, tagsID, 999})
-	if err != nil || len(got) != 2 || got[files] != ExportFiles || got[tagsID] != ExportTags {
+	if err != nil || len(got) != 2 || got[files] != ExportFiles || got[tagsID] != "tags" {
 		t.Errorf("ExportKinds = %v, %v", got, err)
 	}
 }

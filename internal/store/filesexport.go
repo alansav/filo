@@ -59,10 +59,9 @@ func (s *Store) FilesItems(ctx context.Context, today string, f Filter) ([]Files
 }
 
 // RecordFilesExport stores a combined export of items (made at now, written to path) and calls write with its ID.
-// Each row keeps what both a retention and a tags export keep: the file's hash, the file_date (as filled in from the
-// name, if it was), retention and keep_until it was exported with, and its tags cell, so the update can tell an
-// untouched cell in either half, and its name cell, so a changed one can ask for a rename. The export is committed
-// only if write succeeds.
+// Each row keeps the file's hash, the file_date (as filled in from the name, if it was), retention and keep_until it
+// was exported with, and its tags cell, so the update can tell an untouched cell in either half, and its name cell,
+// so a changed one can ask for a rename. The export is committed only if write succeeds.
 func (s *Store) RecordFilesExport(ctx context.Context, path string, now time.Time, items []FilesItem,
 	write func(exportID int64) error) (int64, error) {
 	return s.recordExport(ctx, path, now, ExportFiles, func(tx *sql.Tx, id int64) error {
@@ -214,7 +213,7 @@ func (s *Store) UpdateFiles(ctx context.Context, rows []FilesRow, now time.Time,
 		}
 		rc := &filesRowCheck{r: r, ex: ex}
 		checks = append(checks, rc)
-		if rc.c, err = checkRow(ctx, tx, r.RetentionRow, ex, ExportFiles, policies); err != nil {
+		if rc.c, err = checkRow(ctx, tx, r.RetentionRow, ex, policies); err != nil {
 			return res, err
 		}
 		rc.reasons = append(rc.reasons, rc.c.refusal)
@@ -223,7 +222,7 @@ func (s *Store) UpdateFiles(ctx context.Context, rows []FilesRow, now time.Time,
 		}
 		tr := TagRow{Line: r.Line, ExportID: r.ExportID, FileID: r.FileID, Tags: r.Tags}
 		var why string
-		if rc.ch, why, err = checkTagRow(ctx, q, tr, ex, ExportFiles, spelled); err != nil {
+		if rc.ch, why, err = checkTagRow(ctx, q, tr, ex, spelled); err != nil {
 			return res, err
 		}
 		if why == "" && len(rc.ch.Added) > 0 {
@@ -549,7 +548,7 @@ func joinReasons(reasons ...string) string {
 }
 
 // ExportKinds returns the kind of each of the given exports that is in the register, so filo update can tell a
-// combined CSV that lost a column from a retention or tags CSV.
+// combined CSV that lost a column from a CSV that is not filo's.
 func (s *Store) ExportKinds(ctx context.Context, ids []int64) (map[int64]string, error) {
 	out := map[int64]string{}
 	err := inBatches(ids, func(in string, args []any) error {

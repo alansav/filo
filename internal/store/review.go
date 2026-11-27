@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"slices"
 	"strings"
 	"time"
 )
@@ -215,29 +214,6 @@ func latestScan(ctx context.Context, tx *sql.Tx) (int64, error) {
 	return id, nil
 }
 
-// RecordExport stores an export of items (made at now, written to path) and calls write with its ID. Each row keeps
-// the file's hash and the file_date, retention and keep_until it was exported with (so file_date as filled in from
-// the name, if it was). The export is committed only if write succeeds, so a
-// failed write leaves no trace in the register.
-func (s *Store) RecordExport(ctx context.Context, path string, now time.Time, items []FileItem,
-	write func(exportID int64) error) (int64, error) {
-	return s.recordExport(ctx, path, now, ExportRetention, func(tx *sql.Tx, id int64) error {
-		stmt, err := tx.PrepareContext(ctx,
-			`INSERT INTO export_rows (export_id, file_id, hash, file_date, retention, keep_until) VALUES (?, ?, ?, ?, ?, ?)`)
-		if err != nil {
-			return err
-		}
-		defer stmt.Close()
-		for _, it := range items {
-			if _, err := stmt.ExecContext(ctx, id, it.FileID, nullString(it.Hash), nullString(it.FileDate),
-				nullString(it.Retention), nullString(it.KeepUntil)); err != nil {
-				return err
-			}
-		}
-		return nil
-	}, write)
-}
-
 // recordExport stores an export of the given kind, its rows (written by addRows), and calls write with its ID. It is
 // committed only if write succeeds.
 func (s *Store) recordExport(ctx context.Context, path string, now time.Time, kind string,
@@ -272,7 +248,7 @@ func (s *Store) recordExport(ctx context.Context, path string, now time.Time, ki
 	return id, nil
 }
 
-// RetentionRow is one row of an edited retention CSV.
+// RetentionRow is the retention half of one row of an edited combined CSV.
 type RetentionRow struct {
 	Line         int // in the CSV, for messages
 	ExportID     int64
@@ -313,146 +289,6 @@ type Past struct {
 type NewPolicy struct {
 	Name string
 	Rows int
-}
-
-// UpdateOptions are how an update runs: a dry run, and the questions it asks (nil declines, as with no terminal).
-type UpdateOptions struct {
-	DryRun          bool
-	ConfirmClears   func([]Clear) bool     // given every row that would clear a stored retention, once
-	ConfirmPolicies func([]NewPolicy) bool // given every new policy, once, before the clears
-}
-
-// UpdateResult counts what an update did (or, in a dry run, would do).
-type UpdateResult struct {
-	NewPolicies       []NewPolicy // the policies the CSV names that do not exist yet, by name
-	NoValue           int         // of Set: files put on a policy with no value yet, so still needing a retention
-	PoliciesCreated   int         // of those, created (confirmed)
-	PolicyRowsSkipped int         // rows naming a new policy not confirmed: left alone
-	Set               int         // rows whose file_date or retention changed, clears not included
-	Cleared           int         // retentions cleared by a blank cell
-	ClearsSkipped     int         // blank cells that would clear a retention, not confirmed
-	NowPast           []Past      // of Set: files whose keep_until is today or earlier, so deletion candidates if unchanged
-	Unchanged         int         // rows as exported, or with the values already stored
-	Refusals          []Refusal
-}
-
-// UpdateRetention checks each row against the register and applies the ones that pass, in one transaction. A blank
-// retention where one is stored clears it, but only if confirm (given every such row, once) returns true; confirm is
-// not called in a dry run, or when there is nothing to clear. today is the local date (YYYY-MM-DD); detail names the
-// source for the history.
-func (s *Store) UpdateRetention(ctx context.Context, rows []RetentionRow, now time.Time, today, detail string,
-	dryRun bool, confirm func([]Clear) bool) (UpdateResult, error) {
-	return s.UpdateRetentionWith(ctx, rows, now, today, detail, UpdateOptions{DryRun: dryRun, ConfirmClears: confirm})
-}
-
-// UpdateRetentionWith is UpdateRetention with its options. A retention cell may name a policy (docs/design.md,
-// Named retention policies): the file goes on it, its keep_until worked out from the policy's value. A name that is
-// not a policy yet creates one with no value, but only if ConfirmPolicies (given every new policy, once) returns true;
-// otherwise the rows naming it are left alone. A dry run lists the new policies and creates nothing.
-func (s *Store) UpdateRetentionWith(ctx context.Context, rows []RetentionRow, now time.Time, today, detail string,
-	opt UpdateOptions) (UpdateResult, error) {
-	var res UpdateResult
-	dryRun, confirm := opt.DryRun, opt.ConfirmClears
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return res, err
-	}
-	defer tx.Rollback()
-
-	var sets, clears []retentionChange
-	var clearList []Clear
-	exports := map[int64]exportInfo{}
-	policies := policyCache{}
-	for _, r := range rows {
-		ex, found := exports[r.ExportID]
-		if !found {
-			if ex, err = readExport(ctx, tx, r.ExportID); err != nil {
-				return res, err
-			}
-			exports[r.ExportID] = ex
-		}
-		c, err := checkRow(ctx, tx, r, ex, ExportRetention, policies)
-		if err != nil {
-			return res, err
-		}
-		switch {
-		case c.refusal != "":
-			res.Refusals = append(res.Refusals, Refusal{Line: r.Line, FileID: r.FileID, Path: c.path, Reason: c.refusal})
-		case c.unchanged:
-			res.Unchanged++
-		case c.clear:
-			clears = append(clears, retentionChange{r: r, c: c, afterScan: ex.afterScan})
-			clearList = append(clearList, Clear{FileID: r.FileID, Path: c.path, Retention: c.storedRetention,
-				KeepUntil: c.storedKeepUntil})
-		default:
-			sets = append(sets, retentionChange{r: r, c: c, afterScan: ex.afterScan})
-			if c.keepUntil != "" && c.keepUntil != Forever && c.keepUntil <= today {
-				res.NowPast = append(res.NowPast, Past{Path: c.path, Retention: c.retention, KeepUntil: c.keepUntil})
-			}
-		}
-	}
-	// The policies the rows name that do not exist yet, in order of name, with how many rows name each.
-	newRows := map[string]int{}
-	for _, a := range sets {
-		if a.c.newPolicy {
-			newRows[a.c.retention]++
-		}
-	}
-	for name, n := range newRows {
-		res.NewPolicies = append(res.NewPolicies, NewPolicy{Name: name, Rows: n})
-	}
-	slices.SortFunc(res.NewPolicies, func(a, b NewPolicy) int { return strings.Compare(a.Name, b.Name) })
-	res.Set = len(sets)
-	if dryRun {
-		res.Cleared = len(clears)
-		for _, a := range sets {
-			if a.c.policy && a.c.keepUntil == "" {
-				res.NoValue++
-			}
-		}
-		return res, nil
-	}
-	created := map[string]int64{} // new policy -> its ID, once created
-	if len(res.NewPolicies) > 0 {
-		if opt.ConfirmPolicies != nil && opt.ConfirmPolicies(res.NewPolicies) {
-			if created, err = createPolicies(ctx, tx, res.NewPolicies, now); err != nil {
-				return res, err
-			}
-			res.PoliciesCreated = len(res.NewPolicies)
-		} else {
-			kept := sets[:0]
-			for _, a := range sets {
-				if a.c.newPolicy {
-					res.PolicyRowsSkipped++
-					continue
-				}
-				kept = append(kept, a)
-			}
-			sets = kept
-			res.Set = len(sets)
-		}
-	}
-	if len(clears) > 0 && (confirm == nil || !confirm(clearList)) {
-		res.ClearsSkipped = len(clears)
-		clears = nil
-	}
-	res.Cleared = len(clears)
-	for _, a := range sets {
-		if a.c.policy && a.c.keepUntil == "" {
-			res.NoValue++
-		}
-	}
-	apply := append(sets, clears...)
-	if len(apply) == 0 {
-		return res, nil
-	}
-	if err := applyRetentions(ctx, tx, apply, created, now, detail); err != nil {
-		return res, err
-	}
-	if err := s.commit(tx); err != nil {
-		return res, fmt.Errorf("record retention: %w", err)
-	}
-	return res, nil
 }
 
 // retentionChange is a row of an update that passed its checks, to apply.
@@ -551,18 +387,17 @@ type checked struct {
 	newPolicy                        bool   // one that does not exist yet: created with no value, once confirmed
 }
 
-// checkRow applies the update's rules to one row (docs/design.md, Retention CSV columns), from an export of the given
-// kind: a retention export, or the combined one.
-func checkRow(ctx context.Context, tx *sql.Tx, r RetentionRow, ex exportInfo, kind string,
-	policies policyCache) (checked, error) {
+// checkRow applies the update's rules to the retention half of one row of a combined CSV (docs/design.md, Retention
+// CSV columns).
+func checkRow(ctx context.Context, tx *sql.Tx, r RetentionRow, ex exportInfo, policies policyCache) (checked, error) {
 	var c checked
 	if !ex.found {
 		c.refusal = fmt.Sprintf("export #%d is not in this register", r.ExportID)
 		return c, nil
 	}
-	if ex.kind != kind {
+	if ex.kind != ExportFiles {
 		c.refusal = fmt.Sprintf("export #%d is a %s export, not a %s export", r.ExportID, KindName(ex.kind),
-			KindName(kind))
+			KindName(ExportFiles))
 		return c, nil
 	}
 	var expDate, expRetention, expKeep sql.NullString

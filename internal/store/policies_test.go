@@ -436,11 +436,11 @@ func TestPolicyReviewFindings(t *testing.T) {
 		e.onPolicy("a", "bills", "2019-03-14")
 		e.workOut("bills")
 		ex, _ := e.export("2026-11-16", policyNow)
-		res, err := e.s.UpdateRetention(e.ctx, []RetentionRow{{Line: 2, ExportID: ex, FileID: e.known()["a"].FileID,
-			FileDate: "2019-03-14", HasFileDate: true, Retention: "2030-01-01"}}, policyNow, "2026-11-16", "r.csv",
+		res, err := e.update([]RetentionRow{{Line: 2, ExportID: ex, FileID: e.known()["a"].FileID,
+			FileDate: "2019-03-14", HasFileDate: true, Retention: "2030-01-01"}}, policyNow, "2026-11-16",
 			false, nil)
 		if err != nil || len(res.Refusals) != 0 || res.Set != 1 {
-			t.Fatalf("UpdateRetention: %+v, %v", res, err)
+			t.Fatalf("update: %+v, %v", res, err)
 		}
 		if got := e.files("2026-11-16")["a"]; got.Policy != "" || got.Retention != "2030-01-01" ||
 			got.KeepUntil != "2030-01-01" {
@@ -461,9 +461,8 @@ func (e *reviewEnv) knownAll(path string) int64 {
 	return id
 }
 
-// TestUpdateRetentionPolicies: policy names in the retention CSV (slice 2): A1, A2, B1, B2, B4, B5 and E3 in the
-// store.
-func TestUpdateRetentionPolicies(t *testing.T) {
+// TestUpdatePolicies: policy names in the retention column (slice 2): A1, A2, B1, B2, B4, B5 and E3 in the store.
+func TestUpdatePolicies(t *testing.T) {
 	const today = "2026-11-16"
 	setup := func(t *testing.T) (*reviewEnv, int64) {
 		e := newReviewEnv(t)
@@ -478,16 +477,15 @@ func TestUpdateRetentionPolicies(t *testing.T) {
 		return RetentionRow{Line: 2, ExportID: ex, FileID: e.known()[path].FileID, FileDate: date, HasFileDate: true,
 			Retention: ret}
 	}
-	update := func(e *reviewEnv, rows []RetentionRow, confirm func([]NewPolicy) bool) UpdateResult {
+	update := func(e *reviewEnv, rows []RetentionRow, confirm func(FilesPending) bool) FilesUpdateResult {
 		e.t.Helper()
-		res, err := e.s.UpdateRetentionWith(e.ctx, rows, policyNow, today, "r.csv", UpdateOptions{
-			ConfirmPolicies: confirm})
+		res, err := e.update(rows, policyNow, today, false, confirm)
 		if err != nil {
 			e.t.Fatal(err)
 		}
 		return res
 	}
-	yes := func([]NewPolicy) bool { return true }
+	yes := func(FilesPending) bool { return true }
 
 	t.Run("B1, B2: an existing policy; a period with no file_date refuses the row", func(t *testing.T) {
 		e, ex := setup(t)
@@ -512,18 +510,21 @@ func TestUpdateRetentionPolicies(t *testing.T) {
 			row(e, ex, "c", "", "bils"), row(e, ex, "d", "2020-01-01", "bills")}
 		rows[1].Retention = "payslip" // as the CSV reader gives it
 		var asked []NewPolicy
-		res := update(e, rows, func(ps []NewPolicy) bool { asked = ps; return false })
+		res := update(e, rows, func(p FilesPending) bool { asked = p.NewPolicies; return false })
 		if want := []NewPolicy{{"bils", 2}, {"payslip", 1}}; !slices.Equal(asked, want) {
 			t.Errorf("asked about %v, want %v", asked, want)
 		}
-		if res.Set != 1 || res.PolicyRowsSkipped != 3 || res.PoliciesCreated != 0 {
-			t.Errorf("declined: %+v, want d set and 3 rows left alone", res)
+		if !res.Declined || res.Set != 0 || res.PoliciesCreated != 0 {
+			t.Errorf("declined: %+v, want nothing recorded", res)
 		}
 		if _, err := e.s.Policy(e.ctx, "bils"); !errors.Is(err, ErrNoPolicy) {
 			t.Errorf("bils after declining: %v", err)
 		}
+		if d := e.files(today)["d"]; d.Policy != "" {
+			t.Errorf("d after declining: %+v, want not on bills", d)
+		}
 		// No terminal: confirm is nil, the same as declining.
-		if res := update(e, rows[:1], nil); res.PolicyRowsSkipped != 1 {
+		if res := update(e, rows[:1], nil); !res.Declined {
 			t.Errorf("no terminal: %+v", res)
 		}
 		res = update(e, rows[:3], yes)
@@ -541,9 +542,8 @@ func TestUpdateRetentionPolicies(t *testing.T) {
 
 	t.Run("a dry run lists the new policies and creates nothing", func(t *testing.T) {
 		e, ex := setup(t)
-		res, err := e.s.UpdateRetentionWith(e.ctx, []RetentionRow{row(e, ex, "a", "", "bils")}, policyNow, today,
-			"r.csv", UpdateOptions{DryRun: true, ConfirmPolicies: yes})
-		if err != nil || !slices.Equal(res.NewPolicies, []NewPolicy{{"bils", 1}}) || res.Set != 1 {
+		res, err := e.update([]RetentionRow{row(e, ex, "a", "", "bils")}, policyNow, today, true, yes)
+		if err != nil || !slices.Equal(res.Pending.NewPolicies, []NewPolicy{{"bils", 1}}) || res.Set != 1 {
 			t.Fatalf("dry run: %+v, %v", res, err)
 		}
 		if _, err := e.s.Policy(e.ctx, "bils"); !errors.Is(err, ErrNoPolicy) {
@@ -576,10 +576,8 @@ func TestUpdateRetentionPolicies(t *testing.T) {
 			t.Errorf("back on bills: %+v", a)
 		}
 		// A blank retention clears the policy, once confirmed.
-		res, err := e.s.UpdateRetentionWith(e.ctx, []RetentionRow{row(e, ex3, "a", "2019-03-14", "")}, policyNow,
-			today, "r.csv", UpdateOptions{ConfirmClears: func(cs []Clear) bool {
-				return len(cs) == 1 && cs[0].Retention == "bills"
-			}})
+		res, err := e.update([]RetentionRow{row(e, ex3, "a", "2019-03-14", "")}, policyNow, today, false,
+			func(p FilesPending) bool { return len(p.Clears) == 1 && p.Clears[0].Retention == "bills" })
 		if err != nil || res.Cleared != 1 {
 			t.Fatalf("clear: %+v, %v", res, err)
 		}
@@ -642,10 +640,9 @@ func TestOldCSVAfterMove(t *testing.T) {
 		if _, err := e.s.MovePolicy(e.ctx, "bils", target, policyNow.Add(time.Minute)); err != nil {
 			t.Fatal(err)
 		}
-		res, err := e.s.UpdateRetentionWith(e.ctx, []RetentionRow{{Line: 2, ExportID: ex,
+		res, err := e.update([]RetentionRow{{Line: 2, ExportID: ex,
 			FileID: e.known()["a"].FileID, FileDate: "2021-01-01", HasFileDate: true, Retention: "bils"}},
-			policyNow.Add(2*time.Minute), "2026-11-16", "old.csv", UpdateOptions{
-				ConfirmPolicies: func([]NewPolicy) bool { return true }})
+			policyNow.Add(2*time.Minute), "2026-11-16", false, func(FilesPending) bool { return true })
 		if err != nil {
 			t.Fatal(err)
 		}

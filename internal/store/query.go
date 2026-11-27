@@ -59,7 +59,7 @@ type execer interface {
 }
 
 // stmtCache runs queries in a transaction, preparing each distinct query once. A run that repeats the same few
-// queries for each of thousands of rows (a tags CSV) otherwise has SQLite compile them again for every row, a third
+// queries for each of thousands of rows (a combined CSV) otherwise has SQLite compile them again for every row, a third
 // of its time. The statements belong to the transaction and are closed with it.
 type stmtCache struct {
 	tx    *sql.Tx
