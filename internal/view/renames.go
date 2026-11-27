@@ -5,11 +5,12 @@ import "strings"
 // RenameRow is one file an update renames in its own directory: where it is, its old and new names, and a note on a
 // rename that may be an accident ("only spaces changed").
 type RenameRow struct {
-	Root string // the root, absolute
-	Dir  string // the directory relative to it ('/' separators), "" for the root itself
-	Old  string
-	New  string
-	Note string
+	Root     string // the root, absolute
+	Dir      string // the directory relative to it ('/' separators), "" for the root itself
+	Old      string
+	New      string
+	Note     string
+	Symlinks []string // registered symlinks that point at it (absolute), which the rename breaks
 }
 
 // RenameList is the renames part of an update's summary (docs/design.md, Tags, "Renaming a file by its name cell").
@@ -20,8 +21,9 @@ type RenameList struct {
 
 // Renames writes each directory (relative to the heading's root, or in full) and under it each rename, old and new
 // name side by side: `Britsh bill.pdf  ->  British bill.pdf`. A name that starts or ends with a space is shown in
-// double quotes, a quote in it as \", so the space can be seen; the note follows in brackets. A row that does not
-// fit the terminal's width shows its new name on a line of its own.
+// double quotes, a quote in it as \", so the space can be seen; the note follows in brackets, and each symlink that
+// would break on a line of its own. A row that does not fit the terminal's width shows its new name on a line of
+// its own.
 func (r *Renderer) Renames(l RenameList) {
 	rows := l.Rows
 	more := 0
@@ -45,9 +47,12 @@ func (r *Renderer) Renames(l RenameList) {
 		if r.o.Width > 0 && width(append(line, tail...)...) >= r.o.Width {
 			r.write(spaces(6), old)
 			r.write(append([]span{spaces(8)}, tail...)...)
-			continue
+		} else {
+			r.write(append(line, tail...)...)
 		}
-		r.write(append(line, tail...)...)
+		for _, s := range row.Symlinks {
+			r.write(spaces(8), plain(r.arrow()+" the symlink "), name(r.Tilde(s)), plain(" points here and would break"))
+		}
 	}
 	if more > 0 {
 		r.More(more, "file", "files")

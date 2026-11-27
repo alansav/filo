@@ -4,7 +4,8 @@ import "testing"
 
 func TestRenames(t *testing.T) {
 	rows := []RenameRow{
-		{Root: "/home/u/Documents", Dir: "received/2026/10", Old: "Britsh Gas bill.pdf", New: "British Gas bill.pdf"},
+		{Root: "/home/u/Documents", Dir: "received/2026/10", Old: "Britsh Gas bill.pdf", New: "British Gas bill.pdf",
+			Symlinks: []string{"/home/u/Desktop/bill"}},
 		{Root: "/home/u/Documents", Dir: "received/2026/10", Old: "notes.txt ", New: "notes.txt",
 			Note: "only spaces changed"},
 		{Root: "/home/u/Documents", Dir: "", Old: ` "q".txt`, New: "q.txt"},
@@ -20,6 +21,7 @@ func TestRenames(t *testing.T) {
 		{"piped", 0, 0, "" +
 			"    received/2026/10/\n" +
 			"      Britsh Gas bill.pdf  ->  British Gas bill.pdf\n" +
+			"        -> the symlink ~/Desktop/bill points here and would break\n" +
 			"      \"notes.txt \"         ->  notes.txt   (only spaces changed)\n" +
 			"    ./\n" +
 			"      \" \\\"q\\\".txt\"         ->  q.txt\n" +
@@ -30,11 +32,13 @@ func TestRenames(t *testing.T) {
 		{"cut", 0, 1, "" +
 			"    received/2026/10/\n" +
 			"      Britsh Gas bill.pdf  ->  British Gas bill.pdf\n" +
+			"        -> the symlink ~/Desktop/bill points here and would break\n" +
 			"    ... 4 more files\n"},
 		{"narrow", 40, 1, "" +
 			"    received/2026/10/\n" +
 			"      Britsh Gas bill.pdf\n" +
 			"        ->  British Gas bill.pdf\n" +
+			"        -> the symlink ~/Desktop/bill points here and would break\n" +
 			"    ... 4 more files\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
