@@ -108,7 +108,7 @@ A scan prints a summary like this (paths are relative to the root named at the t
 symbols and colours):
 
 ```
-Scan #2   15 files seen . 0.4 s . ~/FiloTest
+Scan #2   16 files seen . 0.4 s . ~/FiloTest
 
   - 3 new
   - 2 changed
@@ -708,8 +708,11 @@ a root `filo find` couldn't scan or a name it had to escape, or a tag index whos
 ## What a scan skips
 
 - Hidden entries (names starting with `.`), unless the root includes them (`--include-hidden`).
-- `node_modules`, `__pycache__` and `.filo`. Build directories such as `bin` and `obj` are scanned like any other;
-  `filo roots set DIR --ignore bin --ignore obj` skips them (every directory of those names in the root).
+- `node_modules`, `__pycache__` and `.filo`. Build directories such as `bin` and `obj` are scanned like any other.
+  To skip them, add `--ignore bin --ignore obj` to the root's settings. `filo roots set` replaces all of them, so
+  give the root's other settings again (`filo roots` lists them), for example
+  `filo roots set DIR --include-hidden --ignore target --ignore bin --ignore obj`. An ignored name skips every file or
+  directory of that name in the root.
 - Anything the root ignores (`--ignore`).
 - Other filesystems mounted inside the root (each can be its own root).
 - Filo's own database files, and the pages of its tag indexes.
