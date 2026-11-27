@@ -156,9 +156,12 @@ func TestNameColumn(t *testing.T) {
 	if !strings.Contains(b.String(), ",''=x.txt,") {
 		t.Errorf("CSV %q, want the recorded name cell", b.String())
 	}
-	p, err := ParseCSV([]byte("id,export,name,retention,tags\n1,2,\" Bill .pdf \",,\n3,2,'=y,,\n"))
+	p, err := ParseCSV([]byte("id,export,directory,name,retention,tags\n1,2,/r/d ,\" Bill .pdf \",,\n3,2,/r,'=y,,\n"))
 	if err != nil || len(p.Rows) != 2 {
 		t.Fatalf("ParseCSV = %+v, %v", p, err)
+	}
+	if r := p.Rows[0]; !r.HasDirectory || r.DirectoryCell != "/r/d " {
+		t.Errorf("row 1 = %+v, want the directory cell with its spaces", r)
 	}
 	if r := p.Rows[0]; !r.HasName || r.NameCell != " Bill .pdf " || r.Name != " Bill .pdf " {
 		t.Errorf("row 1 = %+v, want the name with its spaces", r)
@@ -166,7 +169,7 @@ func TestNameColumn(t *testing.T) {
 	if r := p.Rows[1]; r.NameCell != "'=y" || r.Name != "=y" {
 		t.Errorf("row 2 = %+v, want the guard dropped from the name", r)
 	}
-	if p, _ := ParseCSV([]byte("id,export,retention,tags\n1,2,,\n")); p.Rows[0].HasName {
-		t.Error("HasName without a name column")
+	if p, _ := ParseCSV([]byte("id,export,retention,tags\n1,2,,\n")); p.Rows[0].HasName || p.Rows[0].HasDirectory {
+		t.Error("HasName or HasDirectory without the column")
 	}
 }

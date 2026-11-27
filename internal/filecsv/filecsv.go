@@ -133,6 +133,9 @@ func ParseCSV(data []byte) (Parsed, error) {
 			fr.HasName, fr.NameCell = true, row.Raw("name") // spaces are part of a name
 			fr.Name = ReadName(fr.NameCell)
 		}
+		if sh.Has("directory") {
+			fr.HasDirectory, fr.DirectoryCell = true, row.Raw("directory") // spaces are part of a directory's name
+		}
 		p.Rows = append(p.Rows, fr)
 	})
 	if err != nil {
