@@ -1815,8 +1815,9 @@ so files can be found by tag; a project is a tag (`project:house sale`).
   done by `internal/dispose`.
   - **Within the file's own root only.** Another root, and another filesystem (a copy then a delete, which would need
     `filo delete`'s care), are not moves.
-  - **The cell** is an absolute path, as the export writes it: compared with the cell as exported, as the name cell
-    is; tidied of a doubled or trailing `/`; then it must be the file's root or a directory inside it. The root itself
+  - **The cell** is an absolute path, as the export writes it: compared with the cell as exported (worked out again
+    from the path the export showed; for an export that recorded none, with the file's directory now, so a cell left
+    alone is still no change), as the name cell is; tidied of a doubled or trailing `/`; then it must be the file's root or a directory inside it. The root itself
     moves the file to its top.
 
     | `directory` cell | Result |
@@ -1829,7 +1830,8 @@ so files can be found by tag; a project is a tag (`project:house sale`).
     | a changed `directory` and `name` in one row | one move, to the new directory under the new name |
 
   - **What the next scan must still see**, checked with the scan's own rule (`walk.SkipsPath`) for the new path and
-    with `OwnPaths`: no directory on it that the root ignores, or noise (`node_modules`, `__pycache__`); not inside
+    with `OwnPaths` (only what changes is judged: the name only if it changes, and only the directories not on the old
+    path, so a file under a directory with an odd name can still move below it): no directory on it that the root ignores, or noise (`node_modules`, `__pycache__`); not inside
     one of Filo's own paths (a tag index's `.NAME/`, the snapshot directory, a `.filo-delete-*` directory); a move
     never hides or unhides a file (no hidden directory on one path and not the other; between hidden directories, in
     a root that includes them, it moves); each new directory's name as a new file name would be (no control
@@ -1852,12 +1854,16 @@ so files can be found by tag; a project is a tag (`project:house sale`).
   - **Collisions**, as for renames, by the new path: two rows moving files to one name in one directory, and a name
     another registered file has there, are refused together; a chain is refused whole.
   - **Edge cases**: a hard link moves only its own path; a symlink with a relative target is refused (it would point
-    elsewhere); a file that registered symlinks point to is moved with a note in the summary that they would break; a
-    directory that cannot be written, or a filesystem that ignores case, is listed under "Not moved", exit 1.
+    elsewhere); a file that registered symlinks point to is moved (or renamed) with a note in the summary that they
+    would break; a file on another filesystem than its root's is refused before the question; on a filesystem that
+    ignores case, a directory cell spelled otherwise than the directory on disk is refused (the register would record a
+    path the disk does not have; not tested); a directory that cannot be written is listed under "Not renamed or
+    moved", exit 1.
     Syncthing: a move inside one synced folder reaches the other devices as a rename; a move out of one into an
     unsynced part of the root is a delete there, to be noted once synced directories are marked (roadmap 9a).
   - **Output**: the summary's moves part lists each move by destination, from where, under its new name if that
-    changed, each new directory marked; the result counts files moved, directories made and directories removed;
+    changed (with the rename's notes), each new directory marked, and "only spaces in the directory changed" for a
+    cell that differs from the file's directory only by spaces at the start or end of a part; the result counts files moved, directories made and directories removed;
     a move not made is listed with why, as a rename is. A move that is also a rename counts as a move.
   - **Recording**, as a rename's: the old path closes and the new opens on the same file row at the run's scan of
     kind `rename`; the `moved` event says "moved by filo update".
