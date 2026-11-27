@@ -1758,9 +1758,9 @@ so files can be found by tag; a project is a tag (`project:house sale`).
     |---|---|
     | `Britsh Gas bill.pdf` → `British Gas bill.pdf`; `bill.pdf` → `Bill.pdf` | renamed |
     | `notes.txt ` → `notes.txt` (a space at the start or end added or removed) | renamed, noted in the summary |
-    | `.bashrc.bak` → `.bashrc.old` (hidden to hidden, in a root that includes hidden files) | renamed |
     | a name holding `/`, or empty, `.` or `..` | refused: one name in the same directory |
-    | `bill.pdf` → `.bill.pdf`, or `.notes` → `notes` | refused: a rename never hides or unhides a file |
+    | `.notes` → `notes`, or `.bashrc.bak` → `.bashrc.old` (a hidden file, in a root that includes hidden files) | refused: a hidden file is never renamed or moved |
+    | `bill.pdf` → `.bill.pdf` | refused: a rename never hides a file |
     | a name starting `.filo-delete-`, or the path of one of Filo's own files there (a tag index's `NAME.html` or `.NAME`, the database and its companions), which no scan records | refused: Filo's own |
     | a name the root ignores (`--ignore`) | refused: the next scan would lose it |
     | a control character (tab, newline, escape) in it | refused |
@@ -1770,6 +1770,12 @@ so files can be found by tag; a project is a tag (`project:house sale`).
     | a new name another row's file has now (a chain or a swap, `a`→`b` and `b`→`c`) | both refused: "rename one at a time" |
     | a new name a registered file in that directory has | refused |
 
+  - **A hidden file is never renamed or moved by the CSV**, nor a file under a hidden directory: in a root that
+    includes hidden files, those are configuration (`.ssh/`, `.config/`), not files being sorted, and a CSV changed
+    between the export and the update (one saved in a synced or shared directory) could otherwise move a private key
+    from `.ssh/` into a synced directory, or a key a synced directory received into `.ssh/`. A changed `name` or
+    `directory` cell of such a file is refused, "rename or move it by hand"; its retention and tags are set as for any
+    file. A new path with a hidden name or directory on it is refused too, so the CSV never hides a file either.
   - **The check at the rename** is that the file at the old name is still the very file the register knows, at the
     name exported: through the opened directory, the same kind, inode, size and modification time as the last scan
     recorded (for a symlink, its own). No re-hash: a rename keeps the content, and renaming a large file should not
@@ -1830,8 +1836,7 @@ so files can be found by tag; a project is a tag (`project:house sale`).
     with `OwnPaths` (only what changes is judged: the name only if it changes, and only the directories not on the old
     path, so a file under a directory with an odd name can still move below it): no directory on it that the root ignores, or noise (`node_modules`, `__pycache__`); not inside
     one of Filo's own paths (a tag index's `.NAME/`, the snapshot directory, a `.filo-delete-*` directory); a move
-    never hides or unhides a file (no hidden directory on one path and not the other; between hidden directories, in
-    a root that includes them, it moves); each new directory's name as a new file name would be (no control
+    never hides a file (no hidden directory on the new path); each new directory's name as a new file name would be (no control
     character, at most 255 bytes); not into a directory on another filesystem mounted inside the root (refused before
     the question: no scan walks it, and no rename crosses filesystems).
   - **Directories that do not exist yet** are made, inside the root: each listed in the summary as new before the
