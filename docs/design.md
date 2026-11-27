@@ -191,10 +191,10 @@ the database, on the same disk. Copying the register's snapshots to a separate p
 
 ### Scan
 - Skips hidden entries unless the root includes them, plus noise: `node_modules`, `__pycache__`, `.filo` and the
-  root's ignore names. No other directory is special (decided 2026-11-27: until then `bin` and `obj` beside a
-  `.csproj` or `.fsproj` were skipped too, a hard-coded case every check of what a scan sees had to repeat). A root
-  holding a .NET project therefore registers its build directories; `filo roots set DIR --ignore bin --ignore obj`
-  skips them, and every other directory of those names in the root.
+  root's ignore names. No other directory is special, so a root holding a .NET project registers its build
+  directories. Adding `--ignore bin --ignore obj` to the root's settings skips them, and every other file or
+  directory of those names in the root; `filo roots set` replaces all of a root's settings, so its other settings are
+  given again.
 - **A `.filo-delete-*` directory is reported, never walked** (issue #21), whatever the root's settings: it is the
   private directory `filo delete` moves a file into to delete it (see Disposal), left behind only if the run was
   interrupted or the file could not be put back. It is an error in the scan summary and the report ("left behind by
