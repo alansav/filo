@@ -98,8 +98,8 @@ func TestFilesCSVGolden(t *testing.T) {
 	ct.lacks("tags after -y", filo(ExitOK, "", false, "find", "--tag", "paid", "--no-scan").stdout, oct)
 }
 
-// TestFilesCSVKinds: a combined CSV that lost a column is refused as a whole, and a retention CSV given a tags
-// column of the person's own stays a retention CSV.
+// TestFilesCSVKinds: a combined CSV that lost a column is refused as a whole, naming it; one that lost both is not a
+// filo CSV; every row refused for its cells is still a combined CSV; a directory named like an export.
 func TestFilesCSVKinds(t *testing.T) {
 	ct := newTagTest(t)
 	filo, work := ct.filo, ct.work

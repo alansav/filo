@@ -151,10 +151,11 @@ func markedLine(v *view.Renderer, suggested int) {
 	}
 }
 
-// scanFirst is an export's scan (docs/design.md, Lifespan, "A scan first"): a retention or tags export of DIR scans
-// DIR; a duplicates export scans every root, since a duplicate group's copies can be anywhere. Its output is exactly filo
+// scanFirst is an export's scan (docs/design.md, Lifespan, "A scan first"): a combined export of DIR scans DIR; a
+// duplicates export scans every root, since a duplicate group's copies can be anywhere. Its output is exactly filo
 // scan's, Next: filo report included when it found something, so nothing it found is hidden. A root that fails to
-// scan stops the export, so a missing disk never gives a CSV that looks complete. scanned is false when there was nothing to scan (no roots), so nothing was shown.
+// scan stops the export, so a missing disk never gives a CSV that looks complete. scanned is false when there was
+// nothing to scan (no roots), so nothing was shown.
 func (e *env) scanFirst(ctx context.Context, s *store.Store, kind string, pos []string, workers int) (scanned bool,
 	err error) {
 	dir := ""

@@ -204,7 +204,7 @@ func TestWriteExportReplace(t *testing.T) {
 }
 
 // TestExportScansFirst: every export scans first unless --no-scan (docs/design.md, Lifespan, "A scan first"): a file
-// saved since the last scan is in the CSV; export retention DIR scans DIR only, other exports every root; --no-scan
+// saved since the last scan is in the CSV; export DIR scans DIR only, export duplicates every root; --no-scan
 // exports the register as it is and says so; a root that fails to scan, or Ctrl-C during the scan, stops the export
 // with no CSV written.
 func TestExportScansFirst(t *testing.T) {

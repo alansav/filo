@@ -35,7 +35,7 @@ func (t Tag) Same(o Tag) bool { return t.Key == o.Key && t.Folded() == o.Folded(
 var (
 	ErrEmpty      = errors.New("give a tag")
 	ErrNoValue    = errors.New("give a value")
-	ErrSeparator  = errors.New(`a tag cannot hold ";", the tags CSV's separator`)
+	ErrSeparator  = errors.New(`a tag cannot hold ";", which separates tags in a CSV`)
 	ErrWildcard   = errors.New(`a tag cannot hold "*", the wildcard of a search`)
 	ErrControl    = errors.New("a tag cannot hold a control character")
 	ErrNotUTF8    = errors.New("a tag must be text (valid UTF-8)")

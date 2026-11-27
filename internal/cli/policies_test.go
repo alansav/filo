@@ -10,7 +10,7 @@ import (
 )
 
 // filo policies (docs/design.md, Named retention policies; slice 3): list, add, set, move, remove and show, with
-// their questions. Files are put on policies through the retention CSV, as a person would.
+// their questions. Files are put on policies through the CSV from filo export, as a person would.
 
 // policyTest is a tree of bills on the policy bills (7y), one without a file_date, and a policy bils (a typo, no value)
 // holding one file.

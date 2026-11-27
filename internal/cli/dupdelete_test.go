@@ -93,7 +93,7 @@ func (d dupTest) groups() int {
 	return len(n)
 }
 
-// setRetentions gives files (path relative to the root -> retention) a retention through a retention CSV.
+// setRetentions gives files (path relative to the root -> retention) a retention through the CSV from filo export.
 func (d dupTest) setRetentions(values map[string]string) {
 	d.t.Helper()
 	p := filepath.Join(d.work, "r-"+strconv.FormatInt(time.Now().UnixNano(), 36)+".csv")
