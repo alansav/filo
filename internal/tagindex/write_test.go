@@ -262,13 +262,69 @@ func TestWriteKeepsADirectoryWithAFiloFileLeft(t *testing.T) {
 func TestTempFilesInThePagesDirectory(t *testing.T) {
 	ix := fixture(t)
 	w := writer{ix: ix, res: Result{Files: map[string]string{}}}
-	if got := w.tempDir("index.html"); got != ix.DirAbs() {
+	if got := w.tempDir("index.html"); got != "." {
 		t.Errorf("tempDir before the pages directory is made = %s", got)
 	}
 	w.res.Files[".index"] = ""
-	for _, name := range []string{"index.html", ".index/a/x.html"} {
-		if got := w.tempDir(name); got != ix.Abs(".index") {
-			t.Errorf("tempDir(%s) = %s, want the pages directory", name, got)
+	for name, want := range map[string]string{"index.html": ".index", ".index/style.css": ".index",
+		".index/a/x.html": ".index/a"} {
+		if got := w.tempDir(name); got != want {
+			t.Errorf("tempDir(%s) = %s, want %s", name, got, want)
 		}
+	}
+}
+
+// TestWriteNeverFollowsASwappedDirectory: a pages directory, or a key's, swapped for a symlink to a directory outside
+// the index while the pages are written (another device syncing the directory) is never followed: nothing lands
+// outside, and the pages go into the directories Filo opened (docs/design.md, Tag index pages, "Filo's own files").
+func TestWriteNeverFollowsASwappedDirectory(t *testing.T) {
+	for _, swapped := range []string{".index", ".index/a"} {
+		t.Run(swapped, func(t *testing.T) {
+			ix := fixture(t)
+			outside := t.TempDir()
+			p := pages(map[string]string{"index.html": "main", ".index/style.css": "css", ".index/a/x.html": "x"},
+				".index", ".index/a")
+			write(t, &ix, p)
+			moved := ix.Abs(swapped) + "-moved"
+			once := false
+			beforeWrite = func(name string) {
+				if once {
+					return
+				}
+				once = true
+				if err := os.Rename(ix.Abs(swapped), moved); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(outside, ix.Abs(swapped)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			t.Cleanup(func() { beforeWrite = nil })
+			// Every page changes, so each is written again.
+			res := write(t, &ix, pages(map[string]string{"index.html": "main 2", ".index/style.css": "css 2",
+				".index/a/x.html": "x 2"}, ".index", ".index/a"))
+			if entries, _ := os.ReadDir(outside); len(entries) != 0 {
+				t.Errorf("written outside the index: %v", entries)
+			}
+			// The pages go into the directories opened. NAME.html's temporary file is in the pages directory, and
+			// its rename into the index's directory goes by .index, now a symlink out: refused, not followed.
+			wantProblems, wantWritten := []string(nil), 3
+			if swapped == ".index" {
+				wantProblems = []string{"index.html could not be written: path escapes from parent"}
+				wantWritten = 2
+			}
+			check(t, "problems", problems(res), wantProblems)
+			if res.Written != wantWritten {
+				t.Errorf("written %d, want %d", res.Written, wantWritten)
+			}
+			if tmps, _ := filepath.Glob(filepath.Join(moved, ".*.tmp")); len(tmps) != 0 {
+				t.Errorf("temporary files left: %v", tmps)
+			}
+			want := map[string]string{".index": "css 2", ".index/a": "x 2"}
+			if b, err := os.ReadFile(filepath.Join(moved, map[string]string{".index": "style.css",
+				".index/a": "x.html"}[swapped])); err != nil || string(b) != want[swapped] {
+				t.Errorf("the page in the directory opened = %q, %v; want %q", b, err, want[swapped])
+			}
+		})
 	}
 }

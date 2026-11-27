@@ -2,6 +2,7 @@ package tagindex
 
 import (
 	"cmp"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -86,6 +87,7 @@ func Write(ix store.TagIndex, p Pages) Result {
 	if !w.reachable() {
 		return w.res
 	}
+	defer w.close()
 	failed := map[string]bool{} // directories that could not be made: their pages are not written
 	for _, d := range p.Dirs {
 		if failed[path.Dir(d)] || !w.dir(d) {
@@ -119,12 +121,13 @@ func Remove(ix store.TagIndex) Result {
 	if !w.reachable() {
 		return w.res
 	}
+	defer w.close()
 	w.removeAll(func(string) bool { return true })
 	for _, name := range []string{ix.Page(), ix.PagesDir()} {
 		if _, ok := ix.Files[name]; ok {
 			continue
 		}
-		if _, err := os.Lstat(ix.Abs(name)); err == nil {
+		if _, err := w.dirs["."].Lstat(name); err == nil {
 			w.problem(name, "is not Filo's: it stays")
 		}
 	}
@@ -190,37 +193,115 @@ func walkForeign(ix store.TagIndex, found func(name string)) {
 type writer struct {
 	ix  store.TagIndex
 	res Result
+	// dirs are the directories opened, by path relative to the index's directory ('/'-separated, "." for itself):
+	// every look and change goes through the one that holds the file (see open).
+	dirs map[string]*os.Root
 }
 
 func (w *writer) problem(name, why string) {
 	w.res.Problems = append(w.res.Problems, Problem{Path: name, Why: why})
 }
 
-// reachable checks that the index's directory is there and is a directory (not a symlink to one).
+// close closes the directories opened.
+func (w *writer) close() {
+	for _, r := range w.dirs {
+		r.Close()
+	}
+}
+
+// errDirChanged means a directory on a file's path is no longer the real directory Filo saw there (a symlink
+// swapped in, say), so nothing is done through it.
+var errDirChanged = errors.New("a directory on its path is not the directory it was (a symlink?)")
+
+// beforeWrite, if set by a test, runs before each page is looked at and written, after the directories are made.
+var beforeWrite func(name string)
+
+// reachable checks that the index's directory is there and is a directory (not a symlink to one), and opens it:
+// from then on everything goes through it, never by path.
 func (w *writer) reachable() bool {
-	fi, err := os.Lstat(w.ix.DirAbs())
+	abs := w.ix.DirAbs()
+	fi, err := os.Lstat(abs)
 	switch {
 	case err != nil:
 		w.problem("", "its directory cannot be reached: "+errText(err))
+		return false
 	case !fi.IsDir():
 		w.problem("", "its directory is not a directory any more")
-	default:
-		return true
+		return false
 	}
-	return false
+	r, err := os.OpenRoot(abs)
+	if err != nil {
+		w.problem("", "its directory cannot be reached: "+errText(err))
+		return false
+	}
+	if got, err := r.Stat("."); err != nil || !os.SameFile(fi, got) {
+		r.Close()
+		w.problem("", "its directory changed as it was opened")
+		return false
+	}
+	w.dirs = map[string]*os.Root{".": r}
+	return true
+}
+
+// open returns the directory dir (relative to the index's directory, '/'-separated; "." for itself), opened from the
+// index's directory down: each directory through the one above it, only if lstat sees a real directory there (never
+// a symlink) and it is the very one lstat saw. Each is opened once, so a directory swapped for a symlink later is
+// never followed: the open one is used.
+func (w *writer) open(dir string) (*os.Root, error) {
+	if r, ok := w.dirs[dir]; ok {
+		return r, nil
+	}
+	if dir == "." || dir == "" {
+		return nil, errDirChanged // reachable opens the index's directory first
+	}
+	parent, err := w.open(path.Dir(dir))
+	if err != nil {
+		return nil, err
+	}
+	base := path.Base(dir)
+	fi, err := parent.Lstat(base)
+	if err != nil {
+		return nil, err
+	}
+	if !fi.IsDir() {
+		return nil, errDirChanged
+	}
+	r, err := parent.OpenRoot(base)
+	if err != nil {
+		return nil, err
+	}
+	if got, err := r.Stat("."); err != nil || !os.SameFile(fi, got) {
+		r.Close()
+		return nil, errDirChanged
+	}
+	w.dirs[dir] = r
+	return r, nil
+}
+
+// forget closes and drops the open directory dir, once it is removed.
+func (w *writer) forget(dir string) {
+	if r, ok := w.dirs[dir]; ok {
+		r.Close()
+		delete(w.dirs, dir)
+	}
 }
 
 // dir makes the directory name, or checks that it is one Filo made.
 func (w *writer) dir(name string) bool {
-	abs := w.ix.Abs(name)
-	fi, err := os.Lstat(abs)
+	parent, err := w.open(path.Dir(name))
+	if err != nil {
+		w.problem(name, "could not be made: "+errText(err))
+		return false
+	}
+	base := path.Base(name)
+	fi, err := parent.Lstat(base)
 	if errors.Is(err, fs.ErrNotExist) {
-		if err := os.Mkdir(abs, 0o755); err != nil {
+		if err := parent.Mkdir(base, 0o755); err != nil {
 			w.problem(name, "could not be made: "+errText(err))
 			return false
 		}
 		w.res.Files[name] = ""
-		return true
+		return w.opened(name)
 	}
 	if err != nil {
 		w.problem(name, "cannot be looked at: "+errText(err))
@@ -231,14 +312,32 @@ func (w *writer) dir(name string) bool {
 		w.problem(name, whyNotFilos)
 		return false
 	}
+	return w.opened(name)
+}
+
+// opened opens the directory name straight after dir made or checked it, so its pages go into the very directory
+// looked at, whatever is put at its path later.
+func (w *writer) opened(name string) bool {
+	if _, err := w.open(name); err != nil {
+		w.problem(name, "cannot be opened: "+errText(err))
+		return false
+	}
 	return true
 }
 
 // file writes content to name, unless what is there is not Filo's.
 func (w *writer) file(name string, content []byte) {
-	abs := w.ix.Abs(name)
+	if beforeWrite != nil {
+		beforeWrite(name)
+	}
 	sum := hashOf(content)
-	fi, err := os.Lstat(abs)
+	parent, err := w.open(path.Dir(name))
+	if err != nil {
+		w.problem(name, "could not be written: "+errText(err))
+		return
+	}
+	base := path.Base(name)
+	fi, err := parent.Lstat(base)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
 	case err != nil:
@@ -251,7 +350,7 @@ func (w *writer) file(name string, content []byte) {
 			w.problem(name, whyNotFilos)
 			return
 		}
-		if !sameFile(abs, was) {
+		if !sameIn(parent, base, was) {
 			delete(w.res.Files, name)
 			w.problem(name, whyChanged)
 			return
@@ -260,7 +359,7 @@ func (w *writer) file(name string, content []byte) {
 			return
 		}
 	}
-	if err := writeFile(abs, w.tempDir(name), content); err != nil {
+	if err := w.writeFile(name, content); err != nil {
 		w.problem(name, "could not be written: "+errText(err))
 		return
 	}
@@ -268,13 +367,16 @@ func (w *writer) file(name string, content []byte) {
 	w.res.Written++
 }
 
-// tempDir is where the temporary file of name is written: the pages directory when Filo made it (so a temporary
-// file left by a crash is never one a scan sees: the pages directory is Filo's own), else name's own directory.
+// tempDir is the directory, relative to the index's directory, where the temporary file of name is written: name's
+// own directory, except for a page in the index's directory itself (NAME.html), whose temporary file goes in the
+// pages directory when Filo made it, so that one a crash leaves is never one a scan sees (the pages directory is
+// Filo's own).
 func (w *writer) tempDir(name string) string {
-	if h, ok := w.res.Files[w.ix.PagesDir()]; ok && h == "" {
-		return w.ix.Abs(w.ix.PagesDir())
+	dir := path.Dir(name)
+	if h, ok := w.res.Files[w.ix.PagesDir()]; ok && h == "" && dir == "." {
+		return w.ix.PagesDir()
 	}
-	return filepath.Dir(w.ix.Abs(name))
+	return dir
 }
 
 // removeAll removes the files and directories Filo wrote for which drop holds: files first, then directories,
@@ -294,18 +396,22 @@ func (w *writer) removeAll(drop func(name string) bool) {
 	slices.Sort(files)
 	for _, name := range files {
 		h := w.res.Files[name]
-		abs := w.ix.Abs(name)
-		fi, err := os.Lstat(abs)
+		base := path.Base(name)
+		parent, err := w.open(path.Dir(name))
+		var fi fs.FileInfo
+		if err == nil {
+			fi, err = parent.Lstat(base)
+		}
 		switch {
 		case errors.Is(err, fs.ErrNotExist):
 			delete(w.res.Files, name)
 		case err != nil:
 			w.problem(name, "cannot be looked at: "+errText(err))
-		case !fi.Mode().IsRegular() || !sameFile(abs, h):
+		case !fi.Mode().IsRegular() || !sameIn(parent, base, h):
 			delete(w.res.Files, name)
 			w.problem(name, "was changed since Filo wrote it: it stays")
 		default:
-			if err := os.Remove(abs); err != nil {
+			if err := parent.Remove(base); err != nil {
 				w.problem(name, "could not be removed: "+errText(err))
 				continue
 			}
@@ -320,8 +426,12 @@ func (w *writer) removeAll(drop func(name string) bool) {
 		return cmp.Compare(a, b)
 	})
 	for _, name := range dirs {
-		abs := w.ix.Abs(name)
-		fi, err := os.Lstat(abs)
+		base := path.Base(name)
+		parent, err := w.open(path.Dir(name))
+		var fi fs.FileInfo
+		if err == nil {
+			fi, err = parent.Lstat(base)
+		}
 		switch {
 		case errors.Is(err, fs.ErrNotExist):
 			delete(w.res.Files, name)
@@ -334,11 +444,12 @@ func (w *writer) removeAll(drop func(name string) bool) {
 			// A file of Filo's in it could not be removed (reported already): the directory stays Filo's, and the
 			// next run tries again.
 		default:
-			err := os.Remove(abs)
+			w.forget(name)
+			err := parent.Remove(base)
 			switch {
 			case err == nil:
 				delete(w.res.Files, name)
-			case !empty(abs):
+			case !emptyIn(parent, base):
 				delete(w.res.Files, name)
 				w.problem(name, "holds files that are not Filo's: it stays")
 			default:
@@ -358,14 +469,20 @@ func (w *writer) holdsFilos(name string) bool {
 	return false
 }
 
-// empty reports whether the directory abs holds nothing (or cannot be read: then it is not taken to hold files that
-// are not Filo's).
-func empty(abs string) bool {
-	entries, err := os.ReadDir(abs)
+// emptyIn reports whether the directory name in dir holds nothing (or cannot be read: then it is not taken to hold
+// files that are not Filo's).
+func emptyIn(dir *os.Root, name string) bool {
+	f, err := dir.Open(name)
+	if err != nil {
+		return true
+	}
+	defer f.Close()
+	entries, err := f.ReadDir(1)
 	return err != nil || len(entries) == 0
 }
 
 // sameFile reports whether the regular file at abs (not a symlink) holds exactly the content whose SHA-256 is sum.
+// It looks by path: only for Plan, which changes nothing.
 func sameFile(abs, sum string) bool {
 	fi, err := os.Lstat(abs)
 	if err != nil || !fi.Mode().IsRegular() {
@@ -375,38 +492,77 @@ func sameFile(abs, sum string) bool {
 	return err == nil && hashOf(b) == sum
 }
 
-// writeFile writes content to abs through a temporary file in tmpDir (on the same file system), flushed and renamed
-// into place, so a page is never seen half written and a power cut cannot leave one torn (which would then not be
-// Filo's to replace).
-func writeFile(abs, tmpDir string, content []byte) error {
-	tmp, err := os.CreateTemp(tmpDir, "."+filepath.Base(abs)+".filo-*.tmp")
+// sameIn is sameFile for the file name in the open directory dir.
+func sameIn(dir *os.Root, name, sum string) bool {
+	fi, err := dir.Lstat(name)
+	if err != nil || !fi.Mode().IsRegular() {
+		return false
+	}
+	b, err := dir.ReadFile(name)
+	return err == nil && hashOf(b) == sum
+}
+
+// writeFile writes content to name through a temporary file (see tempDir), made where nothing is (O_EXCL), flushed
+// and renamed into place, so a page is never seen half written and a power cut cannot leave one torn (which would
+// then not be Filo's to replace). Both go through the open directories: the rename within name's own directory, or
+// for NAME.html with its temporary file in the pages directory, within the index's directory.
+func (w *writer) writeFile(name string, content []byte) error {
+	dir, base := path.Dir(name), path.Base(name)
+	tdir := w.tempDir(name)
+	tr, err := w.open(tdir)
+	if err != nil {
+		return err
+	}
+	tmp, f, err := createTemp(tr, base)
 	if err != nil {
 		return err
 	}
 	done := false
 	defer func() {
 		if !done {
-			tmp.Close()
-			os.Remove(tmp.Name())
+			f.Close()
+			tr.Remove(tmp)
 		}
 	}()
-	if _, err := tmp.Write(content); err != nil {
+	if _, err := f.Write(content); err != nil {
 		return err
 	}
-	if err := tmp.Chmod(0o644); err != nil {
+	if err := f.Chmod(0o644); err != nil {
 		return err
 	}
-	if err := tmp.Sync(); err != nil {
+	if err := f.Sync(); err != nil {
 		return err
 	}
-	if err := tmp.Close(); err != nil {
+	if err := f.Close(); err != nil {
 		return err
 	}
-	if err := os.Rename(tmp.Name(), abs); err != nil {
+	if tdir == dir {
+		err = tr.Rename(tmp, base)
+	} else {
+		err = w.dirs["."].Rename(path.Join(tdir, tmp), name)
+	}
+	if err != nil {
 		return err
 	}
 	done = true
 	return nil
+}
+
+// createTemp makes a new temporary file for the page base in dir, with mode 0600, never over anything there: a
+// short random suffix, tried again if taken.
+func createTemp(dir *os.Root, base string) (string, *os.File, error) {
+	for range 10 {
+		name := "." + base + ".filo-" + rand.Text()[:10] + ".tmp"
+		f, err := dir.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+		if errors.Is(err, fs.ErrExist) {
+			continue
+		}
+		if err != nil {
+			return "", nil, err
+		}
+		return name, f, nil
+	}
+	return "", nil, fs.ErrExist
 }
 
 func hashOf(b []byte) string {
