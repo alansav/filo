@@ -1794,7 +1794,10 @@ so files can be found by tag; a project is a tag (`project:house sale`).
     (`2023 return.pdf` → `2023 return.pd`); neither note refuses anything. In that list a name that starts or ends
     with a space is shown in double quotes (`"notes.txt "`), a `"` in a quoted name as `\"`; other lists keep
     `\x20`. After the run: `N files renamed`, and the renames skipped, each with its reason, under "Skipped: run
-    filo scan, then export again". A dry run says "would be renamed".
+    filo scan, then export again" (the disk changed), and those that could not be made for a reason a scan does not
+    change (no permission, a filesystem that ignores case) under "Not renamed". A dry run says "would be renamed". If
+    the register cannot be written part-way, the run still shows what it did before the error, and how many renames
+    it did not try.
 - **Register (schema version 11)**: a `tags` table on file ids (the key, the value as spelled and its folded form),
   and `tag_changes`, the history of every tag added or removed and by which command, so each change can be written
   to the journal later (9c) without rework. `export_rows` gain `tags`, the cell as exported.
