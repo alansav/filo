@@ -85,7 +85,7 @@ func TestRenderRetention(t *testing.T) {
 			"    Where most need one (to depth 2)",
 			"    files      size",
 			"    1,202   2.0 KiB   docs",
-			"    Next: filo export retention [DIR] -o FILE, then filo update FILE, or filo rules add DIR POLICY",
+			"    Next: filo export [DIR] -o FILE, then filo update FILE, or filo rules add DIR POLICY",
 			"  [!] 1 past its retention: see filo delete",
 		}},
 	}

@@ -1,9 +1,9 @@
 filo set FILE... [flags]
 
-  Sets the file_date and the retention of each file, as the retention CSV does,
-  for a few files at once: a retention is a period (7y, 18m, 6w, 30d, counted
-  from file_date), forever, a date (YYYY-MM-DD) or a policy's name. Several
-  flags can be given together. keep_until is worked out again.
+  Sets the file_date and the retention of each file, as the CSV from filo export
+  does, for a few files at once: a retention is a period (7y, 18m, 6w, 30d,
+  counted from file_date), forever, a date (YYYY-MM-DD) or a policy's name.
+  Several flags can be given together. keep_until is worked out again.
 
   All or nothing: if any file cannot be set (a period with no file_date, a file
   missing or not in the register), nothing changes and every refusal is listed.

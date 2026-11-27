@@ -366,7 +366,7 @@ func (r Report) renderRetention(v *view.Renderer) {
 		}
 		v.Files(view.FileList{Columns: []view.Column{{Header: "files", Right: true}, {Header: "size", Right: true}},
 			Rows: rows})
-		v.Detail(4, "Next: filo export retention [DIR] -o FILE, then filo update FILE, or filo rules add DIR POLICY")
+		v.Detail(4, "Next: filo export [DIR] -o FILE, then filo update FILE, or filo rules add DIR POLICY")
 	}
 	// The files no rule gives a policy, each with the rules that match it equally (they are among those above).
 	if n := int64(len(r.RuleTies)); n > 0 {

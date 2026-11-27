@@ -1,4 +1,4 @@
-Retention update   r.csv . export #1 . 4 rows . <root>
+Update   r.csv . export #1 . 4 rows . <root>
 
   [ok] 2 files given a retention
   [refused] 2 rows refused

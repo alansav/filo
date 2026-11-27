@@ -19,7 +19,7 @@ Dry run: nothing was changed.
 $ filo rules move <root>/bank <root>/banking
 Done   moved 2 rules from bank to banking . policy set on 1 file . 1 needs a file_date . <root>
 
-Next: filo export retention <root>/banking -o FILE, fill in file_date, then filo update FILE
+Next: filo export <root>/banking -o FILE, fill in file_date, then filo update FILE
 
 $ filo rules copy <root>/banking/2024 <root>/banking/2025
 Done   copied 1 rule from banking/2024 to banking/2025 . policy set on 1 file . <root>

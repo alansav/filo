@@ -21,12 +21,10 @@ var overview = struct {
 		{Name: "roots set DIR [flags]", Text: "replace a root's settings"},
 		{Name: "scan [DIR]", Text: "scan every root, or DIR inside a root"},
 		{Name: "report [--top N]", Text: "totals, files needing a retention, largest files, duplicates, events"},
-		{Name: "export retention [DIR] -o FILE",
-			Text: "write every file under DIR (or every root) with its retention, as CSV"},
+		{Name: "export [DIR] -o FILE",
+			Text: "write every file under DIR (or every root) with its retention and tags, as CSV"},
 		{Name: "export duplicates [DIR] -o FILE",
 			Text: "write the duplicate groups with a copy under DIR, as CSV"},
-		{Name: "export tags [DIR] -o FILE",
-			Text: "write every file under DIR (or every root) with its tags, as CSV"},
 		{Name: "update FILE [--dry-run]",
 			Text: "record the retentions or tags edited in an exported CSV"},
 		{Name: "delete [DIR] [-y]",
@@ -120,9 +118,7 @@ var commandHelps = map[string]commandHelp{
 	"export": {
 		usage: []string{
 			"filo export [DIR] -o FILE [--no-scan] [--workers N]",
-			"filo export retention [DIR] -o FILE [--no-scan] [--workers N]",
 			"filo export duplicates [DIR] -o FILE [--no-scan] [--workers N]",
-			"filo export tags [DIR] -o FILE [--no-scan] [--workers N]",
 		},
 		before: []string{
 			"Scans first (DIR only; every root for export duplicates), then writes every file under DIR (inside a " +
@@ -133,21 +129,17 @@ var commandHelps = map[string]commandHelp{
 				"Fill in retention in a spreadsheet (a period such as 7y counted from file_date, a date, forever, or " +
 				"a policy name: filo help policies) and tags (separated by ;, see filo help tag), correct a " +
 				"name to rename the file, or change its directory to move it within its root, then run filo update " +
-				"FILE. A directory named retention, duplicates or tags is given with ./ before it (./tags). A " +
+				"FILE. A directory named duplicates is given with ./ before it (./duplicates). A " +
 				"blank file_date is filled in from " +
 				"the file name when the name holds one clear date (2023-03-14, 20230314, or 2023-03 for the month's " +
 				"last day), marked with ! (!2023-03-14): check it and remove the ! to accept it; a period on a " +
 				"row whose date is still marked is refused. On a large system, export one directory at a time.",
-			"export retention writes the same without the tags column; export tags (below) only the tags.",
 			"export duplicates writes each duplicate group (two or more copies of the same content; hard links to " +
 				"one file are one copy) with a copy under DIR, with all its copies. Columns: id, export, group, " +
 				"copies, directory, name, size, modified, file_date, retention, keep_until, action. In each group " +
 				"you decide on, write keep for the copy to keep and delete for the rest (or k and d); keep on two or " +
 				"more copies keeps them as separate files, each with its own retention; always on every row means the " +
 				"content belongs everywhere. A group left blank is left alone. filo delete FILE carries the CSV out.",
-			"export tags writes every file under DIR with its tags in one cell, separated by ; (see filo help tag). " +
-				"Columns: id, export, directory, name, size, modified, tags. Edit the cells, then run filo update " +
-				"FILE: each cell replaces its file's tags.",
 		},
 		flags: []view.Term{
 			{Name: "-o FILE", Text: "the CSV to write; an existing file is replaced only after asking"},
@@ -176,20 +168,12 @@ var commandHelps = map[string]commandHelp{
 				"file or moves one, filo lists " +
 				"them first and asks once (-y answers yes); no, or no terminal without -y, records nothing at all " +
 				"(exit 1 when there was no terminal to ask in).",
-			"A CSV from export retention is read the same way without tags; a blank retention there clears a " +
-				"stored one after asking, and without a terminal those rows are left alone.",
-			"A tags CSV (from export tags) is told by its header: each tags cell replaces its file's tags. " +
-				"Before removing any tag, filo " +
-				"lists those rows and asks (-y answers yes); without a terminal, and without -y, it leaves them " +
-				"alone. A row is refused, with one line " +
-				"saying why, if for example a tag breaks the spelling rules (see filo help tag), the file's tags " +
-				"changed since the export (by tag, untag or tags rename), or the file is listed twice.",
 			"A duplicates CSV (from export duplicates) is refused: its decisions are not recorded, but carried " +
 				"out by filo delete FILE.",
 		},
 		flags: []view.Term{
 			{Name: "--dry-run", Text: "check everything and write nothing"},
-			{Name: "-y", Text: "apply without asking (not for a CSV from export retention)"},
+			{Name: "-y", Text: "apply without asking"},
 		},
 	},
 	"delete": {
@@ -246,7 +230,7 @@ var commandHelps = map[string]commandHelp{
 			"filo policies show NAME",
 		},
 		before: []string{
-			"A policy is a named retention, written once and typed in the retention column of a retention CSV in " +
+			"A policy is a named retention, written once and typed in the retention column of the CSV from filo export in " +
 				"place of a period: bills = 7y. Changing it changes every file using it. Its value is a period " +
 				"(counted from each file's own file_date), a date, or forever; a name typed in a CSV that is not a " +
 				"policy yet creates one with no value, after filo update asks.",
@@ -309,7 +293,7 @@ var commandHelps = map[string]commandHelp{
 		},
 		after: []string{
 			"Tags follow the file through moves and edits, and a new copy of a tagged file takes its tags. Find " +
-				"files by tag with filo find --tag; many files at once with filo export tags and filo update.",
+				"files by tag with filo find --tag; many files at once with filo export and filo update.",
 		},
 	},
 	"tags": {
@@ -377,7 +361,7 @@ var commandHelps = map[string]commandHelp{
 	"set": {
 		usage: []string{"filo set FILE... [flags]"},
 		before: []string{
-			"Sets the file_date and the retention of each file, as the retention CSV does, for a few files at once: " +
+			"Sets the file_date and the retention of each file, as the CSV from filo export does, for a few files at once: " +
 				"a retention is a period (7y, 18m, 6w, 30d, counted from file_date), forever, a date (YYYY-MM-DD) " +
 				"or a policy's name. Several flags can be given together. keep_until is worked out again.",
 			"All or nothing: if any file cannot be set (a period with no file_date, " +

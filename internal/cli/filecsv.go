@@ -80,9 +80,9 @@ func filesExports(ctx context.Context, s *store.Store, exports []int64) (int64, 
 	return 0, nil
 }
 
-// lostColumn refuses a retention or tags CSV whose rows name a combined export: a combined CSV that lost its
-// column named missing (deleted or renamed in the spreadsheet), which would otherwise be read as the other kind
-// (docs/design.md, Tags, "The combined CSV").
+// lostColumn refuses a CSV without its column named missing whose rows name a combined export: a combined CSV that
+// lost that column (deleted or renamed in the spreadsheet), named so rather than as "not a filo CSV" (docs/design.md,
+// Tags, "The combined CSV"). It returns nil when no row names a combined export.
 func lostColumn(ctx context.Context, s *store.Store, path string, exports []int64, missing string) error {
 	id, err := filesExports(ctx, s, exports)
 	if err != nil || id == 0 {
@@ -488,26 +488,24 @@ func (e *env) confirmPending(ctx context.Context, pr *prompter, roots []string, 
 	return e.askYesNo(ctx, pr, "Apply the update? Nothing is recorded otherwise.", func() { e.showPending(roots, p, 0) })
 }
 
-// maybeUpdateFiles updates a CSV with both retention and tags columns as a combined CSV if its rows name a combined
-// export; done is false when they do not (a retention CSV with a tags column of the person's own), and the CSV is
-// then read as a retention CSV.
-func (e *env) maybeUpdateFiles(ctx context.Context, db, path string, data []byte, dry, yes bool) (done bool,
-	err error) {
-	parsed, err := filecsv.ParseCSV(data)
-	if err != nil {
-		return true, fmt.Errorf("%s: %w", path, err)
+// tagChangeRows lists what an update does to each file's tags: "added urgent; kind:x   removed type:bill".
+func tagChangeRows(roots []string, cs []store.TagChange) []view.FileRow {
+	rows := make([]view.FileRow, len(cs))
+	for i, c := range cs {
+		var what []string
+		if len(c.Added) > 0 {
+			what = append(what, "added "+store.JoinTags(c.Added))
+		}
+		if len(c.Removed) > 0 {
+			what = append(what, "removed "+store.JoinTags(c.Removed))
+		}
+		row := view.FileRow{Note: strings.Join(what, "   ")}
+		if c.Path == "" {
+			row.Label = fmt.Sprintf("file %d, no current path", c.FileID)
+		} else {
+			row.Root, row.Rel = view.SplitRoot(roots, c.Path)
+		}
+		rows[i] = row
 	}
-	s, err := e.open(ctx, db)
-	if err != nil {
-		return true, err
-	}
-	defer e.closeStore(s)
-	id, err := filesExports(ctx, s, parsed.Exports) // refused rows' too: a CSV whose rows are all refused is still one
-	if err != nil {
-		return true, err
-	}
-	if id == 0 {
-		return false, nil
-	}
-	return true, e.updateFiles(ctx, s, path, parsed, dry, yes)
+	return rows
 }

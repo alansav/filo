@@ -138,7 +138,7 @@ func TestUsageAndHelp(t *testing.T) {
 		{"help export", []string{"help", "export"}, ExitOK, "keep_until", ""},
 		{"scan no longer takes root settings", []string{"--db", db, "scan", "--include-hidden"}, ExitUsage, "",
 			"include-hidden"},
-		{"review is gone", []string{"--db", db, "review"}, ExitUsage, "", "export retention and update"},
+		{"review is gone", []string{"--db", db, "review"}, ExitUsage, "", "export and update"},
 		{"unknown roots command", []string{"--db", db, "roots", "bogus"}, ExitUsage, "", `unknown roots command "bogus"`},
 		{"roots set without a dir", []string{"--db", db, "roots", "set"}, ExitUsage, "",
 			"filo: roots set takes exactly one DIR (see filo help roots)\n"},

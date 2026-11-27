@@ -15,7 +15,7 @@ import (
 	"github.com/alansav/filo/internal/store"
 )
 
-// TestExportGolden: filo export's whole plain output (docs/design.md, Terminal output, Export): a retention export
+// TestExportGolden: filo export's whole plain output (docs/design.md, Terminal output, Export): a combined export
 // of a directory with a file_date read from a file name, one with nothing to export, and a duplicates export. The CSVs
 // themselves are tested in the round trips.
 func TestExportGolden(t *testing.T) {
@@ -37,8 +37,8 @@ func TestExportGolden(t *testing.T) {
 	}
 	csv := func(name string) string { return filepath.Join(ct.work, name) }
 
-	step("export retention tax", "export", "retention", in("tax"), "-o", csv("l.csv"))
-	step("export retention empty", "export", "retention", in("empty"), "-o", csv("e.csv"))
+	step("export tax", "export", in("tax"), "-o", csv("l.csv"))
+	step("export empty", "export", in("empty"), "-o", csv("e.csv"))
 	step("export duplicates", "export", "duplicates", "-o", csv("my d.csv"))
 
 	got := strings.ReplaceAll(out.String(), ct.root, "<root>") // the root first: it is inside the work directory
@@ -68,20 +68,20 @@ func TestExportReplace(t *testing.T) {
 		}
 	}
 
-	r := filo(ExitError, "y\n", false, "export", "retention", "-o", l)
+	r := filo(ExitError, "y\n", false, "export", "-o", l)
 	contains("no terminal", r.stderr, l+" already exists", "terminal")
 	same("no terminal")
-	filo(ExitUsage, "y\n", true, "export", "retention", "-y", "-o", l)
+	filo(ExitUsage, "y\n", true, "export", "-y", "-o", l)
 	same("-y")
 	for _, answer := range []string{"n\n", "\n", ""} {
-		r = filo(ExitOK, answer, true, "export", "retention", "-o", l)
+		r = filo(ExitOK, answer, true, "export", "-o", l)
 		contains("declined", r.stdout, "Replace "+l+"? [y/N]", "Nothing exported.")
 		lacks("declined", r.stdout, "Export #")
 		same(fmt.Sprintf("answer %q", answer))
 	}
 
-	r = filo(ExitOK, "y\n", true, "export", "retention", "-o", l)
-	contains("yes", r.stdout, "Replace "+l+"? [y/N]", "Export #1 (retention)   2 files")
+	r = filo(ExitOK, "y\n", true, "export", "-o", l)
+	contains("yes", r.stdout, "Replace "+l+"? [y/N]", "Export #1   2 files")
 	contains("CSV", string(mustRead(t, l)), "id,export,directory,name")
 	if fi, err := os.Stat(l); err != nil || fi.Mode().Perm() != 0o600 {
 		t.Errorf("l.csv after replacing: %v, %v; want mode 0600", fi, err)
@@ -111,7 +111,7 @@ func TestExportReplace(t *testing.T) {
 	}
 	before := mustRead(t, l)
 	for _, p := range []string{dir, link, os.DevNull} {
-		r = filo(ExitError, "y\n", true, "export", "retention", "-o", p)
+		r = filo(ExitError, "y\n", true, "export", "-o", p)
 		contains(p, r.stderr, p+" is not a regular file")
 		lacks(p, r.stdout, "Replace")
 	}
@@ -128,13 +128,13 @@ func TestExportReplace(t *testing.T) {
 		t.Fatalf("no snapshot to test with: %v", err)
 	}
 	for _, p := range []string{ct.db, ct.db + ".lock", snaps[0]} {
-		r = filo(ExitError, "y\n", true, "export", "retention", "-o", p)
+		r = filo(ExitError, "y\n", true, "export", "-o", p)
 		contains(p, r.stderr, "is filo's register or one of its files")
 		lacks(p, r.stdout, "Replace")
 	}
 
 	// A command that cannot run asks nothing: a DIR outside every root.
-	r = filo(ExitError, "y\n", true, "export", "retention", ct.work, "-o", l)
+	r = filo(ExitError, "y\n", true, "export", ct.work, "-o", l)
 	lacks("DIR outside the roots", r.stdout, "Replace")
 }
 
@@ -218,15 +218,15 @@ func TestExportScansFirst(t *testing.T) {
 	// Saved since the last scan: in the CSV, after the scan's block.
 	write("tax/new.txt", "new")
 	write("photos/p.jpg", "photo") // outside tax/
-	r := filo(ExitOK, "", false, "export", "retention", ct.in("tax"), "-o", csv("1.csv"))
+	r := filo(ExitOK, "", false, "export", ct.in("tax"), "-o", csv("1.csv"))
 	contains("scan of DIR", r.stdout, "Scan #2   2 files seen", "under tax/", "  - 1 new\n",
-		"Export #1 (retention)   2 files")
+		"Export #1   2 files")
 	contains("scan of DIR", r.stdout, "  - 1 new\n\nNext: filo report\n\nExport #") // exactly filo scan's output
 	contains("CSV of DIR", string(mustRead(t, csv("1.csv"))), ",new.txt,")
 
 	// DIR only: photos/ was not scanned, so a --no-scan export of the whole root does not know p.jpg yet.
-	r = filo(ExitOK, "", false, "export", "retention", "--no-scan", "-o", csv("2.csv"))
-	contains("--no-scan", r.stdout, "Export #2 (retention)   2 files",
+	r = filo(ExitOK, "", false, "export", "--no-scan", "-o", csv("2.csv"))
+	contains("--no-scan", r.stdout, "Export #2   2 files",
 		"  - not scanned first: as of the last scan, 2026-")
 	lacks("--no-scan", r.stdout, "Scan   ")
 	lacks("--no-scan CSV", string(mustRead(t, csv("2.csv"))), "p.jpg")
@@ -257,15 +257,15 @@ func TestExportScansFirst(t *testing.T) {
 
 	// --workers is the scan's: checked as filo scan checks it, and refused with --no-scan.
 	for _, n := range []string{"0", "65", "-1"} {
-		contains("--workers "+n, filo(ExitUsage, "", false, "export", "retention", "--workers", n, "-o",
+		contains("--workers "+n, filo(ExitUsage, "", false, "export", "--workers", n, "-o",
 			csv("w.csv")).stderr, "--workers must be between 1 and 64")
 	}
-	for _, args := range [][]string{{"export", "retention", "-o", csv("w.csv")}, {"export", "duplicates", "-o",
+	for _, args := range [][]string{{"export", "-o", csv("w.csv")}, {"export", "duplicates", "-o",
 		csv("w.csv")}, {"roots", "add", ct.in("tax"), "--no-scan"}} {
 		contains("--workers with --no-scan", filo(ExitUsage, "", false, append(args, "--workers", "2",
 			"--no-scan")...).stderr, "give one or the other")
 	}
-	contains("--workers", filo(ExitOK, "", false, "export", "retention", ct.in("tax"), "--workers", "1", "-o",
+	contains("--workers", filo(ExitOK, "", false, "export", ct.in("tax"), "--workers", "1", "-o",
 		csv("w.csv")).stdout, "Scan #")
 
 	// Ctrl-C during the scan: nothing exported.
@@ -278,7 +278,7 @@ func TestExportScansFirst(t *testing.T) {
 		return reconcile.Summary{}, errors.New("interrupted (9)") // as SQLite reports it: not context.Canceled
 	}
 	t.Cleanup(func() { runScan = real })
-	r = filo(ExitError, "", false, "export", "retention", ct.in("tax"), "-o", csv("c.csv"))
+	r = filo(ExitError, "", false, "export", ct.in("tax"), "-o", csv("c.csv"))
 	contains("Ctrl-C", r.stderr, "interrupted; nothing was exported")
 	if _, err := os.Lstat(csv("c.csv")); err == nil {
 		t.Error("c.csv was written after Ctrl-C")
@@ -293,8 +293,8 @@ func TestExportNoScanLine(t *testing.T) {
 	write, filo, contains := ct.write, ct.filo, ct.contains
 	csv := func(name string) string { return filepath.Join(ct.work, name) }
 
-	r := filo(ExitOK, "", false, "export", "retention", "-o", csv("0.csv"))
-	if !strings.HasPrefix(r.stdout, "Export (retention)   no files") {
+	r := filo(ExitOK, "", false, "export", "-o", csv("0.csv"))
+	if !strings.HasPrefix(r.stdout, "Export   no files") {
 		t.Errorf("empty register:\n%s", r.stdout)
 	}
 
@@ -302,9 +302,9 @@ func TestExportNoScanLine(t *testing.T) {
 	write("photos/a.jpg", "a")
 	filo(ExitOK, "", false, "roots", "add", ct.root, "--no-scan")
 	filo(ExitOK, "", false, "scan", ct.in("tax"))
-	contains("DIR scanned", filo(ExitOK, "", false, "export", "retention", ct.in("tax"), "--no-scan", "-o",
+	contains("DIR scanned", filo(ExitOK, "", false, "export", ct.in("tax"), "--no-scan", "-o",
 		csv("1.csv")).stdout, "  - not scanned first: as of the last scan, ")
-	contains("root not scanned whole", filo(ExitOK, "", false, "export", "retention", "--no-scan", "-o",
+	contains("root not scanned whole", filo(ExitOK, "", false, "export", "--no-scan", "-o",
 		csv("2.csv")).stdout, "  - not scanned first, and "+ct.root+" has never been scanned whole")
 
 	filo(ExitOK, "", false, "scan")
@@ -315,6 +315,6 @@ func TestExportNoScanLine(t *testing.T) {
 	filo(ExitOK, "", false, "roots", "add", second, "--no-scan")
 	contains("duplicates hold every root", filo(ExitOK, "", false, "export", "duplicates", ct.in("tax"), "--no-scan",
 		"-o", csv("d.csv")).stdout, "has never been scanned whole")
-	contains("retention holds its root", filo(ExitOK, "", false, "export", "retention", ct.in("tax"), "--no-scan",
+	contains("retention holds its root", filo(ExitOK, "", false, "export", ct.in("tax"), "--no-scan",
 		"-o", csv("3.csv")).stdout, "  - not scanned first: as of the last scan, ")
 }

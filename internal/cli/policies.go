@@ -97,7 +97,7 @@ func (e *env) policyList(ctx context.Context, s *store.Store) error {
 	if len(ps) == 0 {
 		r.Heading("Policies", view.Where{}, "none yet")
 		r.Blank()
-		r.Next("Next: filo policies add NAME VALUE, or type a policy name in a retention CSV")
+		r.Next("Next: filo policies add NAME VALUE, or type a policy name in the retention column of a CSV from filo export")
 		return nil
 	}
 	day := today() // one date for the whole list
@@ -357,7 +357,7 @@ func (e *env) policyShow(ctx context.Context, s *store.Store, name string) error
 	r.Blank()
 	switch {
 	case len(needs) > 0:
-		r.Next("Next: filo export retention DIR -o FILE, fill in file_date, then filo update FILE")
+		r.Next("Next: filo export DIR -o FILE, fill in file_date, then filo update FILE")
 	case p.Value == "":
 		r.Next("Next: filo policies set " + p.Name + " VALUE to give it one")
 	default:

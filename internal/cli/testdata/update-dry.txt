@@ -1,4 +1,4 @@
-Retention update (dry run)   r.csv . export #1 . 4 rows . <root>
+Update (dry run)   r.csv . export #1 . 4 rows . <root>
 
   [ok] 2 files would be given a retention
   [refused] 2 rows refused

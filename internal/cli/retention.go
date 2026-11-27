@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"path"
 	"path/filepath"
 	"slices"
@@ -18,7 +17,6 @@ import (
 	"github.com/alansav/filo/internal/retention"
 	"github.com/alansav/filo/internal/sheet"
 	"github.com/alansav/filo/internal/store"
-	"github.com/alansav/filo/internal/tagcsv"
 	"github.com/alansav/filo/internal/view"
 )
 
@@ -27,8 +25,8 @@ var now = time.Now
 
 func today() string { return retention.Today(now().Local()) }
 
-// exportKinds are the CSVs filo can export. Each names what the CSV is for.
-var exportKinds = []string{"retention", "duplicates", "tags"}
+// exportKinds are the CSVs filo can export besides the combined one. Each names what the CSV is for.
+var exportKinds = []string{"duplicates"}
 
 // filterFor turns the DIR argument, if any, into a filter on the register and the place a heading names: the root
 // DIR is in and the directory under it, or every root when there is no DIR.
@@ -62,7 +60,7 @@ func (e *env) export(ctx context.Context, dbBefore string, args []string) error 
 		return err
 	}
 	// No word is the combined CSV (docs/design.md, Tags, "The combined CSV"); a directory named like an export is
-	// given as ./tags.
+	// given as ./duplicates.
 	kind := ""
 	if len(pos) > 0 && slices.Contains(exportKinds, pos[0]) {
 		kind, pos = pos[0], pos[1:]
@@ -104,7 +102,7 @@ func (e *env) export(ctx context.Context, dbBefore string, args []string) error 
 	// A scan first, so the CSV holds the files as they are now (docs/design.md, Lifespan, "A scan first").
 	var notScanned string
 	if *noScan {
-		held := f // a retention export holds DIR; a duplicates export every root (a group's copies can be anywhere)
+		held := f // a combined export holds DIR; a duplicates export every root (a group's copies can be anywhere)
 		if kind == "duplicates" {
 			held = store.Filter{}
 		}
@@ -120,49 +118,10 @@ func (e *env) export(ctx context.Context, dbBefore string, args []string) error 
 			e.view.Blank()
 		}
 	}
-	switch kind {
-	case "duplicates":
+	if kind == "duplicates" {
 		return e.exportDuplicates(ctx, s, f, where, csvPath, asked, notScanned)
-	case "tags":
-		return e.exportTags(ctx, s, f, where, csvPath, asked, notScanned)
-	case "":
-		return e.exportFiles(ctx, s, f, where, csvPath, asked, notScanned)
 	}
-	items, err := s.Files(ctx, today(), f)
-	if err != nil {
-		return err
-	}
-	suggested := markNameDates(len(items), func(i int) *store.FileItem { return &items[i] })
-	v := e.view
-	if len(items) == 0 {
-		v.Heading("Export (retention)", where, "no files")
-		notScannedLine(v, notScanned)
-		v.Next("Nothing exported.")
-		return nil
-	}
-
-	id, err := writeExport(csvPath, asked, func(write func(int64) error) (int64, error) {
-		return s.RecordExport(ctx, csvPath, now(), items, write)
-	}, func(w io.Writer, id int64) error { return retention.WriteCSV(w, id, items, time.Local) })
-	if err != nil {
-		return err
-	}
-	undated := 0
-	for _, it := range items {
-		if it.Retention == "" {
-			undated++
-		}
-	}
-	// docs/design.md, Terminal output, Export.
-	v.Heading(fmt.Sprintf("Export #%d (retention)", id), where, report.Plural(int64(len(items)), "file", "files"))
-	v.Blank()
-	v.Count(view.Neutral, report.Count(int64(undated))+" without a retention, "+
-		report.Count(int64(len(items)-undated))+" with one")
-	markedLine(v, suggested)
-	notScannedLine(v, notScanned)
-	v.Blank()
-	v.Next("Next: fill in retention (7y, 18m, forever or a date), then filo update " + shellQuote(csvPath))
-	return nil
+	return e.exportFiles(ctx, s, f, where, csvPath, asked, notScanned)
 }
 
 // markNameDates fills in each blank file_date of the n items (item(i) is the i-th) from the file name where it holds
@@ -287,154 +246,29 @@ func (e *env) update(ctx context.Context, dbBefore string, args []string) error 
 		return fmt.Errorf("%s is a duplicates CSV: filo update records retentions and tags only; carry it out with "+
 			"filo delete %s", path, shellQuote(path))
 	}
-	if tagcsv.IsTagsCSV(data) || tagcsv.LostTags(data) {
-		return e.updateTags(ctx, *db, path, data, *dry, *yes)
+	// A combined CSV that lost its retention or tags column is told by the exports its rows name (docs/design.md,
+	// Tags, "The combined CSV").
+	parsed, err := filecsv.ParseCSV(data)
+	var missing string
+	var exports []int64
+	if errors.Is(err, filecsv.ErrNotFilesCSV) {
+		missing, exports = filecsv.LostColumn(data)
 	}
-	if filecsv.IsFilesCSV(data) {
-		done, err := e.maybeUpdateFiles(ctx, *db, path, data, *dry, *yes)
-		if done || err != nil {
-			return err
-		}
-	}
-	parsed, err := retention.ParseCSV(data)
-	if err != nil {
+	if err != nil && missing == "" {
 		return fmt.Errorf("%s: %w", path, err)
 	}
-	s, err := e.open(ctx, *db)
-	if err != nil {
-		return err
+	s, openErr := e.open(ctx, *db)
+	if openErr != nil {
+		return openErr
 	}
 	defer e.closeStore(s)
-	if !filecsv.IsFilesCSV(data) { // with a tags column, its exports were found not to be combined ones
-		if err := lostColumn(ctx, s, path, retentionExports(parsed.Rows), "tags"); err != nil {
-			return err
-		}
-	}
-	if *yes { // only once the CSV is known to be a retention CSV, so another file gets its own error
-		return usageError{"-y is for a CSV from filo export or export tags; a retention CSV's questions " +
-			"(clearing a retention, creating a policy) are asked in a terminal"}
-	}
-	roots, err := registeredRoots(ctx, s)
 	if err != nil {
-		return err
-	}
-	r := e.view
-	total := len(parsed.Rows) + len(parsed.Problems)
-	title := "Retention update"
-	if *dry {
-		title += " (dry run)"
-	}
-	r.Heading(title, view.Where{Roots: roots}, csvFacts(path, retentionExports(parsed.Rows),
-		report.Plural(int64(total), "row", "rows"))...)
-	r.Blank()
-
-	asking := e.canPrompt()
-	var pr *prompter
-	if asking {
-		pr = newPrompter(e.stdin)
-		pr.end, pr.check = r.Blank, e.outputErr
-		defer pr.close()
-	}
-	asked := false
-	confirm := func(cs []store.Clear) bool {
-		if !asking {
-			return false
+		if lost := lostColumn(ctx, s, path, exports, missing); lost != nil {
+			return lost
 		}
-		asked = true
-		ok, err := e.confirmClears(ctx, pr, roots, cs)
-		return ok && err == nil // a cancelled context also stops the update itself: nothing is recorded
+		return fmt.Errorf("%s: %w", path, err)
 	}
-	askedPolicies := false
-	confirmPolicies := func(ps []store.NewPolicy) bool {
-		if !asking {
-			return false
-		}
-		askedPolicies = true
-		ok, err := e.confirmPolicies(ctx, pr, ps)
-		return ok && err == nil // a cancelled context also stops the update itself: nothing is recorded
-	}
-	res, err := s.UpdateRetentionWith(ctx, parsed.Rows, now(), today(), path, store.UpdateOptions{DryRun: *dry,
-		ConfirmClears: confirm, ConfirmPolicies: confirmPolicies})
-	if err != nil {
-		return interruptedUpdate(err)
-	}
-	if *dry && len(res.NewPolicies) > 0 {
-		showNewPolicies(r, res.NewPolicies)
-		r.Blank()
-	}
-
-	would := func(done, dryRun string) string {
-		if *dry {
-			return dryRun
-		}
-		return done
-	}
-	refused := refusalProblems(roots, parsed.Problems, res.Refusals)
-	if n := len(res.NewPolicies); *dry && n > 0 {
-		r.Count(view.Neutral, report.Plural(int64(n), "policy", "policies")+" would be created (filo update asks "+
-			"first)")
-	}
-	if res.PoliciesCreated > 0 {
-		names := make([]string, len(res.NewPolicies))
-		for i, p := range res.NewPolicies {
-			names[i] = p.Name
-		}
-		r.Count(view.Done, report.Plural(int64(res.PoliciesCreated), "policy", "policies")+" created: "+
-			strings.Join(names, ", "))
-	}
-	if n := res.Set - res.NoValue; n > 0 {
-		r.Count(view.Done, report.Plural(int64(n), "file", "files")+would(" given a retention",
-			" would be given a retention"))
-	}
-	if res.NoValue > 0 {
-		r.Count(view.Attention, report.Plural(int64(res.NoValue), "file", "files")+would(" put on", " would be put on")+
-			" a policy with no value yet: they need a retention until it has one (filo policies set NAME VALUE)")
-	}
-	if res.Cleared > 0 {
-		r.Count(view.Done, report.Plural(int64(res.Cleared), "retention", "retentions")+would(" cleared",
-			" would be cleared (filo update asks first)"))
-	}
-	if res.Unchanged > 0 {
-		r.Count(view.Neutral, report.Plural(int64(res.Unchanged), "row", "rows")+" unchanged")
-	}
-	if res.ClearsSkipped > 0 {
-		why := "not confirmed"
-		if !asked {
-			why = "there is no terminal to ask in; run filo update in a terminal to clear them"
-		}
-		r.Count(view.Attention, report.Plural(int64(res.ClearsSkipped), "retention left as it was",
-			"retentions left as they were")+", though the cell is blank ("+why+")")
-	}
-	if res.PolicyRowsSkipped > 0 {
-		why := "not confirmed"
-		if !askedPolicies {
-			why = "there is no terminal to ask in; run filo update in a terminal to create them"
-		}
-		r.Count(view.Attention, report.Plural(int64(res.PolicyRowsSkipped), "row left as it was", "rows left as "+
-			"they were")+": they name policies not created ("+why+")")
-	}
-	if len(refused) > 0 {
-		r.Count(view.Refused, report.Plural(int64(len(refused)), "row", "rows")+" refused")
-	}
-	if res.Set+res.Cleared+res.Unchanged+res.ClearsSkipped+res.PolicyRowsSkipped+len(refused) == 0 {
-		r.Count(view.Neutral, "nothing to change")
-	}
-	if len(refused) > 0 {
-		r.Blank()
-		r.Problems("Refused: fix these rows in the CSV and run filo update again", view.Refused, refused)
-	}
-	nowPast(r, roots, res.NowPast, *dry, r.Overview())
-	r.Blank()
-	switch {
-	case *dry:
-		r.Next("Dry run: nothing was written.")
-	case len(res.NowPast) > 0:
-		r.Next("Nothing has been deleted. Next: filo delete")
-	}
-	if len(refused) > 0 {
-		return errReported
-	}
-	return nil
+	return e.updateFiles(ctx, s, path, parsed, *dry, *yes)
 }
 
 // csvFacts are an update heading's facts: the CSV's name, its export (when the rows name one), and a count.
@@ -444,17 +278,6 @@ func csvFacts(path string, exports []int64, count string) []string {
 		facts = append(facts, fmt.Sprintf("export #%d", exports[0]))
 	}
 	return append(facts, count)
-}
-
-// retentionExports lists the exports a retention CSV's rows name, each once.
-func retentionExports(rows []store.RetentionRow) []int64 {
-	var out []int64
-	for _, row := range rows {
-		if !slices.Contains(out, row.ExportID) {
-			out = append(out, row.ExportID)
-		}
-	}
-	return out
 }
 
 // nowPast lists the files a change left past their retention, with the hint to check for a typo (docs/design.md,
@@ -510,25 +333,6 @@ func refusalProblems(roots []string, problems []sheet.Problem, refusals []store.
 	return out
 }
 
-// confirmClears lists the retentions blank cells would clear (the first ones, or all with l) and asks once. Only a
-// yes confirms; the other rows are recorded either way.
-func (e *env) confirmClears(ctx context.Context, pr *prompter, roots []string, cs []store.Clear) (bool, error) {
-	r := e.view
-	list := func(max int) {
-		clearList(r, roots, cs, max)
-		r.Blank()
-	}
-	r.Note(view.Attention, report.Plural(int64(len(cs)), "row has", "rows have")+" a blank retention where one is "+
-		"stored. Recording clears it:")
-	list(r.Overview())
-	question := "Clear this retention? The other rows are recorded either way."
-	if len(cs) > 1 {
-		question = fmt.Sprintf("Clear these %s retentions? The other rows are recorded either way.",
-			report.Count(int64(len(cs))))
-	}
-	return e.askYesNo(ctx, pr, question, func() { list(0) })
-}
-
 // clearList lists the retentions blank cells clear, each with the retention and date it had, max of them before
 // "… N more" (0: all).
 func clearList(r *view.Renderer, roots []string, cs []store.Clear, max int) {
@@ -560,15 +364,6 @@ func showNewPolicies(r *view.Renderer, ps []store.NewPolicy) {
 			"rows"))
 	}
 	r.Count(view.Neutral, "they have no value yet: their files need a retention until filo policies set NAME VALUE")
-}
-
-// confirmPolicies lists the policies a CSV would create and asks once. Only a yes creates them; declined, the rows
-// naming them are left alone and the other rows are recorded either way.
-func (e *env) confirmPolicies(ctx context.Context, pr *prompter, ps []store.NewPolicy) (bool, error) {
-	r := e.view
-	showNewPolicies(r, ps)
-	r.Blank()
-	return e.askYesNo(ctx, pr, "Create "+report.Plural(int64(len(ps)), "policy", "policies")+"?", nil)
 }
 
 // interruptedUpdate words a cancelled update: the transaction was not committed.

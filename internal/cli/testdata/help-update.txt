@@ -24,21 +24,9 @@ filo update FILE [--dry-run] [-y]
   (-y answers yes); no, or no terminal without -y, records nothing at all (exit
   1 when there was no terminal to ask in).
 
-  A CSV from export retention is read the same way without tags; a blank
-  retention there clears a stored one after asking, and without a terminal those
-  rows are left alone.
-
-  A tags CSV (from export tags) is told by its header: each tags cell replaces
-  its file's tags. Before removing any tag, filo lists those rows and asks (-y
-  answers yes); without a terminal, and without -y, it leaves them alone. A row
-  is refused, with one line saying why, if for example a tag breaks the spelling
-  rules (see filo help tag), the file's tags changed since the export (by tag,
-  untag or tags rename), or the file is listed twice.
-
   A duplicates CSV (from export duplicates) is refused: its decisions are not
   recorded, but carried out by filo delete FILE.
 
 Flags
   --dry-run                check everything and write nothing
-  -y                       apply without asking (not for a CSV from export
-                           retention)
+  -y                       apply without asking

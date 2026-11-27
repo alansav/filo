@@ -1,7 +1,5 @@
 filo export [DIR] -o FILE [--no-scan] [--workers N]
-filo export retention [DIR] -o FILE [--no-scan] [--workers N]
 filo export duplicates [DIR] -o FILE [--no-scan] [--workers N]
-filo export tags [DIR] -o FILE [--no-scan] [--workers N]
 
   Scans first (DIR only; every root for export duplicates), then writes every
   file under DIR (inside a root), or under every root, as CSV (UTF-8) to FILE. A
@@ -12,15 +10,12 @@ filo export tags [DIR] -o FILE [--no-scan] [--workers N]
   file_date, a date, forever, or a policy name: filo help policies) and tags
   (separated by ;, see filo help tag), correct a name to rename the file, or
   change its directory to move it within its root, then run filo update FILE. A
-  directory named retention, duplicates or tags is given with ./ before it
-  (./tags). A blank file_date is filled in from the file name when the name
-  holds one clear date (2023-03-14, 20230314, or 2023-03 for the month's last
-  day), marked with ! (!2023-03-14): check it and remove the ! to accept it; a
-  period on a row whose date is still marked is refused. On a large system,
-  export one directory at a time.
-
-  export retention writes the same without the tags column; export tags (below)
-  only the tags.
+  directory named duplicates is given with ./ before it (./duplicates). A blank
+  file_date is filled in from the file name when the name holds one clear date
+  (2023-03-14, 20230314, or 2023-03 for the month's last day), marked with !
+  (!2023-03-14): check it and remove the ! to accept it; a period on a row whose
+  date is still marked is refused. On a large system, export one directory at a
+  time.
 
   export duplicates writes each duplicate group (two or more copies of the same
   content; hard links to one file are one copy) with a copy under DIR, with all
@@ -30,11 +25,6 @@ filo export tags [DIR] -o FILE [--no-scan] [--workers N]
   on two or more copies keeps them as separate files, each with its own
   retention; always on every row means the content belongs everywhere. A group
   left blank is left alone. filo delete FILE carries the CSV out.
-
-  export tags writes every file under DIR with its tags in one cell, separated
-  by ; (see filo help tag). Columns: id, export, directory, name, size,
-  modified, tags. Edit the cells, then run filo update FILE: each cell replaces
-  its file's tags.
 
 Flags
   -o FILE                  the CSV to write; an existing file is replaced only

@@ -14,6 +14,9 @@ import (
 	"github.com/alansav/filo/internal/store"
 )
 
+// setTags returns a CSV edit that sets the tags cell of the rows whose name is a key.
+func setTags(values map[string]string) func(map[string]string) { return setCells("tags", values) }
+
 // edits returns a CSV edit that applies each edit in turn.
 func edits(es ...func(map[string]string)) func(map[string]string) {
 	return func(row map[string]string) {
@@ -124,22 +127,21 @@ func TestFilesCSVKinds(t *testing.T) {
 	ct.contains("all refused", filo(ExitError, "", false, "update", csvPath, "-y").stdout, "Update   all.csv",
 		`tags "a*b": a tag cannot hold "*"`)
 
-	r := filepath.Join(work, "r.csv")
-	filo(ExitOK, "", false, "export", "retention", "-o", r, "--no-scan")
-	editCSV(t, r, setRetention(map[string]string{"ideas.txt": "forever"}))
-	own := strings.Replace(string(mustRead(t, r)), ",keep_until\n", ",keep_until,tags\n", 1)
-	if err := os.WriteFile(r, []byte(own), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	ct.contains("own tags column", filo(ExitOK, "", false, "update", r).stdout, "Retention update",
-		"1 file given a retention")
+	// Both columns lost: not a filo CSV.
+	write(strings.Replace(strings.Replace(data, ",keep_until,tags\n", ",keep_until,labels\n", 1), ",retention,",
+		",ret,", 1))
+	ct.contains("both lost", filo(ExitError, "", false, "update", csvPath).stderr, "not a filo CSV")
 
-	// A directory named like an export is given as ./tags.
-	ct.write("tags/x.txt", "x")
+	// A directory named like an export is given as ./duplicates; one named retention or tags, words no export
+	// takes any more, needs nothing.
+	ct.write("duplicates/x.txt", "x")
+	ct.write("tags/y.txt", "y")
 	filo(ExitOK, "", false, "scan")
 	t.Chdir(ct.root)
-	ct.contains("./tags", filo(ExitOK, "", false, "export", "./tags", "-o", filepath.Join(work, "t.csv"),
+	ct.contains("./duplicates", filo(ExitOK, "", false, "export", "./duplicates", "-o", filepath.Join(work, "d.csv"),
 		"--no-scan").stdout, "Export #", "1 file")
+	ct.contains("tags", filo(ExitOK, "", false, "export", "tags", "-o", filepath.Join(work, "t.csv"),
+		"--no-scan").stdout, "Export #", "1 file", "under tags/")
 }
 
 // TestFilesUpdateInterruptedAtPrompt: Ctrl-C at the combined update's question ends the run as interrupted, exit 1,

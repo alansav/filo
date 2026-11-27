@@ -18,7 +18,7 @@ import (
 )
 
 // set is filo set FILE... (docs/design.md, Showing and setting a file's details): a file_date and a retention set by
-// command, by the retention CSV's rules, all or nothing. It asks only when a stored value would be replaced (-y
+// command, by the combined CSV's retention rules, all or nothing. It asks only when a stored value would be replaced (-y
 // answers yes; with no terminal nothing changes); --dry-run shows what it would do.
 func (e *env) set(ctx context.Context, dbBefore string, args []string) error {
 	fs := e.flags("set")

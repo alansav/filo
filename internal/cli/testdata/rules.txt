@@ -16,7 +16,7 @@ Dry run: nothing was changed.
 $ filo rules add <root>/bank *Statement* statements
 Done   bank . *Statement* -> statements (7y) . policy set on 3 files . 3 need a file_date . <root>
 
-Next: filo export retention <root>/bank -o FILE, fill in file_date, then filo update FILE
+Next: filo export <root>/bank -o FILE, fill in file_date, then filo update FILE
 
 $ filo rules add <root>/bank *bank* banking
 Done   bank . *bank* -> banking . policy set on 1 file . <root>

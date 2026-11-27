@@ -13,7 +13,7 @@ Retention   7 files and symlinks
         1    0 B   .
         1    8 B   docs
         1    5 B   notes
-    Next: filo export retention [DIR] -o FILE, then filo update FILE, or filo rules add DIR POLICY
+    Next: filo export [DIR] -o FILE, then filo update FILE, or filo rules add DIR POLICY
 
 Largest files   top 5
     size

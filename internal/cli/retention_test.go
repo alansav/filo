@@ -22,7 +22,7 @@ func setNow(t *testing.T, at time.Time) {
 	t.Cleanup(func() { now = old })
 }
 
-// editCSV rewrites an exported retention CSV: edit gets each row by column name.
+// editCSV rewrites an exported CSV: edit gets each row by column name.
 func editCSV(t *testing.T, path string, edit func(row map[string]string)) {
 	t.Helper()
 	data, err := os.ReadFile(path)
@@ -128,19 +128,19 @@ func TestRetentionRoundTrip(t *testing.T) {
 
 	filo(ExitOK, "", false, "roots", "add", root)
 	contains("report", filo(ExitOK, "", false, "report").stdout,
-		"[!] 4 need a retention (no retention 4)", "   docs\n", "filo export retention")
+		"[!] 4 need a retention (no retention 4)", "   docs\n", "Next: filo export [DIR] -o FILE")
 
 	// Export: -o is required, and an existing file is not replaced without a terminal to ask in (TestExportReplace).
 	r1 := filepath.Join(work, "r1.csv")
-	filo(ExitUsage, "", false, "export", "retention")
+	filo(ExitUsage, "", false, "export")
 	filo(ExitUsage, "", false, "export", "docs", "notes", "-o", r1) // at most one DIR
-	contains("export", filo(ExitOK, "", false, "export", "retention", "-o", r1).stdout,
-		"Export #1 (retention)   4 files", "  - 4 without a retention, 0 with one\n",
+	contains("export", filo(ExitOK, "", false, "export", "-o", r1).stdout,
+		"Export #1   4 files", "  - 4 without a retention, 0 with one\n",
 		"  [!] 1 file_date read from the file name, marked !: remove the ! to accept it\n",
-		"Next: fill in retention (7y, 18m, forever or a date), then filo update "+r1+"\n")
-	contains("export again", filo(ExitError, "", false, "export", "retention", "-o", r1).stderr, "already exists")
-	contains("CSV", string(mustRead(t, r1)), "id,export,directory,name,size,modified,file_date,retention,keep_until\n",
-		","+root+"/docs,2023-03 invoice.pdf,1,", ",!2023-03-31,,\n", // file_date read from the name, marked
+		"then filo update "+r1+"\n")
+	contains("export again", filo(ExitError, "", false, "export", "-o", r1).stderr, "already exists")
+	contains("CSV", string(mustRead(t, r1)), "id,export,directory,name,size,modified,file_date,retention,keep_until,tags\n",
+		","+root+"/docs,2023-03 invoice.pdf,1,", ",!2023-03-31,,,\n", // file_date read from the name, marked
 		","+root+"/📷 Pictures,🏖️ beach.jpg,4,")
 
 	// Set retentions: a period from the file_date read from the name and accepted (already past), forever, a fixed
@@ -149,7 +149,7 @@ func TestRetentionRoundTrip(t *testing.T) {
 	editCSV(t, r1, accepting(setRetention(map[string]string{"a.txt": "2027-01-01", "2023-03 invoice.pdf": "3y",
 		"c.txt": "2027-02-29", "🏖️ beach.jpg": "Forever"})))
 	r := filo(ExitError, "", false, "update", r1, "--dry-run")
-	contains("dry run", r.stdout, "Retention update (dry run)   r1.csv . export #1 . 4 rows . "+root,
+	contains("dry run", r.stdout, "Update (dry run)   r1.csv . export #1 . 4 rows . "+root,
 		"Dry run: nothing was written.", "3 files would be given a retention", "1 file would be past its retention")
 	wantDates("after a dry run", map[string]string{"a.txt": " undated"})
 	r = filo(ExitError, "", false, "update", r1)
@@ -166,7 +166,8 @@ func TestRetentionRoundTrip(t *testing.T) {
 		"📷 Pictures/🏖️ beach.jpg": "forever forever"})
 
 	// The same CSV again changes nothing. Editing it again replaces what it set; a period on a file without a
-	// file_date is refused; typing in keep_until is refused.
+	// file_date is refused; typing in keep_until is refused; a blank retention clears one only once confirmed, so
+	// with no terminal nothing is recorded.
 	contains("update again", filo(ExitError, "", false, "update", r1).stdout, "3 rows unchanged")
 	editCSV(t, r1, setRetention(map[string]string{"2023-03 invoice.pdf": "", "c.txt": "7y"}))
 	editCSV(t, r1, setCells("file_date", map[string]string{"2023-03 invoice.pdf": ""}))
@@ -174,23 +175,23 @@ func TestRetentionRoundTrip(t *testing.T) {
 	r = filo(ExitError, "", false, "update", r1)
 	contains("re-edited", r.stdout, "docs/c.txt: retention 7y needs a file_date",
 		`a.txt: keep_until was changed to "2030-01-01", but filo works it out; change retention instead`)
-	contains("re-edited, no terminal", r.stdout, "[!] 1 retention left as it was, though the cell is blank (there "+
-		"is no terminal")
+	contains("re-edited, no terminal", r.stdout, "[!] nothing recorded: there is no terminal to ask in")
+	wantDates("re-edited, no terminal", map[string]string{"docs/2023-03 invoice.pdf": "2026-03-31 expired"})
 	editCSV(t, r1, setCells("keep_until", map[string]string{"a.txt": ""}))
 	editCSV(t, r1, setCells("file_date", map[string]string{"c.txt": "2026-01-15"}))
 	r = filo(ExitOK, "y\n", true, "update", r1)
-	contains("re-edited, confirmed", r.stdout, "[!] 1 row has a blank retention where one is stored. Recording "+
-		"clears it:", "    3y          2026-03-31   docs/2023-03 invoice.pdf",
-		"Clear this retention? The other rows are recorded either way. [y/N/l]", "[ok] 1 file given a retention",
+	contains("re-edited, confirmed", r.stdout, "[!] 1 retention is cleared by a blank cell:",
+		"    3y          2026-03-31   docs/2023-03 invoice.pdf",
+		"Apply the update? Nothing is recorded otherwise. [y/N/l]", "[ok] 1 file given a retention",
 		"[ok] 1 retention cleared")
 	wantDates("re-edited", map[string]string{"docs/c.txt": "2033-01-15 kept", "docs/2023-03 invoice.pdf": " undated"})
 
 	// A day later, the re-export shows what was set, with keep_until worked out.
 	setNow(t, day(12))
 	r2 := filepath.Join(work, "r2.csv")
-	filo(ExitOK, "", false, "export", "retention", "-o", r2)
-	contains("re-export", string(mustRead(t, r2)), ",2026-01-15,7y,2033-01-15\n", ",,forever,forever\n",
-		",,2027-01-01,2027-01-01\n", ",!2023-03-31,,\n") // its file_date was cleared: read from the name again
+	filo(ExitOK, "", false, "export", "-o", r2)
+	contains("re-export", string(mustRead(t, r2)), ",2026-01-15,7y,2033-01-15,\n", ",,forever,forever,\n",
+		",,2027-01-01,2027-01-01,\n", ",!2023-03-31,,,\n") // its file_date was cleared: read from the name again
 
 	// A file past its retention is listed by delete and the report.
 	editCSV(t, r2, setRetention(map[string]string{"2023-03 invoice.pdf": "2026-11-10", "a.txt": "2027-02-01"}))
@@ -208,7 +209,7 @@ func TestRetentionRoundTrip(t *testing.T) {
 
 	// A file changed since the export is refused; once past its retention, a changed file needs a new one.
 	r3 := filepath.Join(work, "r3.csv")
-	filo(ExitOK, "", false, "export", "retention", in("docs"), "-o", r3)
+	filo(ExitOK, "", false, "export", in("docs"), "-o", r3)
 	write("docs/c.txt", "changed")
 	write("docs/2023-03 invoice.pdf", "changed too")
 	filo(ExitOK, "", false, "scan")
@@ -219,7 +220,7 @@ func TestRetentionRoundTrip(t *testing.T) {
 	contains("delete after a change", filo(ExitOK, "", false, "delete").stdout, "No files are past their retention.")
 
 	// A row added in the spreadsheet is refused.
-	if err := os.WriteFile(r3, append(mustRead(t, r3), []byte("9999,3,/x,y,1,m,,2027-01-01,\n")...), 0o600); err != nil {
+	if err := os.WriteFile(r3, append(mustRead(t, r3), []byte("9999,3,/x,y,1,m,,2027-01-01,,\n")...), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	contains("added row", filo(ExitError, "", false, "update", r3).stdout,
@@ -235,22 +236,34 @@ func mustRead(t *testing.T, path string) []byte {
 	return b
 }
 
-func TestUpdateNotARetentionCSV(t *testing.T) {
-	dir := t.TempDir()
-	env := map[string]string{"FILO_DB": filepath.Join(dir, "filo.db")}
-	old := filepath.Join(dir, "old.csv")
-	if err := os.WriteFile(old, []byte("id,export,directory,name,size,modified,keep_until\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	r := run(t, context.Background(), env, "update", old)
-	if r.code != ExitError || !strings.Contains(r.stderr, "from an older filo; export again with: filo export retention") {
-		t.Errorf("code %d\n%s", r.code, r.stderr)
+// TestUpdateNotAFilesCSV: a CSV without the combined CSV's columns is refused whole, before the register is opened:
+// one from the retention or tags exports (removed, roadmap 40), from an older filo, or anything else.
+func TestUpdateNotAFilesCSV(t *testing.T) {
+	for _, tc := range []struct{ name, header string }{
+		{"retention CSV", "id,export,directory,name,size,modified,file_date,retention,keep_until\n1,1,/x,a,1,m,,7y,\n"},
+		{"tags CSV", "id,export,directory,name,size,modified,tags\n1,1,/x,a,1,m,urgent\n"},
+		{"older filo", "id,export,directory,name,size,modified,keep_until\n"},
+		{"anything", "a,b\n1,2\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			db := filepath.Join(dir, "filo.db")
+			env := map[string]string{"FILO_DB": db}
+			path := filepath.Join(dir, "x.csv")
+			if err := os.WriteFile(path, []byte(tc.header), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			r := run(t, context.Background(), env, "update", path)
+			if r.code != ExitError || !strings.Contains(r.stderr, "not a filo CSV: the header needs id, export, "+
+				"retention and tags columns") {
+				t.Errorf("code %d\n%s", r.code, r.stderr)
+			}
+		})
 	}
 }
 
 // TestUpdateGolden: filo update's whole plain output for the designed scenarios (docs/design.md, Terminal output):
-// a retention update with refusals and the typo warning, a dry run, a clear confirmed after listing with l, and a
-// duplicates update with refusals and a separate content, confirmed.
+// an update of retentions with refusals and the typo warning, a dry run, and a clear confirmed after listing with l.
 func TestUpdateGolden(t *testing.T) {
 	ct := newCLITest(t)
 	setNow(t, time.Date(2026, 11, 14, 12, 0, 0, 0, time.Local))
@@ -261,18 +274,17 @@ func TestUpdateGolden(t *testing.T) {
 	ct.write("tax/2020 return.pdf", "tax")
 	filo(ExitOK, "", false, "roots", "add", root)
 	rcsv := filepath.Join(work, "r.csv")
-	filo(ExitOK, "", false, "export", "retention", "-o", rcsv)
+	filo(ExitOK, "", false, "export", "-o", rcsv)
 	editCSV(t, rcsv, accepting(setRetention(map[string]string{"2023-01-01 coffee.pdf": "7d", "2019-03.pdf": "2027-02-29",
 		"old draft.txt": "7y", "2020 return.pdf": "forever"})))
-	golden(t, "update-retention-dry.txt", root, filo(ExitError, "", false, "update", "--dry-run", rcsv).stdout)
-	golden(t, "update-retention.txt", root, filo(ExitError, "", false, "update", rcsv).stdout)
+	golden(t, "update-dry.txt", root, filo(ExitError, "", false, "update", "--dry-run", rcsv).stdout)
+	golden(t, "update.txt", root, filo(ExitError, "", false, "update", rcsv).stdout)
 	// A new export shows the stored retentions; blanking two clears them: listed, l lists them again in full, then
 	// yes.
 	r2 := filepath.Join(work, "r2.csv")
-	filo(ExitOK, "", false, "export", "retention", "-o", r2)
+	filo(ExitOK, "", false, "export", "-o", r2)
 	editCSV(t, r2, setRetention(map[string]string{"2020 return.pdf": "", "2023-01-01 coffee.pdf": ""}))
-	golden(t, "update-retention-clear.txt", root, filo(ExitOK, "l\ny\n", true, "update", r2).stdout)
-
+	golden(t, "update-clear.txt", root, filo(ExitOK, "l\ny\n", true, "update", r2).stdout)
 }
 
 // TestCSVTooLarge: filo update and filo delete FILE.csv refuse a CSV over sheet.MaxSize in one line, without

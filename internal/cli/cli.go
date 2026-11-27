@@ -191,7 +191,7 @@ func (e *env) run(ctx context.Context, args []string) error {
 	case "indexes":
 		return e.indexes(ctx, *db, rest)
 	case "review":
-		return usageError{"review was replaced by export retention and update; see filo help"}
+		return usageError{"review was replaced by export and update; see filo help"}
 	default:
 		return usageError{fmt.Sprintf("unknown command %q", cmd)}
 	}

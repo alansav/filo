@@ -7,15 +7,11 @@ Commands
   scan [DIR]               scan every root, or DIR inside a root
   report [--top N]         totals, files needing a retention, largest files,
                            duplicates, events
-  export retention [DIR] -o FILE
-                           write every file under DIR (or every root) with its
-                           retention, as CSV
+  export [DIR] -o FILE     write every file under DIR (or every root) with its
+                           retention and tags, as CSV
   export duplicates [DIR] -o FILE
                            write the duplicate groups with a copy under DIR, as
                            CSV
-  export tags [DIR] -o FILE
-                           write every file under DIR (or every root) with its
-                           tags, as CSV
   update FILE [--dry-run]  record the retentions or tags edited in an exported
                            CSV
   delete [DIR] [-y]        delete the files past their retention, after asking

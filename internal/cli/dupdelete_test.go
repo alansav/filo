@@ -97,7 +97,7 @@ func (d dupTest) groups() int {
 func (d dupTest) setRetentions(values map[string]string) {
 	d.t.Helper()
 	p := filepath.Join(d.work, "r-"+strconv.FormatInt(time.Now().UnixNano(), 36)+".csv")
-	d.filo(ExitOK, "", false, "export", "retention", "-o", p)
+	d.filo(ExitOK, "", false, "export", "-o", p)
 	editCSV(d.t, p, func(row map[string]string) {
 		rel, _ := filepath.Rel(d.root, filepath.Join(row["directory"], row["name"]))
 		if v, ok := values[filepath.ToSlash(rel)]; ok {
@@ -382,7 +382,7 @@ func TestDuplicatesDeleteAsking(t *testing.T) {
 	d.there("declined", all)
 
 	r := filepath.Join(d.work, "r.csv")
-	d.filo(ExitOK, "", false, "export", "retention", "-o", r)
+	d.filo(ExitOK, "", false, "export", "-o", r)
 	d.contains("a retention CSV", d.filo(ExitError, "", false, "delete", r).stderr, "this is a retention CSV")
 }
 
