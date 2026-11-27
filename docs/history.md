@@ -889,6 +889,41 @@ a declined question records nothing), the round trips and goldens through `filo 
 `update-dry.txt` and `update-clear.txt`, renamed from `update-retention*`; `tags-csv.txt` removed). Checked by hand on
 a throwaway tree: `export retention` exports a directory named `retention`, an old retention CSV is not a filo CSV.
 
+## The tag index's find page
+
+Roadmap 44, designed with the person and built on 2026-11-27 on branch `improvements` (the person: one feature
+branch and one PR at the end of the week), right after 40. With about 100 tags, browsing one tag at a time was the
+friction. Designed topic by topic: matching (either value within a key, keys and bare tags all, counts that narrow);
+placement (the person first asked for one page at `~` with directories as a filter, maybe no indexes; since every
+device opens the index from the synced `~/Files`, indexes stay as they are and each page gets a directory filter;
+the person keeps one at `~` and one at `~/Files`; offering an index at the top of a synced directory is noted for
+9a); the tag picker (one box suggesting tags, collapsed keys, chips); everything inline in `NAME.html` (the person
+had checked a script and an external stylesheet run on all five devices); untrusted names (JSON, `textContent`,
+links from Go, a Content-Security-Policy with no network); a preview pane (the person's idea); one machine keeps a
+synced index until 9c (Filo runs on the laptop only for now). The device check with a test page was skipped.
+
+Commits: the design; Node 26 LTS in the Containerfile (the person agreed to the dependency, for tests only; the image
+build itself was not run here, only its download, checksum and extraction); the script's logic with `node --test`
+tests run from `TestFindScript`; the find page (the list of keys moved to `.NAME/index.html`, a "Find files" link
+on every static page, `layout` 2); a gofmt fix for the previous commit, which was committed although `gofmt -l`
+flagged it (the check chain now stops before committing); the preview pane; README and help.
+
+The code review (medium) found three important issues. Fixed: tags were suggested only among files whose names held
+the typed text, so typing a tag's name usually suggested nothing (the page test had typed a word that was in a file
+name); "Show more" never hid (a rule's `display` beat the `hidden` attribute); Chrome blocks its PDF viewer in a
+sandboxed frame, so PDFs now preview in an embed declared `application/pdf` (the person's choice; design.md
+changed). Nits fixed: the header lost its tag count; a tag missing from the index's list would have been shown as
+another tag (now an error); a stale comment; a test helper that could panic; HEIC pictures outside Safari (the pane
+switches to "No preview" on a load error, the person's choice). Fixing the policy test also showed it had passed
+only by luck: `html/template` writes a `+` in an attribute as `&#43;`, and the test now reads the attribute as a
+browser does.
+
+Tests: `find_test.js` (matching, facets, suggestions, subdirectories, the address, the kind of preview, and the
+drawing code on a fake DOM), `TestFindScript`, `TestRenderFindPage` (the policy against what is inlined, the data),
+`TestRenderEscapes` (hostile names in the data, a tag named `</script>`), the goldens. Checked on a throwaway tree:
+the page's data parses and its script's hash is in the policy. Not checked in a browser or on the devices yet: how
+the page looks and behaves there, PDF previews on each device.
+
 ## Notes on decisions
 
 Short notes taken out of `design.md` on 2026-11-17, by the section they were in.

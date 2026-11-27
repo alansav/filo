@@ -56,8 +56,7 @@ complexity scores (1 to 10, Claude's estimates) are still to be settled with the
 
 Next, agreed 2026-11-27 (friction week, on the `improvements` branch, after the combined CSV, 39 renaming by the
 `name` cell, 41 no `bin`/`obj` special case, 42 moving by the `directory` cell and 40 removing the retention and tags
-exports, all built that day): 44 the tag index's find page (agreed the same day, being built, see `design.md`, Tag
-index pages); then the list below.
+exports, all built that day, and 44 the tag index's find page, built the same evening): the list below.
 
 1. 36 bash completion
 2. 9b device ID, 9a marking synced directories, 9c sharing decisions

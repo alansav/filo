@@ -22,7 +22,7 @@ register and report; retention through the CSV (`filo export`, `filo update`); `
 FILE.csv`, `filo duplicates`); the terminal output (every command prints through `internal/view`); named retention
 policies (`filo policies`); directory rules (`filo rules`); showing and setting a file's details (`filo show`, `filo
 set`, `filo get`); finding files (`filo find`); tags (`filo tag`, `untag`, `tags`, `find --tag`); tag index pages
-(`filo indexes`); the combined CSV (`filo export [DIR] -o FILE`, the one CSV for retentions and tags since the
+(`filo indexes`), whose `NAME.html` is a find page with a script (tested with Node from `go test`); the combined CSV (`filo export [DIR] -o FILE`, the one CSV for retentions and tags since the
 retention and tags exports were removed), renaming by its `name` cell and moving by its `directory` cell (all on
 branch `improvements` until merged). What is next is in `docs/roadmap.md`, Priority (2026-11-27: 36 bash completion
 and the sync items).
