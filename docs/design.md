@@ -1946,6 +1946,12 @@ on the person's phone opens the file).
   index, created only where nothing exists, replaced or removed only while still what Filo wrote, and a whole index
   removed only by `filo indexes remove`. `internal/tagindex` is the only code that writes or removes them. They are
   Filo's files, not the person's: `internal/dispose` stays the only code that deletes the person's files.
+  Every look, write, rename and removal goes through the directories opened from the index's directory down, as
+  `internal/dispose` reaches a file: the index's directory, `.NAME/` and each key's directory, each opened through
+  the one above it and checked to be a real directory (never a symlink) and the very one seen. A directory swapped
+  for a symlink while the pages are written (by another device syncing the directory) is then never followed, so no
+  page or temporary file lands outside the index's files. Only `filo indexes remove`'s list of what it will remove
+  looks by path: it changes nothing.
 - **When the pages are written.** At the end of every run that committed a change to the register (as the snapshot
   is, so no list of commands is kept), before the snapshot, and by `add` and `refresh`. A run that only read writes
   none. Data first (the person's idea): Filo builds each index's data, hashes it (with the version of the pages'
