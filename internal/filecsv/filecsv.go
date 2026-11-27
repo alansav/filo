@@ -1,7 +1,7 @@
 // Package filecsv writes and reads the combined CSV (docs/design.md, Tags, "The combined CSV"): every present file
-// with its file_date, retention, keep_until and tags, so both are edited in one pass. Its retention half is read as
-// package retention reads a retention CSV and its tags cell as package tagcsv reads one; the register side (listing
-// files, recording exports, applying updates) is in package store.
+// with its file_date, retention, keep_until and tags, so both are edited in one pass. Its retention cells are read
+// with package retention's rules and its tags cell with package tagcsv's; the register side (listing files,
+// recording exports, applying updates) is in package store.
 package filecsv
 
 import (
@@ -20,20 +20,13 @@ import (
 	"github.com/alansav/filo/internal/tagcsv"
 )
 
-// Header is the CSV's columns, in order: the retention CSV's, then tags. The update finds columns by name, so a
+// Header is the CSV's columns, in order: retention.Header (the file and its retention), then tags. The update finds columns by name, so a
 // spreadsheet may reorder them or add its own; it reads id, export, file_date, retention and tags, and checks that
 // keep_until was left alone.
 var Header = append(append([]string{}, retention.Header...), "tags")
 
 // ErrNotFilesCSV means the header lacks the columns the update needs.
 var ErrNotFilesCSV = errors.New("not a filo CSV: the header needs id, export, retention and tags columns")
-
-// IsFilesCSV reports whether data's header has the columns of a combined CSV: id, export, retention and tags. A
-// retention CSV given a tags column of the person's own has them too: which it is, the exports its rows name say.
-func IsFilesCSV(data []byte) bool {
-	sh, _ := sheet.Open(data, "id", "export", "retention", "tags")
-	return sh != nil && !sh.Has("group")
-}
 
 // LostColumn reports, for a CSV that is not a combined one, the column it lacks if it has all the others the update
 // reads (id, export, and retention or tags), with every export its rows name, each once; missing is "" otherwise.

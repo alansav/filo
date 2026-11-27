@@ -62,8 +62,8 @@ func TestReadCSVRefusesOtherCSVs(t *testing.T) {
 		{"the first design's CSV, with a delete column",
 			sheet.BOM + "id,export,group,copies,directory,name,size,modified,file_date,retention,keep_until,delete\r\n" +
 				"1,1,1,2,/r,x,1,2026-11-15 10:00,,,,Y\r\n", ErrOlderCSV},
-		{"a retention CSV",
-			sheet.BOM + "id,export,directory,name,size,modified,file_date,retention,keep_until\r\n", ErrRetentionCSV},
+		{"a CSV from filo export",
+			sheet.BOM + "id,export,directory,name,size,modified,file_date,retention,keep_until,tags\r\n", ErrFilesCSV},
 		{"no action column", sheet.BOM + "id,export,group,copies\r\n", ErrNoAction},
 		{"not a filo CSV", "a,b,c\r\n1,2,3\r\n", ErrNotDuplicatesCSV},
 	}

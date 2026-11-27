@@ -1,13 +1,10 @@
-// Package retention reads and writes the retention CSV: every present file with its file_date, retention and the date it
-// is kept until, works out keep_until from a retention, and reads dates from file names. The register
-// side (listing files, recording exports, applying updates) is in package store.
+// Package retention reads the retention cells of the combined CSV (file_date, retention and keep_until, the date a
+// file is kept until), works out keep_until from a retention, and reads dates from file names. The register side
+// (listing files, recording exports, applying updates) is in package store; the CSV itself is package filecsv's.
 package retention
 
 import (
-	"errors"
 	"fmt"
-	"io"
-	"strconv"
 	"strings"
 	"time"
 
@@ -15,9 +12,9 @@ import (
 	"github.com/alansav/filo/internal/store"
 )
 
-// Header is the CSV's columns, in order. The update finds columns by name, so a spreadsheet may reorder them or add
-// its own; it reads only id, export, file_date and retention, and checks that keep_until (worked out by filo, for
-// display) was left alone.
+// Header is the combined CSV's columns up to its retention cells, in order (package filecsv adds tags). The update
+// finds columns by name, so a spreadsheet may reorder them or add its own; of these it reads id, export, file_date
+// and retention, and checks that keep_until (worked out by filo, for display) was left alone.
 var Header = []string{"id", "export", "directory", "name", "size", "modified", "file_date", "retention", "keep_until"}
 
 const dateLayout = store.DateLayout
@@ -187,102 +184,8 @@ func isDigit(c byte) bool { return c >= '0' && c <= '9' }
 // Today is t's date in its location, as YYYY-MM-DD.
 func Today(t time.Time) string { return t.Format(dateLayout) }
 
-// WriteCSV writes items as one export: the file_date, retention and keep_until they carry (the caller fills in
-// file_date from the name first, and records the same values with the export). Times are shown in loc.
-func WriteCSV(w io.Writer, exportID int64, items []store.FileItem, loc *time.Location) error {
-	cw, err := sheet.NewWriter(w, Header)
-	if err != nil {
-		return err
-	}
-	ex := strconv.FormatInt(exportID, 10)
-	for _, it := range items {
-		rec := append([]string{strconv.FormatInt(it.FileID, 10), ex},
-			sheet.FileCells(it.RootPath, it.Path, it.Size, it.MtimeNS, loc)...)
-		rec = append(rec, it.FileDate, it.Retention, it.KeepUntil)
-		if err := cw.Write(rec); err != nil {
-			return err
-		}
-	}
-	cw.Flush()
-	return cw.Error()
-}
-
-// Parsed is what ReadCSV found.
-type Parsed struct {
-	Rows     []store.RetentionRow // every readable row; the register decides which changed
-	Problems []sheet.Problem
-}
-
-var (
-	// ErrNotRetentionCSV means the file has no header with the columns the update needs.
-	ErrNotRetentionCSV = errors.New("not a filo retention CSV: the header needs id, export and retention columns")
-	// ErrOldCSV means the file is a review or retention CSV from an older filo.
-	ErrOldCSV = errors.New("this CSV is from an older filo; export again with: filo export retention")
-	// ErrNoRetention means a current retention CSV lost its retention column (deleted or renamed in the spreadsheet).
-	ErrNoRetention = errors.New("the CSV has no retention column, which filo update needs; put it back with that " +
-		"name, or export again")
-)
-
-// ReadCSV reads an edited retention CSV, as spreadsheets save it (see package sheet). A row listed more than once
-// is refused every time it appears, rather than guessing which one is meant.
-func ReadCSV(r io.Reader) (Parsed, error) {
-	data, err := sheet.ReadAll(r)
-	if err != nil {
-		return Parsed{}, err
-	}
-	return ParseCSV(data)
-}
-
-// ParseCSV is ReadCSV on a CSV already read (with sheet.ReadFile or sheet.ReadAll), so it is not copied again.
-func ParseCSV(data []byte) (Parsed, error) {
-	var p Parsed
-	if len(data) > sheet.MaxSize {
-		return p, sheet.ErrTooLarge
-	}
-	sh, headers := sheet.Open(data, "id", "export", "retention")
-	if sh == nil {
-		for _, cols := range headers {
-			if sheet.HasAll(cols, "id", "export", "file_date") {
-				return p, ErrNoRetention // a current CSV without its retention column
-			}
-		}
-		for _, cols := range headers {
-			if sheet.HasAll(cols, "id", "export", "review_date") || sheet.HasAll(cols, "id", "export", "keep_until") {
-				return p, ErrOldCSV
-			}
-		}
-		return p, ErrNotRetentionCSV
-	}
-
-	err := sh.Each(func(row sheet.Row) {
-		bad := func(format string, args ...any) {
-			p.Problems = append(p.Problems, sheet.Problem{Line: row.Line, Msg: fmt.Sprintf(format, args...)})
-		}
-		id, ex, problem := sheet.ReadIDs(row, "file_date or retention")
-		if problem != "" {
-			bad("%s", problem)
-			return
-		}
-		rr, problem := ReadRow(sh, row, id, ex)
-		if problem != "" {
-			bad("%s", problem)
-			return
-		}
-		p.Rows = append(p.Rows, rr)
-	})
-	if err != nil {
-		return p, err // a broken quote: csv says where
-	}
-	p.Rows = sheet.DropRepeated(p.Rows, func(r store.RetentionRow) [2]int64 { return [2]int64{r.ExportID, r.FileID} },
-		func(r store.RetentionRow) {
-			p.Problems = append(p.Problems, sheet.Problem{Line: r.Line,
-				Msg: fmt.Sprintf("file %d of export #%d is listed more than once", r.FileID, r.ExportID)})
-		})
-	return p, nil
-}
-
 // ReadRow reads a row's retention cells, the file_date and keep_until ones if the sheet has them, for the file id of
-// export ex: the row, or why it is refused. The combined CSV reads its retention half with it too.
+// export ex: the row, or why it is refused.
 func ReadRow(sh *sheet.Sheet, row sheet.Row, id, ex int64) (store.RetentionRow, string) {
 	rr := store.RetentionRow{Line: row.Line, ExportID: ex, FileID: id}
 	var err error

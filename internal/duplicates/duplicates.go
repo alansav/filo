@@ -29,15 +29,15 @@ var (
 	ErrNotDuplicatesCSV = errors.New("not a filo duplicates CSV: the header needs id, export, group and action columns")
 	// ErrOlderCSV means a duplicates CSV from the first design, with a delete column of Y and N.
 	ErrOlderCSV = errors.New("this CSV is from an older export (a delete column of Y and N): export again")
-	// ErrRetentionCSV means a retention CSV, which filo update reads.
-	ErrRetentionCSV = errors.New("this is a retention CSV: record it with filo update")
+	// ErrFilesCSV means a CSV from filo export (a retention column and no group column), which filo update reads.
+	ErrFilesCSV = errors.New("this is a CSV from filo export: record it with filo update")
 	// ErrNoAction means a duplicates CSV lost its action column (deleted or renamed in the spreadsheet).
 	ErrNoAction = errors.New("the CSV has no action column; put it back with that name, or export again")
 )
 
 // IsDuplicatesCSV reports whether data's header names a duplicates CSV, of this design or the first one: it has a
 // group column and an action or delete column, or a group column and no retention column (one whose action column was
-// lost, which ReadCSV then explains). A retention CSV with a group column of the person's own stays a retention CSV.
+// lost, which ReadCSV then explains). A CSV from filo export with a group column of the person's own stays one.
 func IsDuplicatesCSV(data []byte) bool {
 	sh, _ := sheet.Open(data, "id", "export", "group")
 	return sh != nil && (sh.Has("action") || sh.Has("delete") || !sh.Has("retention"))
@@ -120,7 +120,7 @@ type Parsed struct {
 }
 
 // ReadCSV reads an edited duplicates CSV, as spreadsheets save it (see package sheet). A CSV of the first design, a
-// retention CSV, or one without an action column is refused whole. A row whose export or group cannot be read is a
+// CSV from filo export, or one without an action column is refused whole. A row whose export or group cannot be read is a
 // problem of its line; a row with another cell that cannot be read is kept, to refuse its group (see Plan).
 func ReadCSV(r io.Reader) (Parsed, error) {
 	data, err := sheet.ReadAll(r)
@@ -141,7 +141,7 @@ func ParseCSV(data []byte) (Parsed, error) {
 	case sh == nil:
 		return p, ErrNotDuplicatesCSV
 	case !sh.Has("group") && sh.Has("retention"):
-		return p, ErrRetentionCSV
+		return p, ErrFilesCSV
 	case !sh.Has("group"):
 		return p, ErrNotDuplicatesCSV
 	case sh.Has("delete") && !sh.Has("action"):

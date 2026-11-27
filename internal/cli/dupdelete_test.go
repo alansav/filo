@@ -383,7 +383,8 @@ func TestDuplicatesDeleteAsking(t *testing.T) {
 
 	r := filepath.Join(d.work, "r.csv")
 	d.filo(ExitOK, "", false, "export", "-o", r)
-	d.contains("a retention CSV", d.filo(ExitError, "", false, "delete", r).stderr, "this is a retention CSV")
+	d.contains("a CSV from filo export", d.filo(ExitError, "", false, "delete", r).stderr,
+		"this is a CSV from filo export")
 }
 
 // TestDuplicatesDeleteGolden: filo delete FILE.csv's whole plain output (docs/design.md, Terminal output): a run

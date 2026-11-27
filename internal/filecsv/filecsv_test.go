@@ -36,9 +36,6 @@ func TestWriteAndParse(t *testing.T) {
 	if b.String() != want {
 		t.Errorf("CSV:\n%s\nwant:\n%s", b.String(), want)
 	}
-	if !IsFilesCSV(b.Bytes()) {
-		t.Error("IsFilesCSV = false for a combined CSV")
-	}
 	p, err := ParseCSV(b.Bytes())
 	if err != nil || len(p.Problems) != 0 || len(p.Rows) != 3 {
 		t.Fatalf("ParseCSV: %+v, %v", p, err)
@@ -90,6 +87,105 @@ func TestParseCSVRows(t *testing.T) {
 	}
 }
 
+// TestParseCSVRetentionHalf: the retention cells of each row, read with package retention's rules (moved here from
+// the retention CSV's reader when it was removed, roadmap 40).
+func TestParseCSVRetentionHalf(t *testing.T) {
+	const head = "id,export,directory,name,size,modified,file_date,retention,keep_until,tags\n"
+	r := func(line int, id int64, date, ret, keep string) store.RetentionRow {
+		return store.RetentionRow{Line: line, ExportID: 2, FileID: id, FileDate: date, HasFileDate: true,
+			Retention: ret, KeepUntil: keep, HasKeepUntil: true}
+	}
+	tests := []struct {
+		name     string
+		in       string
+		want     []store.RetentionRow
+		problems []string // substrings, one per problem, in order
+	}{
+		{name: "periods, dates, forever and blanks",
+			in: head + "1,2,/d,a,1,m,2023-03-14,7Y,,\n2,2,/d,b,1,m,,,,\n3,2,/d,c,1,m,,Forever,,\n" +
+				"4,2,/d,e,1,m,,2015-06-30,,\n",
+			want: []store.RetentionRow{r(2, 1, "2023-03-14", "7y", ""), r(3, 2, "", "", ""), r(4, 3, "", "forever", ""),
+				r(5, 4, "", "2015-06-30", "")}},
+		{name: "keep_until cells are passed on for the register to compare",
+			in:   head + "1,2,/d,a,1,m,2023-03-14,7y, 2030-03-14 ,\n2,2,/d,b,1,m,,forever,FOREVER,\n",
+			want: []store.RetentionRow{r(2, 1, "2023-03-14", "7y", "2030-03-14"), r(3, 2, "", "forever", "forever")}},
+		{name: "a keep_until a spreadsheet rewrote is refused with the format hint",
+			in:       head + "1,2,/d,a,1,m,2023-03-14,7y,3/14/2030,\n",
+			problems: []string{`keep_until "3/14/2030" is not a date: use YYYY-MM-DD, for example 2023-03-14 (a spreadsheet may have rewritten it; format the column as text)`}},
+		{name: "empty spreadsheet rows are skipped",
+			in:   head + "1,2,/d,a,1,m,,2027-01-01,,\n,,,,,,,,,\n\n",
+			want: []store.RetentionRow{r(2, 1, "", "2027-01-01", "")}},
+		{name: "semicolons, BOM, CRLF, reordered and extra columns, no keep_until or file_date",
+			in: "\ufefftags;retention;notes;export;id\r\n;2027-02-03;mine;5;1\r\n;;;5;2\r\n",
+			want: []store.RetentionRow{
+				{Line: 2, ExportID: 5, FileID: 1, Retention: "2027-02-03"},
+				{Line: 3, ExportID: 5, FileID: 2},
+			}},
+		{name: "tabs", in: "id\texport\tfile_date\tretention\ttags\n1\t2\t2023-01-01\t10y\t\n",
+			want: []store.RetentionRow{{Line: 2, ExportID: 2, FileID: 1, FileDate: "2023-01-01", HasFileDate: true,
+				Retention: "10y"}}},
+		{name: "a quoted name with commas and a newline keeps the line numbers",
+			in:   head + "1,2,/d,\"a,b\nc\",1,m,,,,\n2,2,/d,q,1,m,,2027-01-01,,\n",
+			want: []store.RetentionRow{r(2, 1, "", "", ""), r(4, 2, "", "2027-01-01", "")}},
+		{name: "bad rows are refused one by one",
+			in: head +
+				"x,2,/d,a,1,m,,7y,,\n" +
+				"1,,/d,a,1,m,,7y,,\n" +
+				"2,2,/d,a,1,m,,30/06/2027,,\n" +
+				"3,2,/d,a,1,m,,2027-02-29,,\n" +
+				"4,2,/d,a,1,m,,+1y,,\n" +
+				"5,2,/d,a,1,m,14/03/2023,7y,,\n" +
+				"6,2,/d,a,1,m,,,,,2027-01-01\n" +
+				"7,2,/d,a,1,m,2023-01-01,7y,,\n",
+			want: []store.RetentionRow{r(9, 7, "2023-01-01", "7y", "")},
+			problems: []string{"not a file ID", "not an export number", `retention "30/06/2027" is not a retention`,
+				`retention "2027-02-29" is not a retention`, `retention "+1y" is not a retention`,
+				`file_date "14/03/2023" is not a date`, `"2027-01-01" is outside the columns`}},
+		{name: "a file_date marked as read from the file name is passed on marked",
+			in:   head + "1,2,/d,a,1,m,!2023-03-14,7y,,\n2,2,/d,b,1,m, ! 2023-03-14 ,,,\n",
+			want: []store.RetentionRow{r(2, 1, "!2023-03-14", "7y", ""), r(3, 2, "!2023-03-14", "", "")}},
+		{name: "a marked file_date that is not a date is refused",
+			in: head + "1,2,/d,a,1,m,!14/03/2023,7y,,\n2,2,/d,b,1,m,!,7y,,\n",
+			problems: []string{`file_date "!14/03/2023" is not a date: remove the ! and use YYYY-MM-DD`,
+				`file_date "!" is not a date`}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			p, err := ParseCSV([]byte(tc.in))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(p.Rows) != len(tc.want) {
+				t.Fatalf("rows = %+v, want %+v (problems %+v)", p.Rows, tc.want, p.Problems)
+			}
+			for i := range tc.want {
+				if p.Rows[i].RetentionRow != tc.want[i] || len(p.Rows[i].Tags) != 0 {
+					t.Errorf("row %d = %+v, want %+v", i, p.Rows[i], tc.want[i])
+				}
+			}
+			if len(p.Problems) != len(tc.problems) {
+				t.Fatalf("problems = %+v, want %d", p.Problems, len(tc.problems))
+			}
+			for i, w := range tc.problems {
+				if !strings.Contains(p.Problems[i].Msg, w) {
+					t.Errorf("problem %d = %+v, want it to mention %q", i, p.Problems[i], w)
+				}
+			}
+		})
+	}
+}
+
+// TestParseCSVLimits: a broken quote is an error, and a CSV over package sheet's limits is refused whole.
+func TestParseCSVLimits(t *testing.T) {
+	if _, err := ParseCSV([]byte("id,export,retention,tags\n1,2,\"2027-01-01,\n")); err == nil {
+		t.Error("want an error for an unterminated quote")
+	}
+	data := "id,export,retention,tags\n" + strings.Repeat("\n", sheet.MaxRows)
+	if _, err := ParseCSV([]byte(data)); err == nil || !strings.Contains(err.Error(), "rows") {
+		t.Errorf("ParseCSV with too many rows = %v, want refused", err)
+	}
+}
+
 func TestParseCSVHeader(t *testing.T) {
 	for _, tc := range []struct {
 		name, csv string
@@ -98,14 +194,16 @@ func TestParseCSVHeader(t *testing.T) {
 		{"combined", "id,export,retention,tags\n", true},
 		{"retention CSV", "id,export,file_date,retention,keep_until\n", false},
 		{"tags CSV", "id,export,tags\n", false},
-		{"duplicates CSV with both", "group,id,export,retention,tags\n", false},
+		{"an old review CSV", "id,export,reason,path,size,modified,review_date,action,retain_until\n", false},
+		{"not a CSV of filo's", "a,b,c\n1,2,3\n", false},
+		{"empty file", "", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := IsFilesCSV([]byte(tc.csv)); got != tc.files {
-				t.Errorf("IsFilesCSV = %v, want %v", got, tc.files)
+			_, err := ParseCSV([]byte(tc.csv))
+			if tc.files && err != nil {
+				t.Errorf("ParseCSV error %v, want none", err)
 			}
-			if _, err := ParseCSV([]byte(tc.csv)); tc.name != "combined" && tc.name != "duplicates CSV with both" &&
-				!errors.Is(err, ErrNotFilesCSV) {
+			if !tc.files && !errors.Is(err, ErrNotFilesCSV) {
 				t.Errorf("ParseCSV error %v, want ErrNotFilesCSV", err)
 			}
 		})
