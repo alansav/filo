@@ -114,3 +114,58 @@ func TestParseCSVHeader(t *testing.T) {
 		t.Errorf("too large: %v", err)
 	}
 }
+
+func TestNameCell(t *testing.T) {
+	for _, tc := range []struct{ name, cell string }{
+		{"bill.pdf", "bill.pdf"},
+		{"=odd.txt", "'=odd.txt"},
+		{"-draft", "'-draft"},
+		{"'quoted", "''quoted"},
+		{"'=both", "''=both"},
+		{" spaced ", " spaced "},
+		{"bad\xffname", "bad\ufffdname"},
+	} {
+		if got := NameCell(tc.name); got != tc.cell {
+			t.Errorf("NameCell(%q) = %q, want %q", tc.name, got, tc.cell)
+		}
+		if tc.name != "bad\xffname" {
+			if got := ReadName(NameCell(tc.name)); got != tc.name {
+				t.Errorf("ReadName(NameCell(%q)) = %q, want it back as it was", tc.name, got)
+			}
+		}
+	}
+	// A cell typed afresh is read as typed, the guard alone dropped.
+	for cell, name := range map[string]string{"'=new.txt": "=new.txt", "'abc": "'abc", "new ": "new ", "'": "'"} {
+		if got := ReadName(cell); got != name {
+			t.Errorf("ReadName(%q) = %q, want %q", cell, got, name)
+		}
+	}
+}
+
+func TestNameColumn(t *testing.T) {
+	items := []store.FilesItem{{FileItem: store.FileItem{FileID: 1, RootPath: "/r", Path: "d/'=x.txt"}}}
+	SetNameCells(items)
+	if items[0].NameCell != "''=x.txt" {
+		t.Fatalf("NameCell = %q", items[0].NameCell)
+	}
+	var b bytes.Buffer
+	if err := WriteCSV(&b, 2, items, time.UTC); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(b.String(), ",''=x.txt,") {
+		t.Errorf("CSV %q, want the recorded name cell", b.String())
+	}
+	p, err := ParseCSV([]byte("id,export,name,retention,tags\n1,2,\" Bill .pdf \",,\n3,2,'=y,,\n"))
+	if err != nil || len(p.Rows) != 2 {
+		t.Fatalf("ParseCSV = %+v, %v", p, err)
+	}
+	if r := p.Rows[0]; !r.HasName || r.NameCell != " Bill .pdf " || r.Name != " Bill .pdf " {
+		t.Errorf("row 1 = %+v, want the name with its spaces", r)
+	}
+	if r := p.Rows[1]; r.NameCell != "'=y" || r.Name != "=y" {
+		t.Errorf("row 2 = %+v, want the guard dropped from the name", r)
+	}
+	if p, _ := ParseCSV([]byte("id,export,retention,tags\n1,2,,\n")); p.Rows[0].HasName {
+		t.Error("HasName without a name column")
+	}
+}

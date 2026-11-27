@@ -80,7 +80,10 @@ func (s *Store) RecordFilesExport(ctx context.Context, path string, now time.Tim
 // FilesRow is one row of an edited combined CSV: its retention half, and the tags its cell holds, each once.
 type FilesRow struct {
 	RetentionRow
-	Tags []tags.Tag
+	Tags     []tags.Tag
+	HasName  bool   // the CSV has a name column
+	NameCell string // the name cell as read, to tell it from the one exported
+	Name     string // the name it asks for (the formula guard dropped)
 }
 
 // FilesPending is what the combined update asks about before it records anything: the retentions blank cells clear,

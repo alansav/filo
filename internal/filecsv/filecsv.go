@@ -8,8 +8,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"path"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/alansav/filo/internal/retention"
@@ -33,9 +35,36 @@ func IsFilesCSV(data []byte) bool {
 	return sh != nil && !sh.Has("group")
 }
 
+// NameCell is a file name as the combined CSV writes it: as sheet.Cell writes any display cell (valid UTF-8, an
+// apostrophe before one a spreadsheet would read as a formula), and an apostrophe before a name that starts with one
+// itself, so that ReadName, dropping one, always gives back the name as it is (docs/design.md, Tags, "Renaming a
+// file by its name cell").
+func NameCell(name string) string {
+	if strings.HasPrefix(name, "'") {
+		return "'" + name
+	}
+	return sheet.Cell(name)
+}
+
+// ReadName is the file name an edited name cell asks for: the cell with the apostrophe NameCell puts before a
+// formula character or another apostrophe dropped. Nothing else is changed, spaces included.
+func ReadName(cell string) string {
+	if len(cell) > 1 && cell[0] == '\'' && strings.ContainsRune("=+-@\t\r'", rune(cell[1])) {
+		return cell[1:]
+	}
+	return cell
+}
+
+// SetNameCells fills in each item's name cell, as WriteCSV writes it, so the export records the cell the CSV shows.
+func SetNameCells(items []store.FilesItem) {
+	for i := range items {
+		items[i].NameCell = NameCell(path.Base(items[i].Path))
+	}
+}
+
 // WriteCSV writes items as one export: the file_date, retention and keep_until they carry (the caller fills in
 // file_date from the name first, and records the same values with the export), and each one's tags cell. Times are
-// shown in loc.
+// shown in loc. The name cell is the item's NameCell (SetNameCells), so the CSV holds what the export recorded.
 func WriteCSV(w io.Writer, exportID int64, items []store.FilesItem, loc *time.Location) error {
 	cw, err := sheet.NewWriter(w, Header)
 	if err != nil {
@@ -43,8 +72,12 @@ func WriteCSV(w io.Writer, exportID int64, items []store.FilesItem, loc *time.Lo
 	}
 	ex := strconv.FormatInt(exportID, 10)
 	for _, it := range items {
-		rec := append([]string{strconv.FormatInt(it.FileID, 10), ex},
-			sheet.FileCells(it.RootPath, it.Path, it.Size, it.MtimeNS, loc)...)
+		cells := sheet.FileCells(it.RootPath, it.Path, it.Size, it.MtimeNS, loc)
+		cells[1] = it.NameCell
+		if cells[1] == "" {
+			cells[1] = NameCell(path.Base(it.Path))
+		}
+		rec := append([]string{strconv.FormatInt(it.FileID, 10), ex}, cells...)
 		rec = append(rec, it.FileDate, it.Retention, it.KeepUntil, tagcsv.GuardCell(store.JoinTags(it.Tags)))
 		if err := cw.Write(rec); err != nil {
 			return err
@@ -95,7 +128,12 @@ func ParseCSV(data []byte) (Parsed, error) {
 			bad(fmt.Sprintf("tags %v", err))
 			return
 		}
-		p.Rows = append(p.Rows, store.FilesRow{RetentionRow: rr, Tags: ts})
+		fr := store.FilesRow{RetentionRow: rr, Tags: ts}
+		if sh.Has("name") {
+			fr.HasName, fr.NameCell = true, row.Raw("name") // spaces are part of a name
+			fr.Name = ReadName(fr.NameCell)
+		}
+		p.Rows = append(p.Rows, fr)
 	})
 	if err != nil {
 		return p, err // a broken quote: csv says where
