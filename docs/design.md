@@ -2014,10 +2014,9 @@ on the person's phone opens the file).
     its viewer in a sandboxed frame: found in the code review, the person's choice, 2026-11-27); anything else, "No
     preview". What the browser cannot show (a HEIC picture outside Safari, a video it has no codec for) switches to
     "No preview" too, found by the element's load error, not by the browser's name. A pane beside the results on a
-    wide screen, the whole screen with Open and Close on a narrow one. On the iPad (Textastic, 2026-11-27) every
-    kind previews and Open works, a PDF with all its pages once its viewer may fetch it (below); a PDF in a frame
-    showed only its first page there. Known gap, not checked on the device yet: GrapheneOS's browser has no PDF
-    viewer.
+    wide screen, the whole screen with Open and Close on a narrow one. A PDF in a frame would show only its first
+    page on iOS, so it stays an embed there too (its viewer may fetch it, below). Known gap, not checked on the
+    device yet: GrapheneOS's browser has no PDF viewer.
   - **One file.** The data (as JSON), the script and its styles are all inside `NAME.html`, so nothing else has to
     load (the form checked on every device); it is written again whenever the index's data changes, about 150 bytes
     a file, deterministic as every page.
@@ -2027,12 +2026,12 @@ on the person's phone opens the file).
     read only as text to compare. A Content-Security-Policy meta tag allows only the page's own script and style
     (by their hashes) and the person's local files for a preview (`img`, `media`, `frame`, `object`): the page never
     loads a script, a stylesheet or anything else from the internet, so it works the same offline as online (the
-    person's reason for it), and even a mistake cannot send a name anywhere. It also allows fetching from the
-    page's own origin (`connect-src 'self'`), and nothing else: Safari's PDF viewer fetches the embedded PDF, and
-    without it shows a white box (found on the iPad, 2026-11-27, where Textastic serves the page from its own
-    local web server, `http://localhost:8080/…`, so `'self'` is that server; a page opened as a `file:` URL has an
-    origin of its own, which `'self'` does not match, so it changes nothing there). The script itself never
-    fetches.
+    person's reason for it), and even a mistake cannot send a name to any other origin. It also allows fetching
+    from the page's own origin (`connect-src 'self'`): Safari's PDF viewer fetches the embedded PDF, and without
+    it shows a white box. Where a viewer serves the page from a local web server (Textastic on iOS does), `'self'`
+    is that server, so a request with a name in it could reach that server, as `img-src 'self'` already allowed;
+    on a page opened as a `file:` URL, what `'self'` matches differs between browsers (not checked). The script
+    itself never fetches (a test checks it has no call that could).
   - **Tests.** The script's logic (matching, counts, suggestions, directories, the address, the kind of preview) is
     plain functions, tested with Node's own test runner (`node --test`, no packages), run from `go test`; Node is in
     the dev container. The drawing code runs there too, on a small fake of the DOM. What only a browser shows (the
