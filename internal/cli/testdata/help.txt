@@ -12,8 +12,9 @@ Commands
   export duplicates [DIR] -o FILE
                            write the duplicate groups with a copy under DIR, as
                            CSV
-  update FILE [--dry-run]  record the retentions or tags edited in an exported
-                           CSV
+  update FILE [--dry-run] [-y]
+                           apply the retentions, tags, names and directories
+                           edited in a CSV from filo export
   delete [DIR] [-y]        delete the files past their retention, after asking
   delete FILE [-y]         carry out a duplicates CSV: delete the copies marked
                            delete, after asking

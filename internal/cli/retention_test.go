@@ -236,8 +236,9 @@ func mustRead(t *testing.T, path string) []byte {
 	return b
 }
 
-// TestUpdateNotAFilesCSV: a CSV without the combined CSV's columns is refused whole, before the register is opened:
-// one from the retention or tags exports (removed, roadmap 40), from an older filo, or anything else.
+// TestUpdateNotAFilesCSV: a CSV without the combined CSV's columns is refused whole: one from the retention or tags
+// exports (removed, roadmap 40; the register is read first, to tell it from a combined CSV that lost a column), from
+// an older filo, or anything else.
 func TestUpdateNotAFilesCSV(t *testing.T) {
 	for _, tc := range []struct{ name, header string }{
 		{"retention CSV", "id,export,directory,name,size,modified,file_date,retention,keep_until\n1,1,/x,a,1,m,,7y,\n"},
