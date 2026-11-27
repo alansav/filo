@@ -1699,6 +1699,38 @@ so files can be found by tag; a project is a tag (`project:house sale`).
   2026-11-22); it answers only this question, so `filo update -y` of a retention CSV is a usage error (clearing a
   retention has no `-y`). No, or no terminal and no `-y`, leaves those rows as they were; the other rows are
   recorded either way. Ctrl-C at the question records nothing.
+- **The combined CSV** (decided 2026-11-27): `filo export [DIR] -o FILE [--no-scan] [--workers N]`, with no word
+  after `export`, writes every column a person edits in one CSV, so a tag seen while dating files, or a date seen
+  while tagging, is set in the same pass. It is the retention export's CSV with the tags CSV's column after it:
+  `id, export, directory, name, size, modified, file_date, retention, keep_until, tags`. Everything else is as for
+  those two: a scan of DIR (or every root) first, every present file, the `!` mark on a `file_date` read from the
+  name, the formula guard, `-o` asked about if it exists. The export is recorded as kind `files`; each row keeps the
+  hash, `file_date`, `retention`, `keep_until` and the tags cell as exported (no schema change: `exports.kind` is
+  text). A first argument `retention`, `tags` or `duplicates` is still that export (until roadmap 40), so a directory
+  with one of those names is given as `./tags`.
+  - **Read back by `filo update FILE [--dry-run] [-y]`**, which takes a CSV with both a `retention` and a `tags`
+    column, whose rows name `files` exports, as a combined CSV (a retention CSV of an older export with a `tags`
+    column of the person's own stays a retention CSV). Each row is checked with the rules of both: the retention
+    half as a retention CSV's row (file_date, retention, the `!` mark, keep_until left alone, the file unchanged
+    since the export, a newer decision not overwritten), the tags half as a tags CSV's row. **A row refused by
+    either half is refused whole**, with each reason, so a file never ends up half updated; the other rows still
+    apply. A row from another kind of export is refused. A CSV whose rows name `files` exports but which has lost
+    its `retention` or its `tags` column (deleted or renamed in the spreadsheet) is refused as a whole, naming the
+    column, since a lost `tags` column would otherwise read as every tag removed.
+  - **One question, before anything is written.** If any row clears a stored retention, removes a tag, or names a
+    policy that does not exist yet, the update first lists them (the first ones of each, `l` lists all) and asks
+    once, `Apply the update? Nothing is recorded otherwise. [y/N/l]`. Yes records every row that was not refused,
+    in one transaction. **No, end of input, Ctrl-C, or no terminal: nothing is recorded**, not even the rows that
+    needed no question, and one line says why and how to go on; so an emptied column never half applies. `-y`
+    answers yes, for a script (the person's decision, 2026-11-27: the same `-y` for clearing, removing and new
+    policies). An update with none of these asks nothing. `--dry-run` shows the same lists, asks nothing and
+    writes nothing.
+  - The output: `Update   FILE . export #N . R rows . <root>`, then the counts (files given a retention, files put
+    on a policy with no value yet, retentions cleared, files whose tags changed, rows unchanged, rows refused, and
+    the policies created), the files whose tags changed, the refused rows, and the files left past their retention
+    with the hint to check for a typo, as the two updates show them.
+  - The retention and tags CSVs keep their own rules (their questions keep the other rows, and `-y` is refused for
+    a retention CSV) until roadmap 40 removes them.
 - **Register (schema version 11)**: a `tags` table on file ids (the key, the value as spelled and its folded form),
   and `tag_changes`, the history of every tag added or removed and by which command, so each change can be written
   to the journal later (9c) without rework. `export_rows` gain `tags`, the cell as exported.
@@ -1850,7 +1882,7 @@ on the person's phone opens the file).
   root) is shown as `./~/…`, so it never reads as a path in the home directory. The CSV export guards against
   spreadsheet formulas separately.
 - **Prompts only in a terminal** (2026-11-12, replacing "no interactive prompts"). A command asks only where a person
-  should look first: `filo update` before clearing dates or removing tags, and `filo delete`. Declining, or having no
+  should look first: `filo update` before clearing dates, removing tags or creating policies, and `filo delete`. Declining, or having no
   terminal on standard input, is always the safe choice, so Filo still works the same from a script or a timer.
 - `filo roots` lists roots (settings, mount point, files, size, last scan); `filo roots add DIR [--include-hidden]
   [--ignore NAME]... [--no-scan]` registers one and scans it (absorbing any roots inside it on the same filesystem,
@@ -1860,10 +1892,13 @@ on the person's phone opens the file).
   unmounted) is reported in its place on stdout (see Terminal output, Scan and roots) and the others are still
   scanned. `--workers` is 1–64, default 4.
 - `filo report [--top N]`: see section 4.
+- `filo export [DIR] -o FILE [--no-scan] [--workers N]` and `filo update FILE [--dry-run] [-y]`: the combined CSV,
+  see Tags.
 - `filo export retention [DIR] -o FILE [--no-scan] [--workers N]` and `filo update FILE [--dry-run]`: see Lifespan. Every export
   scans first unless `--no-scan` is given (see Lifespan, "A scan first"), with `--workers` as for `filo scan`
   (refused with `--no-scan`). The word after `export`
-  names the CSV, so a later CSV is a new word, not a new command; `update` tells the kind from the CSV's header.
+  names the CSV, so a later CSV is a new word, not a new command, and no word is the combined CSV (2026-11-27);
+  `update` tells the kind from the CSV's header (and, for a CSV with both `retention` and `tags`, from its exports).
 - `filo find [DIR] [--name PATTERN] [--tag TAG]... [--no-tag TAG]... [-0] [--no-scan] [--workers N]`: see Finding
   files and Tags.
 - `filo tag FILE... TAG...`, `filo untag FILE... TAG...`, `filo tags`, `filo tags rename OLD NEW`, and `filo export
