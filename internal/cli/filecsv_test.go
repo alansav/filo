@@ -166,3 +166,91 @@ func TestFilesUpdateInterruptedAtPrompt(t *testing.T) {
 	ct.contains("tags after", ct.filo(ExitOK, "", false, "tags").stdout, "urgent")
 	ct.contains("report after", ct.filo(ExitOK, "", false, "report").stdout, "3 need a retention")
 }
+
+// setNames returns a CSV edit that sets the name cell of the rows whose name is a key.
+func setNames(values map[string]string) func(map[string]string) { return setCells("name", values) }
+
+// TestRenameGolden: renaming by the name cell (docs/design.md, Tags, "Renaming a file by its name cell"): a dry
+// run, the renames asked about and made, the next scan finding nothing, and the refusals.
+func TestRenameGolden(t *testing.T) {
+	ct := newTagTest(t)
+	filo, in, work := ct.filo, ct.in, ct.work
+	ct.write("notes/plan.txt ", "plan")
+	ct.write("tax/2023 retrun.pdf", "return")
+	ct.write("tax/other.pdf", "other")
+	filo(ExitOK, "", false, "scan")
+	filo(ExitOK, "", false, "tag", in("tax/2023 retrun.pdf"), "type:tax")
+	var out strings.Builder
+	step := func(title, stdin string, code int, args ...string) {
+		t.Helper()
+		out.WriteString("$ filo " + title + "\n" + filo(code, stdin, true, args...).stdout + "\n")
+	}
+	csvPath := filepath.Join(work, "all.csv")
+	filo(ExitOK, "", false, "export", "-o", csvPath, "--no-scan")
+	editCSV(t, csvPath, setNames(map[string]string{
+		"2023 retrun.pdf": "2023 return.pdf",
+		"plan.txt ":       "plan.txt",
+		"ideas.txt":       "ideas.md",
+	}))
+	step("update all.csv --dry-run", "", ExitOK, "update", csvPath, "--dry-run")
+	step("update all.csv (yes)", "y\n", ExitOK, "update", csvPath)
+	for _, rel := range []string{"tax/2023 return.pdf", "notes/plan.txt", "notes/ideas.md"} {
+		if !ct.exists(rel) {
+			t.Errorf("%s missing after the renames", rel)
+		}
+	}
+	for _, rel := range []string{"tax/2023 retrun.pdf", "notes/plan.txt ", "notes/ideas.txt"} {
+		if ct.exists(rel) {
+			t.Errorf("%s still there after the renames", rel)
+		}
+	}
+	step("scan (after the renames)", "", ExitOK, "scan")
+	ct.contains("tags kept", filo(ExitOK, "", false, "find", "--tag", "type:tax", "--no-scan").stdout,
+		in("tax/2023 return.pdf"))
+	ct.contains("show", filo(ExitOK, "", false, "show", in("tax/2023 return.pdf")).stdout,
+		"moved from  "+in("tax/2023 retrun.pdf"))
+
+	// Refused before the question: hiding, a /, another file's name, and a file changed since the last scan.
+	again := filepath.Join(work, "again.csv")
+	filo(ExitOK, "", false, "export", "-o", again, "--no-scan")
+	ct.write("notes/ideas.md", "ideas, longer now")
+	editCSV(t, again, setNames(map[string]string{
+		"2023 return.pdf":                 "other.pdf",
+		"plan.txt":                        ".plan.txt",
+		"2026-09-02 British Gas Bill.pdf": "old/bill.pdf",
+		"ideas.md":                        "ideas.txt",
+	}))
+	step("update again.csv (refused)", "", ExitError, "update", again)
+	got := strings.ReplaceAll(out.String(), work, "<work>")
+	got = regexp.MustCompile(`\d{4}-\d\d-\d\d \d\d:\d\d`).ReplaceAllString(got, "<time>")
+	got = regexp.MustCompile(`files seen \. [^.]+ s \.`).ReplaceAllString(got, "files seen . <elapsed> .")
+	golden(t, "rename.txt", ct.root, got)
+}
+
+// TestRenameNoTerminal: a rename asks; with no terminal and no -y nothing is renamed (exit 1), with -y it is.
+func TestRenameNoTerminal(t *testing.T) {
+	ct := newTagTest(t)
+	csvPath := filepath.Join(ct.work, "all.csv")
+	ct.filo(ExitOK, "", false, "export", "-o", csvPath, "--no-scan")
+	editCSV(t, csvPath, setNames(map[string]string{"ideas.txt": "ideas.md"}))
+	ct.contains("no terminal", ct.filo(ExitError, "", false, "update", csvPath).stdout, "nothing recorded")
+	if !ct.exists("notes/ideas.txt") {
+		t.Fatal("renamed without asking")
+	}
+	ct.contains("-y", ct.filo(ExitOK, "", false, "update", csvPath, "-y").stdout, "1 file renamed")
+	if !ct.exists("notes/ideas.md") || ct.exists("notes/ideas.txt") {
+		t.Error("not renamed with -y")
+	}
+	// The same CSV again: the file has the name already, so nothing changes.
+	ct.contains("again", ct.filo(ExitOK, "", false, "update", csvPath, "-y").stdout, "3 rows unchanged")
+	// An older CSV whose file was renamed since: refused.
+	old := filepath.Join(ct.work, "old.csv")
+	ct.filo(ExitOK, "", false, "export", "-o", old, "--no-scan")
+	editCSV(t, old, setNames(map[string]string{"ideas.md": "ideas.markdown"}))
+	newer := filepath.Join(ct.work, "new.csv")
+	ct.filo(ExitOK, "", false, "export", "-o", newer, "--no-scan")
+	editCSV(t, newer, setNames(map[string]string{"ideas.md": "ideas.text"}))
+	ct.filo(ExitOK, "", false, "update", newer, "-y")
+	ct.contains("moved since", ct.filo(ExitError, "", false, "update", old, "-y").stdout,
+		"moved or renamed since export #2")
+}

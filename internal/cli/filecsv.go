@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	pathpkg "path"
 	"slices"
 	"strings"
 	"time"
 
+	"github.com/alansav/filo/internal/dispose"
 	"github.com/alansav/filo/internal/filecsv"
 	"github.com/alansav/filo/internal/report"
 	"github.com/alansav/filo/internal/store"
@@ -24,6 +26,7 @@ func (e *env) exportFiles(ctx context.Context, s *store.Store, f store.Filter, w
 		return err
 	}
 	suggested := markNameDates(len(items), func(i int) *store.FileItem { return &items[i].FileItem })
+	filecsv.SetNameCells(items) // recorded, so an edited name cell asks for a rename
 	v := e.view
 	if len(items) == 0 {
 		v.Heading("Export", where, "no files")
@@ -56,7 +59,7 @@ func (e *env) exportFiles(ctx context.Context, s *store.Store, f store.Filter, w
 	notScannedLine(v, notScanned)
 	v.Blank()
 	v.Next("Next: fill in retention (7y, 18m, forever or a date) and tags (key:value or a bare value, separated " +
-		"by ;), then filo update " + shellQuote(csvPath))
+		"by ;), or correct a name, then filo update " + shellQuote(csvPath))
 	return nil
 }
 
@@ -131,7 +134,7 @@ func (e *env) updateFiles(ctx context.Context, s *store.Store, path string, pars
 		return ok && askErr == nil
 	}
 	res, err := s.UpdateFiles(ctx, parsed.Rows, now(), today(), path, store.FilesUpdateOptions{DryRun: dry,
-		Confirm: confirm})
+		Confirm: confirm, CheckName: dispose.CheckName, CheckDisk: dispose.CheckRename})
 	switch {
 	case err != nil:
 	case ctx.Err() != nil:
@@ -146,6 +149,14 @@ func (e *env) updateFiles(ctx context.Context, s *store.Store, path string, pars
 		e.showPending(roots, res.Pending, r.Overview())
 	}
 
+	// The renames, after the register's changes (docs/design.md, Tags, "Renaming a file by its name cell").
+	var renames renameResult
+	if !dry && !res.Declined {
+		renames, err = e.makeRenames(ctx, s, res.Pending.Renames)
+		if err != nil && ctx.Err() == nil {
+			return err
+		}
+	}
 	refused := refusalProblems(roots, parsed.Problems, res.Refusals)
 	if res.Declined {
 		why := "not confirmed; edit the CSV and run filo update again"
@@ -154,7 +165,7 @@ func (e *env) updateFiles(ctx context.Context, s *store.Store, path string, pars
 		}
 		r.Count(view.Attention, "nothing recorded: "+why)
 	} else {
-		e.filesCounts(res, dry, len(refused))
+		e.filesCounts(res, dry, len(refused), renames)
 	}
 	if len(refused) > 0 {
 		r.Count(view.Refused, report.Plural(int64(len(refused)), "row", "rows")+" refused")
@@ -168,8 +179,16 @@ func (e *env) updateFiles(ctx context.Context, s *store.Store, path string, pars
 		r.Blank()
 		r.Problems("Refused: fix these rows in the CSV and run filo update again", view.Refused, refused)
 	}
+	if len(renames.skipped) > 0 {
+		r.Blank()
+		r.Problems("Not renamed: run filo scan, then export again", view.Attention, renames.skipped)
+	}
 	if !res.Declined {
 		nowPast(r, roots, res.NowPast, dry, r.Overview())
+	}
+	if ctx.Err() != nil { // Ctrl-C between renames: those done are recorded, the rest were not made
+		return fmt.Errorf("interrupted: %d of %d renames made and recorded; the others were not made",
+			renames.done, len(res.Pending.Renames))
 	}
 	switch {
 	case dry:
@@ -179,14 +198,14 @@ func (e *env) updateFiles(ctx context.Context, s *store.Store, path string, pars
 		r.Blank()
 		r.Next("Nothing has been deleted. Next: filo delete")
 	}
-	if len(refused) > 0 || (res.Declined && !asked) { // nothing done, and no one was asked: a script must see it
+	if len(refused) > 0 || len(renames.skipped) > 0 || (res.Declined && !asked) { // nothing done, no one was asked
 		return errReported
 	}
 	return nil
 }
 
 // filesCounts are a combined update's count lines: what it recorded (or, in a dry run, would record).
-func (e *env) filesCounts(res store.FilesUpdateResult, dry bool, refused int) {
+func (e *env) filesCounts(res store.FilesUpdateResult, dry bool, refused int, renames renameResult) {
 	r := e.view
 	would := func(done, dryRun string) string {
 		if dry {
@@ -221,10 +240,19 @@ func (e *env) filesCounts(res store.FilesUpdateResult, dry bool, refused int) {
 		r.Count(view.Done, report.Plural(int64(n), "file", "files")+would(pluralWord(n, " had its tags changed",
 			" had their tags changed"), pluralWord(n, " would have its tags changed", " would have their tags changed")))
 	}
+	if n := len(res.Pending.Renames); dry && n > 0 {
+		r.Count(view.Neutral, report.Plural(int64(n), "file", "files")+" would be renamed")
+	}
+	if renames.done > 0 {
+		r.Count(view.Done, report.Plural(int64(renames.done), "file", "files")+" renamed")
+	}
+	if n := len(renames.skipped); n > 0 {
+		r.Count(view.Attention, report.Plural(int64(n), "rename", "renames")+" not made")
+	}
 	if res.Unchanged > 0 {
 		r.Count(view.Neutral, report.Plural(int64(res.Unchanged), "row", "rows")+" unchanged")
 	}
-	if res.Set+res.Cleared+len(res.TagsChanged)+res.Unchanged+refused == 0 {
+	if res.Set+res.Cleared+len(res.TagsChanged)+len(res.Pending.Renames)+res.Unchanged+refused == 0 {
 		r.Count(view.Neutral, "nothing to change")
 	}
 }
@@ -247,6 +275,71 @@ func (e *env) showPending(roots []string, p store.FilesPending, max int) {
 		showNewPolicies(r, p.NewPolicies)
 		r.Blank()
 	}
+	if n := len(p.Renames); n > 0 {
+		r.Note(view.Attention, report.Plural(int64(n), "file is", "files are")+" renamed:")
+		r.Renames(view.RenameList{Rows: renameRows(p.Renames), Max: max})
+		r.Blank()
+	}
+}
+
+// renameRows are the renames as the summary lists them: by root and directory, each with a note on a rename that
+// may be an accident (only spaces at the start or end changed, or the extension).
+func renameRows(rs []store.Rename) []view.RenameRow {
+	rows := make([]view.RenameRow, len(rs))
+	for i, rn := range rs {
+		dir, old := pathpkg.Split(rn.Path)
+		row := view.RenameRow{Root: rn.RootPath, Dir: strings.TrimSuffix(dir, "/"), Old: old, New: rn.Name}
+		switch {
+		case strings.TrimSpace(old) == strings.TrimSpace(rn.Name):
+			row.Note = "only spaces changed"
+		case pathpkg.Ext(old) != pathpkg.Ext(rn.Name):
+			row.Note = "extension changed"
+		}
+		rows[i] = row
+	}
+	slices.SortStableFunc(rows, func(a, b view.RenameRow) int {
+		return strings.Compare(a.Root+"\x00"+a.Dir, b.Root+"\x00"+b.Dir)
+	})
+	return rows
+}
+
+// renameResult is what making an update's renames did: how many were made, and those not made, with why.
+type renameResult struct {
+	done    int
+	skipped []view.Problem
+}
+
+// makeRenames makes each rename, checked again on disk just before, and records each straight after; one not made
+// is listed with why. Ctrl-C stops after the current one (the error is then the context's).
+func (e *env) makeRenames(ctx context.Context, s *store.Store, rs []store.Rename) (renameResult, error) {
+	var out renameResult
+	if len(rs) == 0 {
+		return out, nil
+	}
+	roots, err := registeredRoots(ctx, s)
+	if err != nil {
+		return out, err
+	}
+	run := s.BeginRenameRun(now())
+	defer func() {
+		if err := run.Finish(context.WithoutCancel(ctx), now()); err != nil {
+			e.errorLine(err.Error())
+		}
+	}()
+	for _, rn := range rs {
+		o, err := dispose.Rename(ctx, run, rn.Candidate, rn.Name, now())
+		if err != nil {
+			return out, err
+		}
+		if o.Done {
+			out.done++
+			continue
+		}
+		p := view.Problem{Reason: o.Reason}
+		p.Root, p.Rel = view.SplitRoot(roots, rn.AbsPath())
+		out.skipped = append(out.skipped, p)
+	}
+	return out, nil
 }
 
 // confirmPending shows what the update asks about (the first ones, or all with l) and asks once. Only a yes
