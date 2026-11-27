@@ -12,7 +12,8 @@ tags and tag index pages done.** You give every file a retention (how long to ke
 such as `bills = 7y`, which a directory rule can give the files under a directory as they arrive), and `filo delete`
 lists the files past theirs, asks, and deletes the ones you choose. For identical copies you decide which to keep in a spreadsheet, and `filo delete` carries
 that out the same careful way. `filo show` shows everything Filo holds about a file or directory, and `filo set` changes
-a few files from the command line. Apart from that, Filo is **read-only on your files**: no other command modifies,
+a few files from the command line; `filo update` renames or moves a file, within its root, when you edit its name or
+directory in the exported CSV. Apart from that, Filo is **read-only on your files**: no other command modifies,
 moves, renames or deletes anything outside its own database, besides the files you ask it to write (an export's
 `-o` file, and the pages of a [tag index](#tag-index-pages), which it replaces only while they are as it wrote them).
 See [Roadmap](#roadmap) for what comes next.
@@ -164,14 +165,17 @@ Recent events                                                                non
 For a few files, `filo set` is quicker (see [One file at a time](#one-file-at-a-time)). For many, use the CSV:
 
 ```sh
-filo export retention ~/Documents -o docs.csv    # scan ~/Documents, then every file under it, with its retention
+filo export ~/Documents -o docs.csv    # scan ~/Documents, then every file under it, with its retention and tags
 # open docs.csv in a spreadsheet, fill in retention, save it as CSV
-filo update docs.csv                            # apply what you changed
-filo delete                                     # list the files past their retention, ask, delete
+filo update docs.csv                  # apply what you changed
+filo delete                           # list the files past their retention, ask, delete
 ```
 
-The CSV has one row per file: `id, export, directory, name, size, modified, file_date, retention, keep_until`. Sort
-and filter it however you like.
+The CSV has one row per file: `id, export, directory, name, size, modified, file_date, retention, keep_until, tags`.
+Sort and filter it however you like. The same CSV sets tags (see [Tags](#tags)), and renames or moves files: a
+changed `name` cell renames the file in its directory, and a changed `directory` cell (the full path of a directory
+in the same root) moves it there, making the directories it needs. Filo never replaces another file, never hides or
+unhides one, and renames or moves a file only if it is still the one the last scan saw.
 
 - **`retention`** is how long to keep the file:
   - a period counted from `file_date`: `7y`, `18m`, `6w` or `30d`;
@@ -192,8 +196,9 @@ and filter it however you like.
 To set a whole directory at once, filter on `directory` and fill the retention down. Filtering on a blank `retention`
 shows the files still to decide.
 
-- Only `id`, `export`, `file_date` and `retention` are read back, so you can reorder columns or add your own. Rows
-  can be sorted, filtered or deleted, but not added.
+- Only `id`, `export`, `file_date`, `retention` and `tags` are read back, with `name` and `directory` compared with
+  what was exported, so you can reorder columns or add your own. Rows can be sorted, filtered or deleted, but not
+  added.
 - Dates are `YYYY-MM-DD` and must be real (`2027-02-29` is refused). Anything else is refused rather than guessed.
   If your spreadsheet turns dates into `01/06/2027`, format those columns as text.
 - Dates in the past are fine: a 2015 invoice with `7y` ended in 2022, so it's simply past its retention.
@@ -201,8 +206,9 @@ shows the files still to decide.
 - A period with no `file_date` is refused for that row, since there's nothing to count from.
 - Cells left as exported change nothing. Editing the same CSV again and running `filo update` again replaces what it
   set.
-- A blank `retention` where one was set clears it, so the file needs a decision again. Filo lists those files and
-  asks first; without a terminal it leaves them alone.
+- A blank `retention` where one was set clears it, so the file needs a decision again. If any row clears a
+  retention, removes a tag, creates a policy, or renames or moves a file, Filo lists them and asks once; no, or no
+  terminal, records nothing at all. `-y` answers yes, for a script.
 - A row is refused, with one line saying why, if the file changed since the export or its retention was changed
   after it (from a later export, or by `filo policies move`). The other rows are still applied. `--dry-run` checks everything and writes nothing.
 - On a large system, export one directory at a time, so the spreadsheet stays fast.
@@ -218,7 +224,7 @@ the rule changes every file using it. If the law moves financial records from 7 
 
 ```sh
 filo policies add bills 7y        # a policy: bills = 7y
-# in a retention CSV, type bills in the retention column of each bill, then filo update the CSV
+# in a CSV from filo export, type bills in the retention column of each bill, then filo update the CSV
 filo policies set bills 10y       # every file on bills is now kept 10 years from its own file_date
 filo policies                     # list them, with what needs attention
 ```
@@ -227,8 +233,8 @@ filo policies                     # list them, with what needs attention
   every file of it ends that day), or `forever`. Names are letters, digits, `-` and `_`, starting with a letter, in
   any case (`Bills` is `bills`); `forever` can't be a name.
 - **Typing a new name in the CSV creates the policy**, with no value yet. `filo update` lists the new names and asks
-  once (`Create 2 policies? [y/N]`), so a typo such as `bils` doesn't quietly become one; declined, those rows are
-  left alone. Its files need a retention until the policy gets a value: `filo policies set bils 7y`.
+  with the update's one question, so a typo such as `bils` doesn't quietly become one; declined, nothing is
+  recorded. Its files need a retention until the policy gets a value: `filo policies set bils 7y`.
 - **Changing a policy** works out every file's `keep_until` again. Lengthening just does it. Shortening asks first
   if it would put files past their retention, and lists them. Setting a period asks first if some files have no
   `file_date` to count from; those then **need a file_date**, which `filo report`, `filo policies` and `filo
@@ -569,9 +575,9 @@ Tagged   1 file · sender:British Gas · type:bill · ~/Documents
   scanning its directory. One that looks moved from a file Filo knows is refused until `filo scan` pairs the two.
 - **Tags follow the file**: through moves, renames and edits (unlike a retention, which an edit asks for again). A new
   copy of a tagged file takes its tags when a scan first sees it; `filo scan` says so when the copies' tags differed.
-- **Many files at once**: `filo export tags [DIR] -o tags.csv` writes every file with its tags in one cell,
-  separated by `;`. Edit the cells and run `filo update tags.csv`: each cell replaces its file's tags, and Filo asks
-  before removing any (`-y` answers yes, for a script).
+- **Many files at once**: the CSV from `filo export [DIR] -o FILE` has every file's tags in one cell, separated by
+  `;`. Edit the cells and run `filo update FILE`: each cell replaces its file's tags, and Filo asks before removing
+  any (`-y` answers yes, for a script).
 - In a terminal, `filo find` shows each file's tags after its path, and `filo show` lists them.
 
 ## Tag index pages
@@ -615,10 +621,9 @@ Next: open ~/Documents/bills/index.html in a browser
 | `filo roots set DIR` | Replace a root's settings. |
 | `filo scan [DIR]` | Scan `DIR` (a directory inside a root: a partial scan), or every root if omitted. |
 | `filo report [--top N]` | Show the overview; `--top` sets how many entries each list shows (default 10). |
-| `filo export retention [DIR] -o FILE [--no-scan] [--workers N]` | Scan `DIR` (or every root), then write every file under it with its retention, as CSV. |
+| `filo export [DIR] -o FILE [--no-scan] [--workers N]` | Scan `DIR` (or every root), then write every file under it with its retention and tags, as CSV. |
 | `filo export duplicates [DIR] -o FILE [--no-scan] [--workers N]` | Scan every root, then write the duplicate groups with a copy under `DIR` as CSV, to decide which copies to keep. See [Duplicates](#duplicates). |
-| `filo export tags [DIR] -o FILE [--no-scan] [--workers N]` | Scan `DIR` (or every root), then write every file under it with its tags, as CSV. See [Tags](#tags). |
-| `filo update FILE [--dry-run] [-y]` | Apply the retentions or tags edited in an exported retention or tags CSV; `-y` removes tags without asking. |
+| `filo update FILE [--dry-run] [-y]` | Apply the retentions, tags, names and directories edited in a CSV from `filo export`, asking once first if it clears, removes, creates, renames or moves anything; `-y` answers yes. |
 | `filo delete [DIR] [-y]` | List the files past their retention, ask, and delete the ones you choose. See [Deleting](#deleting). |
 | `filo delete FILE [-y]` | Carry out a duplicates CSV: check it against the disk, list, ask, and delete the copies marked `delete`. |
 | `filo duplicates` | List what is not counted as duplicates: excluded directories, contents marked always, identical files kept as separate files. |
@@ -840,7 +845,7 @@ bin/filo --db $T/f.db scan
 bin/filo --db $T/f.db report
 scripts/testtree.sh unlock $T/FiloTest
 bin/filo --db $T/f.db scan        # nothing new, changed or missing; the unreadable flag clears
-bin/filo --db $T/f.db export retention $T/FiloTest/notes -o $T/l.csv
+bin/filo --db $T/f.db export $T/FiloTest/notes -o $T/l.csv
 # fill in retention in $T/l.csv
 bin/filo --db $T/f.db update $T/l.csv
 bin/filo --db $T/f.db delete
