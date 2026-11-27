@@ -114,7 +114,7 @@ test('the address: written and read back; unknown tags and directories ignored; 
 
 test('previewKind: by extension, ignoring case; nothing for an unknown one, a hidden file or no extension', () => {
   const cases = {
-    'a.JPG': 'image', 'b.heic': 'image', 'c.mov': 'video', 'd.m4a': 'audio', 'e.pdf': 'frame', 'notes.md': 'frame',
+    'a.JPG': 'image', 'b.heic': 'image', 'c.mov': 'video', 'd.m4a': 'audio', 'e.PDF': 'pdf', 'notes.md': 'frame',
     'f.docx': '', 'README': '', '.pdf': '', 'archive.tar.gz': '', 'x.toString': '', 'y.constructor': '',
   };
   for (const [name, want] of Object.entries(cases)) {
@@ -129,9 +129,13 @@ function fakeDOM(hash) {
   function element(tag) {
     const e = {
       tagName: tag, className: '', textContent: '', hidden: false, open: false, type: '', href: '', value: '',
-      children: [], listeners: new Map(), attributes: new Map(),
-      appendChild(c) { this.children.push(c); return c; },
-      replaceChildren() { this.children = []; },
+      children: [], listeners: new Map(), attributes: new Map(), parentNode: null,
+      appendChild(c) { this.children.push(c); c.parentNode = this; return c; },
+      replaceChildren(...cs) {
+        for (const c of this.children) { c.parentNode = null; }
+        this.children = [];
+        for (const c of cs) { this.appendChild(c); }
+      },
       addEventListener(type, fn) {
         if (!this.listeners.has(type)) { this.listeners.set(type, []); }
         this.listeners.get(type).push(fn);
@@ -201,8 +205,8 @@ test('the page: drawn from the data, and the box, a suggestion, a chip and the a
   assert.equal(dom.loc.hash, '#tag=sender%3AEDF');
   $('subdirs').all((e) => e.tagName === 'button')[0].fire('click');
   assert.match(dom.loc.hash, /dir=received/);
-  // A result's name previews it: an image in the page, a PDF in a frame with scripts off, a .txt too, other
-  // files not at all; Open links to the file; Close (or Escape) empties the pane.
+  // A result's name previews it: a PDF in the browser's PDF viewer, a .txt in a frame with scripts off; one the
+  // browser cannot show says so; Open links to the file; Close (or Escape) empties the pane.
   dom.loc.hash = '';
   dom.win.listeners.get('hashchange')();
   const rows = () => $('results').all((e) => e.tagName === 'button' && e.className === 'file');
@@ -210,17 +214,21 @@ test('the page: drawn from the data, and the box, a suggestion, a chip and the a
   assert.equal($('preview').hidden, false);
   assert.equal($('preview-name').textContent, 'gas-oct.pdf');
   assert.equal($('preview-open').href, './received/2026/10/gas-oct.pdf');
-  const frame = $('preview-body').children[0];
-  assert.equal(frame.tagName, 'iframe');
-  assert.equal(frame.attributes.get('sandbox'), '');
-  assert.equal(frame.src, './received/2026/10/gas-oct.pdf');
+  const pdf = $('preview-body').children[0];
+  assert.equal(pdf.tagName, 'embed');
+  assert.equal(pdf.type, 'application/pdf');
+  assert.equal(pdf.src, './received/2026/10/gas-oct.pdf');
+  pdf.fire('error');
+  assert.match($('preview-body').text(), /No preview/);
   assert.ok(dom.classes.has('previewing'));
   $('preview-close').fire('click');
   assert.equal($('preview').hidden, true);
   assert.equal($('preview-body').children.length, 0);
   assert.ok(!dom.classes.has('previewing'));
   rows()[4].fire('click'); // notes.txt
-  assert.equal($('preview-body').children[0].tagName, 'iframe');
+  const frame = $('preview-body').children[0];
+  assert.equal(frame.tagName, 'iframe');
+  assert.equal(frame.attributes.get('sandbox'), '');
   dom.doc.listeners.get('keydown')({ key: 'Escape' });
   assert.equal($('preview').hidden, true);
   // The address changed by hand (back, a bookmark) is read again.

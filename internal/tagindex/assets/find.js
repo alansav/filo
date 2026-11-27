@@ -217,12 +217,13 @@
   }
 
   // previewKind is how a file is previewed, by its extension (ignoring case): 'image', 'video' or 'audio' in the
-  // page, 'frame' (a PDF or a text file) in a frame with every script switched off, or '' for no preview.
+  // page, 'pdf' in the browser's own PDF viewer, 'frame' (a text file) in a frame with every script switched off, or
+  // '' for no preview.
   const kinds = {
     jpg: 'image', jpeg: 'image', png: 'image', gif: 'image', webp: 'image', heic: 'image',
     mp4: 'video', mov: 'video', webm: 'video',
     mp3: 'audio', m4a: 'audio', ogg: 'audio', wav: 'audio',
-    pdf: 'frame', txt: 'frame', md: 'frame', csv: 'frame',
+    pdf: 'pdf', txt: 'frame', md: 'frame', csv: 'frame',
   };
   function previewKind(name) {
     const dot = name.lastIndexOf('.');
@@ -415,6 +416,7 @@
       const body = $('preview-body');
       body.replaceChildren();
       const kind = previewKind(f.name);
+      const none = function () { return el('p', 'empty', 'No preview for this file here: open it.'); };
       let shown;
       if (kind === 'image') {
         shown = el('img');
@@ -423,14 +425,26 @@
         shown = el(kind);
         shown.controls = true;
         shown.preload = 'metadata';
+      } else if (kind === 'pdf') {
+        // Declared a PDF, so the browser's own viewer shows it and never reads it as a page: a sandboxed frame
+        // would be blocked by Chrome's viewer.
+        shown = el('embed');
+        shown.type = 'application/pdf';
+        shown.title = f.name;
       } else if (kind === 'frame') {
         shown = el('iframe');
         shown.setAttribute('sandbox', ''); // no script, ever, from a file shown here
         shown.title = f.name;
       } else {
-        shown = el('p', 'empty', 'No preview for this kind of file: open it.');
+        shown = none();
       }
       if (kind !== '') {
+        // What the browser cannot show (a HEIC picture outside Safari, a video it has no codec for) says so.
+        shown.addEventListener('error', function () {
+          if (shown.parentNode === body) {
+            body.replaceChildren(none());
+          }
+        });
         shown.src = f.href;
       }
       body.appendChild(shown);

@@ -141,7 +141,7 @@ func TestRenderFindPage(t *testing.T) {
 	policy := html.UnescapeString(inline(t, page, `http-equiv="Content-Security-Policy" content="`, `"`)) // as read
 	want := "default-src 'none'; script-src " + cspHash([]byte(gotScript)) + "; style-src " +
 		cspHash([]byte(gotStyle)) + "; img-src 'self' file:; media-src 'self' file:; frame-src 'self' file:; " +
-		"base-uri 'none'; form-action 'none'"
+		"object-src 'self' file:; base-uri 'none'; form-action 'none'"
 	if policy != want {
 		t.Errorf("policy %q\nwant   %q", policy, want)
 	}
