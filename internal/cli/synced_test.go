@@ -218,3 +218,21 @@ func TestSyncedIndexIsWrittenByOneDevice(t *testing.T) {
 	out = a.filo(0, "", false, "indexes").stdout
 	a.contains("a's indexes after b took it", out, "written by desktop")
 }
+
+func TestRulesAboveASyncedDirectory(t *testing.T) {
+	a := newCLITest(t)
+	a.write("Sync/bills/x.pdf", "x")
+	a.write("other.txt", "o")
+	a.filo(0, "", false, "roots", "add", a.root)
+	a.filo(0, "", false, "policies", "add", "keep", "forever")
+	a.filo(0, "", false, "rules", "add", a.root, "*.pdf", "keep")
+	out := a.filo(0, "c\n", true, "synced", "add", a.in("Sync")).stdout
+	a.contains("mark", out, "Rules above", "*.pdf", "Copy it to the synced directory, move it there, or leave it?",
+		"copied to")
+	out = a.filo(0, "", false, "rules").stdout
+	a.contains("rules", out, "covers synced directory", "Sync")
+	// A rule added above it later: asked about too; -y-less without a terminal it is left, and said so.
+	a.filo(0, "", false, "policies", "add", "short", "1y")
+	out = a.filo(0, "", false, "rules", "add", a.root, "*.txt", "short").stdout
+	a.contains("rules add above", out, "Rules above", "*.txt", "Left as they are")
+}

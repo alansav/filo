@@ -182,6 +182,18 @@ func (e *env) ruleAdd(ctx context.Context, s *store.Store, arg, pattern, policy 
 		next = "Next: filo policies set " + rule.Policy + " VALUE"
 	}
 	e.ruleRunEnd(run, dry, needs, next, store.AbsPath(root.Path, dir))
+	if dry {
+		return nil
+	}
+	under, err := syncedUnder(ctx, s, root.ID, dir)
+	if err != nil {
+		return err
+	}
+	for _, sd := range under {
+		if err := e.askRulesAbove(ctx, s, sd, []store.Rule{rule}, false); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -486,6 +498,14 @@ func (e *env) ruleList(ctx context.Context, s *store.Store, pos []string) error 
 		if x.PolicyValue == "" {
 			row.Attention = "needs a retention"
 			attention++
+		}
+		if under, err := syncedUnder(ctx, s, x.RootID, x.Dir); err != nil {
+			return err
+		} else {
+			for _, sd := range under {
+				row.Below = append(row.Below, "covers synced directory "+r.Tilde(sd.Abs())+": not shared (what it "+
+					"sets there is, file by file)")
+			}
 		}
 		g := &sec.groups[len(sec.groups)-1]
 		g.Rows = append(g.Rows, row)

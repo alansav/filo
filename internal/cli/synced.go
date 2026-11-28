@@ -257,6 +257,13 @@ func (e *env) syncedAdd(ctx context.Context, s *store.Store, abs string, yes boo
 	r.Heading("Synced directory marked", view.Where{}, r.Tilde(sd.Abs()))
 	r.Count(view.Neutral, "its decisions are shared through "+r.Tilde(filepath.Join(sd.Abs(), journal.FiloDir))+
 		"/, which scans skip")
+	above, err := rulesAbove(ctx, s, sd)
+	if err != nil {
+		return err
+	}
+	if err := e.askRulesAbove(ctx, s, sd, above, yes); err != nil {
+		return err
+	}
 	r.Blank()
 	r.Next("Next: once the sync service has copied it, filo synced add DIR on each other device joins it")
 	return nil
@@ -315,7 +322,11 @@ func (e *env) syncedJoin(ctx context.Context, s *store.Store, t share.Target, ye
 	for _, n := range notes {
 		r.Count(view.Attention, n)
 	}
-	return nil
+	above, err := rulesAbove(ctx, s, sd)
+	if err != nil {
+		return err
+	}
+	return e.askRulesAbove(ctx, s, sd, above, yes)
 }
 
 func (e *env) syncedRemove(ctx context.Context, s *store.Store, abs string, yes bool) error {
