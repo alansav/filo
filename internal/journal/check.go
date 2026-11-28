@@ -10,7 +10,8 @@ import (
 )
 
 // Point is where reading a journal stopped: the byte offset just after the last line accepted (its newline), that
-// line itself, and the device's key from line 1. Reading on from a Point checks first that the line before it is
+// line itself, and the device's key from line 1. The zero Point (no line accepted yet) is read on from by Check,
+// from the start. Reading on from a Point checks first that the line before it is
 // still there, byte for byte, so a journal changed under it is read and checked again from the start.
 type Point struct {
 	Offset int64
@@ -83,6 +84,9 @@ func Check(data []byte, dev string) Result {
 // accepted, its newline, and anything after). A tail that does not start with that line is ErrChanged: the caller
 // then reads the journal again from the start.
 func CheckFrom(tail []byte, p Point) (Result, error) {
+	if len(p.Last.Raw) == 0 {
+		return Result{}, errors.New("no line read yet to read on from: read the journal from the start")
+	}
 	want := append(append([]byte(nil), p.Last.Raw...), '\n')
 	if !bytes.HasPrefix(tail, want) {
 		return Result{}, ErrChanged

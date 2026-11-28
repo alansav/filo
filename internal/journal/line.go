@@ -112,8 +112,9 @@ func Encode(key ed25519.PrivateKey, h Header, body any) ([]byte, error) {
 	return raw, nil
 }
 
-// objectKeys returns the keys of the JSON object b, refusing anything else and a key given twice (a reader that
-// kept the first and one that kept the last would read two different lines).
+// objectKeys returns the keys of the JSON object b, refusing anything else, a key that is not plain (lower-case
+// letters, digits and '_': encoding/json matches keys ignoring case, so "Kind" or "KIND" would be read as "kind"),
+// and a key given twice (a reader that kept the first and one that kept the last would read two different lines).
 func objectKeys(b []byte) ([]string, error) {
 	dec := json.NewDecoder(bytes.NewReader(b))
 	t, err := dec.Token()
@@ -131,6 +132,9 @@ func objectKeys(b []byte) ([]string, error) {
 			return nil, err
 		}
 		k := t.(string)
+		if !plainKey(k) {
+			return nil, fmt.Errorf("the key %q is not lower-case letters, digits and '_'", k)
+		}
 		if seen[k] {
 			return nil, fmt.Errorf("the key %q is given twice", k)
 		}
@@ -151,6 +155,21 @@ func objectKeys(b []byte) ([]string, error) {
 		return nil, errors.New("more after the object")
 	}
 	return keys, nil
+}
+
+// plainKey reports whether k is a key a line may have: lower-case ASCII letters, digits and '_', none other, so no
+// two keys are the same key to encoding/json.
+func plainKey(k string) bool {
+	if k == "" {
+		return false
+	}
+	for i := 0; i < len(k); i++ {
+		c := k[i]
+		if !(c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '_') {
+			return false
+		}
+	}
+	return true
 }
 
 // ErrNewer is a line of a newer format than this build reads.
@@ -201,6 +220,9 @@ func Parse(raw []byte) (Line, error) {
 
 // Verify checks the line's signature with pub.
 func (l Line) Verify(pub ed25519.PublicKey) bool {
+	if len(l.Raw) <= len(l.Payload) || len(pub) != ed25519.PublicKeySize {
+		return false // not a line from Parse
+	}
 	sig, err := base64.StdEncoding.Strict().DecodeString(string(l.Raw[len(l.Payload)+1:]))
 	return err == nil && ed25519.Verify(pub, l.Payload, sig)
 }

@@ -78,6 +78,9 @@ func TestEncodeRefuses(t *testing.T) {
 	if _, err := Encode(key, h, map[string]string{"dev": "x"}); err == nil {
 		t.Error("a body using a header key was encoded")
 	}
+	if _, err := Encode(key, h, map[string]string{"Kind": "device"}); err == nil {
+		t.Error("a body with a key in upper case was encoded")
+	}
 	if _, err := Encode(key, h, []int{1}); err == nil {
 		t.Error("a body that is not an object was encoded")
 	}
@@ -106,6 +109,8 @@ func TestParseRefuses(t *testing.T) {
 		{"an array", sign(`[1,2]`)},
 		{"a key twice", sign(`{"v":1,"dev":"` + dev + `","dev":"` + dev + `","seq":1,"prev":"","time":"x","kind":"k"}`)},
 		{"two objects", sign(good + good)},
+		{"a key in another case", sign(`{"v":1,"dev":"` + dev + `","seq":1,"prev":"","time":"x","kind":"k","KIND":"device"}`)},
+		{"a key folding to another", sign(`{"v":1,"dev":"` + dev + `","seq":1,"prev":"","time":"x","\u212aind":"device"}`)},
 		{"bad UTF-8", sign(`{"v":1,"dev":"` + dev + "\xff" + `","seq":1,"prev":"","time":"x","kind":"k"}`)},
 		{"no device", sign(`{"v":1,"seq":1,"prev":"","time":"x","kind":"k"}`)},
 		{"bad device", sign(`{"v":1,"dev":"../x","seq":1,"prev":"","time":"x","kind":"k"}`)},
@@ -156,3 +161,16 @@ func TestCheckPath(t *testing.T) {
 }
 
 func encodeSig(sig []byte) string { return base64.StdEncoding.EncodeToString(sig) }
+
+func TestVerifyAZeroLine(t *testing.T) {
+	_, key := testDevice(t)
+	if (Line{}).Verify(key.Public().(ed25519.PublicKey)) {
+		t.Fatal("the zero Line verifies")
+	}
+	if _, err := Resume(key, Line{}); err == nil {
+		t.Fatal("Resume after the zero Line succeeded")
+	}
+	if _, err := CheckFrom([]byte("x\n"), Point{}); err == nil {
+		t.Fatal("CheckFrom the zero Point succeeded")
+	}
+}
