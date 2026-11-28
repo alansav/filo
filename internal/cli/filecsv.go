@@ -316,6 +316,18 @@ func (e *env) showPending(roots []string, p store.FilesPending, max int) {
 		n := len(moves)
 		r.Note(view.Attention, report.Plural(int64(n), "file is", "files are")+" moved:")
 		r.Moves(view.MoveList{Rows: moves, Max: max})
+		for _, sd := range e.syncedDirs {
+			out := 0
+			for _, rn := range p.Renames {
+				if rn.Moves() && sd.Contains(rn.RootID, rn.Path) && !sd.Contains(rn.RootID, rn.NewPath()) {
+					out++
+				}
+			}
+			if out > 0 {
+				r.Count(view.Attention, report.Plural(int64(out), "file moves", "files move")+" out of synced "+
+					"directory "+r.Tilde(sd.Abs())+": on the other devices that is a delete")
+			}
+		}
 		r.Blank()
 	}
 }

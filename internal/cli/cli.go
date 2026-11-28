@@ -34,6 +34,8 @@ type env struct {
 	// indexesDone: the command wrote or reported the tag index pages itself (filo indexes), so the end of the run
 	// does not; indexFailed: an index was not brought up to date at the end of the run, which then exits 1.
 	indexesDone, indexFailed bool
+	// syncedDirs are the joined synced directories, as read when the register was opened.
+	syncedDirs []store.SyncedDir
 }
 
 // usageError is reported with exit code 2.
@@ -290,6 +292,9 @@ func (e *env) open(ctx context.Context, db string) (*store.Store, error) {
 			e.errorLine("warning: reading the synced directories' journals: " + err.Error())
 		} else if err := e.warnNotSeen(ctx, s, rep); err != nil {
 			e.errorLine("warning: " + err.Error())
+		}
+		for _, dr := range rep.Dirs {
+			e.syncedDirs = append(e.syncedDirs, dr.Dir)
 		}
 	}
 	return s, nil

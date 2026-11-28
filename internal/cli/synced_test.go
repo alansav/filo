@@ -274,3 +274,21 @@ func TestNotSeenDeviceIsWarnedAboutOnce(t *testing.T) {
 	a.contains("retired", r.stdout, "desktop retired.")
 	a.contains("devices", a.filo(0, "", false, "devices").stdout, "retired by laptop")
 }
+
+func TestUpdateSaysAMoveOutOfASyncedDirectoryIsADelete(t *testing.T) {
+	a, _ := syncedPair(t, map[string]string{"x.pdf": "x"})
+	a.write("Private/keep.txt", "k")
+	a.filo(0, "", false, "scan")
+	csv := filepath.Join(a.work, "all.csv")
+	a.filo(0, "", false, "export", a.in("Sync"), "-o", csv)
+	data := string(mustRead(t, csv))
+	edited := strings.Replace(data, a.in("Sync")+",x.pdf", a.in("Private")+",x.pdf", 1)
+	if edited == data {
+		t.Fatalf("no row to edit:\n%s", data)
+	}
+	if err := os.WriteFile(csv, []byte(edited), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out := a.filo(0, "", false, "update", csv, "--dry-run").stdout
+	a.contains("update", out, "1 file moves out of synced directory", "on the other devices that is a delete")
+}
