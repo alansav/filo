@@ -22,69 +22,85 @@ const (
 	factDeleted = "fact:deleted" // Filo deleted it on the device that wrote the line
 )
 
-// publishFacts adds the facts of this device's events after the events cursor to the pubs of the synced directories
-// holding their files; it returns the last event dealt with: an edit not yet seen on two scans in a row stops it
-// there (the file may still be arriving or being written), to be looked at again on a later run.
-func publishFacts(ctx context.Context, s *store.Store, me string, after int64, dirs []store.SyncedDir,
-	at func(store.SyncedDir) *pub, now time.Time) (int64, error) {
-	evs, err := s.FileEventsSince(ctx, after)
-	if err != nil {
-		return after, err
+// publishFacts adds the facts of this device's events (evs) to the pubs of the synced directories holding their
+// files, each directory from its own events cursor (dc), and returns how far each got: an edit not yet seen on two
+// scans in a row stops its directory there (the file may still be arriving or being written), to be looked at again
+// on a later run, while the others go on.
+func publishFacts(ctx context.Context, s *store.Store, me string, evs []store.FileEvent, dirs []store.SyncedDir,
+	dc map[int64]store.PublishCursors, at func(store.SyncedDir) *pub, now time.Time) (map[int64]int64, error) {
+	upto := map[int64]int64{}
+	stalled := map[int64]bool{}
+	for _, sd := range dirs {
+		upto[sd.ID] = dc[sd.ID].Events
 	}
-	upto := after
 	for _, e := range evs {
 		for _, sd := range dirs {
-			rel, ok := relIn(sd, e.RootID, e.Path)
-			if !ok {
+			if stalled[sd.ID] || e.ID <= dc[sd.ID].Events {
 				continue
 			}
-			fid, err := s.SharedID(ctx, sd.ID, e.FileID)
+			wait, err := factOf(ctx, s, me, e, sd, at, now)
 			if err != nil {
 				return upto, err
 			}
-			if fid == "" {
-				break // no decision about it was ever shared: nothing to follow
+			if wait {
+				stalled[sd.ID] = true
+				continue
 			}
-			v, _, err := s.Values(ctx, e.FileID)
-			if err != nil {
-				return upto, err
-			}
-			key, value := factPlace, v.Hash+" "+rel
-			skip := journal.CheckPath(rel) != nil // a name no line may carry: not shared, as for decisions
-			switch e.Kind {
-			case store.EventDeleted:
-				key, value = factDeleted, "1"
-			case "changed":
-				seen, err := s.SeenSince(ctx, e.FileID, e.ScanID)
-				if err != nil {
-					return upto, err
-				}
-				if !seen {
-					later, err := s.ScannedSince(ctx, e.RootID, e.ScanID)
-					if err != nil {
-						return upto, err
-					}
-					if !later && v.Present && !v.Deleted {
-						return upto, nil // seen once only: maybe still being written; looked at after the next scan
-					}
-					skip = true // edited again since, or gone: a later event, or none, says where it is
-				}
-				arriving, err := expected(ctx, s, sd.ID, fid, v.Hash, me)
-				if err != nil {
-					return upto, err
-				}
-				skip = skip || arriving // a content another device decided about: the sync bringing it, not an edit
-			}
-			if pb := at(sd); pb != nil && !skip {
-				if err := pb.fact(ctx, s, fid, key, value, v.Hash, rel, now); err != nil {
-					return upto, err
-				}
-			}
-			break
+			upto[sd.ID] = e.ID
 		}
-		upto = e.ID
 	}
 	return upto, nil
+}
+
+// factOf writes the fact of event e if it is about a file with a shared ID in sd; it reports whether the event must
+// wait (an edit seen on one scan only).
+func factOf(ctx context.Context, s *store.Store, me string, e store.FileEvent, sd store.SyncedDir,
+	at func(store.SyncedDir) *pub, now time.Time) (bool, error) {
+	rel, ok := relIn(sd, e.RootID, e.Path)
+	if !ok {
+		return false, nil
+	}
+	fid, err := s.SharedID(ctx, sd.ID, e.FileID)
+	if err != nil || fid == "" {
+		return false, err // no decision about it was ever shared: nothing to follow
+	}
+	v, _, err := s.Values(ctx, e.FileID)
+	if err != nil {
+		return false, err
+	}
+	key, value := factPlace, v.Hash+" "+rel
+	skip := journal.CheckPath(rel) != nil // a name no line may carry: not shared, as for decisions
+	switch e.Kind {
+	case store.EventDeleted:
+		key, value = factDeleted, "1"
+	case "changed":
+		seen, err := s.SeenSince(ctx, e.FileID, e.ScanID)
+		if err != nil {
+			return false, err
+		}
+		if !seen {
+			later, err := s.ScannedSince(ctx, e.RootID, e.ScanID)
+			if err != nil {
+				return false, err
+			}
+			if !later && v.Present && !v.Deleted {
+				return true, nil // seen once only: maybe still being written; looked at after the next scan
+			}
+			skip = true // edited again since, or gone: a later event, or none, says where it is
+		}
+		arriving, err := expected(ctx, s, sd.ID, fid, v.Hash, me)
+		if err != nil {
+			return false, err
+		}
+		skip = skip || arriving // a content another device decided about: the sync bringing it, not an edit
+	}
+	if skip {
+		return false, nil
+	}
+	if pb := at(sd); pb != nil {
+		return false, pb.fact(ctx, s, fid, key, value, v.Hash, rel, now)
+	}
+	return false, nil
 }
 
 // expected reports whether another device's current decision about fid names content hash (applied here or not):

@@ -16,30 +16,18 @@ import (
 
 // Publish writes the decisions this device made since it last published (the review and tag histories, past the
 // cursors) to its journal in each joined synced directory holding the file: one line per date, retention or tag that
-// changed, each naming the decisions it replaces (those in effect for it here). A decision that applied another
-// device's (command "journal") is never written again. The lines go to the register first, with the cursors, then to
-// the disk. A directory where this device does not write (retired there, its journal ahead of the register) gets
-// nothing, and the cursors still move on: seeding (on joining again) carries what is in effect. A directory that
-// cannot be reached now keeps the cursors where they were, so the next run tries again (a decision written already is
-// in effect, so it is not written twice). It returns the problems met, one line each.
+// changed, each naming the decisions it replaces (those in effect for it here); and its identity facts, policy moves
+// and settings. A decision that applied another device's (command "journal") is never written again. The lines go to
+// the register first, with each synced directory's cursors, then to the disk. Each synced directory has its own
+// cursors: one that cannot be written now (not reachable, its journal ahead or forked) keeps them, and is caught up
+// on its own once it can be, while the others move on and are never written again what they have. A directory
+// where this device was retired gets nothing, and its cursors move on. It returns the problems met, one line each.
 func Publish(ctx context.Context, s *store.Store, now time.Time) ([]string, error) {
 	cur, err := s.Cursors(ctx)
 	if err != nil {
 		return nil, err
 	}
 	latest, err := s.Latest(ctx)
-	if err != nil {
-		return nil, err
-	}
-	reviews, err := s.ReviewsSince(ctx, cur.Reviews)
-	if err != nil {
-		return nil, err
-	}
-	tagEvs, err := s.TagChangesSince(ctx, cur.TagChanges)
-	if err != nil {
-		return nil, err
-	}
-	policyEvs, err := s.PolicyChangesSince(ctx, cur.PolicyChanges)
 	if err != nil {
 		return nil, err
 	}
@@ -51,6 +39,34 @@ func Publish(ctx context.Context, s *store.Store, now time.Time) ([]string, erro
 		return nil, s.Publish(ctx, nil, latest)
 	}
 	me, err := s.Device(ctx)
+	if err != nil {
+		return nil, err
+	}
+	// Each directory's cursors (a directory with none starts from the register's), and the lowest of them, to read
+	// the histories from.
+	dc := map[int64]store.PublishCursors{}
+	low := cur
+	for _, sd := range dirs {
+		c, ok, err := s.DirCursors(ctx, sd.ID)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			c = cur
+		}
+		dc[sd.ID] = c
+		low.Reviews, low.TagChanges = min(low.Reviews, c.Reviews), min(low.TagChanges, c.TagChanges)
+		low.PolicyChanges, low.Events = min(low.PolicyChanges, c.PolicyChanges), min(low.Events, c.Events)
+	}
+	reviews, err := s.ReviewsSince(ctx, low.Reviews)
+	if err != nil {
+		return nil, err
+	}
+	tagEvs, err := s.TagChangesSince(ctx, low.TagChanges)
+	if err != nil {
+		return nil, err
+	}
+	policyEvs, err := s.PolicyChangesSince(ctx, low.PolicyChanges)
 	if err != nil {
 		return nil, err
 	}
@@ -66,40 +82,48 @@ func Publish(ctx context.Context, s *store.Store, now time.Time) ([]string, erro
 		return nil, err
 	}
 	var problems []string
-	failed := false // a directory not written for a passing reason (not reachable): the cursors stay, to retry
+	failed := map[int64]bool{} // not written now (not reachable, ahead, forked): its cursors stay, to catch up
 	pubs := map[int64]*pub{}
 	var order []*pub
-	at := func(fileID int64) *pub {
-		p, ok := places[fileID]
-		if !ok {
-			return nil
-		}
-		for _, sd := range dirs {
-			if !sd.Contains(p.RootID, p.Path) {
-				continue
-			}
-			if pb, ok := pubs[sd.ID]; ok {
-				return pb
-			}
-			pb, problem, err := startPub(ctx, s, me, sd)
-			if err != nil {
-				problems = append(problems, sd.Abs()+": "+err.Error()+" (tried again on the next run)")
-				failed = true
-			} else if problem != "" {
-				problems = append(problems, sd.Abs()+": "+problem)
-				failed = true // its journal ahead or forked: written once that is settled
-			}
-			pubs[sd.ID] = pb // nil: this device does not write there
-			if pb != nil {
-				order = append(order, pb)
-			}
+	pubFor := func(sd store.SyncedDir, quiet bool) *pub {
+		if pb, ok := pubs[sd.ID]; ok {
 			return pb
 		}
-		return nil
+		pb, problem, err := startPub(ctx, s, me, sd)
+		switch {
+		case err != nil:
+			failed[sd.ID] = true
+			if !quiet {
+				problems = append(problems, sd.Abs()+": "+err.Error()+" (tried again on the next run)")
+			}
+		case problem != "":
+			failed[sd.ID] = true
+			if !quiet {
+				problems = append(problems, sd.Abs()+": "+problem)
+			}
+		}
+		pubs[sd.ID] = pb // nil: this device does not write there (or cannot now)
+		if pb != nil {
+			order = append(order, pb)
+		}
+		return pb
+	}
+	// dirOf is the joined synced directory holding a file now, and its pub, if this run writes there.
+	dirOf := func(fileID int64) (store.SyncedDir, *pub, bool) {
+		p, ok := places[fileID]
+		if !ok {
+			return store.SyncedDir{}, nil, false
+		}
+		for _, sd := range dirs {
+			if sd.Contains(p.RootID, p.Path) {
+				return sd, pubFor(sd, false), true
+			}
+		}
+		return store.SyncedDir{}, nil, false
 	}
 	for _, e := range reviews {
-		pb := at(e.FileID)
-		if pb == nil || e.Hash == "" {
+		sd, pb, ok := dirOf(e.FileID)
+		if !ok || pb == nil || e.Hash == "" || e.ID <= dc[sd.ID].Reviews {
 			continue
 		}
 		p := places[e.FileID]
@@ -112,8 +136,8 @@ func Publish(ctx context.Context, s *store.Store, now time.Time) ([]string, erro
 		}
 	}
 	for _, e := range tagEvs {
-		pb := at(e.FileID)
-		if pb == nil {
+		sd, pb, ok := dirOf(e.FileID)
+		if !ok || pb == nil || e.ID <= dc[sd.ID].TagChanges {
 			continue
 		}
 		t := tags.Tag{Key: e.Key, Value: e.Value}
@@ -127,50 +151,28 @@ func Publish(ctx context.Context, s *store.Store, now time.Time) ([]string, erro
 		}
 	}
 	// Identity facts: what this device's scans paired, and its deletes by Filo, for files with a shared ID.
-	pubFor := func(sd store.SyncedDir) *pub {
-		if pb, ok := pubs[sd.ID]; ok {
-			return pb
-		}
-		pb, problem, err := startPub(ctx, s, me, sd)
-		if err != nil {
-			problems = append(problems, sd.Abs()+": "+err.Error()+" (tried again on the next run)")
-			failed = true
-		} else if problem != "" {
-			problems = append(problems, sd.Abs()+": "+problem)
-			failed = true
-		}
-		pubs[sd.ID] = pb
-		if pb != nil {
-			order = append(order, pb)
-		}
-		return pb
-	}
-	upto, err := publishFacts(ctx, s, me.ID, cur.Events, dirs, pubFor, now)
+	evs, err := s.FileEventsSince(ctx, low.Events)
 	if err != nil {
 		return problems, err
 	}
-	latest.Events = upto
-	// Settings (policies, rules, duplicates decisions, tag indexes): what each synced directory's journal has in
-	// effect, against what this device holds; and the policies moved, in every one.
-	var moves []store.PolicyEvent
-	for _, e := range policyEvs {
-		if e.Kind == "rename" || e.Kind == "move" {
-			moves = append(moves, e)
-		}
+	upto, err := publishFacts(ctx, s, me.ID, evs, dirs, dc, func(sd store.SyncedDir) *pub { return pubFor(sd, false) },
+		now)
+	if err != nil {
+		return problems, err
 	}
+	// Settings (policies, rules, duplicates decisions, tag indexes) and policy moves, in every directory: by a run
+	// that changed something, or with a move to write; a directory not reachable is left quietly.
 	for _, sd := range dirs {
-		if !s.Changed() && len(moves) == 0 {
-			break // a run that changed nothing has no setting of its own to write
-		}
-		pb, started := pubs[sd.ID]
-		if !started {
-			// Settings only: a directory not reachable now is left quietly; what differs is written when it is.
-			pb, _, _ = startPub(ctx, s, me, sd)
-			pubs[sd.ID] = pb
-			if pb != nil {
-				order = append(order, pb)
+		var moves []store.PolicyEvent
+		for _, e := range policyEvs {
+			if (e.Kind == "rename" || e.Kind == "move") && e.ID > dc[sd.ID].PolicyChanges {
+				moves = append(moves, e)
 			}
 		}
+		if !s.Changed() && len(moves) == 0 {
+			continue
+		}
+		pb := pubFor(sd, true)
 		if pb == nil {
 			continue
 		}
@@ -181,12 +183,22 @@ func Publish(ctx context.Context, s *store.Store, now time.Time) ([]string, erro
 			return problems, err
 		}
 	}
-	changes := make([]store.SyncedChange, 0, len(order))
-	for _, pb := range order {
-		changes = append(changes, pb.ch)
-	}
-	if failed {
-		latest = cur // what was written now is not written again: a decision in effect already is skipped
+	// Each directory written (or with nothing to write) moves its cursors on; one that failed keeps them.
+	changes := make([]store.SyncedChange, 0, len(dirs))
+	for _, sd := range dirs {
+		if failed[sd.ID] {
+			keep := dc[sd.ID] // pinned where it was (a directory with no row would follow the register's on)
+			changes = append(changes, store.SyncedChange{SyncedID: sd.ID, Cursor: &keep})
+			continue
+		}
+		next := latest
+		next.Events = upto[sd.ID]
+		ch := store.SyncedChange{SyncedID: sd.ID}
+		if pb := pubs[sd.ID]; pb != nil {
+			ch = pb.ch
+		}
+		ch.Cursor = &next
+		changes = append(changes, ch)
 	}
 	if err := s.Publish(ctx, changes, latest); err != nil {
 		return problems, err

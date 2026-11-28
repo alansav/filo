@@ -477,6 +477,13 @@ func applySettingValue(ctx context.Context, s *store.Store, me store.Device, sd 
 	case strings.HasPrefix(key, keyAlways):
 		h := strings.TrimPrefix(key, keyAlways)
 		if value == "" {
+			if outside, err := copyOutside(ctx, s, sd, h); err != nil || outside {
+				if err != nil {
+					return false, "", err
+				}
+				return true, fmt.Sprintf("a content always kept was taken off on another device, and stays "+
+					"always here: this device has copies of it outside %s", sd.Abs()), nil
+			}
 			return true, "", s.RemoveAlways(ctx, h)
 		}
 		return true, "", s.AddAlways(ctx, h, now)
@@ -555,9 +562,24 @@ func applyRecords(ctx context.Context, s *store.Store, sd store.SyncedDir, hash,
 		if err != nil {
 			return false, "", err
 		}
+		// Only a set all inside sd ends: one with records elsewhere is this device's own, not the synced directory's.
+		var ids []int64
+		for _, m := range members {
+			ids = append(ids, m.FileID)
+		}
+		places, err := s.FilePlaces(ctx, ids)
+		if err != nil {
+			return false, "", err
+		}
+		outside := map[int64]bool{}
+		for _, m := range members {
+			if p, ok := places[m.FileID]; !ok || !sd.Contains(p.RootID, p.Path) {
+				outside[m.Set] = true
+			}
+		}
 		done := map[int64]bool{}
 		for _, m := range members {
-			if m.Hash == hash && !done[m.Set] {
+			if m.Hash == hash && !done[m.Set] && !outside[m.Set] {
 				done[m.Set] = true
 				if err := s.RemoveRecordSet(ctx, m.Set); err != nil {
 					return false, "", err
@@ -624,4 +646,18 @@ func applyIndex(ctx context.Context, s *store.Store, me store.Device, sd store.S
 		return true, problem, s.SetIndexWriter(ctx, ix.ID, w)
 	}
 	return true, problem, nil
+}
+
+// copyOutside reports whether this device has a present copy of content hash outside synced directory sd.
+func copyOutside(ctx context.Context, s *store.Store, sd store.SyncedDir, hash string) (bool, error) {
+	files, err := s.Files(ctx, retention.Today(time.Now()), store.Filter{})
+	if err != nil {
+		return false, err
+	}
+	for _, f := range files {
+		if f.Hash == hash && !(f.RootPath == sd.RootPath && sd.Contains(sd.RootID, f.Path)) {
+			return true, nil
+		}
+	}
+	return false, nil
 }

@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"slices"
 	"strings"
@@ -462,19 +463,33 @@ func Join(ctx context.Context, s *store.Store, t Target, now time.Time) (store.S
 	devs[me.ID] = selfFrom(known, me, now)
 	retired, notes := settle(reads, map[string]store.JournalState{}, me.ID, devs, now)
 	name := func(dev string) string { return nameOf(devs, dev) }
+	var ownSeen []seenValue
 	for _, r := range reads {
 		ch.Journals = append(ch.Journals, r.update(store.JournalState{Dev: r.dev}, retired[r.dev]))
-		if r.dev != me.ID {
-			notes = append(notes, fileDecisions(r.lines, 0, name, &ch)...)
-			ps, err := settingDecisions(ctx, s, r.lines, name, &ch, now, false)
-			if err != nil {
-				return store.SyncedDir{}, notes, err
+		from := len(ch.Decisions)
+		notes = append(notes, fileDecisions(r.lines, 0, name, &ch)...)
+		ps, err := settingDecisions(ctx, s, r.lines, name, &ch, now, false)
+		if err != nil {
+			return store.SyncedDir{}, notes, err
+		}
+		notes = append(notes, ps...)
+		if r.dev == me.ID {
+			// This device's own lines, from when it was here before: kept as its decisions, applied already (what
+			// it holds now is seeded against them, and a change replaces them, not conflicts with them).
+			for i := from; i < len(ch.Decisions); i++ {
+				ch.Decisions[i].Applied = true
+				if d := ch.Decisions[i]; d.FID == store.SettingsFID {
+					id := int64(-1) // this synced directory's, filled in once it has an ID
+					if strings.HasPrefix(d.Key, keyPolicy) {
+						id = 0
+					}
+					ownSeen = append(ownSeen, seenValue{id, d.Key, d.Value})
+				}
 			}
-			notes = append(notes, ps...)
 		}
 	}
 	var first []byte
-	if _, here := p.results[me.ID]; !here {
+	if _, here := p.results[me.ID]; !here && retired[me.ID] == 0 {
 		_, first, err = journal.Start(me.Key, me.ID, me.Name, now)
 		if err != nil {
 			return store.SyncedDir{}, nil, err
@@ -494,6 +509,14 @@ func Join(ctx context.Context, s *store.Store, t Target, now time.Time) (store.S
 	slices.SortFunc(ch.Devices, func(a, b store.KnownDevice) int { return strings.Compare(a.Dev, b.Dev) })
 	if sd.ID, err = s.ApplySynced(ctx, ch); err != nil {
 		return store.SyncedDir{}, nil, err
+	}
+	for _, sv := range ownSeen {
+		if sv.id < 0 {
+			sv.id = sd.ID
+		}
+		if err := s.SetSeen(ctx, sv.id, sv.key, sv.value); err != nil {
+			return sd, notes, err
+		}
 	}
 	d, err := journal.Open(t.Abs)
 	if err != nil {
@@ -577,32 +600,50 @@ func (r *read) cut(seq int64) bool {
 // retired device's last line that counts (the kept ones and the new), and what the person should hear.
 func settle(reads []*read, state map[string]store.JournalState, me string, devs map[string]store.KnownDevice,
 	now time.Time) (map[string]int64, []string) {
-	retired := map[string]int64{}
-	by := map[string]string{}
+	kept := map[string]int64{} // the retirements kept from before: they stand
 	for dev, st := range state {
 		if st.RetiredSeq > 0 {
-			retired[dev] = st.RetiredSeq
+			kept[dev] = st.RetiredSeq
 		}
 	}
-	for range len(reads) + 2 {
-		changed := false
-		for _, r := range reads {
+	type orig struct {
+		lines   []journal.Line
+		problem string
+	}
+	origs := make([]orig, len(reads))
+	for i, r := range reads {
+		origs[i] = orig{r.lines, r.problem}
+	}
+	// Each pass works the retirements out again from the kept ones and the retire lines that still count after the
+	// cuts they make, until that no longer changes: a retire line whose own device is cut before it stops counting,
+	// and what it retired is retired no more, whichever journal was read first.
+	retired, by := maps.Clone(kept), map[string]string{}
+	for range 2*len(reads) + 2 {
+		for i, r := range reads {
+			r.lines, r.problem = origs[i].lines, origs[i].problem
 			r.cut(retired[r.dev])
 		}
+		next, nextBy := maps.Clone(kept), map[string]string{}
 		for _, r := range reads {
 			for _, l := range r.lines {
 				var b RetireBody
 				if l.Kind != KindRetire || l.Body(&b) != nil || !device.ValidID(b.Device) || b.Last < 0 {
 					continue
 				}
-				if retired[b.Device] == 0 {
-					retired[b.Device], by[b.Device], changed = max(b.Last, 1), l.Dev, true
+				if next[b.Device] == 0 {
+					next[b.Device], nextBy[b.Device] = max(b.Last, 1), l.Dev
 				}
 			}
 		}
-		if !changed {
+		same := maps.Equal(next, retired)
+		retired, by = next, nextBy
+		if same {
 			break
 		}
+	}
+	for i, r := range reads {
+		r.lines, r.problem = origs[i].lines, origs[i].problem
+		r.cut(retired[r.dev])
 	}
 	var notes []string
 	for _, r := range reads {

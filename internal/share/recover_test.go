@@ -3,6 +3,7 @@ package share
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -145,5 +146,50 @@ func TestDecisionMadeWhileBlockedIsWrittenLater(t *testing.T) {
 	a.publish(t0.Add(time.Minute))
 	if a.lines(a.dev().ID) == before {
 		t.Fatal("the decision made while blocked was never written")
+	}
+}
+
+// A second synced directory that cannot be written does not make the first one be written old decisions again.
+func TestABlockedDirectoryDoesNotReplayTheOthers(t *testing.T) {
+	ctx := context.Background()
+	a, _ := pair(t, map[string]string{"x.pdf": "x"})
+	other := filepath.Join(a.root, "Other")
+	if err := os.Mkdir(other, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	tg, err := Inspect(ctx, a.s, other)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sd2, _, err := Mark(ctx, a.s, tg, t0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Block Other: its journal holds a line of this device's the register does not.
+	kept, _ := a.s.JournalLines(ctx, sd2.ID, a.dev().ID)
+	last, _ := journal.Parse(kept[len(kept)-1].Raw)
+	w, _ := journal.Resume(a.dev().Key, last)
+	raw, _ := w.Add(KindName, NameBody{Name: "laptop"}, t0)
+	f, _ := os.OpenFile(filepath.Join(other, journal.FiloDir, journal.JournalName(a.dev().ID)), os.O_APPEND|os.O_WRONLY, 0)
+	f.Write(append(raw, '\n'))
+	f.Close()
+	retentions := func() int {
+		n := 0
+		for _, l := range mustLines(t, a, a.dev().ID) {
+			if p, err := journal.Parse(l.Raw); err == nil && p.Kind == KindRetention {
+				n++
+			}
+		}
+		return n
+	}
+	a.set("x.pdf", "2026-01-01", "7y", t0.Add(time.Minute))
+	a.set("x.pdf", "", "8y", t0.Add(2*time.Minute))
+	before := retentions()
+	for i := range 3 {
+		a.s.AddPolicy(ctx, fmt.Sprintf("p%d", i), "1y", t0) // a change, so each run publishes
+		Publish(ctx, a.s, t0.Add(time.Duration(3+i)*time.Minute))
+	}
+	if retentions() != before {
+		t.Fatalf("old retentions written again: %d, had %d", retentions(), before)
 	}
 }

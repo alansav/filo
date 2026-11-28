@@ -433,6 +433,10 @@ func checkOwn(ctx context.Context, s *store.Store, d *journal.Dir, syncedID int6
 	}
 	if rerr == nil {
 		res := journal.Check(data, me.ID)
+		if len(res.Lines) > 0 && !res.Key.Equal(me.Public()) {
+			return "", "a journal under this device's ID, signed with another key, is there: another machine uses " +
+				"this ID (filo device new gives this register a new one); nothing is written there", nil
+		}
 		if len(res.Lines) > 0 && res.Key.Equal(me.Public()) {
 			n := 0
 			for n < len(res.Lines) && n < len(kept) && bytes.Equal(res.Lines[n].Raw, kept[n].Raw) {
