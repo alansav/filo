@@ -227,3 +227,35 @@ func TestValues(t *testing.T) {
 		t.Fatal("Values of no file")
 	}
 }
+
+func TestConflictKeepsAFileFromDeletion(t *testing.T) {
+	ctx := context.Background()
+	e := newReviewEnv(t)
+	e.apply(Changes{New: []NewFile{f("Sync/old.pdf", "ho")}})
+	id := e.known()["Sync/old.pdf"].FileID
+	now := time.Date(2026, 11, 28, 0, 0, 0, 0, time.UTC)
+	if _, err := e.s.SetFiles(ctx, []int64{id}, SetValues{Retention: "2020-01-01", SetRetention: true}, now,
+		"2026-11-28", SetOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if c, _ := e.s.Candidates(ctx, "2026-11-28", Filter{}); len(c) != 1 {
+		t.Fatalf("candidates before the conflict: %d", len(c))
+	}
+	sid, err := e.s.ApplySynced(ctx, SyncedChange{Add: &SyncedDir{SyncID: "s", RootID: e.root.ID, Dir: "Sync",
+		State: SyncedJoined, AddedUTC: "t"}, Shared: map[string]int64{"f": id}, Decisions: []Decision{
+		{Dev: "a", Seq: 1, FID: "f", Key: "retention", Value: "2020-01-01"},
+		{Dev: "b", Seq: 1, FID: "f", Key: "retention", Value: "forever"},
+		{Dev: "a", Seq: 2, FID: "f", Key: "tag:x:y", Value: "x:y"},
+		{Dev: "b", Seq: 2, FID: "f", Key: "tag:x:y", Value: ""}}, Replaces: [][]LineRef{nil, nil, nil, nil}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = sid
+	if c, _ := e.s.Candidates(ctx, "2026-11-28", Filter{}); len(c) != 0 {
+		t.Fatalf("a file whose retention is in conflict is a candidate: %d", len(c))
+	}
+	items, _ := e.s.FilesItems(ctx, "2026-11-28", Filter{})
+	if len(items) != 1 || items[0].Conflict != "retention tags" {
+		t.Fatalf("conflict cell = %q", items[0].Conflict)
+	}
+}
