@@ -364,6 +364,17 @@ Agreed with the person on 2026-11-20. Tab completes Filo's commands, flags and a
   FILE... TAG...` follows the command's rule (a word on disk is a file, the first that is not starts the tags):
   files and tags while every earlier word is a file, only tags after the first tag; `untag` offers only the tags the
   files named have, and `key:` for each of their keys.
+- **What each argument completes, decided 2026-11-28.** Each placeholder word has a default source, with overrides
+  for the subcommands that act on something registered; a test checks every placeholder of every usage line has one.
+  Defaults: `DIR` directories inside the roots, from disk; `FILE` of `set`, `get`, `tag`, `untag` and `PATH` of
+  `show`, files from the register merged with the disk; `update FILE` `.csv` files; `-o FILE` and `--db PATH` plain
+  file names; `TAG` tags; `POLICY` and the `NAME` of `policies set`, `move`, `remove`, `show` policy names; nothing for
+  `N`, `VALUE`, `rules add`'s `PATTERN`, `--ignore NAME` and `policies add NAME` (a new value). Overrides: `roots add
+  DIR` any directory; `roots set DIR` the roots; `delete` directories and `.csv` files; `indexes remove` and
+  `refresh` directories with an index, and their `--name` that directory's index names; `rules set` and `remove`
+  directories with rules, then their patterns; `rules move` and `copy` OLD directories with rules, NEW any directory
+  in a root; `duplicates include PATH` what `filo duplicates` lists; `policies move` policy names for both; `tags
+  rename` OLD tags and `key:` in use, NEW tags in use (to merge).
 - Bash only at first (zsh can load bash completions). No framework: Cobra would be a new dependency and a rewrite of
   every command's parsing.
 
