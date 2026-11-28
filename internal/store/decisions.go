@@ -544,3 +544,27 @@ func (s *Store) CurrentByKey(ctx context.Context, id int64, fid string) (map[str
 	}
 	return out, rows.Err()
 }
+
+// AlwaysHashes returns the contents marked always, every one (docs/design.md, Duplicates).
+func (s *Store) AlwaysHashes(ctx context.Context) ([]string, error) {
+	return queryAll(ctx, s.db, func(rows *sql.Rows) (string, error) {
+		var h string
+		return h, rows.Scan(&h)
+	}, `SELECT hash FROM always_hashes ORDER BY hash`)
+}
+
+// RecordMember is a file kept as one of a set of records, while its content is still the one marked.
+type RecordMember struct {
+	Set    int64
+	FileID int64
+	Hash   string
+}
+
+// RecordMembers returns every file kept as a record of a set, while its content is the one it was marked on.
+func (s *Store) RecordMembers(ctx context.Context) ([]RecordMember, error) {
+	return queryAll(ctx, s.db, func(rows *sql.Rows) (RecordMember, error) {
+		var m RecordMember
+		return m, rows.Scan(&m.Set, &m.FileID, &m.Hash)
+	}, `SELECT r.set_id, r.file_id, r.hash FROM duplicate_records r JOIN files f ON f.id = r.file_id
+		WHERE f.hash = r.hash AND f.deleted_utc IS NULL ORDER BY r.set_id, r.file_id`)
+}

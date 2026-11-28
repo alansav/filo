@@ -326,3 +326,25 @@ func TestCurrentByKey(t *testing.T) {
 		t.Fatalf("CurrentByKey = %+v, %v", got, err)
 	}
 }
+
+func TestAlwaysAndRecordMembers(t *testing.T) {
+	ctx := context.Background()
+	e := newReviewEnv(t)
+	e.apply(Changes{New: []NewFile{f("a1", "ha"), f("a2", "ha"), f("r1", "hr"), f("r2", "hr")}})
+	k := e.known()
+	now := time.Date(2026, 11, 28, 0, 0, 0, 0, time.UTC)
+	if err := e.s.AddAlways(ctx, "ha", now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.s.SetFiles(ctx, []int64{k["r1"].FileID, k["r2"].FileID}, SetValues{Duplicates: DupRecords}, now,
+		"2026-11-28", SetOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if hs, _ := e.s.AlwaysHashes(ctx); len(hs) != 1 || hs[0] != "ha" {
+		t.Fatalf("AlwaysHashes = %q", hs)
+	}
+	ms, err := e.s.RecordMembers(ctx)
+	if err != nil || len(ms) != 2 || ms[0].Set != ms[1].Set || ms[0].Hash != "hr" {
+		t.Fatalf("RecordMembers = %+v, %v", ms, err)
+	}
+}
