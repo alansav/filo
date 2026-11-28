@@ -30,6 +30,10 @@ type DirReport struct {
 	// not yet the one they were made on (the sync has not brought it). Conflicts counts the things decided (a file's
 	// date, retention or a tag) with current decisions of different values.
 	Waiting, Conflicts int
+	// Ahead: this device's journal holds its own lines the register does not (restored from a snapshot or a
+	// backup, or copied from another machine): nothing is written there until the person says which (TakeOwn, or
+	// a new device ID).
+	Ahead bool
 }
 
 // Report is what Import found, a DirReport per joined synced directory.
@@ -159,6 +163,27 @@ func importDir(ctx context.Context, s *store.Store, me store.Device, sd store.Sy
 		dr.Problems = append(dr.Problems, fmt.Sprintf("%s retired this device here: it writes nothing more; to "+
 			"share decisions again, filo device new, then join again", nameOf(devs, devs[me.ID].RetiredBy)))
 	}
+	if dr.Writing && mine.Seq == 0 {
+		// No journal of this device's ID here yet (a register given a new ID, after it was copied): start one.
+		if ok, err := d.Exists(journal.JournalName(me.ID)); err != nil {
+			return dr, err
+		} else if !ok {
+			_, first, err := journal.Start(me.Key, me.ID, me.Name, now)
+			if err != nil {
+				return dr, err
+			}
+			if _, err := s.ApplySynced(ctx, store.SyncedChange{SyncedID: sd.ID,
+				Devices: []store.KnownDevice{selfFrom(known, me, now)},
+				Journals: []store.JournalUpdate{{Dev: me.ID, Lines: []store.JournalLine{{Seq: 1, Raw: first}}, Seq: 1,
+					Offset: int64(len(first) + 1)}}}); err != nil {
+				return dr, err
+			}
+			if err := d.Create(journal.JournalName(me.ID), [][]byte{first}); err != nil {
+				dr.Problems = append(dr.Problems, err.Error())
+			}
+			dr.Notes = append(dr.Notes, "this device's journal started here")
+		}
+	}
 	if dr.Writing {
 		note, problem, err := checkOwn(ctx, s, d, sd.ID, me)
 		if err != nil {
@@ -170,6 +195,7 @@ func importDir(ctx context.Context, s *store.Store, me store.Device, sd store.Sy
 		if problem != "" {
 			dr.Problems = append(dr.Problems, problem)
 			dr.Writing = false
+			dr.Ahead = strings.HasPrefix(problem, ErrAhead.Error())
 		}
 	}
 
