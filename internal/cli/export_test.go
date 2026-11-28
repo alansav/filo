@@ -352,6 +352,21 @@ func TestExportRefusesAGitRepository(t *testing.T) {
 			}
 			return filepath.Join(base, "link", "files.csv")
 		}, nil, false},
+		{"a directory not made yet inside a repository", func(t *testing.T, base string) string {
+			mkdir(t, filepath.Join(base, "repo", ".git"))
+			return filepath.Join(base, "repo", "missing", "deeper", "files.csv")
+		}, nil, false},
+		{"a directory that cannot be looked into", func(t *testing.T, base string) string {
+			if os.Geteuid() == 0 {
+				t.Skip("root can look at anything")
+			}
+			mkdir(t, filepath.Join(base, "locked", "sub"))
+			if err := os.Chmod(filepath.Join(base, "locked"), 0o600); err != nil { // no search: nothing in it found
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { os.Chmod(filepath.Join(base, "locked"), 0o755) })
+			return filepath.Join(base, "locked", "sub", "files.csv")
+		}, nil, false},
 		{"a duplicates export", func(t *testing.T, base string) string {
 			mkdir(t, filepath.Join(base, "repo", ".git"))
 			return filepath.Join(base, "repo", "dups.csv")
@@ -377,7 +392,9 @@ func TestExportRefusesAGitRepository(t *testing.T) {
 				return
 			}
 			r := ct.filo(ExitError, "", false, args...)
-			ct.contains("refusal", r.stderr, "is inside a git repository", "could be committed by mistake")
+			if !strings.Contains(r.stderr, "cannot tell whether") {
+				ct.contains("refusal", r.stderr, "is inside a git repository", "could be committed by mistake")
+			}
 			if _, err := os.Lstat(csv); err == nil {
 				t.Fatal("a CSV was written inside a git repository")
 			}

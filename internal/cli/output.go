@@ -145,6 +145,10 @@ func gitRepoAbove(csvPath string) (string, error) {
 			dir = resolved
 			break
 		}
+		if !errors.Is(err, fs.ErrNotExist) {
+			// A part that cannot be resolved could be a symlink into a repository: refused, not walked past.
+			return "", fmt.Errorf("cannot tell whether %s is inside a git repository: %w", csvPath, err)
+		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
 			break
