@@ -184,10 +184,14 @@ func (s *Store) Unapplied(ctx context.Context, id int64) ([]Decision, error) {
 	return out, rows.Err()
 }
 
+// conflictValue is what two current decisions must differ in to conflict: the value, but for a tag only whether it is
+// added or removed (two devices adding it, spelled in other cases, agree).
+const conflictValue = `CASE WHEN key LIKE 'tag:%' THEN value != '' ELSE value END`
+
 // Conflicts returns the (fid, key) of synced directory id with current decisions of different values.
 func (s *Store) Conflicts(ctx context.Context, id int64) ([][2]string, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT fid, key FROM decisions WHERE synced_id = ? AND current = 1
-		GROUP BY fid, key HAVING count(DISTINCT value) > 1 ORDER BY fid, key`, id)
+		GROUP BY fid, key HAVING count(DISTINCT `+conflictValue+`) > 1 ORDER BY fid, key`, id)
 	if err != nil {
 		return nil, err
 	}
@@ -348,11 +352,9 @@ func (s *Store) FilePlaces(ctx context.Context, ids []int64) (map[int64]FilePlac
 
 // MatchFile finds the one file a decision is about in synced directory sd: the one present with content hash at
 // path (relative to sd's top), else the one present with hash under sd, else, of several with hash, the one that was
-// once at path. It returns 0 when there is none, or more than one: matching never guesses.
+// once at path. With no hash (a tag on a file not hashed yet) only the one file present at path matches. It returns
+// 0 when there is none, or more than one: matching never guesses.
 func (s *Store) MatchFile(ctx context.Context, sd SyncedDir, hash, path string) (int64, error) {
-	if hash == "" {
-		return 0, nil
-	}
 	full := path
 	if sd.Dir != "" {
 		full = sd.Dir + "/" + path
@@ -372,6 +374,11 @@ func (s *Store) MatchFile(ctx context.Context, sd SyncedDir, hash, path string) 
 			out = append(out, id)
 		}
 		return out, rows.Err()
+	}
+	if hash == "" {
+		at, err := ids(`SELECT f.id FROM files f JOIN paths p ON p.file_id = f.id AND p.valid_to_scan IS NULL
+			WHERE f.deleted_utc IS NULL AND p.root_id = ? AND p.path = ?`, sd.RootID, full)
+		return first(at), err
 	}
 	present := `SELECT DISTINCT f.id FROM files f JOIN paths p ON p.file_id = f.id AND p.valid_to_scan IS NULL
 		WHERE f.deleted_utc IS NULL AND f.hash = ? AND p.root_id = ?`
@@ -428,7 +435,7 @@ func (s *Store) FileDecisions(ctx context.Context, fileID int64) ([]Decision, er
 func (s *Store) ConflictedFiles(ctx context.Context) (map[int64][]string, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT sf.file_id, d.key FROM decisions d JOIN shared_files sf
 		ON sf.synced_id = d.synced_id AND sf.fid = d.fid WHERE d.current = 1 AND sf.file_id IS NOT NULL
-		GROUP BY sf.file_id, d.key HAVING count(DISTINCT d.value) > 1 ORDER BY sf.file_id, d.key`)
+		GROUP BY sf.file_id, d.key HAVING count(DISTINCT `+conflictValue+`) > 1 ORDER BY sf.file_id, d.key`)
 	if err != nil {
 		return nil, err
 	}

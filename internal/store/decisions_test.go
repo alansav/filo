@@ -146,7 +146,8 @@ func TestMatchFile(t *testing.T) {
 		{"hash alone, one under the synced directory", "hb", "old/b.pdf", "Sync/b.pdf"},
 		{"two copies, neither at the path", "same", "x/a.pdf", ""},
 		{"no such content", "none", "a", ""},
-		{"no hash", "", "b.pdf", ""},
+		{"no hash: the one file at the path", "", "b.pdf", "Sync/b.pdf"},
+		{"no hash, nothing at the path", "", "none.pdf", ""},
 	}
 	for _, tt := range tests {
 		got, err := e.s.MatchFile(ctx, sd, tt.hash, tt.path)
@@ -250,12 +251,20 @@ func TestConflictKeepsAFileFromDeletion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_ = sid
 	if c, _ := e.s.Candidates(ctx, "2026-11-28", Filter{}); len(c) != 0 {
 		t.Fatalf("a file whose retention is in conflict is a candidate: %d", len(c))
 	}
 	items, _ := e.s.FilesItems(ctx, "2026-11-28", Filter{})
 	if len(items) != 1 || items[0].Conflict != "retention tags" {
 		t.Fatalf("conflict cell = %q", items[0].Conflict)
+	}
+	// One tag added on two devices, spelled in other cases: they agree.
+	if _, err := e.s.ApplySynced(ctx, SyncedChange{SyncedID: sid, Decisions: []Decision{
+		{Dev: "a", Seq: 3, FID: "f", Key: "tag:sender:edf", Value: "sender:EDF"},
+		{Dev: "b", Seq: 3, FID: "f", Key: "tag:sender:edf", Value: "sender:edf"}}, Replaces: [][]LineRef{nil, nil}}); err != nil {
+		t.Fatal(err)
+	}
+	if c, _ := e.s.ConflictedFiles(ctx); len(c[id]) != 2 {
+		t.Fatalf("a tag spelled in two cases is a conflict: %v", c[id])
 	}
 }
