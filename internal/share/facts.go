@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alansav/filo/internal/journal"
 	"github.com/alansav/filo/internal/store"
 )
 
@@ -49,19 +50,30 @@ func publishFacts(ctx context.Context, s *store.Store, me string, after int64, d
 				return upto, err
 			}
 			key, value := factPlace, v.Hash+" "+rel
-			skip := false
+			skip := journal.CheckPath(rel) != nil // a name no line may carry: not shared, as for decisions
 			switch e.Kind {
 			case store.EventDeleted:
 				key, value = factDeleted, "1"
 			case "changed":
-				if seen, err := s.SeenSince(ctx, e.FileID, e.ScanID); err != nil || !seen {
-					return upto, err // seen once only: maybe still being written; looked at again later
+				seen, err := s.SeenSince(ctx, e.FileID, e.ScanID)
+				if err != nil {
+					return upto, err
+				}
+				if !seen {
+					later, err := s.ScannedSince(ctx, e.RootID, e.ScanID)
+					if err != nil {
+						return upto, err
+					}
+					if !later && v.Present && !v.Deleted {
+						return upto, nil // seen once only: maybe still being written; looked at after the next scan
+					}
+					skip = true // edited again since, or gone: a later event, or none, says where it is
 				}
 				arriving, err := expected(ctx, s, sd.ID, fid, v.Hash, me)
 				if err != nil {
 					return upto, err
 				}
-				skip = arriving // a content another device decided about: the sync bringing it, not an edit here
+				skip = skip || arriving // a content another device decided about: the sync bringing it, not an edit
 			}
 			if pb := at(sd); pb != nil && !skip {
 				if err := pb.fact(ctx, s, fid, key, value, v.Hash, rel, now); err != nil {
@@ -92,22 +104,31 @@ func expected(ctx context.Context, s *store.Store, syncedID int64, fid, hash, me
 	return false, nil
 }
 
-// fact adds a fact line about fid, replacing the facts of its key in effect, unless one says the same already.
+// fact adds a fact line about fid, replacing the facts of its key in effect (or the one this run wrote), unless one
+// says the same already.
 func (pb *pub) fact(ctx context.Context, s *store.Store, fid, key, value, hash, rel string, now time.Time) error {
-	cur, err := s.CurrentDecisions(ctx, pb.sd.ID, fid, key)
-	if err != nil {
-		return err
-	}
+	k := [2]string{fid, key}
 	var refs []Ref
 	var replaces []store.LineRef
-	same := len(cur) > 0
-	for _, d := range cur {
-		same = same && d.Value == value
-		refs = append(refs, Ref{Dev: d.Dev, Seq: d.Seq})
-		replaces = append(replaces, store.LineRef{Dev: d.Dev, Seq: d.Seq})
-	}
-	if same {
-		return nil
+	if ref, ok := pb.mine[k]; ok {
+		if pb.value[k] == value {
+			return nil
+		}
+		refs, replaces = []Ref{{Dev: ref.Dev, Seq: ref.Seq}}, []store.LineRef{ref}
+	} else {
+		cur, err := s.CurrentDecisions(ctx, pb.sd.ID, fid, key)
+		if err != nil {
+			return err
+		}
+		same := len(cur) > 0
+		for _, d := range cur {
+			same = same && d.Value == value
+			refs = append(refs, Ref{Dev: d.Dev, Seq: d.Seq})
+			replaces = append(replaces, store.LineRef{Dev: d.Dev, Seq: d.Seq})
+		}
+		if same {
+			return nil
+		}
 	}
 	raw, err := pb.w.Add(KindFact, FileBody{File: fid, Hash: hash, Path: rel, Replaces: refs, Value: value,
 		What: strings.TrimPrefix(key, "fact:")}, now)
@@ -119,6 +140,8 @@ func (pb *pub) fact(ctx context.Context, s *store.Store, fid, key, value, hash, 
 	pb.ch.Decisions = append(pb.ch.Decisions, store.Decision{Dev: l.Dev, Seq: l.Seq, FID: fid, Key: key, Hash: hash,
 		Path: rel, Value: value, Decided: l.Time, Current: true, Applied: true})
 	pb.ch.Replaces = append(pb.ch.Replaces, replaces)
+	pb.mine[k] = store.LineRef{Dev: l.Dev, Seq: l.Seq}
+	pb.value[k] = value
 	return nil
 }
 
@@ -127,7 +150,7 @@ func (pb *pub) fact(ctx context.Context, s *store.Store, fid, key, value, hash, 
 // file as deleted by Filo once it is missing here (the sync deleted it). Facts that disagree are ignored. It reports
 // whether the facts are done with (false: they wait, as for the sync to delete the file).
 func applyFact(ctx context.Context, s *store.Store, sd store.SyncedDir, fid, key string, cur []store.Decision,
-	now time.Time) (bool, error) {
+	now time.Time, again *bool) (bool, error) {
 	if len(cur) == 0 {
 		return true, nil
 	}
@@ -165,7 +188,10 @@ func applyFact(ctx context.Context, s *store.Store, sd store.SyncedDir, fid, key
 		if err != nil || id == 0 {
 			return false, err // not here yet
 		}
-		_, err = s.RemapShared(ctx, sd.ID, fid, id)
+		remapped, err := s.RemapShared(ctx, sd.ID, fid, id)
+		if remapped {
+			*again = true
+		}
 		return err == nil, err
 	}
 	return true, nil

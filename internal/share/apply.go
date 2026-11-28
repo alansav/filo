@@ -42,6 +42,24 @@ func fileDecisions(lines []journal.Line, syncedID int64, name func(dev string) s
 // device's journal again. A decision about a file Filo deleted here is done with. It returns how many decisions wait
 // (their file not found yet, missing, or its content not the one decided on), and the problems met.
 func applyDecisions(ctx context.Context, s *store.Store, sd store.SyncedDir, now time.Time) (int, []string, error) {
+	waiting, problems, again, err := applyOnce(ctx, s, sd, now)
+	if err == nil && again {
+		// A fact gave a shared ID another file here: its decisions apply to it now, not on the next run.
+		var more []string
+		waiting, more, _, err = applyOnce(ctx, s, sd, now)
+		problems = append(problems, more...)
+	}
+	return waiting, problems, err
+}
+
+func applyOnce(ctx context.Context, s *store.Store, sd store.SyncedDir, now time.Time) (int, []string, bool, error) {
+	again := false
+	waiting, problems, err := applyGroups(ctx, s, sd, now, &again)
+	return waiting, problems, again, err
+}
+
+func applyGroups(ctx context.Context, s *store.Store, sd store.SyncedDir, now time.Time, again *bool) (int, []string,
+	error) {
 	un, err := s.Unapplied(ctx, sd.ID)
 	if err != nil {
 		return 0, nil, err
@@ -100,7 +118,7 @@ func applyDecisions(ctx context.Context, s *store.Store, sd store.SyncedDir, now
 			if err != nil {
 				return waiting, problems, err
 			}
-			done, err := applyFact(ctx, s, sd, g.fid, g.key, cur, now)
+			done, err := applyFact(ctx, s, sd, g.fid, g.key, cur, now, again)
 			if err != nil {
 				return waiting, problems, err
 			}

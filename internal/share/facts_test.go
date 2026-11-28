@@ -31,17 +31,22 @@ func TestPlaceFactFollowsAnEditedAndMovedFile(t *testing.T) {
 	b.scan()
 	b.scan()
 	b.publish(t0.Add(time.Minute))
-	os.MkdirAll(filepath.Join(b.sync, "house"), 0o755)
-	os.Rename(filepath.Join(b.sync, "bills/x.pdf"), filepath.Join(b.sync, "house/gas.pdf"))
+	if err := os.MkdirAll(filepath.Join(b.sync, "house"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(filepath.Join(b.sync, "bills/x.pdf"), filepath.Join(b.sync, "house/gas.pdf")); err != nil {
+		t.Fatal(err)
+	}
 	b.scan()
 	b.publish(t0.Add(2 * time.Minute))
 	// The sync brings both at once to a: the old file gone, the new one elsewhere.
-	os.Remove(filepath.Join(a.sync, "bills/x.pdf"))
+	if err := os.Remove(filepath.Join(a.sync, "bills/x.pdf")); err != nil {
+		t.Fatal(err)
+	}
 	a.write("house/gas.pdf", "new")
 	a.scan()
 	syncFilo(t, b, a)
-	a.imp(t0.Add(3 * time.Minute))
-	a.imp(t0.Add(4 * time.Minute))
+	a.imp(t0.Add(3 * time.Minute)) // one import: the fact and the decisions it carries over, together
 	if got := a.tags("house/gas.pdf"); len(got) != 1 || got[0] != "sender:EDF" {
 		t.Fatalf("a's moved file's tags: %q", got)
 	}
@@ -52,7 +57,9 @@ func TestAnEditIsAFactOnlyOnceSettled(t *testing.T) {
 	ctx := context.Background()
 	_, b := pair(t, map[string]string{"x.pdf": "old"})
 	tg, _ := tags.Parse("urgent")
-	b.s.TagFiles(ctx, []int64{b.file("x.pdf")}, []tags.Tag{tg}, t0)
+	if _, err := b.s.TagFiles(ctx, []int64{b.file("x.pdf")}, []tags.Tag{tg}, t0); err != nil {
+		t.Fatal(err)
+	}
 	b.publish(t0)
 	before := b.lines(b.dev().ID)
 	b.write("x.pdf", "half")
@@ -84,5 +91,30 @@ func TestArrivingContentIsNotAnEdit(t *testing.T) {
 	b.publish(t0.Add(2 * time.Minute))
 	if b.lines(b.dev().ID) != before {
 		t.Fatalf("b wrote an edit fact for a content arriving by sync: %d lines, had %d", b.lines(b.dev().ID), before)
+	}
+}
+
+// An edit seen once, then the file gone (deleted, moved out): the facts after it are not held up for ever.
+func TestAnUnsettledEditDoesNotHoldUpLaterFacts(t *testing.T) {
+	ctx := context.Background()
+	_, b := pair(t, map[string]string{"x.pdf": "old", "y.pdf": "y"})
+	tg, _ := tags.Parse("urgent")
+	if _, err := b.s.TagFiles(ctx, []int64{b.file("x.pdf"), b.file("y.pdf")}, []tags.Tag{tg}, t0); err != nil {
+		t.Fatal(err)
+	}
+	b.publish(t0)
+	b.write("x.pdf", "half")
+	b.scan() // x edited, seen once
+	if err := os.Remove(filepath.Join(b.sync, "x.pdf")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(filepath.Join(b.sync, "y.pdf"), filepath.Join(b.sync, "z.pdf")); err != nil {
+		t.Fatal(err)
+	}
+	b.scan() // x gone, y moved
+	before := b.lines(b.dev().ID)
+	b.publish(t0.Add(time.Minute))
+	if b.lines(b.dev().ID) != before+1 { // y's move, and nothing for x's edit
+		t.Fatalf("facts after an unsettled edit: %d lines, had %d", b.lines(b.dev().ID), before)
 	}
 }
