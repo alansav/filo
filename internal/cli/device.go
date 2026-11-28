@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	"github.com/alansav/filo/internal/device"
@@ -96,12 +95,9 @@ func (e *env) deviceNew(ctx context.Context, s *store.Store, d store.Device, yes
 	if err != nil || !ok {
 		return err
 	}
-	nd, err := s.NewDeviceIdentity(ctx)
-	if errors.Is(err, store.ErrDevice) {
-		return err
-	}
+	nd, err := s.NewDeviceIdentity(ctx) // its errors say what failed
 	if err != nil {
-		return fmt.Errorf("make a new device identity: %w", err)
+		return err
 	}
 	if !yes {
 		r.Blank()
