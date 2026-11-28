@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alansav/filo/internal/device"
 	"github.com/alansav/filo/internal/journal"
 	"github.com/alansav/filo/internal/store"
 )
@@ -16,6 +17,15 @@ var (
 	ErrNoDevice  = errors.New("no device of that name or ID")
 	ErrAmbiguous = errors.New("more than one device has that name or an ID starting so")
 )
+
+// FingerprintOf is the fingerprint of a public key as the register keeps it (base64).
+func FingerprintOf(key string) (string, error) {
+	pub, err := device.DecodePublic(key)
+	if err != nil {
+		return "", err
+	}
+	return device.Fingerprint(pub), nil
+}
 
 // FindDevice finds a known device by its name (any case) or the start of its ID.
 func FindDevice(ctx context.Context, s *store.Store, arg string) (store.KnownDevice, error) {
@@ -137,8 +147,7 @@ func Retire(ctx context.Context, s *store.Store, kd store.KnownDevice, in []stor
 		}
 		last := max(st.Seq, 1)
 		if _, err := s.ApplySynced(ctx, store.SyncedChange{SyncedID: sd.ID, Journals: []store.JournalUpdate{{
-			Dev: kd.Dev, Seq: st.Seq, Offset: st.Offset, Problem: st.Problem, SeenUTC: st.SeenUTC,
-			Applied: st.Applied, RetiredSeq: last}}}); err != nil {
+			Dev: kd.Dev, Seq: st.Seq, Offset: st.Offset, Problem: st.Problem, RetiredSeq: last}}}); err != nil {
 			return err
 		}
 		if err := AppendOwn(ctx, s, me, sd, KindRetire, RetireBody{Device: kd.Dev, Last: last}, now); err != nil {

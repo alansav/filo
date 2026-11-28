@@ -435,3 +435,41 @@ func TestAppendOwnAfterATornAppend(t *testing.T) {
 		t.Fatalf("after a torn append: stop %v, partial %v, %d lines", res.Stop, res.Partial, len(res.Lines))
 	}
 }
+
+// TestImportWithNothingNewWritesNothing: a run that reads nothing new changes nothing in the register (so a timer's
+// scan takes no snapshot), while this device's status file is still written at most hourly.
+func TestImportWithNothingNewWritesNothing(t *testing.T) {
+	ctx := context.Background()
+	a, b := newNode(t, "laptop"), newNode(t, "desktop")
+	a.mark()
+	syncFilo(t, a, b)
+	b.join()
+	b.imp(t0)
+	db := b.s.DBPath()
+	b.s.Close()
+	s, err := store.Open(ctx, store.Options{DBPath: db})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	b.s = s
+	status := filepath.Join(b.sync, journal.FiloDir, journal.StatusName(b.dev().ID))
+	before, _ := os.ReadFile(status)
+	b.imp(t0.Add(10 * time.Minute))
+	if s.Changed() {
+		t.Fatal("an import that read nothing new wrote to the register")
+	}
+	if after, _ := os.ReadFile(status); !bytes.Equal(before, after) {
+		t.Fatal("the status file was written again within the hour")
+	}
+	dr := b.imp(t0.Add(2 * time.Hour))
+	if s.Changed() {
+		t.Fatal("writing the hourly status file wrote to the register")
+	}
+	if after, _ := os.ReadFile(status); bytes.Equal(before, after) || dr.Status[b.dev().ID].Seen == "" {
+		t.Fatal("the status file was not written after an hour")
+	}
+	if dr.Status[a.dev().ID].Seen == "" {
+		t.Fatal("the other device's status file was not read")
+	}
+}

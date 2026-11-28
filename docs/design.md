@@ -2976,8 +2976,7 @@ CREATE TABLE journals (                 -- what this device has read of each jou
     synced_id INTEGER NOT NULL REFERENCES synced_dirs(id), dev TEXT NOT NULL,
     seq INTEGER NOT NULL DEFAULT 0,     -- the last line accepted
     byte_offset INTEGER NOT NULL DEFAULT 0,  -- just after it in the file
-    problem TEXT,                       -- why reading stopped, if it did
-    seen_utc TEXT, applied TEXT,        -- from its status file: last ran there; highest line applied per journal (JSON)
+    problem TEXT,                       -- why reading stopped, if it did (status files are read from .filo/ each run)
     retired_seq INTEGER,                -- its device retired: its lines after this one are refused here
     PRIMARY KEY (synced_id, dev));
 

@@ -47,7 +47,7 @@ func TestApplySynced(t *testing.T) {
 		Add:     &add,
 		Devices: []KnownDevice{{Dev: "dev1", Key: "k1", Name: "laptop", TrustedUTC: "t"}, {Dev: "dev2", Key: "k2", Name: "desktop"}},
 		Journals: []JournalUpdate{{Dev: "dev1", Lines: []JournalLine{{1, []byte("l1")}, {2, []byte("l2")}}, Seq: 2,
-			Offset: 6, Applied: map[string]int64{"dev1": 2}}},
+			Offset: 6}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -72,12 +72,12 @@ func TestApplySynced(t *testing.T) {
 	}
 	// Reading on: the line kept already is not written again; new ones are; the state moves on.
 	_, err = s.ApplySynced(ctx, SyncedChange{SyncedID: id, Journals: []JournalUpdate{{Dev: "dev1",
-		Lines: []JournalLine{{2, []byte("l2")}, {3, []byte("l3")}}, Seq: 3, Offset: 9, SeenUTC: "seen"}}})
+		Lines: []JournalLine{{2, []byte("l2")}, {3, []byte("l3")}}, Seq: 3, Offset: 9, Problem: "stopped"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	js, _ := s.Journals(ctx, id)
-	if len(js) != 1 || js[0].Seq != 3 || js[0].Offset != 9 || string(js[0].Last) != "l3" || js[0].SeenUTC != "seen" {
+	if len(js) != 1 || js[0].Seq != 3 || js[0].Offset != 9 || string(js[0].Last) != "l3" || js[0].Problem != "stopped" {
 		t.Fatalf("Journals = %+v", js)
 	}
 	lines, _ := s.JournalLines(ctx, id, "dev1")

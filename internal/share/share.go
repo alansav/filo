@@ -390,9 +390,7 @@ func Join(ctx context.Context, s *store.Store, t Target, now time.Time) (store.S
 			kd.TrustedUTC = timeText(now)
 		}
 		devs[pd.Dev] = kd
-		st := p.statuses[pd.Dev]
-		ju := store.JournalUpdate{Dev: pd.Dev, Seq: res.End.Last.Seq, Offset: res.End.Offset, Problem: pd.Problem,
-			SeenUTC: st.Seen, Applied: st.Applied}
+		ju := store.JournalUpdate{Dev: pd.Dev, Seq: res.End.Last.Seq, Offset: res.End.Offset, Problem: pd.Problem}
 		for _, l := range res.Lines {
 			ju.Lines = append(ju.Lines, store.JournalLine{Seq: l.Seq, Raw: l.Raw})
 		}
@@ -547,7 +545,8 @@ func nameOf(devs map[string]store.KnownDevice, dev string) string {
 	return dev
 }
 
-// writeStatus writes this device's status file in d: now, and the highest line it holds of each journal there.
+// writeStatus writes this device's status file in d: now, and the highest line it holds of each journal there. It
+// writes nothing to the register: status files are read from .filo/ on every run.
 func writeStatus(ctx context.Context, s *store.Store, d *journal.Dir, syncedID int64, me store.Device,
 	now time.Time) error {
 	js, err := s.Journals(ctx, syncedID)
@@ -555,27 +554,16 @@ func writeStatus(ctx context.Context, s *store.Store, d *journal.Dir, syncedID i
 		return err
 	}
 	applied := map[string]int64{}
-	var mine store.JournalState
 	for _, j := range js {
 		if j.Seq > 0 {
 			applied[j.Dev] = j.Seq
-		}
-		if j.Dev == me.ID {
-			mine = j
 		}
 	}
 	raw, err := journal.NewStatus(me.Key, me.ID, applied, now)
 	if err != nil {
 		return err
 	}
-	if err := d.Replace(journal.StatusName(me.ID), [][]byte{raw}); err != nil {
-		return err
-	}
-	mine.Dev, mine.SeenUTC = me.ID, timeText(now)
-	_, err = s.ApplySynced(ctx, store.SyncedChange{SyncedID: syncedID, Journals: []store.JournalUpdate{{
-		Dev: me.ID, Seq: mine.Seq, Offset: mine.Offset, Problem: mine.Problem, SeenUTC: mine.SeenUTC,
-		Applied: mine.Applied, RetiredSeq: mine.RetiredSeq}}})
-	return err
+	return d.Replace(journal.StatusName(me.ID), [][]byte{raw})
 }
 
 // ownBytes is this device's journal as the register keeps it: what the file must hold.

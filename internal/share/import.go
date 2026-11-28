@@ -22,7 +22,10 @@ type DirReport struct {
 	Others   []journal.Entry      // names in .filo/ that are not Filo's
 	Strange  []store.KnownDevice  // devices whose journal is there that this device does not trust
 	Journals []store.JournalState // after the import, each device's
-	Writing  bool                 // this device writes there (false: retired there, or its journal is not its own)
+	// Status is each trusted device's status file (this device's too), read and checked: when it last ran there,
+	// and the highest line it holds of each journal. A device with none, or one that does not check, is not in it.
+	Status  map[string]journal.StatusBody
+	Writing bool // this device writes there (false: retired there, or its journal is not its own)
 }
 
 // Report is what Import found, a DirReport per joined synced directory.
@@ -70,7 +73,7 @@ func Import(ctx context.Context, s *store.Store, now time.Time) (Report, error) 
 
 func importDir(ctx context.Context, s *store.Store, me store.Device, sd store.SyncedDir, now time.Time) (DirReport,
 	error) {
-	dr := DirReport{Dir: sd}
+	dr := DirReport{Dir: sd, Status: map[string]journal.StatusBody{}}
 	abs := sd.Abs()
 	if !dirExists(abs) {
 		dr.Problems = append(dr.Problems, "not found at "+abs+": moved, or not synced here yet (a scan that finds it "+
@@ -182,28 +185,18 @@ func importDir(ctx context.Context, s *store.Store, me store.Device, sd store.Sy
 			dr.Problems = append(dr.Problems, nameOf(devs, dev)+"'s journal is missing from "+d.Path())
 		}
 	}
-	// The status files of trusted devices: when each last ran there.
+	// The status files of trusted devices, this one's too: when each last ran there.
 	for _, e := range entries {
-		if e.Kind != journal.Status || e.Dev == me.ID || !devs[e.Dev].Trusted() {
+		if e.Kind != journal.Status || !devs[e.Dev].Trusted() {
 			continue
 		}
 		key, err := device.DecodePublic(devs[e.Dev].Key)
 		if err != nil {
 			continue
 		}
-		st, ok := readStatus(d, e.Name, key)
-		j := state[e.Dev]
-		for _, u := range ch.Journals {
-			if u.Dev == e.Dev {
-				j = store.JournalState{Dev: u.Dev, Seq: u.Seq, Offset: u.Offset, Problem: u.Problem,
-					SeenUTC: u.SeenUTC, Applied: u.Applied, RetiredSeq: u.RetiredSeq}
-			}
+		if st, ok := readStatus(d, e.Name, key); ok {
+			dr.Status[e.Dev] = st
 		}
-		if !ok || st.Seen == j.SeenUTC {
-			continue
-		}
-		setJournal(&ch, store.JournalUpdate{Dev: e.Dev, Seq: j.Seq, Offset: j.Offset, Problem: j.Problem,
-			SeenUTC: st.Seen, Applied: st.Applied, RetiredSeq: j.RetiredSeq})
 	}
 	for dev, kd := range devs {
 		if old, ok := known[dev]; !ok || old != kd {
@@ -217,27 +210,18 @@ func importDir(ctx context.Context, s *store.Store, me store.Device, sd store.Sy
 	if retiredHere(ch, me.ID) {
 		dr.Writing = false
 	}
-	if dr.Writing && statusDue(state[me.ID].SeenUTC, now) {
+	if dr.Writing && (len(ch.Journals) > 0 || statusDue(dr.Status[me.ID].Seen, now)) {
 		if err := writeStatus(ctx, s, d, sd.ID, me, now); err != nil {
 			dr.Problems = append(dr.Problems, err.Error())
+		} else if st, ok := readStatus(d, journal.StatusName(me.ID), me.Public()); ok {
+			dr.Status[me.ID] = st
 		}
 	}
 	return dr, nil
 }
 
-// setJournal puts u in ch, replacing an update of the same device's journal (keeping its lines).
-func setJournal(ch *store.SyncedChange, u store.JournalUpdate) {
-	for i := range ch.Journals {
-		if ch.Journals[i].Dev == u.Dev {
-			u.Lines = ch.Journals[i].Lines
-			ch.Journals[i] = u
-			return
-		}
-	}
-	ch.Journals = append(ch.Journals, u)
-}
-
-// statusDue reports whether this device's status file is to be written: never written, or an hour ago or more.
+// statusDue reports whether this device's status file is to be written when nothing new was read: never written,
+// or an hour ago or more.
 func statusDue(seen string, now time.Time) bool {
 	t, err := time.Parse(time.RFC3339, seen)
 	return err != nil || now.Sub(t) >= statusEvery
@@ -324,8 +308,8 @@ func readJournal(ctx context.Context, s *store.Store, d *journal.Dir, syncedID i
 	if len(res.Lines) == 0 && problem == st.Problem {
 		return nil, nil, problem
 	}
-	ju := &store.JournalUpdate{Dev: e.Dev, Seq: st.Seq, Offset: st.Offset, Problem: problem, SeenUTC: st.SeenUTC,
-		Applied: st.Applied, RetiredSeq: st.RetiredSeq}
+	ju := &store.JournalUpdate{Dev: e.Dev, Seq: st.Seq, Offset: st.Offset, Problem: problem,
+		RetiredSeq: st.RetiredSeq}
 	off := st.Offset
 	for _, l := range res.Lines {
 		off += int64(len(l.Raw) + 1)
@@ -346,8 +330,8 @@ func problemOnly(st store.JournalState, problem string) (*store.JournalUpdate, [
 	if problem == st.Problem {
 		return nil, nil, problem
 	}
-	return &store.JournalUpdate{Dev: st.Dev, Seq: st.Seq, Offset: st.Offset, Problem: problem, SeenUTC: st.SeenUTC,
-		Applied: st.Applied, RetiredSeq: st.RetiredSeq}, nil, problem
+	return &store.JournalUpdate{Dev: st.Dev, Seq: st.Seq, Offset: st.Offset, Problem: problem,
+		RetiredSeq: st.RetiredSeq}, nil, problem
 }
 
 // ErrAhead is this device's journal holding lines its register does not: the register was restored from a
@@ -453,7 +437,7 @@ func AppendOwn(ctx context.Context, s *store.Store, me store.Device, sd store.Sy
 	}
 	if _, err := s.ApplySynced(ctx, store.SyncedChange{SyncedID: sd.ID, Journals: []store.JournalUpdate{{
 		Dev: me.ID, Lines: []store.JournalLine{{Seq: last.Seq + 1, Raw: raw}}, Seq: last.Seq + 1,
-		Offset: size + int64(len(raw)+1), Problem: mine.Problem, SeenUTC: mine.SeenUTC, Applied: mine.Applied}}}); err != nil {
+		Offset: size + int64(len(raw)+1), Problem: mine.Problem}}}); err != nil {
 		return err
 	}
 	err = d.Append(journal.JournalName(me.ID), size, [][]byte{raw})

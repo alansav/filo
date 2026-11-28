@@ -3,7 +3,6 @@ package store
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -83,8 +82,6 @@ type JournalState struct {
 	Offset  int64  // the byte just after it in the journal file
 	Last    []byte // that line
 	Problem string // why reading stopped, if it did
-	SeenUTC string // when its status file says that device last ran there
-	Applied map[string]int64
 	// RetiredSeq > 0: the device was retired, and its lines after this one are refused here.
 	RetiredSeq int64
 }
@@ -97,8 +94,6 @@ type JournalUpdate struct {
 	Seq        int64
 	Offset     int64
 	Problem    string
-	SeenUTC    string
-	Applied    map[string]int64
 	RetiredSeq int64
 }
 
@@ -185,16 +180,10 @@ func (s *Store) ApplySynced(ctx context.Context, c SyncedChange) (int64, error) 
 				return 0, fmt.Errorf("line %d of %s's journal is kept already with other bytes", l.Seq, j.Dev)
 			}
 		}
-		applied, err := json.Marshal(j.Applied)
-		if err != nil {
-			return 0, err
-		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO journals (synced_id, dev, seq, byte_offset, problem, seen_utc,
-			applied, retired_seq) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (synced_id, dev) DO UPDATE SET
-			seq = excluded.seq, byte_offset = excluded.byte_offset, problem = excluded.problem,
-			seen_utc = excluded.seen_utc, applied = excluded.applied, retired_seq = excluded.retired_seq`,
-			id, j.Dev, j.Seq, j.Offset, nullString(j.Problem), nullString(j.SeenUTC), string(applied),
-			nullInt(j.RetiredSeq)); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO journals (synced_id, dev, seq, byte_offset, problem,
+			retired_seq) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (synced_id, dev) DO UPDATE SET seq = excluded.seq,
+			byte_offset = excluded.byte_offset, problem = excluded.problem, retired_seq = excluded.retired_seq`,
+			id, j.Dev, j.Seq, j.Offset, nullString(j.Problem), nullInt(j.RetiredSeq)); err != nil {
 			return 0, err
 		}
 	}
@@ -353,7 +342,7 @@ func (s *Store) KnownDevices(ctx context.Context) ([]KnownDevice, error) {
 // Journals returns what this register has read of each journal of synced directory id, by device.
 func (s *Store) Journals(ctx context.Context, id int64) ([]JournalState, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT j.dev, j.seq, j.byte_offset, coalesce(j.problem, ''),
-		coalesce(j.seen_utc, ''), coalesce(j.applied, ''), coalesce(j.retired_seq, 0), l.raw
+		coalesce(j.retired_seq, 0), l.raw
 		FROM journals j LEFT JOIN journal_lines l ON l.synced_id = j.synced_id AND l.dev = j.dev AND l.seq = j.seq
 		WHERE j.synced_id = ? ORDER BY j.dev`, id)
 	if err != nil {
@@ -363,15 +352,8 @@ func (s *Store) Journals(ctx context.Context, id int64) ([]JournalState, error) 
 	var out []JournalState
 	for rows.Next() {
 		var j JournalState
-		var applied string
-		if err := rows.Scan(&j.Dev, &j.Seq, &j.Offset, &j.Problem, &j.SeenUTC, &applied, &j.RetiredSeq,
-			&j.Last); err != nil {
+		if err := rows.Scan(&j.Dev, &j.Seq, &j.Offset, &j.Problem, &j.RetiredSeq, &j.Last); err != nil {
 			return nil, err
-		}
-		if applied != "" && applied != "null" {
-			if err := json.Unmarshal([]byte(applied), &j.Applied); err != nil {
-				return nil, fmt.Errorf("journal of %s: %w", j.Dev, err)
-			}
 		}
 		out = append(out, j)
 	}

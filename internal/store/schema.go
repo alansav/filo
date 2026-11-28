@@ -256,9 +256,10 @@ ALTER TABLE export_rows ADD COLUMN name TEXT;
 // readable mark, problem says why). devices are every device met in a journal, by ID, with its key and name from its
 // line 1; trusted_utc is set when the person trusted it at a join, or a trusted device vouched for it (vouched_by);
 // retired_utc when a trusted device retired it (retired_by). journals is what this device has read of each journal
-// of each synced directory (its own too): up to which line, at which byte, why reading stopped if it did, when its
-// status file says it last ran there, and, for a retired device, the last of its lines a retire line kept there
-// (each synced directory's journal of a device has its own numbering). journal_lines are those lines, byte for byte as
+// of each synced directory (its own too): up to which line, at which byte, why reading stopped if it did, and, for a
+// retired device, the last of its lines a retire line kept there (each synced directory's journal of a device has its
+// own numbering). Status files are not kept: they are read from .filo/ on every run, so a device's hourly status
+// writes nothing to the register (and takes no snapshot). journal_lines are those lines, byte for byte as
 // read (or written), so a journal lost or damaged can be written back.
 const syncedSQL = `
 CREATE TABLE synced_dirs (
@@ -298,8 +299,6 @@ CREATE TABLE journals (
     seq INTEGER NOT NULL DEFAULT 0,
     byte_offset INTEGER NOT NULL DEFAULT 0,
     problem TEXT,
-    seen_utc TEXT,
-    applied TEXT,                           -- its status file's highest line applied per journal, JSON
     retired_seq INTEGER,                    -- the device retired: its lines after this one are refused
     PRIMARY KEY (synced_id, dev)
 );
