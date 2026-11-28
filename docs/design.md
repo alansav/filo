@@ -2196,7 +2196,11 @@ the desktop, kept its retention on the laptop's next scan, because the move was 
   set. A newer format version stops that journal there ("made by a newer Filo"), as a newer database is refused;
   an unknown kind in a known version is counted and skipped. Writing: the lines are stored in the register in the
   transaction of the decisions they record, then appended to the journal and flushed; a torn append is repaired by
-  the next run. About 200 bytes a line, so 100,000 decisions is about 20 MB. No new dependency: ed25519, SHA-256
+  the next run. `.filo/` is made with mode 0700 and
+  its files 0600. Everything there is reached through the directory opened, never by path: a `.filo` that is a
+  link or not a directory is refused, and so is a file there that is a link, has other names (hard links) or is
+  not a regular file, so a write there can never reach a file of the person's; Filo's own temporary files
+  (`.filo-*.tmp`, a file being replaced) are not listed, and a file over 1 GiB is not read. About 200 bytes a line, so 100,000 decisions is about 20 MB. No new dependency: ed25519, SHA-256
   and base64 are in Go's standard library.
 - **Silent failure.** `filo report` gains a Synced part: marks found but not joined, devices not trusted, journals
   missing (a sync rule that skips hidden directories shows up whatever the service), conflicts, pending decisions,
