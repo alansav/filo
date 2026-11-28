@@ -107,7 +107,10 @@ func (l Line) Insert(candidate string, done bool) (string, bool) {
 	default:
 		for i, r := range rest {
 			atStart := i == 0 && l.Before == ""
-			if strings.ContainsRune(" \t\\'\"`$&;|<>()*?[]{}!", r) || (atStart && (r == '~' || r == '#')) {
+			// A leading ~/ stays as it is, so the shell expands it to the home directory; any other ~ or # at the
+			// start would be read by the shell, so it is escaped.
+			home := atStart && r == '~' && strings.HasPrefix(rest, "~/")
+			if strings.ContainsRune(" \t\\'\"`$&;|<>()*?[]{}!", r) || (atStart && !home && (r == '~' || r == '#')) {
 				b.WriteByte('\\')
 			}
 			b.WriteRune(r)
