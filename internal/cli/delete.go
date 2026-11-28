@@ -495,10 +495,12 @@ func (p *prompter) newline() {
 
 // deleteOrigins notes on the list where a retention came from when another device sharing the file's synced
 // directory decided it, and when each other device was last seen in the synced directories the files are in.
+// It uses what the import at open found: importing again here could apply a decision the candidates, chosen
+// already, do not reflect.
 func (e *env) deleteOrigins(ctx context.Context, s *store.Store, l *deleteList, cands []store.Candidate) error {
-	rep, err := e.importAll(ctx, s)
-	if err != nil || len(rep.Dirs) == 0 {
-		return err
+	rep := e.imported
+	if len(rep.Dirs) == 0 {
+		return nil
 	}
 	me, err := s.Device(ctx)
 	if err != nil {
@@ -529,20 +531,22 @@ func (e *env) deleteOrigins(ctx context.Context, s *store.Store, l *deleteList, 
 			}
 		}
 	}
+	trusted := map[string]bool{}
+	for _, d := range devs {
+		trusted[d.Dev] = d.Trusted() && !d.Retired()
+	}
 	now := now()
 	for _, dr := range rep.Dirs {
 		if !inDir[dr.Dir.ID] {
 			continue
 		}
 		for _, j := range dr.Journals {
-			if j.Dev == me.ID || j.RetiredSeq > 0 {
+			if j.Dev == me.ID || j.RetiredSeq > 0 || !trusted[j.Dev] {
 				continue
 			}
 			when := "never seen there"
-			if st, ok := dr.Status[j.Dev]; ok {
-				if t, err := time.Parse(time.RFC3339, st.Seen); err == nil {
-					when = "last seen there " + ago(now.Sub(t))
-				}
+			if t, ok := lastSign(dr, j); ok {
+				when = "last seen there " + ago(now.Sub(t))
 			}
 			l.devices = append(l.devices, fmt.Sprintf("%s %s in %s: what it decided since is not known here",
 				names[j.Dev], when, e.view.Tilde(dr.Dir.Abs())))

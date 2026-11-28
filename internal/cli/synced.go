@@ -718,16 +718,8 @@ func (e *env) warnNotSeen(ctx context.Context, s *store.Store, rep share.Report)
 			if j.Dev == me.ID || j.RetiredSeq > 0 {
 				continue
 			}
-			var t time.Time
-			if st, ok := dr.Status[j.Dev]; ok {
-				t, _ = time.Parse(time.RFC3339, st.Seen)
-			} else if l, err := journal.Parse(j.Last); err == nil {
-				t, _ = time.Parse(time.RFC3339, l.Time)
-			}
-			if t.After(last[j.Dev]) {
-				last[j.Dev] = t
-			} else if _, ok := last[j.Dev]; !ok {
-				last[j.Dev] = t
+			if t, ok := lastSign(dr, j); ok && t.After(last[j.Dev]) {
+				last[j.Dev] = t // no known time at all: never warned about as unseen
 			}
 		}
 	}
@@ -772,4 +764,20 @@ func (e *env) warnNotSeen(ctx context.Context, s *store.Store, rep share.Report)
 		}
 	}
 	return nil
+}
+
+// lastSign is the latest sign of life of journal j's device in synced directory dr: its status file's time, or else
+// its last line's; false when neither can be read.
+func lastSign(dr share.DirReport, j store.JournalState) (time.Time, bool) {
+	if st, ok := dr.Status[j.Dev]; ok {
+		if t, err := time.Parse(time.RFC3339, st.Seen); err == nil {
+			return t, true
+		}
+	}
+	if l, err := journal.Parse(j.Last); err == nil {
+		if t, err := time.Parse(time.RFC3339, l.Time); err == nil {
+			return t, true
+		}
+	}
+	return time.Time{}, false
 }
