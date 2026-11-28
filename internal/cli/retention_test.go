@@ -139,8 +139,8 @@ func TestRetentionRoundTrip(t *testing.T) {
 		"  [!] 1 file_date read from the file name, marked !: remove the ! to accept it\n",
 		"then filo update "+r1+"\n")
 	contains("export again", filo(ExitError, "", false, "export", "-o", r1).stderr, "already exists")
-	contains("CSV", string(mustRead(t, r1)), "id,export,directory,name,size,modified,file_date,retention,keep_until,tags\n",
-		","+root+"/docs,2023-03 invoice.pdf,1,", ",!2023-03-31,,,\n", // file_date read from the name, marked
+	contains("CSV", string(mustRead(t, r1)), "id,export,directory,name,size,modified,file_date,retention,keep_until,tags,conflict\n",
+		","+root+"/docs,2023-03 invoice.pdf,1,", ",!2023-03-31,,,,\n", // file_date read from the name, marked
 		","+root+"/📷 Pictures,🏖️ beach.jpg,4,")
 
 	// Set retentions: a period from the file_date read from the name and accepted (already past), forever, a fixed
@@ -190,8 +190,8 @@ func TestRetentionRoundTrip(t *testing.T) {
 	setNow(t, day(12))
 	r2 := filepath.Join(work, "r2.csv")
 	filo(ExitOK, "", false, "export", "-o", r2)
-	contains("re-export", string(mustRead(t, r2)), ",2026-01-15,7y,2033-01-15,\n", ",,forever,forever,\n",
-		",,2027-01-01,2027-01-01,\n", ",!2023-03-31,,,\n") // its file_date was cleared: read from the name again
+	contains("re-export", string(mustRead(t, r2)), ",2026-01-15,7y,2033-01-15,,\n", ",,forever,forever,,\n",
+		",,2027-01-01,2027-01-01,,\n", ",!2023-03-31,,,,\n") // its file_date was cleared: read from the name again
 
 	// A file past its retention is listed by delete and the report.
 	editCSV(t, r2, setRetention(map[string]string{"2023-03 invoice.pdf": "2026-11-10", "a.txt": "2027-02-01"}))

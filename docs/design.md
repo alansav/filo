@@ -354,7 +354,8 @@ never touch the files, except for the renames and moves an edited `name` or `dir
     leaves out a file saved since, unnoticed; watching the disk needs a process running all the time.
 - **Columns**, in order: `id` (file row ID), `export` (export number), `directory` (absolute), `name`, `size`
   (bytes), `modified` (local time; a cue to when the file was last worked on), `file_date`, `retention`, `keep_until`
-  (see Retention CSV columns), `tags` (see Tags). The name is a column of its own because file names often carry dates. Left out on purpose: a reason (one purpose only), an action (a
+  (see Retention CSV columns), `tags` (see Tags), `conflict` (what devices sharing the file disagree on: `date`,
+  `retention`, `tags`; blank for nothing; never read back: see Sharing decisions between devices). The name is a column of its own because file names often carry dates. Left out on purpose: a reason (one purpose only), an action (a
   delete column in a spreadsheet is unsafe: a one-column sort or a fill-down puts it on the wrong rows), and creation
   or first-seen dates (not reliable: many filesystems do not record a birth time, and a copy, restore or sync resets
   it). `filo update` finds columns by header name and reads `id`, `export`, `file_date`, `retention` and `tags`

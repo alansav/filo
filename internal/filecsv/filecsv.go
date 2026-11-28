@@ -20,10 +20,11 @@ import (
 	"github.com/alansav/filo/internal/tagcsv"
 )
 
-// Header is the CSV's columns, in order: retention.Header (the file and its retention), then tags. The update finds columns by name, so a
-// spreadsheet may reorder them or add its own; it reads id, export, file_date, retention and tags, and checks that
-// keep_until was left alone.
-var Header = append(append([]string{}, retention.Header...), "tags")
+// Header is the CSV's columns, in order: retention.Header (the file and its retention), then tags, then conflict
+// (what devices sharing the file disagree on: date, retention, tags; blank for nothing; docs/design.md, Sharing
+// decisions between devices). The update finds columns by name, so a spreadsheet may reorder them or add its own; it
+// reads id, export, file_date, retention and tags, checks that keep_until was left alone, and never reads conflict.
+var Header = append(append([]string{}, retention.Header...), "tags", "conflict")
 
 // ErrNotFilesCSV means the header lacks the columns the update needs.
 var ErrNotFilesCSV = errors.New("not a filo CSV: the header needs id, export, retention and tags columns")
@@ -98,7 +99,8 @@ func WriteCSV(w io.Writer, exportID int64, items []store.FilesItem, loc *time.Lo
 			cells[1] = NameCell(path.Base(it.Path))
 		}
 		rec := append([]string{strconv.FormatInt(it.FileID, 10), ex}, cells...)
-		rec = append(rec, it.FileDate, it.Retention, it.KeepUntil, tagcsv.GuardCell(store.JoinTags(it.Tags)))
+		rec = append(rec, it.FileDate, it.Retention, it.KeepUntil, tagcsv.GuardCell(store.JoinTags(it.Tags)),
+			it.Conflict)
 		if err := cw.Write(rec); err != nil {
 			return err
 		}

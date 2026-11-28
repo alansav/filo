@@ -42,8 +42,8 @@ func TestFilesCSVGolden(t *testing.T) {
 	csvPath := filepath.Join(work, "all.csv")
 	step("export -o all.csv --no-scan", "", ExitOK, "export", "-o", csvPath, "--no-scan")
 	ct.contains("CSV", string(mustRead(t, csvPath)),
-		"id,export,directory,name,size,modified,file_date,retention,keep_until,tags\n",
-		",2026-09-02 British Gas Bill.pdf,14,", ",!2026-09-02,,,sender:British Gas; type:bill\n")
+		"id,export,directory,name,size,modified,file_date,retention,keep_until,tags,conflict\n",
+		",2026-09-02 British Gas Bill.pdf,14,", ",!2026-09-02,,,sender:British Gas; type:bill,\n")
 	editCSV(t, csvPath, accepting(edits(
 		setRetention(map[string]string{"2026-09-02 British Gas Bill.pdf": "7y", "2026-10-03 British Gas Bill.pdf": "7y",
 			"ideas.txt": "forever"}),
@@ -112,7 +112,7 @@ func TestFilesCSVKinds(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	write(strings.Replace(data, ",keep_until,tags\n", ",keep_until,labels\n", 1))
+	write(strings.Replace(data, ",keep_until,tags,conflict\n", ",keep_until,labels,conflict\n", 1))
 	ct.contains("lost tags", filo(ExitError, "", false, "update", csvPath).stderr, "has no tags column; put it back")
 	ct.contains("lost tags, -y", filo(ExitError, "", false, "update", csvPath, "-y").stderr,
 		"has no tags column; put it back")
@@ -128,7 +128,7 @@ func TestFilesCSVKinds(t *testing.T) {
 		`tags "a*b": a tag cannot hold "*"`)
 
 	// Both columns lost: not a filo CSV.
-	write(strings.Replace(strings.Replace(data, ",keep_until,tags\n", ",keep_until,labels\n", 1), ",retention,",
+	write(strings.Replace(strings.Replace(data, ",keep_until,tags,conflict\n", ",keep_until,labels,conflict\n", 1), ",retention,",
 		",ret,", 1))
 	ct.contains("both lost", filo(ExitError, "", false, "update", csvPath).stderr, "not a filo CSV")
 
