@@ -8,15 +8,20 @@ case someone asks").
 backups of your files, and of Filo's register and its snapshots (see [Register snapshots](docs/design.md#register-snapshots)).
 
 **Status: scan, lifespan, delete, duplicates, retention policies, directory rules, show, set and get, finding files,
-tags and tag index pages done.** You give every file a retention (how long to keep it, often through a named policy
-such as `bills = 7y`, which a directory rule can give the files under a directory as they arrive), and `filo delete`
-lists the files past theirs, asks, and deletes the ones you choose. For identical copies you decide which to keep in a spreadsheet, and `filo delete` carries
-that out the same careful way. `filo show` shows everything Filo holds about a file or directory, and `filo set` changes
-a few files from the command line; `filo update` renames or moves a file, within its root, when you edit its name or
-directory in the exported CSV. Apart from that, Filo is **read-only on your files**: no other command modifies,
-moves, renames or deletes anything outside its own database, besides the files you ask it to write (an export's
-`-o` file, and the pages of a [tag index](#tag-index-pages), which it replaces only while they are as it wrote them).
-See [Roadmap](#roadmap) for what comes next.
+tags, tag index pages, the one CSV for retentions, tags, names and directories, and bash completion done.**
+
+You give every file a retention (how long to keep it, often through a named policy such as `bills = 7y`, which a
+directory rule can give the files under a directory as they arrive), and `filo delete` lists the files past theirs,
+asks, and deletes the ones you choose. For identical copies you decide which to keep in a spreadsheet, and `filo
+delete` carries that out the same careful way. `filo show` shows everything Filo holds about a file or directory, and
+`filo set` changes a few files from the command line.
+
+Filo changes your files in only two ways: `filo delete` deletes the files you confirm, and `filo update` renames or
+moves a file, within its root, when you edit its `name` or `directory` cell in the exported CSV (it lists them and
+asks first). Apart from that, Filo is **read-only on your files**: no other command modifies, moves, renames or
+deletes anything outside its own database, besides the files you ask it to write (an export's `-o` file, and the
+pages of a [tag index](#tag-index-pages), which it replaces only while they are as it wrote them). See
+[Roadmap](#roadmap) for what comes next.
 
 ## What it does today
 
@@ -80,23 +85,21 @@ It is built to fail safe:
 
 ## Install
 
-Filo is pure Go (no C toolchain needed). It needs Go 1.27.4 or later and runs on Linux, macOS and the BSDs. Windows is
+Filo is pure Go (no C toolchain needed). It needs Go 1.27.4 or later (or Podman, to build in the dev container) and
+runs on Linux, macOS and the BSDs. Windows is
 not supported yet: file locking and inode lookup aren't implemented there.
 
 ```sh
 git clone https://github.com/alansav/filo.git
 cd filo
-make install          # builds bin/filo, copies it to ~/.local/bin, loads tab completion from ~/.bashrc
+scripts/install.sh    # builds bin/filo, copies it to ~/.local/bin, loads tab completion from ~/.bashrc
 ```
 
-`make build` only builds `bin/filo`. `scripts/install.sh` builds it (with Go if the host has it, otherwise in the dev
-container, see Development), copies it to `~/.local/bin` (replacing an older copy), so `filo` runs from anywhere if
-`~/.local/bin` is on your `PATH`, and adds the line that loads tab completion to `~/.bashrc` if it is not there yet. It
-can be run again after every change. The binary is static (`CGO_ENABLED=0`).
-
-```sh
-scripts/install.sh               # on the host
-```
+`scripts/install.sh` builds Filo with Go if the host has it, otherwise in the dev container (see
+[Development](#development)). It copies the binary to `~/.local/bin` (replacing an older copy), so `filo` runs from
+anywhere if `~/.local/bin` is on your `PATH`, and adds the line that loads tab completion to `~/.bashrc` if it is not
+there yet. Run it again after every change. With Go installed, `make install` does the same, and `make build` only
+builds `bin/filo`. The binary is static (`CGO_ENABLED=0`).
 
 ### Tab completion in bash
 
@@ -723,8 +726,9 @@ is not a failure), `1` an error, a root that failed during `filo scan` of every 
 refused, a file `filo delete` couldn't read or delete, a group of a duplicates CSV it refused, a path `filo show`
 or `filo get` couldn't show (not in the register, skipped by its root's settings, or for `get` a directory; the others
 are still shown), a file `filo set`, `filo tag` or `filo untag` refused, a tag `filo tags rename` found on no file,
-a root `filo find` couldn't scan or a name it had to escape, or a tag index whose pages couldn't be brought up to date
-(or that `filo indexes remove` had to leave files of), `2` a usage error. `filo find` that finds nothing exits `0`.
+a root `filo find` couldn't scan or a name it had to escape, a rename or move `filo update` refused or skipped (or an
+update that needed to ask with no terminal to ask in), or a tag index whose pages couldn't be brought up to date (or
+that `filo indexes remove` had to leave files of), `2` a usage error. `filo find` that finds nothing exits `0`.
 
 ## Roots
 
@@ -816,10 +820,13 @@ Enable it with `systemctl --user enable --now filo-scan.timer`.
 8. **Show, set and get**: everything about a file or directory, and its decisions changed from the command line.
    Done.
 9. **Finding files** by name: `filo find`. Done.
-10. **Tags**: `filo tag`, `untag`, `tags`, finding by tag, and the tags CSV. Done.
-11. **Tag index pages**: HTML pages listing a directory's files by tag, kept up to date. Done.
-12. **Next**: what is planned, in order, is in [docs/roadmap.md](docs/roadmap.md): bash completion, sharing decisions
-    between devices, and more.
+10. **Tags**: `filo tag`, `untag`, `tags` and finding by tag. Done.
+11. **Tag index pages**: HTML pages listing a directory's files by tag, with a find page, kept up to date. Done.
+12. **One CSV**: `filo export [DIR] -o FILE` holds retentions and tags together, and editing a `name` or `directory`
+    cell renames or moves the file. Done.
+13. **Bash completion**: `filo completion bash`. Done.
+14. **Next**: what is planned, in order, is in [docs/roadmap.md](docs/roadmap.md): a device ID, marking synced
+    directories and sharing decisions between devices, then more.
 
 Principles that won't change:
 - A retention is never a trigger: reaching its end makes a file a candidate you confirm.
@@ -842,8 +849,8 @@ scripts/dev.sh shell                # or work inside it
 
 The first call builds the image, with Claude Code (`scripts/dev.sh build --no-claude` builds it without, and
 `scripts/dev.sh claude` then says so and how to rebuild). The container mounts only the repo, so `scripts/dev.sh run
-bin/filo ...` sees the repo and the container's own home, never your files. To run Filo on your own files, build it in the container and run it from the host. `make build` builds it
-static: the SQLite driver is pure Go, so `CGO_ENABLED=0` gives a binary with no library dependencies that runs on any
+bin/filo ...` sees the repo and the container's own home, never your files. To run Filo on your own files, build it
+in the container and run it from the host. `make build` builds it static: the SQLite driver is pure Go, so `CGO_ENABLED=0` gives a binary with no library dependencies that runs on any
 x86-64 Linux, including older CPUs (Go's default target is `GOAMD64=v1`). Without it, the binary links the
 container's C library and may not start on an older host. `scripts/install.sh`, run on the host, builds it in the
 container (when the host has no Go), copies it to `~/.local/bin` and loads tab completion from `~/.bashrc`:
