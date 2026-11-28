@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/alansav/filo/internal/report"
+	"github.com/alansav/filo/internal/share"
 	"github.com/alansav/filo/internal/store"
 	"github.com/alansav/filo/internal/view"
 )
@@ -280,6 +281,14 @@ func (e *env) open(ctx context.Context, db string) (*store.Store, error) {
 	for _, note := range s.UpgradeNotes() {
 		e.errorLine("warning: " + note)
 	}
+	// Every run reads the synced directories' journals before it changes anything, so what it decides is decided on
+	// what the other devices decided (docs/design.md, Sharing decisions between devices, Timing). What it finds is
+	// reported by filo synced, filo report and the scans; a failure here never stops the command.
+	if e.cmd != "device" {
+		if _, err := e.importAll(ctx, s); err != nil {
+			e.errorLine("warning: reading the synced directories' journals: " + err.Error())
+		}
+	}
 	return s, nil
 }
 
@@ -287,6 +296,16 @@ func (e *env) open(ctx context.Context, db string) (*store.Store, error) {
 // snapshot, which then holds what was written). The run's work is already written, so a problem with the snapshot is
 // a warning, one line on stderr; an index not brought up to date makes the run exit 1.
 func (e *env) closeStore(s *store.Store) {
+	if s.Changed() {
+		// The decisions this run made go to the journals of the synced directories holding their files.
+		problems, err := share.Publish(context.Background(), s, timeNow())
+		if err != nil {
+			problems = append(problems, err.Error())
+		}
+		for _, p := range problems {
+			e.errorLine("warning: sharing this run's decisions: " + p)
+		}
+	}
 	e.refreshIndexes(context.Background(), s) // the run's change is committed: its pages follow, even after Ctrl-C
 	if err := s.Close(); err != nil {
 		for _, p := range joinedParts(err) {

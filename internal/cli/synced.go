@@ -155,8 +155,16 @@ func (e *env) renderSyncedDir(dr share.DirReport, devs []store.KnownDevice) {
 		facts = append(facts, report.Count(int64(len(dr.Strange)))+" not trusted")
 	}
 	r.Section(r.Tilde(dr.Dir.Abs()), facts...)
-	if len(dr.Problems) == 0 && len(dr.Strange) == 0 && len(dr.Others) == 0 {
+	if len(dr.Problems) == 0 && len(dr.Strange) == 0 && len(dr.Others) == 0 && dr.Conflicts == 0 {
 		r.Count(view.Done, "no problems")
+	}
+	if dr.Conflicts > 0 {
+		r.Count(view.Attention, report.Plural(int64(dr.Conflicts), "decision", "decisions")+" in conflict: the safe "+
+			"side applies until a new decision; the export's conflict column shows them")
+	}
+	if dr.Waiting > 0 {
+		r.Count(view.Neutral, report.Plural(int64(dr.Waiting), "decision waits", "decisions wait")+
+			" for its file or content to arrive")
 	}
 	for _, p := range dr.Problems {
 		r.Count(view.Attention, p)
@@ -617,9 +625,10 @@ func (e *env) syncedAfterScan(ctx context.Context, s *store.Store, sums []scanne
 	if err != nil {
 		return
 	}
-	strange := 0
+	strange, conflicts := 0, 0
 	for _, d := range rep.Dirs {
 		strange += len(d.Strange)
+		conflicts += d.Conflicts
 	}
 	var facts []string
 	if n := rep.Problems(); n > 0 {
@@ -627,6 +636,9 @@ func (e *env) syncedAfterScan(ctx context.Context, s *store.Store, sums []scanne
 	}
 	if strange > 0 {
 		facts = append(facts, report.Plural(int64(strange), "device not trusted", "devices not trusted"))
+	}
+	if conflicts > 0 {
+		facts = append(facts, report.Plural(int64(conflicts), "decision in conflict", "decisions in conflict"))
 	}
 	if len(found) > 0 {
 		facts = append(facts, report.Plural(int64(len(found)), "mark found", "marks found"))
