@@ -229,7 +229,10 @@ type pub struct {
 	mine  map[[2]string]store.LineRef // the line this run wrote for a (fid, key), which the next one replaces
 	value map[[2]string]string        // and its value
 	fids  map[int64]string
-	seen  []seenValue // setting values written, recorded as seen once committed
+	fresh map[string]int64 // shared IDs made this run, not recorded until a line about the file is written
+	// seeding: the lines are decisions made before this device shared the directory: they replace nothing
+	seeding bool
+	seen    []seenValue // setting values written, recorded as seen once committed
 }
 
 // startPub checks this device's journal in sd (written back if it fell short) and starts writing after its last
@@ -267,7 +270,8 @@ func startPub(ctx context.Context, s *store.Store, me store.Device, sd store.Syn
 	size := int64(len(ownBytes(kept)))
 	return &pub{sd: sd, w: w, kept: kept, ch: store.SyncedChange{SyncedID: sd.ID, Shared: map[string]int64{}},
 		ju:   store.JournalUpdate{Dev: me.ID, Seq: last.Seq, Offset: size},
-		mine: map[[2]string]store.LineRef{}, value: map[[2]string]string{}, fids: map[int64]string{}}, "", nil
+		mine: map[[2]string]store.LineRef{}, value: map[[2]string]string{}, fids: map[int64]string{},
+		fresh: map[string]int64{}}, "", nil
 }
 
 // decide adds a line for (the file's) key if value differs from what is in effect for it here.
@@ -301,6 +305,9 @@ func (pb *pub) decide(ctx context.Context, s *store.Store, fileID int64, p store
 		if same || (len(cur) == 0 && value == "") {
 			return nil // already in effect here; or nothing decided, and nothing to say
 		}
+		if pb.seeding {
+			replaces = nil
+		}
 	}
 	refs := make([]Ref, len(replaces))
 	for i, r := range replaces {
@@ -317,6 +324,10 @@ func (pb *pub) decide(ctx context.Context, s *store.Store, fileID int64, p store
 	pb.ch.Replaces = append(pb.ch.Replaces, replaces)
 	pb.mine[k] = store.LineRef{Dev: l.Dev, Seq: l.Seq}
 	pb.value[k] = value
+	if f, ok := pb.fresh[fid]; ok {
+		pb.ch.Shared[fid] = f
+		delete(pb.fresh, fid)
+	}
 	return nil
 }
 
@@ -350,7 +361,7 @@ func (pb *pub) fid(ctx context.Context, s *store.Store, fileID int64, hash, rel 
 				return "", err
 			}
 		}
-		pb.ch.Shared[fid] = fileID
+		pb.fresh[fid] = fileID // recorded with the first line written about it, not before
 	}
 	pb.fids[fileID] = fid
 	return fid, nil

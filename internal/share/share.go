@@ -414,6 +414,9 @@ func Mark(ctx context.Context, s *store.Store, t Target, now time.Time) (store.S
 	if err := d.Create(journal.JournalName(me.ID), [][]byte{first}); err != nil {
 		return sd, err
 	}
+	if _, err := Seed(ctx, s, sd, now); err != nil {
+		return sd, err
+	}
 	return sd, writeStatus(ctx, s, d, sd.ID, me, now)
 }
 
@@ -499,6 +502,15 @@ func Join(ctx context.Context, s *store.Store, t Target, now time.Time) (store.S
 		if err := d.Create(journal.JournalName(me.ID), [][]byte{first}); err != nil {
 			return sd, notes, err
 		}
+	}
+	// Seeding comes before applying: what this device decided before it joined is written while it still holds
+	// it, and where it differs from what is in effect it is a conflict (the safe side then applies), not lost.
+	if retired[me.ID] == 0 {
+		problems, err := Seed(ctx, s, sd, now)
+		if err != nil {
+			return sd, notes, err
+		}
+		notes = append(notes, problems...)
 	}
 	if _, problems, err := applyDecisions(ctx, s, sd, now); err != nil {
 		return sd, notes, err

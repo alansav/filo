@@ -226,6 +226,9 @@ func (pb *pub) publishSettings(ctx context.Context, s *store.Store, me store.Dev
 		case !wasSeen && (same || (len(ds) == 0 && value == "")):
 			continue
 		}
+		if pb.seeding {
+			refs, replaces = nil, nil // held before sharing: a difference is a conflict
+		}
 		raw, err := pb.w.Add(KindSetting, SettingBody{Key: k, Value: value, Replaces: refs}, now)
 		if err != nil {
 			return err
