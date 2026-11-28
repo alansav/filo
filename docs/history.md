@@ -1080,7 +1080,7 @@ built the same day on branch `sync`, in seven slices, each reviewed once (medium
 - **Not done, in the roadmap**: replaying lines a newer Filo wrote after an upgrade (devices on mixed versions),
   compacting journals, handing over a tag index beyond `take`.
 
-## Export never inside a git repository
+## Export never inside a git repository or a synced directory, unless asked
 
 Asked for by the person on 2026-11-28, after item 9 was merged: a CSV of file names, paths and decisions written
 inside a git working tree could be committed and pushed by mistake. Designed and built the same day on branch
@@ -1091,6 +1091,14 @@ nits, all fixed: a part of the path that cannot be resolved is refused rather th
 and the CLI tests fail clearly when the temporary directory is inside a repository. Tests: table-driven end to end
 (`.git` at or above the directory, a worktree's `.git` file, a symlink into a repository, a directory not made yet,
 one that cannot be looked into, a duplicates export, and outside any repository).
+
+Then, at the person's request after talking it over (a guard is worth having before an accident; moving the CSV there
+afterwards is a second, deliberate step): `--in-git` to allow a repository, and the same guard for a synced directory
+(one holding a synced directory's mark, at or above FILE, or one joined here whose mark is lost), allowed with
+`--in-synced`, each flag for its own place only. Its medium review found six nits, fixed: each test case checks its
+own refusal, a joined directory with a lost mark is caught through the register, the paths in the message match the
+design, the test harness also refuses a synced temporary directory, no errno in the cli, and the help says a synced
+directory is one marked for Filo.
 
 ## Notes on decisions
 
