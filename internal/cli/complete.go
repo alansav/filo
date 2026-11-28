@@ -436,7 +436,7 @@ func argSource(cmd, sub, name string) srcKind {
 		return srcNothing
 	case "duplicates include PATH":
 		return srcNotCounted
-	case "policies add NAME", "policies add VALUE", "policies set VALUE":
+	case "policies add NAME", "policies add VALUE", "policies set VALUE", "device name NAME":
 		return srcNothing
 	case "policies set NAME", "policies move OLD", "policies move NEW", "policies remove NAME", "policies show NAME":
 		return srcPolicies

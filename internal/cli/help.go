@@ -60,6 +60,9 @@ var overview = struct {
 		{Name: "indexes add [DIR] [--name NAME]", Text: "write a directory's tag index, kept up to date from then on"},
 		{Name: "indexes remove [DIR] [--name NAME]", Text: "stop keeping an index, and remove its pages"},
 		{Name: "indexes refresh [DIR] [--name NAME]", Text: "write an index's pages again"},
+		{Name: "device", Text: "this device's name, ID and key fingerprint, for sharing decisions between devices"},
+		{Name: "device name NAME", Text: "rename this device"},
+		{Name: "device new [-y]", Text: "give a register copied from another machine a new device ID and key"},
 		{Name: "completion bash", Text: "print the script that makes Tab complete filo's commands, files and tags"},
 		{Name: "help [COMMAND]", Text: "this overview, or a command's flags and rules"},
 	},
@@ -350,6 +353,21 @@ var commandHelps = map[string]commandHelp{
 			{Name: "--name NAME", Text: "add: the pages' name (letters, digits, - and _); remove and refresh: " +
 				"which index of DIR, when it has several"},
 			{Name: "-y", Text: "remove: remove without asking"},
+		},
+	},
+	"device": {
+		usage: []string{"filo device", "filo device name NAME", "filo device new [-y]"},
+		before: []string{
+			"Every register is a device, with a random ID, a signing key and a name (the host name when it was " +
+				"made). Decisions shared through a synced directory are signed with the key, and another device " +
+				"asks you to compare the key's fingerprint before it trusts this one. filo device shows them.",
+			"name renames the device: letters, digits, '.', '-' and '_', starting with a letter or digit.",
+			"new gives the register a new ID and key, keeping its name, after asking. It is for a register copied " +
+				"from another machine: two machines must never share one device. A register restored on the " +
+				"same machine stays the same device and needs nothing.",
+		},
+		flags: []view.Term{
+			{Name: "-y", Text: "new: without asking"},
 		},
 	},
 	"get": {

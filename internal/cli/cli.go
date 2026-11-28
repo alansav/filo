@@ -190,6 +190,8 @@ func (e *env) run(ctx context.Context, args []string) error {
 		return e.tags(ctx, *db, rest)
 	case "indexes":
 		return e.indexes(ctx, *db, rest)
+	case "device":
+		return e.device(ctx, *db, rest)
 	case "completion":
 		return e.completion(rest)
 	case "__complete": // run by the completion script on Tab; not in the help
