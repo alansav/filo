@@ -192,6 +192,10 @@ func (e *env) run(ctx context.Context, args []string) error {
 		return e.indexes(ctx, *db, rest)
 	case "device":
 		return e.device(ctx, *db, rest)
+	case "synced":
+		return e.synced(ctx, *db, rest)
+	case "devices":
+		return e.devices(ctx, *db, rest)
 	case "completion":
 		return e.completion(rest)
 	case "__complete": // run by the completion script on Tab; not in the help
@@ -343,7 +347,7 @@ func (e *env) report(ctx context.Context, dbBefore string, args []string) error 
 		return err
 	}
 	r.Render(e.view)
-	return nil
+	return e.syncedReport(ctx, s)
 }
 
 // terminal is implemented by writers that know whether they are a terminal (tests use it).

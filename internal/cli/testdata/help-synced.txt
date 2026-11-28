@@ -1,0 +1,27 @@
+filo synced
+filo synced add DIR [-y]
+filo synced remove DIR [-y]
+filo synced ignore DIR
+
+  A synced directory is one a sync service (any of them) shares between devices.
+  Marking it lets the devices that run Filo share their decisions about its
+  files: each keeps its own register, and writes the decisions it makes there to
+  its own signed journal in DIR/.filo/, which the sync service copies and the
+  other devices read. A journal only records decisions: it never deletes,
+  renames or moves a file.
+
+  add marks DIR, a directory in a root, when it has no mark. When it has one
+  (the sync service brought it from another device), add shows the devices whose
+  journals are there, with their key fingerprints to compare with filo device on
+  each, and asks before trusting them and joining. When it holds the mark of a
+  synced directory this device joined elsewhere, which is gone from there, add
+  asks whether it moved. One synced directory cannot hold another.
+
+  Every scan notes the marks it finds; a mark this device has not joined is
+  reported until it is joined, or ignored with ignore. remove stops this device
+  sharing decisions in DIR (its files and the journals stay), or forgets that a
+  mark was ignored. filo synced lists the synced directories, what is wrong in
+  each, and the marks found.
+
+Flags
+  -y                       add and remove: without asking

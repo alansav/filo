@@ -66,6 +66,19 @@ Commands
   device name NAME         rename this device
   device new [-y]          give a register copied from another machine a new
                            device ID and key
+  synced                   list the synced directories, and the marks of others
+                           found by the scans
+  synced add DIR [-y]      mark DIR as a synced directory, or join one marked on
+                           another device
+  synced remove DIR [-y]   stop sharing decisions in a synced directory
+  synced ignore DIR        stop reporting a synced directory found at DIR
+  devices [DIR]            list the devices sharing decisions in each synced
+                           directory
+  devices trust DEVICE [-y]
+                           trust a device met in a journal, and vouch for it
+  devices retire DEVICE [-y]
+                           retire a device that is gone: its later decisions are
+                           refused
   completion bash          print the script that makes Tab complete filo's
                            commands, files and tags
   help [COMMAND]           this overview, or a command's flags and rules

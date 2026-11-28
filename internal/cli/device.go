@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/alansav/filo/internal/device"
+	"github.com/alansav/filo/internal/share"
 	"github.com/alansav/filo/internal/store"
 	"github.com/alansav/filo/internal/view"
 )
@@ -78,6 +79,9 @@ func (e *env) deviceName(ctx context.Context, s *store.Store, d store.Device, na
 		return err
 	}
 	r.Heading("Device renamed", view.Where{}, d.Name+" → "+name)
+	if err := share.Rename(ctx, s, timeNow()); err != nil {
+		return fmt.Errorf("the new name is not in every synced directory's journal yet: %w", err)
+	}
 	return nil
 }
 

@@ -103,6 +103,7 @@ func (e *env) scanAll(ctx context.Context, s *store.Store, opt reconcile.Options
 	defer pr.stop()
 	failed, attention := 0, false
 	var failedRoots []string
+	var scanned []scannedRoot
 	for i, r := range roots {
 		o := opt
 		o.Target = r.Path
@@ -133,7 +134,9 @@ func (e *env) scanAll(ctx context.Context, s *store.Store, opt reconcile.Options
 		if renderScan(v, sum, time.Since(start)) {
 			attention = true
 		}
+		scanned = append(scanned, scannedRoot{root: sum.Root, scope: sum.Scope, filoDirs: sum.FiloDirs})
 	}
+	e.syncedAfterScan(ctx, s, scanned)
 	if len(roots) > 1 {
 		v.Blank()
 		facts := []string{report.Plural(int64(len(roots)), "root", "roots"),
@@ -169,7 +172,9 @@ func (e *env) scanTarget(ctx context.Context, s *store.Store, opt reconcile.Opti
 	if err != nil {
 		return err
 	}
-	if renderScan(e.view, sum, time.Since(start)) {
+	attention := renderScan(e.view, sum, time.Since(start))
+	e.syncedAfterScan(ctx, s, []scannedRoot{{root: sum.Root, scope: sum.Scope, filoDirs: sum.FiloDirs}})
+	if attention {
 		e.view.Blank()
 		e.view.Next("Next: filo report")
 	}
