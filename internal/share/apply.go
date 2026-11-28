@@ -67,7 +67,34 @@ func applyDecisions(ctx context.Context, s *store.Store, sd store.SyncedDir, now
 	waiting := 0
 	var problems []string
 	today := retention.Today(now)
+	var me store.Device
 	for _, g := range groups {
+		if g.fid == store.SettingsFID {
+			if me.ID == "" {
+				if me, err = s.Device(ctx); err != nil {
+					return waiting, problems, err
+				}
+			}
+			cur, err := s.CurrentDecisions(ctx, sd.ID, g.fid, g.key)
+			if err != nil {
+				return waiting, problems, err
+			}
+			done, problem, err := applySetting(ctx, s, me, sd, g.key, cur, now, today)
+			if err != nil {
+				return waiting, problems, err
+			}
+			if problem != "" {
+				problems = append(problems, problem)
+			}
+			if !done {
+				waiting += len(g.refs)
+				continue
+			}
+			if err := s.MarkApplied(ctx, sd.ID, g.refs); err != nil {
+				return waiting, problems, err
+			}
+			continue
+		}
 		fileID, other, err := matchShared(ctx, s, sd, g.fid, g.last)
 		if err != nil {
 			return waiting, problems, err

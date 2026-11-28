@@ -208,6 +208,11 @@ func importDir(ctx context.Context, s *store.Store, me store.Device, sd store.Sy
 	name := func(dev string) string { return nameOf(devs, dev) }
 	for _, r := range reads {
 		dr.Problems = append(dr.Problems, fileDecisions(r.lines, sd.ID, name, &ch)...)
+		ps, err := settingDecisions(ctx, s, r.lines, name, &ch, now)
+		if err != nil {
+			return dr, err
+		}
+		dr.Problems = append(dr.Problems, ps...)
 	}
 	updated := map[string]bool{}
 	for _, r := range reads {

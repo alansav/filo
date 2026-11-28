@@ -31,9 +31,6 @@ func Publish(ctx context.Context, s *store.Store, now time.Time) ([]string, erro
 	if err != nil {
 		return nil, err
 	}
-	if latest == cur {
-		return nil, nil
-	}
 	reviews, err := s.ReviewsSince(ctx, cur.Reviews)
 	if err != nil {
 		return nil, err
@@ -42,11 +39,15 @@ func Publish(ctx context.Context, s *store.Store, now time.Time) ([]string, erro
 	if err != nil {
 		return nil, err
 	}
+	policyEvs, err := s.PolicyChangesSince(ctx, cur.PolicyChanges)
+	if err != nil {
+		return nil, err
+	}
 	dirs, err := joinedDirs(ctx, s)
 	if err != nil {
 		return nil, err
 	}
-	if len(dirs) == 0 || len(reviews)+len(tagEvs) == 0 {
+	if len(dirs) == 0 {
 		return nil, s.Publish(ctx, nil, latest)
 	}
 	me, err := s.Device(ctx)
@@ -121,6 +122,40 @@ func Publish(ctx context.Context, s *store.Store, now time.Time) ([]string, erro
 		}
 		p := places[e.FileID]
 		if err := pb.decide(ctx, s, e.FileID, p, KindTag, tagKey(t), value, t.String(), p.Hash, now); err != nil {
+			return problems, err
+		}
+	}
+	// Settings (policies, rules, duplicates decisions, tag indexes): what each synced directory's journal has in
+	// effect, against what this device holds; and the policies moved, in every one.
+	var moves []store.PolicyEvent
+	for _, e := range policyEvs {
+		if e.Kind == "rename" || e.Kind == "move" {
+			moves = append(moves, e)
+		}
+	}
+	for _, sd := range dirs {
+		pb, seen := pubs[sd.ID]
+		if !seen {
+			var problem string
+			pb, problem, err = startPub(ctx, s, me, sd)
+			if err != nil {
+				problems = append(problems, sd.Abs()+": "+err.Error()+" (tried again on the next run)")
+				failed = true
+			} else if problem != "" {
+				problems = append(problems, sd.Abs()+": "+problem)
+			}
+			pubs[sd.ID] = pb
+			if pb != nil {
+				order = append(order, pb)
+			}
+		}
+		if pb == nil {
+			continue
+		}
+		if err := pb.publishMoves(moves, now); err != nil {
+			return problems, err
+		}
+		if err := pb.publishSettings(ctx, s, me, now); err != nil {
 			return problems, err
 		}
 	}
@@ -248,15 +283,20 @@ func (pb *pub) decide(ctx context.Context, s *store.Store, fileID int64, p store
 		return err
 	}
 	l := pb.w.Last()
-	pb.ju.Lines = append(pb.ju.Lines, store.JournalLine{Seq: l.Seq, Raw: raw})
-	pb.ju.Seq, pb.ju.Offset = l.Seq, pb.ju.Offset+int64(len(raw)+1)
-	pb.ch.Journals = []store.JournalUpdate{pb.ju}
+	pb.addLine(raw, l)
 	pb.ch.Decisions = append(pb.ch.Decisions, store.Decision{Dev: l.Dev, Seq: l.Seq, FID: fid, Key: key, Hash: hash,
 		Path: rel, Value: value, Decided: l.Time, Current: true, Applied: true})
 	pb.ch.Replaces = append(pb.ch.Replaces, replaces)
 	pb.mine[k] = store.LineRef{Dev: l.Dev, Seq: l.Seq}
 	pb.value[k] = value
 	return nil
+}
+
+// addLine adds a line just made to what pb writes.
+func (pb *pub) addLine(raw []byte, l journal.Line) {
+	pb.ju.Lines = append(pb.ju.Lines, store.JournalLine{Seq: l.Seq, Raw: raw})
+	pb.ju.Seq, pb.ju.Offset = l.Seq, pb.ju.Offset+int64(len(raw)+1)
+	pb.ch.Journals = []store.JournalUpdate{pb.ju}
 }
 
 // fid is the file's shared ID in the synced directory: the one it has, or a new one, made from the synced directory,
