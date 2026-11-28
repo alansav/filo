@@ -255,3 +255,28 @@ func TestRender(t *testing.T) {
 		}
 	}
 }
+
+func TestRenderShared(t *testing.T) {
+	f := File{Shown: store.Shown{FileItem: store.FileItem{RootPath: "/home/u/Sync", Path: "x.pdf", Kind: "file",
+		Retention: "10y", Status: store.StatusKept}, Present: true},
+		Shared: []Shared{
+			{What: "retention", Value: "1y", Device: "laptop", Decided: "2026-11-20T10:00:00Z", Conflict: true},
+			{What: "retention", Value: "10y", Device: "desktop", Decided: "2026-11-20T11:00:00Z", Conflict: true},
+			{What: "tag sender:EDF", Value: "", Device: "laptop", Decided: "2026-11-21T10:00:00Z"},
+		}}
+	var b bytes.Buffer
+	f.Render(view.New(view.Options{Out: &b, Home: "/home/u"}), 1, 1, "2026-11-28", false)
+	out := b.String()
+	for _, want := range []string{"Shared   3 decisions . devices disagree: the safe side applies until a new decision",
+		"retention       1y", "from laptop, ", "[!] in conflict", "tag sender:EDF  removed"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("lacks %q:\n%s", want, out)
+		}
+	}
+	none := File{Shown: f.Shown}
+	b.Reset()
+	none.Render(view.New(view.Options{Out: &b}), 1, 1, "2026-11-28", false)
+	if strings.Contains(b.String(), "Shared") {
+		t.Errorf("a file with no shared decisions has a Shared part:\n%s", b.String())
+	}
+}

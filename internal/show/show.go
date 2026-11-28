@@ -10,6 +10,7 @@ import (
 	"os"
 	"path"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/alansav/filo/internal/fsid"
@@ -56,6 +57,18 @@ type File struct {
 	DiskWhy   string // DiskNoRoot, DiskError: why
 	Verify    Verify
 	VerifyWhy string // VerifyFailed: why
+	// Shared are the decisions in effect about it from the devices sharing its synced directory (docs/design.md,
+	// Sharing decisions between devices): where each came from, and both sides of a conflict.
+	Shared []Shared
+}
+
+// Shared is one decision in effect about a file, from a device sharing its synced directory.
+type Shared struct {
+	What     string // "file_date", "retention", or "tag" and the tag
+	Value    string // "" = none (cleared), or the tag removed
+	Device   string // the device's name
+	Decided  string // when, as its line says (RFC 3339)
+	Conflict bool   // another device decided otherwise, and neither has seen the other's
 }
 
 // Look checks the file on disk: an lstat compared with the register, as a scan compares (docs/design.md, Scan and
@@ -226,6 +239,7 @@ func (f File) Render(v *view.Renderer, n, total int, today string, history bool)
 		f.renderTags(v)
 	}
 	f.renderCopies(v)
+	f.renderShared(v)
 	if history {
 		v.Part("Paths", view.Plural(int64(len(f.Paths)), "path", "paths")+", newest first")
 		rows := make([]view.FileRow, len(f.Paths))
@@ -439,4 +453,48 @@ func (f File) renderCopies(v *view.Renderer) {
 		rows[i] = view.FileRow{Root: c.RootPath, Rel: c.Path, Note: note}
 	}
 	v.Files(view.FileList{Rows: rows})
+}
+
+// renderShared writes the decisions in effect from the devices sharing the file, each with where and when it came
+// from; a conflict lists both sides, under the attention marker, until a new decision replaces them.
+func (f File) renderShared(v *view.Renderer) {
+	if len(f.Shared) == 0 {
+		return
+	}
+	conflicts := 0
+	for _, d := range f.Shared {
+		if d.Conflict {
+			conflicts++
+		}
+	}
+	facts := []string{view.Plural(int64(len(f.Shared)), "decision", "decisions")}
+	if conflicts > 0 {
+		facts = append(facts, "devices disagree: the safe side applies until a new decision")
+	}
+	v.Part("Shared", facts...)
+	fields := make([]view.Field, len(f.Shared))
+	for i, d := range f.Shared {
+		value := d.Value
+		if value == "" {
+			value = "none"
+			if strings.HasPrefix(d.What, "tag ") {
+				value = "removed"
+			}
+		}
+		fl := view.Field{Label: d.What, Value: value, Note: "from " + d.Device + ", " + shortTime(d.Decided)}
+		if d.Conflict {
+			fl.Attention = "in conflict"
+		}
+		fields[i] = fl
+	}
+	v.Fields(0, fields)
+}
+
+// shortTime is an RFC 3339 time as a local date and minute, or as it is if it is not one.
+func shortTime(s string) string {
+	t, err := time.Parse(time.RFC3339, s)
+	if err != nil {
+		return s
+	}
+	return t.Local().Format("2006-01-02 15:04")
 }
