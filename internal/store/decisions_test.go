@@ -388,7 +388,13 @@ func TestFileEventsAndFacts(t *testing.T) {
 	if ok, _ := e.s.SeenSince(ctx, k["Sync/b.pdf"].FileID, scan); ok {
 		t.Fatal("an edit seen on one scan counts as seen twice")
 	}
+	if ok, _ := e.s.ScannedSince(ctx, e.root.ID, scan); ok {
+		t.Fatal("a scan after the last one")
+	}
 	e.apply(Changes{})
+	if ok, _ := e.s.ScannedSince(ctx, e.root.ID, scan); !ok {
+		t.Fatal("no scan after it, though one ran")
+	}
 	if ok, _ := e.s.SeenSince(ctx, k["Sync/b.pdf"].FileID, scan); !ok {
 		t.Fatal("an edit seen unchanged by the next scan is not")
 	}

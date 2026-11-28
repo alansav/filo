@@ -644,6 +644,14 @@ func (s *Store) SeenSince(ctx context.Context, fileID, scanID int64) (bool, erro
 	return n > 0, err
 }
 
+// ScannedSince reports whether a scan of root rootID finished after scan scanID.
+func (s *Store) ScannedSince(ctx context.Context, rootID, scanID int64) (bool, error) {
+	var n int
+	err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM scans WHERE root_id = ? AND id > ? AND kind = 'scan'
+		AND finished_utc IS NOT NULL`, rootID, scanID).Scan(&n)
+	return n > 0, err
+}
+
 // RemapShared makes shared ID fid of synced directory id the file fileID, which has none (another device's scan
 // found the file moved or edited where this one saw a missing file and a new one), and makes its current decisions
 // apply again, to it. It reports whether it did.
@@ -669,8 +677,9 @@ func (s *Store) RemapShared(ctx context.Context, id int64, fid string, fileID in
 	return true, s.commit(tx)
 }
 
-// MarkDeletedElsewhere records that a file missing here was deleted by Filo on another device (named in detail):
-// its row is closed as deleted, so it is never "missing", and a copy restored later is a new file. A file present,
+// MarkDeletedElsewhere records that a file missing here was deleted by Filo on another device: its row is closed as
+// deleted, so it is never "missing", and a copy restored later is a new file. (No event names the device: the
+// journal line that said so is kept.) A file present,
 // or deleted already, is left alone; it reports whether it marked it.
 func (s *Store) MarkDeletedElsewhere(ctx context.Context, fileID int64, now time.Time) (bool, error) {
 	res, err := s.exec(ctx, `UPDATE files SET deleted_utc = ? WHERE id = ? AND deleted_utc IS NULL AND NOT EXISTS (
