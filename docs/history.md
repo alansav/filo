@@ -942,6 +942,48 @@ a test that the script has no call that could fetch (it fails on a planted `fetc
 `TestRenderFindPage` (the policy, no fetching call), the goldens. Not checked yet: a PDF in the real find page on the
 iPad, and the other devices since the change.
 
+## Security review of 2026-11-27
+
+A security review of the whole code, asked for by the person on 2026-11-27, looking for exploits, each tried on a
+throwaway tree. Built on 2026-11-27/28 on branch `improvements`, straight from the review (no roadmap items: the
+person chose to do them at once). Found sound: disposal through the opened directories, `view.Escape`, the pages'
+`html/template` and Content-Security-Policy, parameterised SQL, `O_EXCL` output files and the private register.
+
+- **A tag index written through its opened directories** (`7fdfdf5` design, `13e3f99`, `8197278` review fixes).
+  `internal/tagindex` looked with `os.Lstat` and then acted by path, so a `.NAME/` swapped for a symlink between the
+  two was followed. Reproduced: a refresh of 300 changed pages, racing a loop that swapped `.index` with a symlink
+  (`mv -T --exchange`), left three temporary page files in a directory outside the index and 170 pages unwritten.
+  Now every change goes through `os.Root`s opened from the index's directory down, each a real directory and the one
+  lstat saw, opened as soon as it is made or checked; the same race left nothing outside. Tests:
+  `TestWriteNeverFollowsASwappedDirectory` (a hook swaps `.index`, then `.index/a`, before the first write),
+  `TestWriteForgetsFilesOfADirectoryNoLongerFilos`, and `TestOnlyWriteTouchesTheDisk` now refusing path-based changes
+  in `write.go` too (it fails on the old code).
+- **No renaming or moving of hidden files by the CSV** (`37d1a3c` design, `1ee9576`, `0562ae5` and `1875100` review
+  fixes). The rule was that a rename or move never hides or unhides a file, so in a root with `--include-hidden` a
+  move between hidden directories passed. Reproduced with an edited CSV: `.ssh/id_ed25519` moved into
+  `Sync/.stversions/` (and the emptied `.ssh` removed), and `Sync/.peer/authorized_keys`, as another Syncthing device
+  could leave it, moved into a new `.ssh/`. Now a file with a hidden part on its path is never renamed or moved, nor
+  given a hidden path; its retention and tags still apply. This replaced the "hidden to hidden is renamed" row of the
+  rename table. Test: `TestUpdateNeverMovesHiddenFiles` (both moves, the rename of `inbox/.notes`, and the key's
+  retention still set).
+- **Moves leave the directories they empty** (`491ce8e` design, `410747b`). Not a security fix: raised by the person
+  in the same discussion, since clearing an inbox through the CSV removed the inbox. Replaces their decision recorded
+  with the moves (roadmap 42), "an emptied `inbox/` goes too". `filo delete` still removes what its run empties; a
+  hidden `.keep` keeps a directory a delete would empty. Test: `TestMoveLeavesDirectories`.
+- **Not acted on.** The formula guard looks only at a cell's first character, so a name such as `report;=1+1;x.txt`
+  goes into the CSV unquoted and a spreadsheet splitting at `;` would make `=1+1` a cell. The person's LibreOffice
+  splits at commas (a tags cell, `;`-separated, stays whole) and leaves "Evaluate formulas" off, so nothing was
+  changed; excluding such names from the export, and listing them, was the fix kept in reserve. The find page's PDF
+  preview is an `embed` with no sandbox: a server that sniffs content could show a `.pdf` holding HTML as a page of
+  the same origin. The servers used (Textastic's, files opened locally) go by the extension.
+
+One review (medium), six nits, five fixed: `NAME.html`'s rename went by path through `.index` with no check that it
+was still the directory opened, and a swap showed `os.Root`'s "path escapes from parent" (now checked before and
+after the rename, reported in Filo's words); a page in a directory that is no longer Filo's stayed recorded and was
+reported on every run; a design clause and `extension()`'s case for a hidden name, both dead once hidden files are not
+renamed; a garbled README sentence. Not fixed: every opened key directory stays open until the end of the run, one
+descriptor each; an index has a few keys, and Go raises the soft limit on open files to the hard one.
+
 ## Notes on decisions
 
 Short notes taken out of `design.md` on 2026-11-17, by the section they were in.
