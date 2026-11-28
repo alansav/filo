@@ -69,6 +69,11 @@ func (e *env) askRulesAbove(ctx context.Context, s *store.Store, sd store.Synced
 		preview := "would set a policy on " + report.Plural(int64(len(run.Dated)), "file", "files") + " there now"
 		if err != nil {
 			preview = "cannot be copied there: " + err.Error()
+		} else if all, _, err := s.FilesUnder(ctx, rule.RootID, rule.Dir); err == nil {
+			if inside, _, err := s.FilesUnder(ctx, sd.RootID, sd.Dir); err == nil && all > inside {
+				preview += "; it also covers " + report.Plural(all-inside, "file", "files") + " outside it, " +
+					"which a move takes it from"
+			}
 		}
 		r.Count(view.Neutral, fmt.Sprintf("%s on %s: %s", ruleTo(rule.Pattern, rule.Policy, rule.PolicyValue),
 			where, preview))

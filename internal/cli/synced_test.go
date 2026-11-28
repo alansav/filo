@@ -227,7 +227,8 @@ func TestRulesAboveASyncedDirectory(t *testing.T) {
 	a.filo(0, "", false, "policies", "add", "keep", "forever")
 	a.filo(0, "", false, "rules", "add", a.root, "*.pdf", "keep")
 	out := a.filo(0, "c\n", true, "synced", "add", a.in("Sync")).stdout
-	a.contains("mark", out, "Rules above", "*.pdf", "Copy it to the synced directory, move it there, or leave it?",
+	a.contains("mark", out, "Rules above", "*.pdf", "outside it, which a move takes it from",
+		"Copy it to the synced directory, move it there, or leave it?",
 		"copied to")
 	out = a.filo(0, "", false, "rules").stdout
 	a.contains("rules", out, "covers synced directory", "Sync")
