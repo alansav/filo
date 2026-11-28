@@ -615,6 +615,7 @@ func (s *Store) SetSeen(ctx context.Context, id int64, key, value string) error 
 type FileEvent struct {
 	ID     int64
 	ScanID int64
+	RootID int64
 	Kind   string
 	FileID int64
 	Path   string // where it is (moved: to), relative to its root
@@ -624,9 +625,10 @@ type FileEvent struct {
 func (s *Store) FileEventsSince(ctx context.Context, after int64) ([]FileEvent, error) {
 	return queryAll(ctx, s.db, func(rows *sql.Rows) (FileEvent, error) {
 		var e FileEvent
-		return e, rows.Scan(&e.ID, &e.ScanID, &e.Kind, &e.FileID, &e.Path)
-	}, `SELECT id, scan_id, kind, file_id, coalesce(path, '') FROM events WHERE id > ? AND file_id IS NOT NULL
-		AND kind IN ('moved', 'changed', ?) ORDER BY id`, after, EventDeleted)
+		return e, rows.Scan(&e.ID, &e.ScanID, &e.RootID, &e.Kind, &e.FileID, &e.Path)
+	}, `SELECT e.id, e.scan_id, sc.root_id, e.kind, e.file_id, coalesce(e.path, '') FROM events e
+		JOIN scans sc ON sc.id = e.scan_id WHERE e.id > ? AND e.file_id IS NOT NULL
+		AND e.kind IN ('moved', 'changed', ?) ORDER BY e.id`, after, EventDeleted)
 }
 
 // SeenSince reports whether a scan finished after scan scanID covered the file's root and found it unchanged: an
