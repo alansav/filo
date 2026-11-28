@@ -26,6 +26,12 @@ func newCLITest(t *testing.T) *cliTest {
 	skipWindows(t)
 	sameDevice(t, nil)
 	work := canonicalTemp(t)
+	for _, find := range []func(string) (string, error){gitRepoAbove, syncedDirAbove} {
+		if top, err := find(filepath.Join(work, "x.csv")); err != nil || top != "" {
+			t.Fatalf("the temporary directory %s is inside a git repository or a synced directory (%s, %v): "+
+				"exports refuse it; set TMPDIR outside both", work, top, err)
+		}
+	}
 	db := filepath.Join(work, "filo.db")
 	return &cliTest{t: t, ctx: context.Background(), env: map[string]string{"FILO_DB": db}, work: work,
 		root: filepath.Join(work, "home"), db: db}

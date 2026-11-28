@@ -318,3 +318,150 @@ func TestExportNoScanLine(t *testing.T) {
 	contains("retention holds its root", filo(ExitOK, "", false, "export", ct.in("tax"), "--no-scan",
 		"-o", csv("3.csv")).stdout, "  - not scanned first: as of the last scan, ")
 }
+
+// TestExportRefusesAGitRepositoryOrASyncedDirectory (docs/design.md, Lifespan): a CSV is not written inside a git
+// repository or a synced directory unless --in-git or --in-synced allows it, however the path reaches it; a refusal
+// writes and records nothing.
+func TestExportRefusesAGitRepositoryOrASyncedDirectory(t *testing.T) {
+	tests := []struct {
+		name  string
+		setup func(t *testing.T, base string) string // returns the -o path
+		kind  []string                               // "duplicates", flags, or nothing
+		ok    bool
+	}{
+		{"a .git directory where the CSV goes", func(t *testing.T, base string) string {
+			mkdir(t, filepath.Join(base, "repo", ".git"))
+			return filepath.Join(base, "repo", "files.csv")
+		}, nil, false},
+		{"a .git directory two levels up", func(t *testing.T, base string) string {
+			mkdir(t, filepath.Join(base, "repo", ".git"))
+			mkdir(t, filepath.Join(base, "repo", "a", "b"))
+			return filepath.Join(base, "repo", "a", "b", "files.csv")
+		}, nil, false},
+		{"a .git file (a worktree)", func(t *testing.T, base string) string {
+			mkdir(t, filepath.Join(base, "wt"))
+			if err := os.WriteFile(filepath.Join(base, "wt", ".git"), []byte("gitdir: /elsewhere\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			return filepath.Join(base, "wt", "files.csv")
+		}, nil, false},
+		{"a symlinked directory into a repository", func(t *testing.T, base string) string {
+			mkdir(t, filepath.Join(base, "repo", ".git"))
+			mkdir(t, filepath.Join(base, "repo", "out"))
+			if err := os.Symlink(filepath.Join(base, "repo", "out"), filepath.Join(base, "link")); err != nil {
+				t.Fatal(err)
+			}
+			return filepath.Join(base, "link", "files.csv")
+		}, nil, false},
+		{"a directory not made yet inside a repository", func(t *testing.T, base string) string {
+			mkdir(t, filepath.Join(base, "repo", ".git"))
+			return filepath.Join(base, "repo", "missing", "deeper", "files.csv")
+		}, nil, false},
+		{"a directory that cannot be looked into", func(t *testing.T, base string) string {
+			if os.Geteuid() == 0 {
+				t.Skip("root can look at anything")
+			}
+			mkdir(t, filepath.Join(base, "locked", "sub"))
+			if err := os.Chmod(filepath.Join(base, "locked"), 0o600); err != nil { // no search: nothing in it found
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { os.Chmod(filepath.Join(base, "locked"), 0o755) })
+			return filepath.Join(base, "locked", "sub", "files.csv")
+		}, nil, false},
+		{"a duplicates export", func(t *testing.T, base string) string {
+			mkdir(t, filepath.Join(base, "repo", ".git"))
+			return filepath.Join(base, "repo", "dups.csv")
+		}, []string{"duplicates"}, false},
+		{"a repository, allowed with --in-git", func(t *testing.T, base string) string {
+			mkdir(t, filepath.Join(base, "repo", ".git"))
+			return filepath.Join(base, "repo", "files.csv")
+		}, []string{"--in-git"}, true},
+		{"a synced directory", func(t *testing.T, base string) string {
+			mkdir(t, filepath.Join(base, "Sync", ".filo"))
+			if err := os.WriteFile(filepath.Join(base, "Sync", ".filo", "mark"), []byte("m\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			mkdir(t, filepath.Join(base, "Sync", "docs"))
+			return filepath.Join(base, "Sync", "docs", "files.csv")
+		}, nil, false},
+		{"a synced directory, allowed with --in-synced", func(t *testing.T, base string) string {
+			mkdir(t, filepath.Join(base, "Sync", ".filo"))
+			if err := os.WriteFile(filepath.Join(base, "Sync", ".filo", "mark"), []byte("m\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			return filepath.Join(base, "Sync", "files.csv")
+		}, []string{"--in-synced"}, true},
+		{"a repository inside a synced directory, --in-git alone", func(t *testing.T, base string) string {
+			mkdir(t, filepath.Join(base, "Sync", ".filo"))
+			if err := os.WriteFile(filepath.Join(base, "Sync", ".filo", "mark"), []byte("m\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			mkdir(t, filepath.Join(base, "Sync", "repo", ".git"))
+			return filepath.Join(base, "Sync", "repo", "files.csv")
+		}, []string{"--in-git"}, false},
+		{"a directory named .filo that is a file is not a mark", func(t *testing.T, base string) string {
+			mkdir(t, filepath.Join(base, "odd"))
+			if err := os.WriteFile(filepath.Join(base, "odd", ".filo"), []byte("x"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			return filepath.Join(base, "odd", "files.csv")
+		}, nil, true},
+		{"a joined synced directory whose mark is lost", func(t *testing.T, base string) string {
+			return "" // made in the test body: it needs this register's own synced directory
+		}, nil, false},
+		{"outside any repository", func(t *testing.T, base string) string {
+			mkdir(t, filepath.Join(base, "plain"))
+			return filepath.Join(base, "plain", "files.csv")
+		}, nil, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ct := newCLITest(t)
+			ct.write("a.txt", "a")
+			ct.filo(ExitOK, "", false, "roots", "add", ct.root)
+			base := canonicalTemp(t)
+			csv := tt.setup(t, base)
+			if csv == "" { // a joined synced directory whose mark is then lost
+				ct.write("Sync/x.txt", "x")
+				ct.filo(ExitOK, "", false, "scan")
+				ct.filo(ExitOK, "", false, "synced", "add", ct.in("Sync"))
+				if err := os.Remove(ct.in("Sync/.filo/mark")); err != nil {
+					t.Fatal(err)
+				}
+				csv = ct.in("Sync/files.csv")
+				tt.name = "a synced directory: " + tt.name
+			}
+			args := append([]string{"export"}, tt.kind...)
+			args = append(args, "-o", csv)
+			if tt.ok {
+				ct.filo(ExitOK, "", false, args...)
+				if _, err := os.Stat(csv); err != nil {
+					t.Fatalf("the CSV was not written: %v", err)
+				}
+				return
+			}
+			r := ct.filo(ExitError, "", false, args...)
+			want := "is inside a git repository"
+			switch {
+			case strings.Contains(tt.name, "cannot be looked into"):
+				want = "cannot tell whether"
+			case strings.HasPrefix(tt.name, "a synced") || strings.Contains(tt.name, "--in-git alone"):
+				want = "is inside a synced directory"
+			}
+			ct.contains("refusal", r.stderr, want)
+			if _, err := os.Lstat(csv); err == nil {
+				t.Fatal("a CSV was written inside a git repository")
+			}
+			// Nothing recorded: the next export made is the first.
+			out := ct.filo(ExitOK, "", false, "export", "-o", filepath.Join(ct.work, "after.csv")).stdout
+			ct.contains("the next export", out, "#1")
+		})
+	}
+}
+
+func mkdir(t *testing.T, p string) {
+	t.Helper()
+	if err := os.MkdirAll(p, 0o755); err != nil {
+		t.Fatal(err)
+	}
+}

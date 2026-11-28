@@ -1,21 +1,26 @@
-filo export [DIR] -o FILE [--no-scan] [--workers N]
-filo export duplicates [DIR] -o FILE [--no-scan] [--workers N]
+filo export [DIR] -o FILE [flags]
+filo export duplicates [DIR] -o FILE [flags]
 
   Scans first (DIR only; every root for export duplicates), then writes every
   file under DIR (inside a root), or under every root, as CSV (UTF-8) to FILE. A
   root that cannot be scanned stops the export. If FILE exists, filo asks before
-  replacing it (only a regular file, and only at a terminal). Columns: id,
-  export, directory, name, size, modified, file_date, retention, keep_until,
-  tags. Fill in retention in a spreadsheet (a period such as 7y counted from
-  file_date, a date, forever, or a policy name: filo help policies) and tags
-  (separated by ;, see filo help tag), correct a name to rename the file, or
-  change its directory to move it within its root, then run filo update FILE. A
-  directory named duplicates is given with ./ before it (./duplicates). A blank
-  file_date is filled in from the file name when the name holds one clear date
-  (2023-03-14, 20230314, or 2023-03 for the month's last day), marked with !
-  (!2023-03-14): check it and remove the ! to accept it; a period on a row whose
-  date is still marked is refused. On a large system, export one directory at a
-  time.
+  replacing it (only a regular file, and only at a terminal). FILE is not
+  written inside a git repository (a directory holding .git, there or above it),
+  where it could be committed by mistake, or inside a synced directory (one
+  marked for Filo: filo help synced), where it is copied to every device that
+  shares it, unless --in-git or --in-synced allows that place. A directory a
+  sync service shares but nobody marked for Filo is not known as one. Columns:
+  id, export, directory, name, size, modified, file_date, retention, keep_until,
+  tags, conflict. Fill in retention in a spreadsheet (a period such as 7y
+  counted from file_date, a date, forever, or a policy name: filo help policies)
+  and tags (separated by ;, see filo help tag), correct a name to rename the
+  file, or change its directory to move it within its root, then run filo update
+  FILE. A directory named duplicates is given with ./ before it (./duplicates).
+  A blank file_date is filled in from the file name when the name holds one
+  clear date (2023-03-14, 20230314, or 2023-03 for the month's last day), marked
+  with ! (!2023-03-14): check it and remove the ! to accept it; a period on a
+  row whose date is still marked is refused. On a large system, export one
+  directory at a time.
 
   export duplicates writes each duplicate group (two or more copies of the same
   content; hard links to one file are one copy) with a copy under DIR, with all
@@ -30,5 +35,7 @@ Flags
   -o FILE                  the CSV to write; an existing file is replaced only
                            after asking
   --no-scan                export the register as it is, without scanning first
+  --in-git                 allow FILE inside a git repository
+  --in-synced              allow FILE inside a synced directory
   --workers N              for the scan: files hashed in parallel, 1-64 (default
                            4; use 1 on a spinning disk)

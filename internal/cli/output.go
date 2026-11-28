@@ -9,6 +9,9 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
+
+	"github.com/alansav/filo/internal/journal"
 )
 
 // askReplace decides whether an export may write csvPath (docs/design.md, Lifespan, "An existing FILE is replaced
@@ -130,4 +133,84 @@ func stillAsked(csvPath string, asked fs.FileInfo) error {
 		return fmt.Errorf("%s changed after you were asked about it; it was left as it is", csvPath)
 	}
 	return nil
+}
+
+// The places an export refuses its CSV unless asked (docs/design.md, Lifespan, "Never inside a git repository or a
+// synced directory, unless asked for"), each found by what its top directory holds.
+var (
+	gitMarker    = ".git"                                           // a directory, or a worktree's or a submodule's file
+	syncedMarker = filepath.Join(journal.FiloDir, journal.MarkName) // a synced directory's mark, joined here or not
+)
+
+// gitRepoAbove returns the top of the git working tree that holds csvPath's directory, or "" if none does.
+func gitRepoAbove(csvPath string) (string, error) {
+	return markedAbove(csvPath, gitMarker, "a git repository")
+}
+
+// syncedDirAbove returns the top of the synced directory that holds csvPath's directory, or "" if none does.
+func syncedDirAbove(csvPath string) (string, error) {
+	return markedAbove(csvPath, syncedMarker, "a synced directory")
+}
+
+// markedAbove returns the nearest directory holding marker (a path relative to it), csvPath's directory or one above
+// it, or "" if none does. The directory is resolved first (symlinks followed), so a symlink into such a place is no way
+// round it; one that does not exist yet is looked at from the nearest directory above it that does. A part of the
+// path that cannot be resolved, or a marker that cannot be looked at, is an error: the export is refused all the
+// same. what names the place, for the error.
+func markedAbove(csvPath, marker, what string) (string, error) {
+	cannot := func(err error) error {
+		return fmt.Errorf("cannot tell whether %s is inside %s: %w", csvPath, what, err)
+	}
+	dir := filepath.Dir(csvPath)
+	for {
+		resolved, err := filepath.EvalSymlinks(dir)
+		if err == nil {
+			dir = resolved
+			break
+		}
+		if !errors.Is(err, fs.ErrNotExist) {
+			return "", cannot(err) // could be a symlink into such a place: refused, not walked past
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	for {
+		found, err := holds(dir, marker)
+		if err != nil {
+			return "", cannot(err)
+		}
+		if found {
+			return dir, nil
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", nil
+		}
+		dir = parent
+	}
+}
+
+// holds reports whether dir holds marker, a path relative to it: each part before the last a directory (a file
+// named .filo is no synced directory's mark), the last there as anything. An error is a part that cannot be looked
+// at.
+func holds(dir, marker string) (bool, error) {
+	p := dir
+	parts := strings.Split(filepath.ToSlash(marker), "/")
+	for i, part := range parts {
+		p = filepath.Join(p, part)
+		fi, err := os.Lstat(p)
+		if errors.Is(err, fs.ErrNotExist) {
+			return false, nil
+		}
+		if err != nil {
+			return false, err
+		}
+		if i < len(parts)-1 && !fi.IsDir() {
+			return false, nil
+		}
+	}
+	return true, nil
 }
