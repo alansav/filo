@@ -57,6 +57,8 @@ func TestInsert(t *testing.T) {
 		{"filo show a/", "a/", "a/#1 & co", true, `a/#1\ \&\ co `, true},
 		{"filo tag a sender:bri", "bri", "type:bill", true, "", false},
 		{"filo tag a SENDER:", "", "sender:British Gas", true, `British\ Gas `, true},
+		{`filo tag a "note:w`, "note:w", "note:wow!now", true, "", false},
+		{"filo tag a note:w", "w", "note:wow!now", true, `wow\!now `, true},
 	} {
 		l := Parse(tc.line, tc.word)
 		got, ok := l.Insert(tc.candidate, tc.done)

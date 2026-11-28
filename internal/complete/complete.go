@@ -87,12 +87,16 @@ func split(line string) (args []string, last, raw string, open byte) {
 // Insert is what replaces bash's word for candidate, a whole argument that starts with l.Current (as typed or in
 // another case), when Filo quotes it itself: the rest of it after l.Before, quoted for l.Quote, and, if done (a word
 // finished, not a key or a directory to go on from), closed and followed by a space. ok is false for a candidate
-// that does not start with l.Before (in any case).
+// that does not start with l.Before (in any case), and for one holding a ! inside a double quote.
 func (l Line) Insert(candidate string, done bool) (string, bool) {
 	if len(candidate) < len(l.Before) || !strings.EqualFold(candidate[:len(l.Before)], l.Before) {
 		return "", false
 	}
 	rest := candidate[len(l.Before):]
+	if l.Quote == '"' && strings.ContainsRune(rest, '!') {
+		// Inside double quotes an interactive bash expands ! as history, and no backslash stops it there.
+		return "", false
+	}
 	var b strings.Builder
 	switch l.Quote {
 	case '\'':
