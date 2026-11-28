@@ -48,9 +48,11 @@ Principles. These are not negotiable:
   `scripts/dev.sh` (`build`, `shell`, `run CMD...`, `clean`). Only the repo is mounted at `/workspace`. The container
   has its own home directory, so a scan of "home" inside it can never reach the real one. Git runs on the host.
 - Build and install: `make build` builds a static `bin/filo` (`CGO_ENABLED=0`, which the pure-Go driver allows), so
-  a binary built in the container runs on the host. `scripts/install.sh`, run on the host, copies it to
-  `~/.local/bin/filo` (through a temporary name and a rename, so a running copy is not cut off). `make install` does
-  both where Go is installed. No build version is stamped yet.
+  a binary built in the container runs on the host. `scripts/install.sh`, run on the host, builds it (`make build`
+  with the host's Go, otherwise `scripts/dev.sh run make build`), copies it to `~/.local/bin/filo` (through a
+  temporary name and a rename, so a running copy is not cut off) and adds `command -v filo >/dev/null 2>&1 && source
+  <(filo completion bash)` to `~/.bashrc` unless that exact line is there, so it can be run any number of times.
+  `make install` builds, then runs it with `FILO_INSTALL_NO_BUILD=1`. No build version is stamped yet.
 - Claude Code runs inside the container (`scripts/dev.sh claude`) with normal permission prompts. Its login and
   settings live in a named volume (`filo-claude`). Git commits and pushes happen on the host: the container has no git
   identity and no SSH keys.
@@ -2130,7 +2132,8 @@ Agreed 2026-11-20, designed 2026-11-28 (roadmap 36). Tab completes Filo's comman
 - **Loading it.** `filo completion bash` prints the script and writes nothing. The README shows two ways: `source
   <(filo completion bash)` in `.bashrc` (always current, run at each shell start), or the output saved once to
   `~/.local/share/bash-completion/completions/filo`, which the `bash-completion` package loads on the first Tab
-  (written again after an upgrade that changes commands). Filo never edits `.bashrc` itself (hard rules). Bash only
+  (written again after an upgrade that changes commands). Filo never edits `.bashrc` itself (hard rules);
+  `scripts/install.sh`, which the person runs, adds the `source` line (see Build and install). Bash only
   (zsh can load bash completions); no framework (Cobra would be a dependency and a rewrite of every command's
   parsing).
 - **The script stays a few lines.** On Tab it runs a hidden `filo __complete LINE WORD` with the command line up to

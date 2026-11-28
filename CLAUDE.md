@@ -81,8 +81,8 @@ You run inside the dev container, so run Go commands directly. (From the host th
 prefix.) The image is built with Claude Code by default (`scripts/dev.sh build`; `--no-claude` leaves it out, and
 `scripts/dev.sh claude` then refuses with how to rebuild).
 
-- Build: `make build` (a static `bin/filo`; `scripts/install.sh` copies it to `~/.local/bin` and is for the user to
-  run on the host, not you)
+- Build: `make build` (a static `bin/filo`; `scripts/install.sh` builds it, copies it to `~/.local/bin` and adds the
+  completion line to `~/.bashrc`; it is for the user to run on the host, not you)
 - Test: `go test ./...` (it also runs the tag index's find page script tests with `node --test`; Node is in the dev
   container, and a container built before Node was added needs a rebuild)
 - Vet and lint: `go vet ./...` and `staticcheck ./...`

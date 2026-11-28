@@ -86,25 +86,26 @@ not supported yet: file locking and inode lookup aren't implemented there.
 ```sh
 git clone https://github.com/alansav/filo.git
 cd filo
-make install          # builds bin/filo and copies it to ~/.local/bin
+make install          # builds bin/filo, copies it to ~/.local/bin, loads tab completion from ~/.bashrc
 ```
 
-`make build` only builds `bin/filo`; `scripts/install.sh` only copies it to `~/.local/bin` (replacing an older copy),
-so `filo` runs from anywhere if `~/.local/bin` is on your `PATH`. The binary is static (`CGO_ENABLED=0`).
-Without Go on the host, build in the dev container and install on the host (see Development):
+`make build` only builds `bin/filo`. `scripts/install.sh` builds it (with Go if the host has it, otherwise in the dev
+container, see Development), copies it to `~/.local/bin` (replacing an older copy), so `filo` runs from anywhere if
+`~/.local/bin` is on your `PATH`, and adds the line that loads tab completion to `~/.bashrc` if it is not there yet. It
+can be run again after every change. The binary is static (`CGO_ENABLED=0`).
 
 ```sh
-scripts/dev.sh run make build    # in the container
 scripts/install.sh               # on the host
 ```
 
 ### Tab completion in bash
 
-Tab completes Filo's commands, flags, files and directories, tags (`sender:` then its values) and policy names. Add
-this line to `~/.bashrc` to load it in every new shell:
+Tab completes Filo's commands, flags, files and directories, tags (`sender:` then its values) and policy names.
+`scripts/install.sh` adds this line to `~/.bashrc` (once), which loads it in every new shell; without the script, add it
+yourself:
 
 ```sh
-source <(filo completion bash)
+command -v filo >/dev/null 2>&1 && source <(filo completion bash)
 ```
 
 Or save it once where the `bash-completion` package finds it, and save it again after an upgrade that changes
@@ -844,12 +845,11 @@ The first call builds the image, with Claude Code (`scripts/dev.sh build --no-cl
 bin/filo ...` sees the repo and the container's own home, never your files. To run Filo on your own files, build it in the container and run it from the host. `make build` builds it
 static: the SQLite driver is pure Go, so `CGO_ENABLED=0` gives a binary with no library dependencies that runs on any
 x86-64 Linux, including older CPUs (Go's default target is `GOAMD64=v1`). Without it, the binary links the
-container's C library and may not start on an older host. `scripts/install.sh`, run on the host, copies it to
-`~/.local/bin`:
+container's C library and may not start on an older host. `scripts/install.sh`, run on the host, builds it in the
+container (when the host has no Go), copies it to `~/.local/bin` and loads tab completion from `~/.bashrc`:
 
 ```sh
-scripts/dev.sh run make build    # in the container
-scripts/install.sh               # on the host: bin/filo to ~/.local/bin
+scripts/install.sh               # on the host: builds, then bin/filo to ~/.local/bin
 T=$(mktemp -d)                   # on the host: a private directory
 filo --db $T/f.db roots add ~/FiloTest
 ```

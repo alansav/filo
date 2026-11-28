@@ -4,7 +4,7 @@
 build:
 	CGO_ENABLED=0 go build -o bin/filo ./cmd/filo
 
-# Builds, then copies bin/filo to ~/.local/bin. Only where Go is installed; with the dev container, run
-# `scripts/dev.sh run make build` and then scripts/install.sh on the host.
+# Builds, then copies bin/filo to ~/.local/bin and loads bash completion from ~/.bashrc. Only where Go is
+# installed; without it, run scripts/install.sh on the host, which builds in the dev container.
 install: build
-	scripts/install.sh
+	FILO_INSTALL_NO_BUILD=1 scripts/install.sh
