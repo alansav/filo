@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/alansav/filo/internal/device"
+	"github.com/alansav/filo/internal/journal"
 	"github.com/alansav/filo/internal/reconcile"
 	"github.com/alansav/filo/internal/store"
 	"github.com/alansav/filo/internal/tags"
@@ -337,5 +338,70 @@ func TestDerivedID(t *testing.T) {
 	}
 	if a == derivedID("sync", "hash", "bills/y.pdf") || a == derivedID("other", "hash", "bills/x.pdf") {
 		t.Fatal("derivedID does not depend on the path and the synced directory")
+	}
+}
+
+func TestTagSpelledOtherwiseIsNoConflict(t *testing.T) {
+	ctx := context.Background()
+	a, b := pair(t, map[string]string{"x.pdf": "x"})
+	for n, spelled := range map[*node]string{a: "sender:British Gas", b: "sender:british gas"} {
+		tg, _ := tags.Parse(spelled)
+		if _, err := n.s.TagFiles(ctx, []int64{n.file("x.pdf")}, []tags.Tag{tg}, t0); err != nil {
+			t.Fatal(err)
+		}
+		n.publish(t0)
+	}
+	syncFilo(t, a, b)
+	syncFilo(t, b, a)
+	if da := a.imp(t0.Add(time.Minute)); da.Conflicts != 0 {
+		t.Fatalf("one tag in two spellings is a conflict: %d", da.Conflicts)
+	}
+}
+
+// A directory that cannot be reached when the decisions are written keeps them for the next run.
+func TestPublishTriesAgainWhenADirectoryCannotBeReached(t *testing.T) {
+	ctx := context.Background()
+	a, _ := pair(t, map[string]string{"x.pdf": "x"})
+	before := a.lines(a.dev().ID)
+	if _, err := a.s.SetFiles(ctx, []int64{a.file("x.pdf")}, store.SetValues{Retention: "forever", SetRetention: true},
+		t0, "2026-11-28", store.SetOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(a.sync, 0); err != nil {
+		t.Fatal(err)
+	}
+	problems, err := Publish(ctx, a.s, t0)
+	os.Chmod(a.sync, 0o755)
+	if err != nil || len(problems) == 0 {
+		t.Skipf("the directory could be read anyway (running as root?): %v %q", err, problems)
+	}
+	if a.lines(a.dev().ID) != before {
+		t.Fatal("lines were kept for a directory that could not be reached")
+	}
+	a.publish(t0.Add(time.Minute))
+	if a.lines(a.dev().ID) != before+1 {
+		t.Fatalf("the retention was not written on the next run: %d lines, had %d", a.lines(a.dev().ID), before)
+	}
+}
+
+// A tag on a file not hashed yet reaches the other device's file at the same path.
+func TestTagOnAFileWithNoHash(t *testing.T) {
+	a, b := pair(t, map[string]string{"x.pdf": "x"})
+	// The line as a device that had no hash would write it.
+	kept := mustLines(t, a, a.dev().ID)
+	last, _ := journal.Parse(kept[len(kept)-1].Raw)
+	w, _ := journal.Resume(a.dev().Key, last)
+	raw, err := w.Add(KindTag, FileBody{File: derivedID(mustDir(t, a).SyncID, "", "x.pdf"), Path: "x.pdf",
+		Value: "urgent", Tag: "urgent"}, t0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, _ := os.OpenFile(filepath.Join(a.sync, journal.FiloDir, journal.JournalName(a.dev().ID)), os.O_APPEND|os.O_WRONLY, 0)
+	f.Write(append(raw, '\n'))
+	f.Close()
+	syncFilo(t, a, b)
+	dr := b.imp(t0)
+	if got := b.tags("x.pdf"); len(got) != 1 || dr.Waiting != 0 {
+		t.Fatalf("b's tags = %q, waiting %d", got, dr.Waiting)
 	}
 }

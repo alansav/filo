@@ -4,6 +4,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/alansav/filo/internal/device"
 	"github.com/alansav/filo/internal/journal"
@@ -130,10 +131,11 @@ func effective(key string, ds []store.Decision, keepUntil func(key, value string
 	if len(ds) == 0 {
 		return "", false
 	}
+	isTag := strings.HasPrefix(key, keyTagPrefix)
 	conflict := false
 	for _, d := range ds[1:] {
-		if d.Value != ds[0].Value {
-			conflict = true
+		if (!isTag && d.Value != ds[0].Value) || (isTag && (d.Value == "") != (ds[0].Value == "")) {
+			conflict = true // a tag: only added against removed, not two spellings
 		}
 	}
 	if !conflict {

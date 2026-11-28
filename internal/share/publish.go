@@ -19,8 +19,9 @@ import (
 // changed, each naming the decisions it replaces (those in effect for it here). A decision that applied another
 // device's (command "journal") is never written again. The lines go to the register first, with the cursors, then to
 // the disk. A directory where this device does not write (retired there, its journal ahead of the register) gets
-// nothing; the cursors still move on, so those decisions are not written later out of order: seeding (on joining
-// again) carries what is in effect. It returns the problems met, one line each.
+// nothing, and the cursors still move on: seeding (on joining again) carries what is in effect. A directory that
+// cannot be reached now keeps the cursors where they were, so the next run tries again (a decision written already is
+// in effect, so it is not written twice). It returns the problems met, one line each.
 func Publish(ctx context.Context, s *store.Store, now time.Time) ([]string, error) {
 	cur, err := s.Cursors(ctx)
 	if err != nil {
@@ -64,6 +65,7 @@ func Publish(ctx context.Context, s *store.Store, now time.Time) ([]string, erro
 		return nil, err
 	}
 	var problems []string
+	failed := false // a directory not written for a passing reason (not reachable): the cursors stay, to retry
 	pubs := map[int64]*pub{}
 	var order []*pub
 	at := func(fileID int64) *pub {
@@ -80,7 +82,8 @@ func Publish(ctx context.Context, s *store.Store, now time.Time) ([]string, erro
 			}
 			pb, problem, err := startPub(ctx, s, me, sd)
 			if err != nil {
-				problems = append(problems, sd.Abs()+": "+err.Error())
+				problems = append(problems, sd.Abs()+": "+err.Error()+" (tried again on the next run)")
+				failed = true
 			} else if problem != "" {
 				problems = append(problems, sd.Abs()+": "+problem)
 			}
@@ -124,6 +127,9 @@ func Publish(ctx context.Context, s *store.Store, now time.Time) ([]string, erro
 	changes := make([]store.SyncedChange, 0, len(order))
 	for _, pb := range order {
 		changes = append(changes, pb.ch)
+	}
+	if failed {
+		latest = cur // what was written now is not written again: a decision in effect already is skipped
 	}
 	if err := s.Publish(ctx, changes, latest); err != nil {
 		return problems, err

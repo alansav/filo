@@ -39,7 +39,8 @@ func fileDecisions(lines []journal.Line, syncedID int64, name func(dev string) s
 // guess) and given the value in effect, or the safe one in a conflict. A date or a retention applies only to the
 // content it was decided on: until that content is here, it waits (an expectation), and so does a decision whose
 // file is not found yet. Applied changes are recorded with command "journal", so they are never written to this
-// device's journal again. It returns how many decisions wait, and the problems met.
+// device's journal again. A decision about a file Filo deleted here is done with. It returns how many decisions wait
+// (their file not found yet, missing, or its content not the one decided on), and the problems met.
 func applyDecisions(ctx context.Context, s *store.Store, sd store.SyncedDir, now time.Time) (int, []string, error) {
 	un, err := s.Unapplied(ctx, sd.ID)
 	if err != nil {
@@ -67,9 +68,18 @@ func applyDecisions(ctx context.Context, s *store.Store, sd store.SyncedDir, now
 	var problems []string
 	today := retention.Today(now)
 	for _, g := range groups {
-		fileID, err := matchShared(ctx, s, sd, g.fid, g.last)
+		fileID, other, err := matchShared(ctx, s, sd, g.fid, g.last)
 		if err != nil {
 			return waiting, problems, err
+		}
+		if other {
+			// Found by content and path, but the file is another shared ID's here: never two, so never applied.
+			problems = append(problems, fmt.Sprintf("%s: a decision names it by another shared ID than this "+
+				"device's: not applied (decide it again to settle it)", g.last.Path))
+			if err := s.MarkApplied(ctx, sd.ID, g.refs); err != nil {
+				return waiting, problems, err
+			}
+			continue
 		}
 		if fileID == 0 {
 			waiting += len(g.refs)
@@ -83,8 +93,15 @@ func applyDecisions(ctx context.Context, s *store.Store, sd store.SyncedDir, now
 		if err != nil {
 			return waiting, problems, err
 		}
-		if !ok {
-			waiting += len(g.refs) // deleted, or gone: nothing to apply to
+		if !ok || v.Deleted {
+			// Deleted here by Filo: nothing to apply to, ever (a copy restored later is a new file).
+			if err := s.MarkApplied(ctx, sd.ID, g.refs); err != nil {
+				return waiting, problems, err
+			}
+			continue
+		}
+		if !v.Present {
+			waiting += len(g.refs) // missing now: applied if it comes back
 			continue
 		}
 		done, problem, err := applyOne(ctx, s, fileID, g.key, cur, v, now, today)
@@ -106,24 +123,25 @@ func applyDecisions(ctx context.Context, s *store.Store, sd store.SyncedDir, now
 }
 
 // matchShared returns the file a shared ID is here, matching it the first time from decision d's content and path
-// (0: not found, or not one).
-func matchShared(ctx context.Context, s *store.Store, sd store.SyncedDir, fid string, d store.Decision) (int64, error) {
+// (0: not found, or not one); the bool is true when the file found has another shared ID here already.
+func matchShared(ctx context.Context, s *store.Store, sd store.SyncedDir, fid string,
+	d store.Decision) (int64, bool, error) {
 	fileID, _, err := s.SharedFile(ctx, sd.ID, fid)
 	if err != nil || fileID != 0 {
-		return fileID, err
+		return fileID, false, err
 	}
 	fileID, err = s.MatchFile(ctx, sd, d.Hash, d.Path)
 	if err != nil || fileID == 0 {
-		return 0, err
+		return 0, false, err
 	}
 	if other, err := s.SharedID(ctx, sd.ID, fileID); err != nil || other != "" {
-		return 0, err // the file has another shared ID here: never two
+		return 0, other != "", err // never two shared IDs for one file
 	}
 	_, err = s.ApplySynced(ctx, store.SyncedChange{SyncedID: sd.ID, Shared: map[string]int64{fid: fileID}})
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
-	return fileID, nil
+	return fileID, false, nil
 }
 
 // applyOne gives file fileID (values v) the value in effect for key from its current decisions. It reports whether
