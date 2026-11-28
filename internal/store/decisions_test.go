@@ -221,6 +221,9 @@ func TestValues(t *testing.T) {
 		v.Hash != "ha" {
 		t.Fatalf("Values = %+v, %v, %v", v, ok, err)
 	}
+	if !v.Present || v.Deleted {
+		t.Fatalf("a present file: %+v", v)
+	}
 	if v, ok, _ := e.s.Values(ctx, k["b.txt"].FileID); !ok || v.Retention != "" || v.Policy {
 		t.Fatalf("Values of an undecided file = %+v, %v", v, ok)
 	}

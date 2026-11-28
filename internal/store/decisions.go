@@ -453,20 +453,22 @@ func (s *Store) ConflictedFiles(ctx context.Context) (map[int64][]string, error)
 }
 
 // FileValues is what a file is decided now: its file_date, its retention (its policy's name, or its own), that
-// policy's value, and its content.
+// policy's value, and its content; and whether it is present (has a current path) or was deleted by Filo.
 type FileValues struct {
 	FileDate, Retention, PolicyValue, Hash string
 	Policy                                 bool // Retention names a policy
+	Present, Deleted                       bool
 }
 
-// Values returns file fileID's values (false: no such file present).
+// Values returns file fileID's values (false: no such file in the register).
 func (s *Store) Values(ctx context.Context, fileID int64) (FileValues, bool, error) {
 	var v FileValues
 	var policy sql.NullString
 	err := s.db.QueryRowContext(ctx, `SELECT coalesce(f.file_date, ''), coalesce(f.retention, ''), p.name,
-		coalesce(p.value, ''), coalesce(f.hash, '') FROM files f LEFT JOIN policies p ON p.id = f.policy_id
-		WHERE f.id = ? AND f.deleted_utc IS NULL`, fileID).Scan(&v.FileDate, &v.Retention, &policy, &v.PolicyValue,
-		&v.Hash)
+		coalesce(p.value, ''), coalesce(f.hash, ''), f.deleted_utc IS NOT NULL,
+		EXISTS (SELECT 1 FROM paths x WHERE x.file_id = f.id AND x.valid_to_scan IS NULL)
+		FROM files f LEFT JOIN policies p ON p.id = f.policy_id WHERE f.id = ?`, fileID).Scan(&v.FileDate,
+		&v.Retention, &policy, &v.PolicyValue, &v.Hash, &v.Deleted, &v.Present)
 	if errors.Is(err, sql.ErrNoRows) {
 		return v, false, nil
 	}
