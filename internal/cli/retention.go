@@ -55,6 +55,8 @@ func (e *env) export(ctx context.Context, dbBefore string, args []string) error 
 	out := fl.String("o", "", "")
 	noScan := fl.Bool("no-scan", false, "")
 	workers := fl.Int("workers", reconcile.DefaultWorkers, "")
+	inGit := fl.Bool("in-git", false, "")
+	inSynced := fl.Bool("in-synced", false, "")
 	pos, err := e.parse(fl, "export", args)
 	if err != nil {
 		return err
@@ -84,13 +86,8 @@ func (e *env) export(ctx context.Context, dbBefore string, args []string) error 
 	if err != nil {
 		return err
 	}
-	// Never inside a git repository, where the CSV could be committed by mistake (docs/design.md, Lifespan): refused
-	// before anything else, so it costs nothing.
-	if repo, err := gitRepoAbove(csvPath); err != nil {
+	if err := e.checkOutPlace(csvPath, *inGit, *inSynced); err != nil {
 		return err
-	} else if repo != "" {
-		return fmt.Errorf("%s is inside a git repository (%s): a CSV there could be committed by mistake; write it "+
-			"outside", csvPath, repo)
 	}
 	s, err := e.open(ctx, *db)
 	if err != nil {
@@ -381,4 +378,31 @@ func interruptedUpdate(err error) error {
 		return errors.New("interrupted; nothing was recorded")
 	}
 	return err
+}
+
+// checkOutPlace refuses an export's CSV inside a git repository, where it could be committed by mistake, or inside a
+// synced directory, where it is copied to every device that shares it, unless --in-git or --in-synced allows that
+// place (docs/design.md, Lifespan). Done before anything else, so a refusal costs nothing.
+func (e *env) checkOutPlace(csvPath string, inGit, inSynced bool) error {
+	if !inGit {
+		repo, err := gitRepoAbove(csvPath)
+		if err != nil {
+			return err
+		}
+		if repo != "" {
+			return fmt.Errorf("%s is inside a git repository (%s): a CSV there could be committed by mistake; "+
+				"write it outside, or pass --in-git", csvPath, e.view.Tilde(repo))
+		}
+	}
+	if !inSynced {
+		top, err := syncedDirAbove(csvPath)
+		if err != nil {
+			return err
+		}
+		if top != "" {
+			return fmt.Errorf("%s is inside a synced directory (%s): a CSV there is copied to every device that "+
+				"shares it; write it outside, or pass --in-synced", csvPath, e.view.Tilde(top))
+		}
+	}
+	return nil
 }

@@ -319,13 +319,14 @@ func TestExportNoScanLine(t *testing.T) {
 		"-o", csv("3.csv")).stdout, "  - not scanned first: as of the last scan, ")
 }
 
-// TestExportRefusesAGitRepository (docs/design.md, Lifespan, "Never inside a git repository"): a CSV is never written
-// inside a git working tree, however the path reaches it; nothing is written and no export is recorded.
-func TestExportRefusesAGitRepository(t *testing.T) {
+// TestExportRefusesAGitRepositoryOrASyncedDirectory (docs/design.md, Lifespan): a CSV is not written inside a git
+// repository or a synced directory unless --in-git or --in-synced allows it, however the path reaches it; a refusal
+// writes and records nothing.
+func TestExportRefusesAGitRepositoryOrASyncedDirectory(t *testing.T) {
 	tests := []struct {
 		name  string
 		setup func(t *testing.T, base string) string // returns the -o path
-		kind  []string                               // "duplicates" or nothing
+		kind  []string                               // "duplicates", flags, or nothing
 		ok    bool
 	}{
 		{"a .git directory where the CSV goes", func(t *testing.T, base string) string {
@@ -371,6 +372,40 @@ func TestExportRefusesAGitRepository(t *testing.T) {
 			mkdir(t, filepath.Join(base, "repo", ".git"))
 			return filepath.Join(base, "repo", "dups.csv")
 		}, []string{"duplicates"}, false},
+		{"a repository, allowed with --in-git", func(t *testing.T, base string) string {
+			mkdir(t, filepath.Join(base, "repo", ".git"))
+			return filepath.Join(base, "repo", "files.csv")
+		}, []string{"--in-git"}, true},
+		{"a synced directory", func(t *testing.T, base string) string {
+			mkdir(t, filepath.Join(base, "Sync", ".filo"))
+			if err := os.WriteFile(filepath.Join(base, "Sync", ".filo", "mark"), []byte("m\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			mkdir(t, filepath.Join(base, "Sync", "docs"))
+			return filepath.Join(base, "Sync", "docs", "files.csv")
+		}, nil, false},
+		{"a synced directory, allowed with --in-synced", func(t *testing.T, base string) string {
+			mkdir(t, filepath.Join(base, "Sync", ".filo"))
+			if err := os.WriteFile(filepath.Join(base, "Sync", ".filo", "mark"), []byte("m\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			return filepath.Join(base, "Sync", "files.csv")
+		}, []string{"--in-synced"}, true},
+		{"a repository inside a synced directory, --in-git alone", func(t *testing.T, base string) string {
+			mkdir(t, filepath.Join(base, "Sync", ".filo"))
+			if err := os.WriteFile(filepath.Join(base, "Sync", ".filo", "mark"), []byte("m\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			mkdir(t, filepath.Join(base, "Sync", "repo", ".git"))
+			return filepath.Join(base, "Sync", "repo", "files.csv")
+		}, []string{"--in-git"}, false},
+		{"a directory named .filo that is a file is not a mark", func(t *testing.T, base string) string {
+			mkdir(t, filepath.Join(base, "odd"))
+			if err := os.WriteFile(filepath.Join(base, "odd", ".filo"), []byte("x"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			return filepath.Join(base, "odd", "files.csv")
+		}, nil, true},
 		{"outside any repository", func(t *testing.T, base string) string {
 			mkdir(t, filepath.Join(base, "plain"))
 			return filepath.Join(base, "plain", "files.csv")
@@ -383,7 +418,8 @@ func TestExportRefusesAGitRepository(t *testing.T) {
 			ct.filo(ExitOK, "", false, "roots", "add", ct.root)
 			base := canonicalTemp(t)
 			csv := tt.setup(t, base)
-			args := append(append([]string{"export"}, tt.kind...), "-o", csv)
+			args := append([]string{"export"}, tt.kind...)
+			args = append(args, "-o", csv)
 			if tt.ok {
 				ct.filo(ExitOK, "", false, args...)
 				if _, err := os.Stat(csv); err != nil {
@@ -393,7 +429,7 @@ func TestExportRefusesAGitRepository(t *testing.T) {
 			}
 			r := ct.filo(ExitError, "", false, args...)
 			if !strings.Contains(r.stderr, "cannot tell whether") {
-				ct.contains("refusal", r.stderr, "is inside a git repository", "could be committed by mistake")
+				ct.contains("refusal", r.stderr, "is inside a ", "write it outside, or pass --in-")
 			}
 			if _, err := os.Lstat(csv); err == nil {
 				t.Fatal("a CSV was written inside a git repository")

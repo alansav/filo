@@ -9,7 +9,13 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"syscall"
+
+	"github.com/alansav/filo/internal/journal"
 )
+
+// syscallNotDir is a path whose parent is a file, not a directory (a file named .filo): not the marker.
+var syscallNotDir = syscall.ENOTDIR
 
 // askReplace decides whether an export may write csvPath (docs/design.md, Lifespan, "An existing FILE is replaced
 // only after asking"). A path that does not exist: go ahead, with asked nil. A regular file: go ahead only if the
@@ -132,12 +138,32 @@ func stillAsked(csvPath string, asked fs.FileInfo) error {
 	return nil
 }
 
-// gitRepoAbove returns the top of the git working tree that holds csvPath's directory: the nearest directory, that
-// one or one above it, holding .git (a directory, or a file, as a worktree or a submodule has), or "" if none does
-// (docs/design.md, Lifespan, "Never inside a git repository"). The directory is resolved first (symlinks followed),
-// so a symlink into a repository is no way round it; one that does not exist yet is looked at from the nearest
-// directory above it that does. A .git that cannot be looked at is an error: the export is refused all the same.
+// The places an export refuses its CSV unless asked (docs/design.md, Lifespan, "Never inside a git repository or a
+// synced directory, unless asked for"), each found by what its top directory holds.
+var (
+	gitMarker    = ".git"                                           // a directory, or a worktree's or a submodule's file
+	syncedMarker = filepath.Join(journal.FiloDir, journal.MarkName) // a synced directory's mark, joined here or not
+)
+
+// gitRepoAbove returns the top of the git working tree that holds csvPath's directory, or "" if none does.
 func gitRepoAbove(csvPath string) (string, error) {
+	return markedAbove(csvPath, gitMarker, "a git repository")
+}
+
+// syncedDirAbove returns the top of the synced directory that holds csvPath's directory, or "" if none does.
+func syncedDirAbove(csvPath string) (string, error) {
+	return markedAbove(csvPath, syncedMarker, "a synced directory")
+}
+
+// markedAbove returns the nearest directory holding marker (a path relative to it), csvPath's directory or one above
+// it, or "" if none does. The directory is resolved first (symlinks followed), so a symlink into such a place is no way
+// round it; one that does not exist yet is looked at from the nearest directory above it that does. A part of the
+// path that cannot be resolved, or a marker that cannot be looked at, is an error: the export is refused all the
+// same. what names the place, for the error.
+func markedAbove(csvPath, marker, what string) (string, error) {
+	cannot := func(err error) error {
+		return fmt.Errorf("cannot tell whether %s is inside %s: %w", csvPath, what, err)
+	}
 	dir := filepath.Dir(csvPath)
 	for {
 		resolved, err := filepath.EvalSymlinks(dir)
@@ -146,8 +172,7 @@ func gitRepoAbove(csvPath string) (string, error) {
 			break
 		}
 		if !errors.Is(err, fs.ErrNotExist) {
-			// A part that cannot be resolved could be a symlink into a repository: refused, not walked past.
-			return "", fmt.Errorf("cannot tell whether %s is inside a git repository: %w", csvPath, err)
+			return "", cannot(err) // could be a symlink into such a place: refused, not walked past
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
@@ -156,12 +181,12 @@ func gitRepoAbove(csvPath string) (string, error) {
 		dir = parent
 	}
 	for {
-		_, err := os.Lstat(filepath.Join(dir, ".git"))
+		_, err := os.Lstat(filepath.Join(dir, marker))
 		if err == nil {
 			return dir, nil
 		}
-		if !errors.Is(err, fs.ErrNotExist) {
-			return "", fmt.Errorf("cannot tell whether %s is inside a git repository: %w", csvPath, err)
+		if !errors.Is(err, fs.ErrNotExist) && !errors.Is(err, syscallNotDir) {
+			return "", cannot(err)
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {

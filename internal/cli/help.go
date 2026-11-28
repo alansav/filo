@@ -145,16 +145,17 @@ var commandHelps = map[string]commandHelp{
 	},
 	"export": {
 		usage: []string{
-			"filo export [DIR] -o FILE [--no-scan] [--workers N]",
-			"filo export duplicates [DIR] -o FILE [--no-scan] [--workers N]",
+			"filo export [DIR] -o FILE [flags]",
+			"filo export duplicates [DIR] -o FILE [flags]",
 		},
 		before: []string{
 			"Scans first (DIR only; every root for export duplicates), then writes every file under DIR (inside a " +
 				"root), or under every root, as CSV (UTF-8) to FILE. A root that cannot be scanned stops the export. " +
 				"If FILE " +
-				"exists, filo asks before replacing it (only a regular file, and only at a terminal). FILE is never " +
-				"inside a git repository (a directory holding .git, there or above it): a CSV there could be " +
-				"committed by mistake. Columns: id, export, directory, name, size, modified, file_date, retention, " +
+				"exists, filo asks before replacing it (only a regular file, and only at a terminal). FILE is not " +
+				"written inside a git repository (a directory holding .git, there or above it), where it could be " +
+				"committed by mistake, or inside a synced directory, where it is copied to every device that shares " +
+				"it, unless --in-git or --in-synced allows that place. Columns: id, export, directory, name, size, modified, file_date, retention, " +
 				"keep_until, tags, conflict. " +
 				"Fill in retention in a spreadsheet (a period such as 7y counted from file_date, a date, forever, or " +
 				"a policy name: filo help policies) and tags (separated by ;, see filo help tag), correct a " +
@@ -174,6 +175,8 @@ var commandHelps = map[string]commandHelp{
 		flags: []view.Term{
 			{Name: "-o FILE", Text: "the CSV to write; an existing file is replaced only after asking"},
 			{Name: "--no-scan", Text: "export the register as it is, without scanning first"},
+			{Name: "--in-git", Text: "allow FILE inside a git repository"},
+			{Name: "--in-synced", Text: "allow FILE inside a synced directory"},
 			{Name: "--workers N", Text: "for the scan: files hashed in parallel, 1-64 (default 4; use 1 on a spinning disk)"},
 		},
 	},
