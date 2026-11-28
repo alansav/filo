@@ -1004,9 +1004,15 @@ func (c *completer) deviceCands() []cand {
 	if err != nil {
 		return nil
 	}
-	var out []cand
+	names := map[string]int{}
 	for _, d := range devs {
 		if d.Dev != me.ID {
+			names[d.Name]++
+		}
+	}
+	var out []cand
+	for _, d := range devs {
+		if d.Dev != me.ID && names[d.Name] == 1 { // a name two devices share names neither: give the ID
 			out = append(out, cand{text: d.Name, done: true})
 		}
 	}

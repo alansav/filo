@@ -796,49 +796,57 @@ func (e *env) askAhead(ctx context.Context, s *store.Store, rep share.Report) (s
 	if !e.canPrompt() || e.cmd == "__complete" {
 		return rep, nil
 	}
-	r := e.view
+	var ahead []store.SyncedDir
 	for _, dr := range rep.Dirs {
-		if !dr.Ahead {
-			continue
+		if dr.Ahead {
+			ahead = append(ahead, dr.Dir)
 		}
-		r.Note(view.Attention, "this device's journal in "+r.Tilde(dr.Dir.Abs())+" holds lines this register does not")
-		r.Paragraph(0, "Either the register was restored from a snapshot or a backup, and those lines are "+
-			"decisions this device made since (take them in), or it was copied from another machine, which "+
-			"writes as this device (give this register a new device ID; the other devices then trust it again).")
-		if err := e.outputErr(); err != nil {
-			return rep, err
-		}
-		pr := newPrompter(e.stdin)
-		pr.end, pr.check = r.Blank, e.outputErr
-		choice, err := e.askChoice(ctx, pr, "Was this register restored, or copied?", []view.Choice{
-			{Key: "r", Word: "restored"}, {Key: "c", Word: "copied"}, {Key: "l", Word: "later"}}, "l")
-		pr.close()
-		if err != nil {
-			return rep, err
-		}
-		switch choice {
-		case "r":
-			n, problems, err := share.TakeOwn(ctx, s, dr.Dir, now())
+	}
+	if len(ahead) == 0 {
+		return rep, nil
+	}
+	r := e.view
+	for _, sd := range ahead {
+		r.Note(view.Attention, "this device's journal in "+r.Tilde(sd.Abs())+" holds lines this register does not")
+	}
+	r.Paragraph(0, "Either the register was restored from a snapshot or a backup, and those lines are decisions "+
+		"this device made since (take them in), or it was copied from another machine, which writes as this device "+
+		"(give this register a new device ID; the other devices then trust it again).")
+	if err := e.outputErr(); err != nil {
+		return rep, err
+	}
+	pr := newPrompter(e.stdin)
+	pr.end, pr.check = r.Blank, e.outputErr
+	choice, err := e.askChoice(ctx, pr, "Was this register restored, or copied?", []view.Choice{
+		{Key: "r", Word: "restored"}, {Key: "c", Word: "copied"}, {Key: "l", Word: "later"}}, "l")
+	pr.close()
+	if err != nil {
+		return rep, err
+	}
+	switch choice {
+	case "r":
+		for _, sd := range ahead {
+			n, problems, err := share.TakeOwn(ctx, s, sd, now())
 			if err != nil {
 				return rep, err
 			}
+			r.Count(view.Done, report.Plural(int64(n), "line", "lines")+" of this device's taken in, in "+
+				r.Tilde(sd.Abs()))
 			for _, p := range problems {
 				r.Count(view.Attention, p)
 			}
-			r.Count(view.Done, report.Plural(int64(n), "line", "lines")+" of this device's taken in")
-		case "c":
-			d, err := s.NewDeviceIdentity(ctx)
-			if err != nil {
-				return rep, err
-			}
-			r.Count(view.Done, "this register is now a new device ("+d.ID[:8]+"); on another device, filo "+
-				"devices trust "+d.Name+" once its journal is there")
-		default:
-			continue
 		}
-		return e.importAll(ctx, s)
+	case "c":
+		d, err := s.NewDeviceIdentity(ctx)
+		if err != nil {
+			return rep, err
+		}
+		r.Count(view.Done, "this register is now a new device, "+d.ID[:8]+"; on another device, once its journal "+
+			"is there: filo devices trust "+d.ID[:8])
+	default:
+		return rep, nil
 	}
-	return rep, nil
+	return e.importAll(ctx, s)
 }
 
 // devicesRestore writes back device DEVICE's journal where it is lost or cut short, from the lines this register keeps
@@ -847,6 +855,12 @@ func (e *env) devicesRestore(ctx context.Context, s *store.Store, arg string, ye
 	kd, err := share.FindDevice(ctx, s, arg)
 	if err != nil {
 		return err
+	}
+	if me, err := s.Device(ctx); err != nil {
+		return err
+	} else if kd.Dev == me.ID {
+		return errors.New("this is this device: its journal is written back by its own runs where it writes " +
+			"(where it was retired, it writes nothing)")
 	}
 	in, err := share.Where(ctx, s, kd.Dev)
 	if err != nil {
