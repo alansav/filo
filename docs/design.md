@@ -66,7 +66,9 @@ Principles. These are not negotiable:
   `FILO_DB`) overrides it. Created automatically on first run; the default `filo` directory is the only directory
   Filo creates (mode 0700), and an explicit `--db` path must have an existing parent.
 - **Never synced.** The default location is outside every root, so the register is never inside a synced directory and
-  never scanned. That is also why there is no device column. The register stays per device.
+  never scanned. The register stays per device; each has a device ID, key and name in `meta`, so the decisions it
+  shares through a synced directory's journal name their device (see Sharing decisions between devices; until
+  2026-11-28 there was no device column, because nothing left the device).
 - Driver: `modernc.org/sqlite` (pure Go, no CGO, plain `database/sql`), chosen 2026-11-11 at v1.62.0.
 - `meta.schema_version` must equal the build's version. An older database is upgraded when it is opened, one version
   at a time, each step in its own transaction with the version bump (from any version from 1 to 12); a newer version, or an older
@@ -907,7 +909,10 @@ three files that handle only Filo's own files: the register's snapshots, an `-o`
 - **`filo report`** adds "deleted by filo: N files, SIZE freed (last run DATE: n files, SIZE)" to its Retention
   section, from the deleted rows.
 - **Syncthing propagates deletes**: a delete on one device removes the file on every device that shares the Syncthing
-  folder. Filo treats synced roots like any other.
+  folder. Filo treats synced roots like any other, except that in a synced directory `filo delete` shows where each
+  retention came from and when the other devices were last seen (see Sharing decisions between devices). Accepted
+  risks: a delete made on a decision another device has changed but not yet synced, and a delete on one device
+  racing an edit of the same file on another (what happens is the sync service's choice).
 - **Details:**
   - *A delete run is recorded as a scan of kind `delete`.* A closed path and an event both need a scan, so the run
     adds one `scans` row (`kind = 'delete'`, whole root) in each root where it first records something; deleted
@@ -1863,7 +1868,8 @@ so files can be found by tag; a project is a tag (`project:house sale`).
     path the disk does not have; not tested); a directory that cannot be written is listed under "Not renamed or
     moved", exit 1.
     Syncthing: a move inside one synced folder reaches the other devices as a rename; a move out of one into an
-    unsynced part of the root is a delete there, to be noted once synced directories are marked (roadmap 9a).
+    unsynced part of the root is a delete there, noted by the summary in a synced directory (see
+    Sharing decisions between devices).
   - **Output**: the summary's moves part lists each move by destination, from where, under its new name if that
     changed (with the rename's notes), each new directory marked, and "only spaces in the directory changed" for a
     cell that differs from the file's directory only by spaces at the start or end of a part; the result counts files moved and directories made;
@@ -1872,7 +1878,8 @@ so files can be found by tag; a project is a tag (`project:house sale`).
     kind `rename`; the `moved` event says "moved by filo update".
 - **Register (schema version 11)**: a `tags` table on file ids (the key, the value as spelled and its folded form),
   and `tag_changes`, the history of every tag added or removed and by which command, so each change can be written
-  to the journal later (9c) without rework. `export_rows` gain `tags`, the cell as exported.
+  to the journal (see Sharing decisions between
+  devices) without rework. `export_rows` gain `tags`, the cell as exported.
 
 ### Tag index pages
 Roadmap item 38, designed with the person on 2026-11-22. Filo writes HTML pages that list files by tag, to browse
@@ -2002,8 +2009,8 @@ on the person's phone opens the file).
   tags). Indexes stay as they are (any number, on any directory, nested ones independent), and each find page covers
   the files under its directory; the person keeps one at `~` on the laptop and one at the top of the synced
   directory, opened on every device (desktop, laptop, iPad, iPhone and GrapheneOS, where a script was checked to
-  run from a local page). A synced directory's index is kept by one machine until decisions are shared (9c): two
-  registers would write two pages over each other.
+  run from a local page). A synced directory's index is written by one device only (see Sharing decisions between
+  devices): two registers would write two pages over each other.
   - **Matching.** The selected tags of one key match either value (`sender:British Gas` or `sender:EDF`); tags of
     different keys, and the bare tags, must all match. The directory filter and the search combine with them. The
     search matches the file's name and directory, ignoring case. Counts narrow: only the tags still found among the
@@ -2054,6 +2061,156 @@ on the person's phone opens the file).
 - **Register (schema version 12)**: `tag_indexes` (root, directory, name, the data hash of the last full write,
   when, and the last problem) and `tag_index_files` (each file and directory Filo wrote in an index, with the file's
   hash).
+
+### Sharing decisions between devices
+Roadmap item 9, designed with the person on 2026-11-28, topic by topic, merging the former 9a (marking synced
+directories), 9b (a device ID) and 9c (sharing decisions). Being built in slices on branch `sync`; until it is
+merged, this section is the design being built, not yet all of it in the code.
+
+A synced directory is on several devices, each with its own register; a decision made on one (a retention, a tag,
+a rule) should be known on the others. Sharing the database file itself is rejected: a sync service copies
+`filo.db` and its WAL and SHM files separately and not as transactions, so a copy can be stale or corrupt; the
+`flock` is local, so writes on two devices between syncs give a conflict copy and one side is silently lost; and
+most of the register is per device (root paths, inodes, ctimes, mount points, unreadable flags, scan history). So
+each device keeps its own register, and devices exchange **decisions** through one signed, append-only journal per
+device in `.filo/` at the top of each synced directory. A device writes only its own journal and reads all of them,
+so the sync never makes a conflict copy. Tested on 2026-11-13: a file dated on the laptop, then moved and renamed on
+the desktop, kept its retention on the laptop's next scan, because the move was paired by hash.
+
+- **The frame.** Whoever can write into a synced directory can already delete or change its files on every device
+  through the sync service. The journal must never let a writer do more than that: a journal line only records; it
+  never deletes, renames or moves a file. Deletes are the sync service's business (it deletes, or makes a conflict
+  copy); Filo only records that it deleted a file.
+- **The device.** Each register gets a device ID (128 random bits, written in lower-case base32), an ed25519 key and
+  a name (the hostname, which the person can change), in `meta`, made with the database or by the schema upgrade.
+  The device is its register: a restored register is the same device, a reinstall without it is a new device, and a
+  register copied to another machine is caught (below). Every `--db` is its own device. A phone that only syncs
+  files has none. See Register.
+- **The synced directory.** Any directory inside a root, or a root itself, marked by the person. Filo knows it by a
+  random ID in its mark, never by its path, so it can sit at a different path on each device (`~/Sync` on one, the
+  root `/data/Sync` on another); each register maps the ID to its root and directory, and a root absorbing another
+  rewrites that. One synced directory never holds another (refused when marking or joining; reported when found).
+  The mark is tool agnostic: Filo reads nothing from a sync service's configuration, and the docs say "synced
+  directory", not a product's name. The walk still skips `.filo`, but notes one that holds a mark; a mark not joined
+  is reported by every scan until it is joined or ignored. The same ID at two places (a copy of the directory) is
+  reported, never guessed, and at most one is joined. A joined directory gone from its place while its ID is found
+  once elsewhere (moved) is reported, and nothing is imported or written for it until the person confirms the new
+  place. A lost mark is written back from the register. Root settings (hidden files, ignores) stay each device's
+  own; decisions about files a device does not scan stay pending, counted, not listed each run.
+- **Trust.** Every line is signed with its device's key. A mark found by a scan is reported automatically, but
+  sharing starts only with a one-time confirmed join, which makes clear where the sync comes from: the synced
+  directory, its ID, which device marked it and when, and for each device its name, key fingerprint (compared with
+  `filo device` on that device), first and last seen, number of decisions, and who vouched for it. A trusted device
+  can vouch for a new one (a signed `trust` line), so a new device is approved on one device, not on each. Filo
+  cannot know that a device has left (reinstalled, broken): the device list shows when each was last seen, and a
+  device is **retired** by a signed line naming its last line; its lines up to there stay valid, anything after is
+  refused, and its journal is never deleted, so a device joining later still gets its decisions. A retired device
+  that is still alive sees the line, stops writing, and must join again as a new device. Accepted risk: a
+  compromised trusted device.
+- **What is shared.** Every decision about a file, directory or content in the synced directory, whatever made it
+  (a command, the CSV, a rule, a duplicates CSV); what a device only observes is not (roots and their settings,
+  path history, inodes, scans, events, exports, snapshots, review history). Only decisions about files inside the
+  synced directory are written, and a journal's decisions apply only to files inside that same synced directory,
+  so a hash match can never reach a copy elsewhere.
+  - File decisions: a file's date; its retention or policy; each tag added or removed; and what any rule decides
+    for each file (both devices deciding the same merges).
+  - Rules whose directory is inside the synced directory, relative to its top. A rule on a directory above it is
+    shown, and the person is asked, per rule, to copy it to the synced directory's top, move it there, or leave it:
+    when the directory is marked or joined, and when such a rule is added later; the question shows a dry run (a
+    copied rule outranks rules on the directories between), and no terminal or `-y` leaves it. `filo rules` flags
+    such rules. A rule left above still has its per-file outcomes shared. Needs copying or moving one rule into a
+    subdirectory, which `rules copy` refuses today.
+  - Policies, by a shared ID (so a rename is a change of name, not a new policy), with their global effect: a
+    policy changed on one device changes it everywhere, its unsynced files included; changing one says where else
+    it applies. Removing one is shared, and happens on a device only where nothing uses it.
+  - Duplicates: a content always kept as separate copies, when a copy is inside (global, like a policy); members of
+    sets of records inside; excluded directories inside, and one above it as "the whole synced directory is
+    excluded".
+  - A tag index inside the synced directory: shared, and written by one device only (the one that added it, until
+    handed over), so two devices never rewrite the same pages.
+  - Facts, which never conflict: **identity** (the first decision about a file gives it a random shared file ID;
+    a device's scan journals what it paired for such a file: moved, renamed, edited, returned), renames and moves
+    by `filo update`, and deletes by Filo (another device closes the row as "deleted by Filo on laptop" once the
+    file is gone there, so a copy restored later is a new file everywhere). Two facts that contradict each other
+    are ignored, and each device's own pairing stands.
+- **Finding the file.** A file decision names the file's shared ID, content hash H and path P relative to the
+  synced directory. The receiving device uses the file the ID is mapped to; the first time, the one file with H at
+  P, else the one file with H, else the one with H that was once at P (path history). With none, the decision is
+  pending (the sync has not delivered the file yet) and tried again on every run; with several, reported, never
+  guessed. A retention needs the hash (an edited file needs a new decision); a tag follows the file through an edit.
+  So a file decided on the desktop, then moved or renamed there, gets the decision on the laptop whether the
+  journal or the file arrives first.
+- **Ordering and conflicts, without clocks.** Each decision lists the decisions it replaces: those in effect on its
+  device for that thing when it was made. One that replaces all those in effect wins; otherwise both stay, a
+  conflict. Journals arrive in any order, so a decision that replaces one not yet received marks it replaced ahead.
+  Equal values merge silently. The things decided are small, so changes to different parts of a file do not
+  conflict: a file's date, a file's retention, one tag on one file, a policy, a rule (directory and pattern), a
+  content, a set member, an excluded directory, an index's writer. **An open conflict never makes anything deletable
+  sooner**: the longer retention or policy value applies, a tag stays, a directory stays excluded. A conflict is
+  counted by `filo report`, shown with both sides (device, time) by `filo show`, and marked in the combined CSV's
+  `conflict` column (blank, or the field in conflict); any new decision about that thing, from any command on any
+  device, resolves it. Times are shown, never used to decide.
+- **Timing.** Every run imports and applies the journals before it changes anything, so a new decision always
+  lists what it replaces; it reads only what is new (an offset and the last line's hash; a mismatch means the
+  journal is read and checked again from the start). A Filo started at boot may run before the sync service has
+  caught up; everything then fails safe: decisions wait for their files, files wait as "new, needs a date". A line
+  saying what a file's content is becomes an **expectation**: when that content is found, the decision applies and
+  the content counts as arrived, never as an edit; a file with an open expectation and other content (half
+  written, the old version) is arriving, and nothing is applied or written about it. Without an expectation (the
+  file arrived before its line, or an edit on this device), an edit fact is written only once the content is the
+  same on two scans in a row. Nothing expires: an expectation open more than 7 days is listed by `filo report` as
+  waiting, usually a sync problem (a rule excluding the file, a stopped service). A trusted device not seen for 30
+  days is warned about by every command that imports; in a terminal Filo asks whether to retire it, saying what
+  that means; no, or no terminal, snoozes the question for 30 days on this device; `-y` does not answer it.
+  `filo delete` in a synced directory shows each retention's origin and when the other devices were last seen.
+  Accepted risks: a delete made on a decision another device has changed but not yet synced; a delete on one
+  device racing an edit on another (the sync service's choice).
+- **Identity cases.** After a reinstall the device is new: it joins (offered to retire devices not seen for a
+  while, such as its old self) and imports everything; only decisions about synced files come back (the rest
+  needs a snapshot, 9d). A register restored from a snapshot or backup finds its own journal ahead of it, as does
+  one copied to a second machine, and Filo cannot tell which: in a terminal it asks (restored: take the lines in
+  and go on; copied: this device needs a new ID); without one, nothing is written to that synced directory and it
+  is reported. A fork (two different lines with one number) is always a copy: it stops and reports. `filo device
+  new` gives a copied register a new ID and key. A device joining later reads every journal from the start.
+  **Seeding**: marking writes every current decision under the directory into the journal; joining with decisions
+  already made imports first, then writes only those that differ (conflicts, counted in the join's summary).
+- **Losing a journal.** Every device keeps every line it has accepted, its own and the others', in its register,
+  byte for byte, so the register and the journals back each other up. Its own journal missing, cut short or
+  altered (a line it did not write) is rewritten from the register, the same bytes and numbers. Another device's
+  with a bad signature or a broken chain stops at the last good line, reported, nothing after it applied; a lost
+  journal of a device that is gone is written back from the register's copy by `filo devices restore`, its
+  signatures still valid. A lost status file is written again on the next run.
+- **Files and format.** `.filo/` holds exactly `mark` (the synced directory's ID, the format version, who marked
+  it, signed), `journal.<device-id>` and `status.<device-id>` (last seen, and the highest line applied from each
+  journal; written whole, at most hourly). Anything else there is reported, never read (a conflict copy of a
+  journal by name). A journal line is one JSON object, a tab, and the base64 ed25519 signature of exactly those
+  bytes (no canonical JSON needed; a tab inside a JSON string is always `\t`). Every line has `v` (the format
+  version), `dev`, `seq`, `prev` (the SHA-256 of the previous whole line), `time`, `kind`, then what it is about,
+  `replaces` and the value. Line 1 is the device itself (ID, public key, name, created); other kinds besides
+  decisions and facts are `name`, `trust` and `retire`. A device's key never changes; a new key is a new device.
+  Reading checks a line is at most 64 KiB, its paths relative, `/`-separated, with no `..`, empty or absolute
+  parts, valid UTF-8, no control characters, at most 4096 bytes, and its values within the limits the commands
+  set. A newer format version stops that journal there ("made by a newer Filo"), as a newer database is refused;
+  an unknown kind in a known version is counted and skipped. Writing: the lines are stored in the register in the
+  transaction of the decisions they record, then appended to the journal and flushed; a torn append is repaired by
+  the next run. About 200 bytes a line, so 100,000 decisions is about 20 MB. No new dependency: ed25519, SHA-256
+  and base64 are in Go's standard library.
+- **Silent failure.** `filo report` gains a Synced part: marks found but not joined, devices not trusted, journals
+  missing (a sync rule that skips hidden directories shows up whatever the service), conflicts, pending decisions,
+  waiting files, devices not seen for 30 days.
+- **Commands.** `filo device` (this device's ID, name and fingerprint), `filo device name NAME`, `filo device new`.
+  `filo synced` (the synced directories and marks found), `filo synced add DIR` (marks DIR, or joins it with the
+  trust prompt, or confirms a moved one), `filo synced remove DIR` (this device leaves; files and journals
+  untouched), `filo synced ignore DIR`. `filo devices [DIR]` (each device: name, short ID, fingerprint, trusted,
+  vouched for, retired or not trusted, last seen, lines, whether it has applied this device's latest), `filo
+  devices trust|retire|restore DEVICE` (a name or the start of an ID, refused if ambiguous; each shows what it will
+  do and asks, or `-y`). Not `filo sync`: Filo never copies files. Bash completion covers them and device names.
+- **Where Filo writes.** One more exception to the hard rule: `.filo/` at the top of a synced directory, Filo's own
+  files only, a device writing only its own journal and status file (and the mark when it is lost), another
+  device's journal only through `filo devices restore`, all through one package with a guard test.
+- **A move out of a synced directory.** A move by the `directory` cell out of a synced directory into an unsynced
+  part of its root is a delete on the other devices, so the update's summary notes it (see Tags, moving).
+
 
 ### Commands and scheduling
 - Plain names, easy to remember: `roots`, `scan`, `report`, `export`, `update`, `delete`, `duplicates` (added
@@ -2758,7 +2915,7 @@ CREATE TABLE tags (                     -- a file has a tag while it has the row
     added_utc TEXT NOT NULL,
     PRIMARY KEY (file_id, key, folded));
 CREATE INDEX ix_tags_tag ON tags(key, folded);
-CREATE TABLE tag_changes (              -- append-only: every tag added or removed, for the journal (roadmap 9c)
+CREATE TABLE tag_changes (              -- append-only: every tag added or removed, for the journal (Sharing decisions)
     id INTEGER PRIMARY KEY,
     kind TEXT NOT NULL,                 -- 'add' or 'remove'
     file_id INTEGER NOT NULL REFERENCES files(id),
@@ -2852,4 +3009,7 @@ Linux-only, and snapshots do not use it). A directory on the path of a file bein
 moved that is itself moved in the instant between the last look and the call is not caught: the file acted on is
 still the one checked, in the directory checked, wherever that has just been moved to (see Disposal). `filo find -0` writes file names unescaped (see Finding files): it is refused when
 stdout is a terminal, but a pipe that ends in one (`filo find -0 | cat`) shows the raw names, as `find -print0 | cat`
-does; a list of names for `xargs -0` has to be the names.
+does; a list of names for `xargs -0` has to be the names. Sharing decisions between devices (2026-11-28): a trusted device
+that is compromised can make any decision the person could make on it, in the synced directories it shares (the
+journal never deletes, renames or moves a file; deleting still asks on each device); and a device that only syncs
+files and runs no Filo is not seen by Filo at all.

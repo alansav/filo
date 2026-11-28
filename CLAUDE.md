@@ -26,7 +26,7 @@ set`, `filo get`); finding files (`filo find`); tags (`filo tag`, `untag`, `tags
 retention and tags exports were removed), renaming by its `name` cell and moving by its `directory` cell (never a
 hidden file; a move leaves the directories it empties); bash completion (`filo completion bash`, tested with bash
 from `go test`) (all on branch `improvements` until merged). What is next is in `docs/roadmap.md`, Priority
-(2026-11-28: the sync items, 9b, 9a and 9c).
+(2026-11-28: item 9, sharing decisions between devices, which merged 9a, 9b and 9c; being built on branch `sync`).
 **`internal/dispose` is the only code allowed to change the user's files**: deleting them only from `filo delete`,
 renaming or moving them within their root only from `filo update` (a changed `name` or `directory` cell in the
 combined CSV, making the directories a move needs; `TestOnlyDisposeChangesUserFiles` guards it); everything else stays
@@ -46,7 +46,12 @@ own pages, see the hard rules). Stay inside the current piece of work.
   matches; anything else is left alone and reported), and removes as a whole only through `filo indexes remove`, which
   shows what it will remove and asks (or `-y`). `internal/tagindex` is the only code that writes or removes them
   (`TestOnlyWriteTouchesTheDisk` guards it); they are Filo's files, not the user's (see `docs/design.md`, Tag index
-  pages). Anything destructive shows what it will do and asks first (or needs `-y`).
+  pages); and the files of a synced directory's `.filo/` (`mark`, `journal.<device-id>`, `status.<device-id>`), also
+  Filo's own: a device writes only its own journal and status file, the mark only when marking or when it is lost,
+  and another device's journal only through `filo devices restore` (shows and asks, or `-y`), and never deletes one;
+  `internal/journal` is the only code that writes them (`TestOnlyJournalWritesSyncedFiles` guards it; see
+  `docs/design.md`, Sharing decisions between devices). A journal line never deletes, renames or moves a file.
+  Anything destructive shows what it will do and asks first (or needs `-y`).
 - Treat file names and the register as untrusted input: delete only inside a root (`internal/dispose` checks), and
   print through `internal/view` (its Renderer escapes every text it is given with `view.Escape`, then adds only its
   own colour codes; the two exceptions are `filo find -0`'s raw path list, written by the Renderer and refused when
