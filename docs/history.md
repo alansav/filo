@@ -1070,6 +1070,13 @@ built the same day on branch `sync`, in seven slices, each reviewed once (medium
   end to end in `internal/cli`): half lines, forged, edited, reordered and replayed lines, lost and torn journals, a
   restored and a copied register, vouching, retiring, conflicts, journals and files arriving in either order, the
   person's decide-then-move scenario. Left on purpose: the end-to-end tests are scenarios, not table-driven.
+- **A review of the whole branch (high)**, at the person's request, found eight more, all fixed with tests:
+  leaving a synced directory failed on a foreign key once it had decisions; one directory that could not be written
+  made every other replay old decisions over newer ones (schema 20: each synced directory's own publish cursors); a
+  retirement stood after the retire line behind it stopped counting; a rejoining device's old lines were not kept as
+  its own; a directory's decision could end sets of records and contents always kept outside it; a retired device
+  started a journal on joining; a journal under this device's ID with another key was overwritten; facts that
+  disagree were counted as conflicts. No further review round, as agreed.
 - **Not done, in the roadmap**: replaying lines a newer Filo wrote after an upgrade (devices on mixed versions),
   compacting journals, handing over a tag index beyond `take`.
 
