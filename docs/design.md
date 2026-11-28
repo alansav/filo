@@ -2084,7 +2084,10 @@ the desktop, kept its retention on the laptop's next scan, because the move was 
 - **The device.** Each register gets a device ID (128 random bits, written in lower-case base32), an ed25519 key and
   a name (the hostname, which the person can change), in `meta`, made with the database or by the schema upgrade.
   The device is its register: a restored register is the same device, a reinstall without it is a new device, and a
-  register copied to another machine is caught (below). Every `--db` is its own device. A phone that only syncs
+  register copied to another machine is caught (below). A register restored from a snapshot older than schema 14 has
+  no identity, so its upgrade makes a new one: it is a new device, as after a reinstall, and the device it was since
+  the upgrade is one of the others (found again when it joins; offered to retire). A register with only part of an
+  identity is refused, never completed, since completing it would pair a known ID with a key no other device knows. Every `--db` is its own device. A phone that only syncs
   files has none. See Register.
 - **The synced directory.** Any directory inside a root, or a root itself, marked by the person. Filo knows it by a
   random ID in its mark, never by its path, so it can sit at a different path on each device (`~/Sync` on one, the

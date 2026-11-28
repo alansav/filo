@@ -130,3 +130,27 @@ func TestNewDeviceIdentity(t *testing.T) {
 		t.Error("the new identity is not the one stored")
 	}
 }
+
+func TestMigrateRefusesAPartialDevice(t *testing.T) {
+	db := tempDB(t)
+	mustClose(t, mustOpen(t, Options{DBPath: db}))
+	rawExec(t, db, `DELETE FROM meta WHERE key = 'device_key'`, `UPDATE meta SET value = '13' WHERE key = 'schema_version'`)
+	if _, err := Open(context.Background(), Options{DBPath: db}); !errors.Is(err, ErrDevice) {
+		t.Fatalf("Open with part of a device identity = %v, want ErrDevice", err)
+	}
+}
+
+func TestMigrateKeepsAWholeDevice(t *testing.T) {
+	ctx := context.Background()
+	db := tempDB(t)
+	s := mustOpen(t, Options{DBPath: db})
+	before, _ := s.Device(ctx)
+	mustClose(t, s)
+	rawExec(t, db, `UPDATE meta SET value = '13' WHERE key = 'schema_version'`)
+	s = mustOpen(t, Options{DBPath: db})
+	defer mustClose(t, s)
+	after, err := s.Device(ctx)
+	if err != nil || after.ID != before.ID || !after.Key.Equal(before.Key) {
+		t.Fatalf("the upgrade replaced a whole device identity: %v", err)
+	}
+}

@@ -38,8 +38,21 @@ func (d Device) Public() ed25519.PublicKey { return d.Key.Public().(ed25519.Publ
 // Fingerprint is what a person compares to check the device's key.
 func (d Device) Fingerprint() string { return device.Fingerprint(d.Public()) }
 
-// insertDevice gives the register in tx a new device identity, named after the host, unless it has one.
+// insertDevice gives the register in tx a new device identity, named after the host, unless it has one. A register
+// with only part of one is refused: filling in the rest would pair a known ID with a key no other device knows.
 func insertDevice(ctx context.Context, tx *sql.Tx) error {
+	var have int
+	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM meta WHERE key IN (?, ?, ?)`, metaDeviceID,
+		metaDeviceName, metaDeviceKey).Scan(&have); err != nil {
+		return fmt.Errorf("read the device identity: %w", err)
+	}
+	switch have {
+	case 3:
+		return nil
+	case 0:
+	default:
+		return fmt.Errorf("%w: only part of it is there", ErrDevice)
+	}
 	id, err := device.NewID()
 	if err != nil {
 		return err
@@ -53,8 +66,7 @@ func insertDevice(ctx context.Context, tx *sql.Tx) error {
 		{metaDeviceName, device.DefaultName(hostname)},
 		{metaDeviceKey, device.EncodeKey(key)},
 	} {
-		if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO meta (key, value) VALUES (?, ?)`, kv[0],
-			kv[1]); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO meta (key, value) VALUES (?, ?)`, kv[0], kv[1]); err != nil {
 			return fmt.Errorf("write the device identity: %w", err)
 		}
 	}
@@ -133,8 +145,12 @@ func (s *Store) NewDeviceIdentity(ctx context.Context) (Device, error) {
 	}
 	defer tx.Rollback()
 	for _, kv := range [][2]string{{metaDeviceID, id}, {metaDeviceKey, device.EncodeKey(key)}} {
-		if _, err := tx.ExecContext(ctx, `UPDATE meta SET value = ? WHERE key = ?`, kv[1], kv[0]); err != nil {
+		res, err := tx.ExecContext(ctx, `UPDATE meta SET value = ? WHERE key = ?`, kv[1], kv[0])
+		if err != nil {
 			return Device{}, fmt.Errorf("make a new device identity: %w", err)
+		}
+		if n, err := res.RowsAffected(); err != nil || n != 1 {
+			return Device{}, fmt.Errorf("make a new device identity: %w", ErrDevice)
 		}
 	}
 	if err := s.commit(tx); err != nil {
