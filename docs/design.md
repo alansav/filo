@@ -2171,8 +2171,10 @@ Agreed 2026-11-20, designed 2026-11-28 (roadmap 36). Tab completes Filo's comman
   cannot be read, or has another schema version, gives completion from the disk alone, never an error. It prints
   nothing on stderr and honours a `--db` typed on the line, then `FILO_DB`. Paths complete one level at a time, as
   bash completes file names, by range queries on the `(root_id, path)` index of current paths, one per entry (not
-  `LIKE`: names hold `%` and `_`). Files not present (missing, or deleted by Filo) complete too, the most recent
-  hundred in that directory, since that index covers current paths only. Tags and policies are read whole. No cap on
+  `LIKE`: names hold `%` and `_`). Files not present (missing, or deleted by Filo) complete too, from the hundred
+  such paths in that directory registered last: no index covers them, so the table is read from its newest row back
+  and the read stops there (a benchmark, 120,000 files, 20,000 not present: about 11 ms at the top of the root, 14
+  ms deep in it, 1.5 ms of it for the current paths). Tags and policies are read whole. No cap on
   matches: bash asks before showing thousands.
 
 ### Terminal output
