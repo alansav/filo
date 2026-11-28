@@ -296,8 +296,9 @@ func (e *env) open(ctx context.Context, db string) (*store.Store, error) {
 // snapshot, which then holds what was written). The run's work is already written, so a problem with the snapshot is
 // a warning, one line on stderr; an index not brought up to date makes the run exit 1.
 func (e *env) closeStore(s *store.Store) {
-	if s.Changed() {
-		// The decisions this run made go to the journals of the synced directories holding their files.
+	if e.cmd != "device" {
+		// The decisions this run made, and any an earlier run could not write, go to the journals of the synced
+		// directories holding their files (a run that decided nothing finds nothing to write, and writes nothing).
 		problems, err := share.Publish(context.Background(), s, timeNow())
 		if err != nil {
 			problems = append(problems, err.Error())

@@ -227,7 +227,11 @@ func sharedOf(ctx context.Context, s *store.Store, fileID int64) ([]show.Shared,
 		if values[d.Key] == nil {
 			values[d.Key] = map[string]bool{}
 		}
-		values[d.Key][d.Value] = true
+		v := d.Value
+		if strings.HasPrefix(d.Key, "tag:") && v != "" {
+			v = "added" // two spellings of one tag agree: only added against removed is a conflict
+		}
+		values[d.Key][v] = true
 	}
 	out := make([]show.Shared, 0, len(ds))
 	for _, d := range ds {
@@ -236,16 +240,17 @@ func sharedOf(ctx context.Context, s *store.Store, fileID int64) ([]show.Shared,
 		case d.Key == "date":
 			what = "file_date"
 		case strings.HasPrefix(d.Key, "tag:"):
-			what = "tag " + strings.TrimPrefix(d.Key, "tag:")
-			if d.Value != "" {
-				what = "tag " + d.Value
-			}
+			what = "tag"
+		}
+		value := d.Value
+		if what == "tag" && value == "" {
+			value = strings.TrimPrefix(d.Key, "tag:") + " removed"
 		}
 		name := names[d.Dev]
 		if name == "" {
 			name = d.Dev
 		}
-		out = append(out, show.Shared{What: what, Value: d.Value, Device: name, Decided: d.Decided,
+		out = append(out, show.Shared{What: what, Value: value, Device: name, Decided: d.Decided,
 			Conflict: len(values[d.Key]) > 1})
 	}
 	return out, nil

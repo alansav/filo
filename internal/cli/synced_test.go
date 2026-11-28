@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -165,6 +166,9 @@ func TestDecisionsAreSharedThroughTheCommands(t *testing.T) {
 	copyFilo(t, a, b, "Sync")
 	out := b.filo(0, "", false, "show", b.in("Sync/bills/gas.pdf")).stdout
 	b.contains("b's show", out, "7y", "2026-01-01", "sender:British Gas", "Shared", "from laptop")
+	if strings.Count(out, "sender:British Gas") != 2 { // once under Tags, once under Shared
+		t.Errorf("the shared tag is not shown once under Shared:\n%s", out)
+	}
 
 	// A conflict: each sets x.pdf otherwise before seeing the other.
 	a.filo(0, "", false, "set", a.in("Sync/x.pdf"), "--file-date", "2026-01-01", "--retention", "2020-02-02")
