@@ -92,11 +92,11 @@ type JournalState struct {
 // JournalUpdate is what reading a journal (or writing this device's) added: the new lines, in order, and the state
 // after them.
 type JournalUpdate struct {
-	Dev     string
-	Lines   []JournalLine
-	Seq     int64
-	Offset  int64
-	Problem string
+	Dev        string
+	Lines      []JournalLine
+	Seq        int64
+	Offset     int64
+	Problem    string
 	SeenUTC    string
 	Applied    map[string]int64
 	RetiredSeq int64
