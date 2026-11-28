@@ -23,9 +23,10 @@ FILE.csv`, `filo duplicates`); the terminal output (every command prints through
 policies (`filo policies`); directory rules (`filo rules`); showing and setting a file's details (`filo show`, `filo
 set`, `filo get`); finding files (`filo find`); tags (`filo tag`, `untag`, `tags`, `find --tag`); tag index pages
 (`filo indexes`), whose `NAME.html` is a find page with a script (tested with Node from `go test`); the combined CSV (`filo export [DIR] -o FILE`, the one CSV for retentions and tags since the
-retention and tags exports were removed), renaming by its `name` cell and moving by its `directory` cell (all on
-branch `improvements` until merged). What is next is in `docs/roadmap.md`, Priority (2026-11-27: 36 bash completion
-and the sync items).
+retention and tags exports were removed), renaming by its `name` cell and moving by its `directory` cell (never a
+hidden file; a move leaves the directories it empties); bash completion (`filo completion bash`, tested with bash
+from `go test`) (all on branch `improvements` until merged). What is next is in `docs/roadmap.md`, Priority
+(2026-11-28: the sync items, 9b, 9a and 9c).
 **`internal/dispose` is the only code allowed to change the user's files**: deleting them only from `filo delete`,
 renaming or moving them within their root only from `filo update` (a changed `name` or `directory` cell in the
 combined CSV, making the directories a move needs; `TestOnlyDisposeChangesUserFiles` guards it); everything else stays
