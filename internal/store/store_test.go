@@ -654,8 +654,12 @@ func TestMigrateFromV3(t *testing.T) {
 	}
 }
 
-// dropTagIndexes removes the tag indexes of schema 12, for a test that rebuilds an older one.
-const dropTagIndexes = `DROP TABLE tag_index_files; DROP TABLE tag_indexes;`
+// dropExportNames removes the exported name cells of schema 13, for a test that rebuilds an older one.
+const dropExportNames = `ALTER TABLE export_rows DROP COLUMN name;`
+
+// dropTagIndexes removes the tag indexes of schema 12 (and the exported names of 13), for a test that rebuilds an
+// older one.
+const dropTagIndexes = dropExportNames + `DROP TABLE tag_index_files; DROP TABLE tag_indexes;`
 
 // dropTags removes the tags of schema 11 (and the tag indexes of 12), for a test that rebuilds an older one.
 const dropTags = dropTagIndexes + `DROP TABLE tag_changes; DROP TABLE tags; ALTER TABLE export_rows DROP COLUMN tags;`
@@ -691,8 +695,8 @@ func TestMigrateFromV6(t *testing.T) {
 	if err := s.db.QueryRow(`SELECT kind FROM exports WHERE id = 1`).Scan(&kind); err != nil {
 		t.Fatal(err)
 	}
-	if kind != ExportRetention {
-		t.Errorf("an existing export's kind = %q, want %q", kind, ExportRetention)
+	if kind != "retention" { // the column's default, the only kind then
+		t.Errorf("an existing export's kind = %q, want retention", kind)
 	}
 	if _, err := s.RowCounts(context.Background()); err != nil {
 		t.Errorf("the duplicates tables after upgrade: %v", err)

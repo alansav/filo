@@ -81,7 +81,7 @@ func (s *Store) Scan(ctx context.Context, id int64) (ScanInfo, bool, error) {
 		return ScanInfo{}, false, nil
 	}
 	if err != nil {
-		return ScanInfo{}, false, fmt.Errorf("read scan %d: %w", id, err)
+		return ScanInfo{}, false, fmt.Errorf("read scan #%d: %w", id, err)
 	}
 	si.Finished = finished.Valid
 	si.FinishedUTC = finished.String

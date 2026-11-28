@@ -10,12 +10,10 @@ import (
 	"time"
 )
 
-// Export kinds (exports.kind). Schema 7 also wrote 'separate', the first design's export of the contents marked
-// separate; such exports stay in the register's history, but are not written any more.
-const (
-	ExportRetention  = "retention"
-	ExportDuplicates = "duplicates"
-)
+// ExportDuplicates is a duplicates export's kind (exports.kind). Earlier kinds stay in the register's history but are
+// not written any more: 'separate' (schema 7, the first design's export of the contents marked separate), and
+// 'retention' and 'tags' (the retention and tags CSVs, until 2026-11-27).
+const ExportDuplicates = "duplicates"
 
 // DupCopy is one copy in a duplicate group: a present regular file, with the other paths of the same file (hard
 // links: the same inode in the same root) if it has any. Hard links are one copy, since deleting one frees nothing.
@@ -227,8 +225,8 @@ func sortContents(cs []DupContent) {
 }
 
 // RecordDuplicatesExport stores a duplicates export of groups, numbered from 1 in the order given, and calls write
-// with its ID. Each copy's row keeps its hash, retention, group and path. As with RecordExport, the export is
-// committed only if write succeeds.
+// with its ID. Each copy's row keeps its hash, retention, group and path. As with RecordFilesExport, the export
+// is committed only if write succeeds.
 func (s *Store) RecordDuplicatesExport(ctx context.Context, path string, now time.Time, groups []DupContent,
 	write func(exportID int64) error) (int64, error) {
 	return s.recordExport(ctx, path, now, ExportDuplicates, func(tx *sql.Tx, id int64) error {
@@ -251,8 +249,8 @@ func (s *Store) RecordDuplicatesExport(ctx context.Context, path string, now tim
 }
 
 // ExportedGroups returns, for each of the given exports that is a duplicates export, each file's group as exported:
-// what a duplicates CSV's rows are checked against. An export that is not one (a retention export, the first design's
-// separate export, or no export of this register) is left out.
+// what a duplicates CSV's rows are checked against. An export that is not one (a combined export, an older kind, or no
+// export of this register) is left out.
 func (s *Store) ExportedGroups(ctx context.Context, exportIDs []int64) (map[int64]map[int64]int64, error) {
 	out := map[int64]map[int64]int64{}
 	for _, id := range exportIDs {
@@ -263,7 +261,7 @@ func (s *Store) ExportedGroups(ctx context.Context, exportIDs []int64) (map[int6
 		}, `SELECT er.file_id, er.dup_group FROM export_rows er JOIN exports e ON e.id = er.export_id
 			WHERE er.export_id = ? AND e.kind = ? AND er.dup_group IS NOT NULL`, id, ExportDuplicates)
 		if err != nil {
-			return nil, fmt.Errorf("read export %d: %w", id, err)
+			return nil, fmt.Errorf("read export #%d: %w", id, err)
 		}
 		if len(rows) == 0 {
 			continue
@@ -299,6 +297,11 @@ type NotCounted struct {
 // SymlinksTo returns, for each of the given absolute paths, the present symlinks in the register that point at it
 // (absolute paths). A relative target counts from the link's directory.
 func (s *Store) SymlinksTo(ctx context.Context, targets []string) (map[string][]string, error) {
+	return symlinksTo(ctx, s.db, targets)
+}
+
+// symlinksTo is SymlinksTo through q: the store, or a transaction (filo update asks it inside its own).
+func symlinksTo(ctx context.Context, q querier, targets []string) (map[string][]string, error) {
 	want := map[string]bool{}
 	for _, t := range targets {
 		want[t] = true
@@ -307,7 +310,7 @@ func (s *Store) SymlinksTo(ctx context.Context, targets []string) (map[string][]
 	if len(want) == 0 {
 		return out, nil
 	}
-	links, err := queryAll(ctx, s.db, func(rows *sql.Rows) ([2]string, error) {
+	links, err := queryAll(ctx, q, func(rows *sql.Rows) ([2]string, error) {
 		var root, rel, target string
 		err := rows.Scan(&root, &rel, &target)
 		return [2]string{absPath(root, rel), target}, err

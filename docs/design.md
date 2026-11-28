@@ -3,7 +3,7 @@
 **The present.** Of three documents, this is the present: `design.md` (what Filo is), `roadmap.md` (the future:
 what it is not yet) and `history.md` (the past: how it got here).
 
-Filo as built: schema version 11. Last updated: 2026-11-22.
+Filo as built: schema version 13. Last updated: 2026-11-28.
 
 This file records what Filo does and why, as built. Work not done yet, ideas, open questions and ideas rejected are
 in `roadmap.md`, where designs are worked out; a design moves here, in its own commit, when work on it starts (see
@@ -47,6 +47,12 @@ Principles. These are not negotiable:
 - Dev environment: a Podman container defined in the repo (`.devcontainer/Containerfile`), driven by
   `scripts/dev.sh` (`build`, `shell`, `run CMD...`, `clean`). Only the repo is mounted at `/workspace`. The container
   has its own home directory, so a scan of "home" inside it can never reach the real one. Git runs on the host.
+- Build and install: `make build` builds a static `bin/filo` (`CGO_ENABLED=0`, which the pure-Go driver allows), so
+  a binary built in the container runs on the host. `scripts/install.sh`, run on the host, builds it (`make build`
+  with the host's Go, otherwise `scripts/dev.sh run make build`), copies it to `~/.local/bin/filo` (through a
+  temporary name and a rename, so a running copy is not cut off) and adds `command -v filo >/dev/null 2>&1 && source
+  <(filo completion bash)` to `~/.bashrc` unless that exact line is there, so it can be run any number of times.
+  `make install` builds, then runs it with `FILO_INSTALL_NO_BUILD=1`. No build version is stamped yet.
 - Claude Code runs inside the container (`scripts/dev.sh claude`) with normal permission prompts. Its login and
   settings live in a named volume (`filo-claude`). Git commits and pushes happen on the host: the container has no git
   identity and no SSH keys.
@@ -63,7 +69,7 @@ Principles. These are not negotiable:
   never scanned. That is also why there is no device column. The register stays per device.
 - Driver: `modernc.org/sqlite` (pure Go, no CGO, plain `database/sql`), chosen 2026-11-11 at v1.62.0.
 - `meta.schema_version` must equal the build's version. An older database is upgraded when it is opened, one version
-  at a time, each step in its own transaction with the version bump (up to version 10); a newer version, or an older
+  at a time, each step in its own transaction with the version bump (from any version from 1 to 12); a newer version, or an older
   one with no migration, is refused, as is a SQLite file without Filo's `meta` keys. WAL mode is set only after those checks pass, so
   a foreign database is never modified.
 - One writer at a time: an `flock` on `<db>.lock`, taken before the database is opened. The kernel drops it if Filo
@@ -186,8 +192,11 @@ the database, on the same disk. Copying the register's snapshots to a separate p
   so the tree at any scan is recorded.
 
 ### Scan
-- Skips hidden entries unless the root includes them, plus noise: `node_modules`, `__pycache__`, `.filo`, the root's
-  ignore names, and `bin`/`obj` beside a `.csproj` or `.fsproj`.
+- Skips hidden entries unless the root includes them, plus noise: `node_modules`, `__pycache__`, `.filo` and the
+  root's ignore names. No other directory is special, so a root holding a .NET project registers its build
+  directories. Adding `--ignore bin --ignore obj` to the root's settings skips them, and every other file or
+  directory of those names in the root; `filo roots set` replaces all of a root's settings, so its other settings are
+  given again.
 - **A `.filo-delete-*` directory is reported, never walked** (issue #21), whatever the root's settings: it is the
   private directory `filo delete` moves a file into to delete it (see Disposal), left behind only if the run was
   interrupted or the file could not be put back. It is an error in the scan summary and the report ("left behind by
@@ -281,7 +290,10 @@ the database, on the same disk. Copying the register's snapshots to a separate p
 - The inode is only used to decide what to rehash, never to pair moves.
 
 ### Lifespan
-The retention CSV and `filo update` write only the register and the CSV file the user names; they never touch the files.
+The combined CSV (`filo export [DIR] -o FILE`, see Tags, "The combined CSV") is where retentions are set in bulk:
+its `file_date`, `retention` and `keep_until` columns are described here and in Retention CSV columns, its `tags`
+column under Tags. `filo export` and `filo update` write only the register and the CSV file the user names; they
+never touch the files, except for the renames and moves an edited `name` or `directory` cell asks for (see Tags).
 
 - **Forever** (decided 2026-11-12): the retention (and so `keep_until`) may be the word `forever` instead of a date, for files kept
   indefinitely. It is stored as that word, never as a far-off date such as 9999-12-31 (which would look like a
@@ -322,8 +334,8 @@ The retention CSV and `filo update` write only the register and the CSV file the
 
   | Export | Scans first |
   |---|---|
-  | `export retention DIR` | DIR only (a scan of part of a root is safe, see Scan) |
-  | `export retention`, no DIR | every root |
+  | `export DIR` | DIR only (a scan of part of a root is safe, see Scan) |
+  | `export`, no DIR | every root |
   | `export duplicates [DIR]` | every root: a group's copies can be anywhere |
 
   It is the ordinary scan, with its block on stdout before the export's (see Terminal output, Scan and roots), so the
@@ -340,17 +352,18 @@ The retention CSV and `filo update` write only the register and the CSV file the
     leaves out a file saved since, unnoticed; watching the disk needs a process running all the time.
 - **Columns**, in order: `id` (file row ID), `export` (export number), `directory` (absolute), `name`, `size`
   (bytes), `modified` (local time; a cue to when the file was last worked on), `file_date`, `retention`, `keep_until`
-  (see Retention CSV columns). The name is a column of its own because file names often carry dates. Left out on purpose: a reason (one purpose only), an action (a
+  (see Retention CSV columns), `tags` (see Tags). The name is a column of its own because file names often carry dates. Left out on purpose: a reason (one purpose only), an action (a
   delete column in a spreadsheet is unsafe: a one-column sort or a fill-down puts it on the wrong rows), and creation
   or first-seen dates (not reliable: many filesystems do not record a birth time, and a copy, restore or sync resets
-  it). `filo update` finds columns by header name and reads only `id`, `export`, `file_date` and `retention` (and
-  checks `keep_until` was left alone), so a spreadsheet may reorder columns or add its own. Rows are keyed on (export, id). Each export's rows, hashes and dates are stored in
+  it). `filo update` finds columns by header name and reads `id`, `export`, `file_date`, `retention` and `tags`
+  (and checks `keep_until` was left alone, and whether `name` or `directory` changed), so a spreadsheet may reorder
+  columns or add its own. Rows are keyed on (export, id). Each export's rows, hashes and dates are stored in
   the register (`export_rows`).
 - **Encoding.** UTF-8 with a byte order mark (so spreadsheets detect UTF-8), standard quoting. File names are written
   as they are, emoji and all; bytes that are not valid UTF-8 are shown as U+FFFD, which is harmless because the update
   never reads the name. A display cell that starts with `= + - @`, tab or CR gets a leading `'` so a spreadsheet does
   not run it as a formula. The update accepts a byte order mark, CRLF, `;` or tab separators, and empty rows.
-- **Limits on a CSV read back** (security review, issue #18), for the retention and duplicates CSVs alike, all in
+- **Limits on a CSV read back** (security review, issue #18), for the combined and duplicates CSVs alike, all in
   package `sheet`: at most 256 MB (no more than that is ever read), 1,048,576 rows (header and empty rows included)
   and 16,384 fields in a row, the most a spreadsheet keeps, and 1 MB in one row. A CSV over any of them is refused
   whole, before a row is read, saying which limit and on which line; the limits follow the quotes, so a separator or
@@ -363,7 +376,7 @@ The retention CSV and `filo update` write only the register and the CSV file the
   `file_date` (`7y`) replaced them. Dates only: a time (`2026-12-31 15:00`) is refused, not cut off.
 - **`-o FILE` is required**: the CSV is never written to the terminal. FILE is created with mode 0600.
 - **An existing FILE is replaced only after asking**. Refusing would make people delete the old CSV or invent
-  `retention2.csv`. Filo asks `Replace retention.csv? [y/N]`; with no terminal it refuses. `-y` does not answer it: a
+  `files2.csv`. Filo asks `Replace files.csv? [y/N]`; with no terminal it refuses. `-y` does not answer it: a
   timer or script never replaces a file silently. Only a regular file is replaced, never a directory, symlink or device.
   The new CSV is written to a temporary file next to it (mode 0600) and renamed over it, so a crash never leaves half a
   CSV. The question is asked first, before the scan, so a no costs nothing (`Nothing exported.`); if the file is no
@@ -387,29 +400,33 @@ The retention CSV and `filo update` write only the register and the CSV file the
     again and updating again replaces them again;
   - a blank `retention` where one is stored: clears it, so the file is undated again. Clearing a retention does not
     clear `file_date`; blanking the `file_date` cell as well is a separate change and clears it too. Before
-    clearing, the update lists those files (the first ten, then a count) and asks once,
-    `Clear the retention of N files? [y/n]`. Anything but `y` or `yes`, or no terminal on standard input, leaves those
-    rows alone, and the summary says how many and why. `--dry-run` counts them without asking.
+    clearing, the update lists those files and asks, in the update's one question (see Tags, "The combined CSV"):
+    no, or no terminal and no `-y`, records nothing. `--dry-run` lists them without asking.
 - **The update refuses a row**, with one line naming the CSV line and the file, and still applies the others, when:
   a value does not parse, or is typed past the last column; the export is not in the register, or the file is not in
   that export (a row added in the spreadsheet); the file is no longer present; the file's hash differs from the
   export's (changed since the export); its date was changed from a later export since (an old CSV never overwrites a
   newer decision); a retention period has no `file_date`; `keep_until` was changed; the same (export, id) appears
   more than once (every copy is refused). A deleted row changes nothing. The applied rows go in one transaction;
-  `--dry-run` checks everything and writes nothing. The exit code is 1 if any row was refused. A CSV without a
-  `retention` header is refused as a whole: with a pointer to `filo export retention` if it is a review CSV or a
-  retention CSV from before schema version 5, or, if it has a `file_date` column (a current CSV whose `retention`
-  column was deleted or renamed), saying the `retention` column is missing.
+  `--dry-run` checks everything and writes nothing. The exit code is 1 if any row was refused.
+- **The update refuses a CSV as a whole** when it is not a combined CSV, before a row is applied: a duplicates CSV
+  points to `filo delete FILE`, a combined CSV that lost a column is named so (see Tags, "The combined CSV"), and
+  anything else is not a filo CSV. The retention and tags exports were removed on 2026-11-27 (roadmap 40); their
+  CSVs get no pointer of their own, since only the person had used them: one without a `tags` or `retention` column
+  is not a filo CSV, and a row of one under both headers is from another kind of export.
 - **Bulk dates**: set in the spreadsheet (filter on `directory`, fill down). There is no command for them.
 - The hash at export is stored; it is **re-checked at action time** (`filo delete`) against `files.reviewed_hash`.
 
 ### Retention CSV columns
 Retention is usually counted from a document's own date ("keep tax records for seven years"), not from today or from
-when the file reached the disk. So the CSV has a date to count from and a retention that can be a period.
+when the file reached the disk. So the combined CSV has a date to count from and a retention that can be a period.
+(Until 2026-11-27 these columns were also a CSV of their own, from `filo export retention`; see Tags, "The combined
+CSV".)
 
-- **Columns**, in order: `id, export, directory, name, size, modified, file_date, retention, keep_until`.
+- **Columns**, in order: `id, export, directory, name, size, modified, file_date, retention, keep_until`, then
+  `tags`.
   - `file_date`: the date the file is about or was issued, the date a retention period counts from. Typed by the
-    person, or filled in by the export from the file name (below). Not the filesystem's creation date, which is not
+    person, or suggested by the export from the file name, marked `!` (below). Not the filesystem's creation date, which is not
     reliable. Kept in the register even when no retention uses it.
   - `retention`, one cell for the decision, whose value says what kind it is:
     - a period, `Ny`, `Nm`, `Nw` or `Nd` (years, months, weeks, days; any case, stored without leading zeros, so
@@ -427,7 +444,7 @@ when the file reached the disk. So the CSV has a date to count from and a retent
     "keep_until is worked out; change retention instead", and one holding a value that is not a date at all (a
     spreadsheet rewrote it as `3/14/2030`) is refused with the same "format the column as text" hint as the other
     date columns.
-  - The update reads `id`, `export`, `file_date` and `retention`.
+  - Of these, the update reads `id`, `export`, `file_date` and `retention`.
 - **Past dates are accepted**, whether typed
   or worked out from a period: a 2015 invoice with `7y` ends in 2022, which means it is already past its retention.
   The file simply becomes a deletion candidate. Since that also lets a typo through (`7d` for `7y`, 2016 for 2026),
@@ -437,7 +454,7 @@ when the file reached the disk. So the CSV has a date to count from and a retent
   file_date") and nothing is set for that file. The other rows still apply.
 - **Changing `file_date`** on a file whose retention is a period works its `keep_until` out again; a fixed date or
   `forever` does not depend on it.
-- **A blank `retention`** where one is stored clears it, behind the prompt described above.
+- **A blank `retention`** where one is stored clears it, behind the update's question described above.
 - **Dates read from file names**, to fill in `file_date` on export where it is blank. Accepted, with non-digit
   characters (or the start or end of the name) on both sides:
   - `YYYY-MM-DD`, also with `_` or `.` as the separator;
@@ -447,11 +464,25 @@ when the file reached the disk. So the CSV has a date to count from and a retent
   The result must be a real date between 1900-01-01 and 30 days after today (one day for the whole export, even if
   it runs past midnight); anything else is not a date
   (`1245-06`, `2099-01-01`). A lone year (`2019 report.pdf`) is not read: it may be a model number or part of a title.
-  A name with two different dates (`2023-01-01 to 2023-12-31 statement.pdf`) gets none: the person types it. A
-  filled-in `file_date` is a suggestion shown in the spreadsheet. Left untouched, it is stored only when the row's
-  retention is a period, which is when it is used and the person has had reason to look at it; with `forever`, a
-  fixed date or no retention it is dropped, so a later period can never count from a guess nobody checked. (Found in
-  a code review on 2026-11-12: `scan 20190101 id.pdf` would otherwise keep 2019-01-01 as its file_date.)
+  A name with two different dates (`2023-01-01 to 2023-12-31 statement.pdf`) gets none: the person types it.
+- **A date read from a file name is marked** (decided 2026-11-24): it is written `!2023-07-14`, so the rows to check
+  can be found (filter or search on `!`), and it counts only once the `!` is removed. A spreadsheet treats the
+  marked cell as text, so marked dates also sort apart. `!` and not `?`, which is a wildcard in Excel's find and
+  replace, so removing every `!` in the column accepts them all in one deliberate step. Format the `file_date`
+  column as text first: a spreadsheet may read the cell left after the replace as a date and save it in the
+  locale's format (`14/03/2023`), which the update refuses (LibreOffice Calc keeps `YYYY-MM-DD`, checked
+  2026-11-24; Excel not checked). On update:
+
+  | `file_date` cell | Result |
+  |---|---|
+  | marked, as exported, and a retention that is not a period | nothing is stored for the date |
+  | marked, as exported, and a period (or a policy whose value is one) | row refused: "file_date !2023-07-14 was read from the file name: remove the ! to accept it" |
+  | marked, but not as exported | row refused with the same hint |
+  | the `!` removed | an ordinary date, as if typed |
+
+  So a guess nobody looked at never reaches the register, not even when a period is filled down a whole directory.
+  (Before 2026-11-24 the date was written unmarked and stored, untouched, when the row's retention was a period.
+  Found in a code review on 2026-11-12: `scan 20190101 id.pdf` would otherwise keep 2019-01-01 as its file_date.)
 - **Register (schema version 5)**: `files.file_date` (YYYY-MM-DD, NULL = none), `files.retention` (the value as
   given: a period, `forever` or a date; NULL = none), and `files.keep_until`, now always worked out from those two
   (YYYY-MM-DD or `forever`). Statuses and `filo delete` keep using `keep_until` only. Migration: an existing
@@ -474,8 +505,9 @@ place: if the law moves financial records from 7 to 10 years, `filo policies set
   per file. Nothing is deleted on that day: the file is listed by the next `filo delete`, which asks.
 - **Creating a policy** (the person's choice over creating them by command only: a policy created ahead may never be
   used): a name in the CSV that is not a policy yet creates one **with no value**. `filo update` lists the policies it
-  is about to create, with how many rows name each, and asks once (`Create 2 policies? [y/N]`). Declined, or no
-  terminal, the rows naming them are left alone and the summary says how many; `--dry-run` lists them. Its files
+  is about to create, with how many rows name each, in the update's one question (`Apply the update? Nothing is
+  recorded otherwise. [y/N/l]`, see Tags, "The combined CSV"). Declined, or no terminal and no `-y`, nothing is
+  recorded; `--dry-run` lists them. Its files
   need a retention until the policy gets a value. A policy made in error (`bils`) is fixed with `filo policies move
   bils bills`, then `remove bils`.
 - **`filo policies`**:
@@ -505,8 +537,8 @@ place: if the law moves financial records from 7 to 10 years, `filo policies set
   policy with no value yet ("its policy payslip has no value yet"). It is a status of its own (below *possible move*, before *undated*), so the fix is
   named: never a deletion candidate; counted in the report's decisions with the directories holding most of them (`! 3
   files need a file_date: their policy counts from it (bills, 7y)`); flagged by `filo policies`; listed first by
-  `show`, with `Next: filo export retention DIR -o FILE, fill in file_date, then filo update FILE`.
-- **The retention CSV**: the `retention` cell holds the policy name; `keep_until` shows the date worked out, as
+  `show`, with `Next: filo export DIR -o FILE, fill in file_date, then filo update FILE`.
+- **The combined CSV**: the `retention` cell holds the policy name; `keep_until` shows the date worked out, as
   today. A policy whose value is a period, on a row with no `file_date`, refuses the row ("retention bills (7y) needs
   a file_date"); a policy with no value is accepted. An untouched cell is recognised by what was exported (`bils`),
   so an old CSV does nothing after a `move` or `set`.
@@ -549,7 +581,7 @@ Nothing has been deleted. Next: filo delete
 
   Lengthening: `Done   bills is 10y · 2 files updated`. `filo update` naming new policies: a `New policies   2 ·
   bils, payslip` block with a line per policy and its rows, "they have no value yet: their files need a retention
-  until filo policies set NAME VALUE", then `Create 2 policies? [y/N]` (`testdata/update-policies.txt`). `move` asks
+  until filo policies set NAME VALUE", then the update's one question (`testdata/update-policies.txt`). `move` asks
   `Move 1 file from bils to bills (3y)? [y/N]` and ends `Next: filo policies remove bils, now it has no files`; `add`
   is `Added   bills · 7y`; the report's Retention section ends with `! 4 policies, 1 needs
   attention (filo policies)` when there are policies (`·` when none needs attention), even with no files.
@@ -564,7 +596,7 @@ Nothing has been deleted. Next: filo delete
   | scenario | outcome |
   |---|---|
   | A1 a CSV names a new policy, confirmed | created with no value; its files need a retention |
-  | A2 declined, or no terminal | those rows left alone, counted in the summary |
+  | A2 declined, or no terminal | nothing recorded, not even the other rows |
   | A3 `Bills`, `7y`, `forever`, `2030-12-31`, `bills!` in the cell | the policy bills; a period; forever; a date; the row refused |
   | A4 `policies add` an existing name, or `forever` | refused |
   | B1 `bills` (7y) on a row with a file_date | keep_until is file_date plus 7 years |
@@ -701,7 +733,7 @@ Dry run: nothing was changed.
 $ filo rules add <root>/bank *Statement* statements
 Done   bank . *Statement* -> statements (7y) . policy set on 3 files . 3 need a file_date . <root>
 
-Next: filo export retention <root>/bank -o FILE, fill in file_date, then filo update FILE
+Next: filo export <root>/bank -o FILE, fill in file_date, then filo update FILE
 
 $ filo rules add <root>/bank *bank* banking
 Done   bank . *bank* -> banking . policy set on 1 file . <root>
@@ -756,7 +788,7 @@ Removed   bank . *bank* -> banking
 
 ```
 $ filo scan (four new files)
-Scan   scan 2 . 11 files seen . <took> . <root>
+Scan #2   11 files seen . <took> . <root>
 
   - 4 new
   - 3 given a policy by rules
@@ -783,7 +815,7 @@ Retention   …
   …
   [!] 1 not given a policy: two rules match it equally
     bank/new-2024-bank.pdf   rules of bank: *2024*, *bank*
-    Next: filo export retention [DIR] -o FILE, then filo update FILE, or filo rules add DIR POLICY
+    Next: filo export [DIR] -o FILE, then filo update FILE, or filo rules add DIR POLICY
 ```
 - **Register (schema version 10)**: `rules` (id, root, directory relative to the root, empty for the root itself,
   pattern as typed, its length (column `letters`: every character but `*`; a `?` counted from 2026-11-17), policy, when
@@ -819,7 +851,11 @@ Retention   …
   | G1 the upgrade from schema 9 | table and columns created, nothing else changes |
 
 ### Disposal
-Package `internal/dispose`, the only code that deletes the user's files.
+Package `internal/dispose`, the only code that changes the user's files: deleting them from `filo delete`, and
+renaming or moving them within their root from `filo update`, making the directories a move needs (see Tags,
+"Renaming a file by its `name` cell" and "Moving a file by its `directory` cell"). A test
+(`TestOnlyDisposeChangesUserFiles`) fails on any call that removes or renames on the disk anywhere else, but in the
+three files that handle only Filo's own files: the register's snapshots, an `-o` output file, and a tag index's pages.
 
 - **Deletion is permanent.** No quarantine and no recycle bin: the bin can fill up with large files, and is
   missing on network disks; backups are what make a deletion recoverable. (The private directory a file passes
@@ -953,7 +989,7 @@ rules, the listing before the question and the check at the moment of deleting b
   deciding and deleting, so a second export never disagrees with a first, and an old CSV is safe to run: a group is
   acted on only if its files are still exactly as exported. The only duplicates state stored is what is meant to
   exist: excluded directories, contents *always*, and sets of *records* (below). Setting a retention stays a separate
-  step (`filo update` on a retention CSV), since it never deletes: deletes happen later.
+  step (`filo update` on a combined CSV), since it never deletes: deletes happen later.
 - **A group** is a content (hash) held by two or more *copies*: present regular files, size above zero, not deleted,
   not under an excluded directory, the content not *always*, and not all members of one set of records. Hard links
   (same inode in the same root; a root never leaves its filesystem) are one copy: two paths to one file are not a
@@ -980,7 +1016,7 @@ rules, the listing before the question and the check at the moment of deleting b
   left out entirely: filo duplicates exclude DIR" (see Output, below). Expected to be used rarely, mainly for backups.
 - **`filo export duplicates [DIR] -o FILE [--no-scan] [--workers N]`** writes every group with at least one copy under DIR, and all of that
   group's copies, also those outside DIR (the copy to keep may live elsewhere), so exports of different directories
-  can overlap. One row per copy, groups numbered in order of their first path. Same CSV rules as the retention CSV
+  can overlap. One row per copy, groups numbered in order of their first path. Same CSV rules as the combined CSV
   (byte order mark, formula guard, `-o` required, mode 0600, an existing file replaced only after asking). Columns: `id, export, group, copies,
   directory, name, size, modified, file_date, retention, keep_until, action`. `copies` is the group's size, so a
   filtered view shows when copies are hidden. The retention columns are display only. `export_rows` records each
@@ -1029,7 +1065,7 @@ rules, the listing before the question and the check at the moment of deleting b
   deleted, so by then every copy's retention has passed.
 - **`filo delete FILE.csv [-y]`**, in order:
   1. Read the CSV: a CSV from the first design (a `delete` column) is refused ("this CSV is from an older export:
-     export again"); a retention CSV is refused; each group's values and structure are checked. A row not in its
+     export again"); a combined CSV is refused; each group's values and structure are checked. A row not in its
      export, or whose `group` is not the export's group for that file (its `group` edited, pasted from another
      export, added or duplicated), refuses both groups it touches; the other groups are still processed, and the
      output advises a new export. Sorting is fine: groups are found by each row's `group` cell, not by row order. A file in groups of two exports (overlapping
@@ -1171,10 +1207,10 @@ Nothing to include   <root>/Documents/notes.txt
 
 ```
 $ filo export duplicates
-Scan   scan 4 . 4 files seen . under 0.1 s . <root>
+Scan #4   4 files seen . under 0.1 s . <root>
   [ok] no changes
 
-Duplicates export   export 2 . 1 group . 2 copies . <root>
+Export #2 (duplicates)   1 group . 2 copies . <root>
 
   - in each group: keep for the copy to keep, delete for the rest; always on every row if the content belongs everywhere
   - keep on two or more copies: they are kept as separate files, each with its own retention
@@ -1294,8 +1330,8 @@ the tool for many). Replaces "Later b, setting dates in place".
 - **`filo set FILE... [--file-date DATE | --no-file-date] [--retention R | --no-retention] [--duplicates
   always|records|counted]`.** Several flags at once, in any order. A contradiction (`--file-date` with
   `--no-file-date`) or no flag at all is refused before anything is checked. All or nothing: if any file is
-  refused, nothing is written and every refusal is listed. The retention CSV's rules apply unchanged: a period needs
-  a `file_date` (stored, or given in the same command), so `--no-file-date` on a file whose retention is a period is
+  refused, nothing is written and every refusal is listed. The combined CSV's retention rules apply unchanged: a
+  period needs a `file_date` (stored, or given in the same command), so `--no-file-date` on a file whose retention is a period is
   refused; a new `file_date` works a period out again; past dates are accepted and listed with the hint to check for
   a typo; clearing asks first (or `-y`); no date is read from the file name (the CSV only suggests one where the
   person sees it). Recorded as a review batch, like an update. `--duplicates` is about the content, not the one
@@ -1319,7 +1355,7 @@ the tool for many). Replaces "Later b, setting dates in place".
       size        184 KB
       modified    2022-02-03 09:14   unchanged since the last scan (2026-11-20)
       sha256      3f9a1c0e8b2d47f6a9e0c5d1b7a3f2e8c4d6b0a9e1f3c5d7b9a2e4f6c8d0e21e
-      first seen  2026-11-12 (scan 3)
+      first seen  2026-11-12 (scan #3)
       moved from  ~/Documents/inbox/british-gas.pdf   2026-11-12 to 2026-11-13   ... 2 more: --history
     Retention
       status      kept
@@ -1447,8 +1483,10 @@ the tool for many). Replaces "Later b, setting dates in place".
   ```
 
   A file left past its retention is listed after `Done` with the update's typo hint ("Check for a typo, such as 7d
-  for 7y"), then "Nothing has been deleted. Next: filo delete". Clearing (`--no-retention`) asks in the same shape,
-  adding "they will need a retention again". `--duplicates` names the content and every copy it covers:
+  for 7y"), every one of them (the update, from a CSV, shows the first ten in a terminal; `filo set` is a command
+  naming its files, so it shows every file it affected), then "Nothing has been deleted. Next: filo delete".
+  Clearing (`--no-retention`) asks in the same shape, adding "they will need a retention again". `--duplicates`
+  names the content and every copy it covers:
 
   ```
   Done   always . 1 content . applies to 3 copies
@@ -1544,7 +1582,8 @@ file contents (see `roadmap.md`, Rejected, "Building search"); tags add `--tag` 
 - **Exit status**: 0 when it searched, matches or none (a script tests for empty output; exit 1 means something
   went wrong, as everywhere in Filo); 1 on an error, a root that failed to scan, or a piped name changed by
   escaping; 2 on a usage error.
-- **Read-only on the files**, like every command but `filo delete`; it writes the register only through its scan.
+- **Read-only on the files**, like every command but `filo delete` and `filo update`'s renames and moves; it writes
+  the register only through its scan.
 
 ### Tags
 Roadmap item 18a, designed with the person on 2026-11-19/20 (see `roadmap.md`, Direction, the goal: finding files by
@@ -1660,24 +1699,177 @@ so files can be found by tag; a project is a tag (`project:house sale`).
   each link as a file of its own, each with its own tags: `find` takes the tags of all its links together, so a file
   tagged through one link is tagged. `filo show FILE` has a Tags part: how many, then one tag a line (or `none`), so
   a tag named `none` cannot be mistaken; a file deleted by Filo shows the tags it had, `as when it was deleted`.
-- **The tags CSV**: `filo export tags [DIR] -o FILE [--no-scan] [--workers N]`, a scan first as every export, and
-  read back by `filo update FILE [--dry-run] [-y]`, which tells it from a retention or duplicates CSV by its header.
-  Columns: `id, export, directory, name, size, modified, tags`; every present file under DIR (every root with no
-  DIR). The `tags` cell holds the file's tags, separated by `; `, in the order `filo tags` lists them. **The cell
-  replaces the file's tags:** a tag not in it is removed, so an untouched cell changes nothing and an emptied one
-  removes all. Cells are read with the spelling rules, so `type:Bill` on a file tagged `type:bill` changes nothing
-  (the first spelling stays: `filo tags rename` changes it), and a tag typed twice is one. A cell left as exported
-  is no decision, whatever happened to the file since, and a cell with the tags the file has already changes nothing
-  (a CSV applied twice). A row whose file's tags changed since the export (by `tag`, `untag` or `tags rename`) to
-  others than the cell's is refused, as a changed file is for retention, and so are a row with a tag that breaks the
-  spelling rules, a file deleted by Filo since, and a file listed twice (even under two exports); the other rows still
-  apply. A cell that starts with a character a spreadsheet would read as a formula (`=`, `+`, `-`, `@`), or with an
-  apostrophe, is written after an apostrophe, which the update drops. An update that removes tags lists those rows
-  and asks first (`Remove them? [y/N/l]`), as clearing a retention does, since an emptied column (a spreadsheet that
-  lost it on a save) would remove every tag at once. `-y` answers yes, for a script (the person's decision,
-  2026-11-22); it answers only this question, so `filo update -y` of a retention CSV is a usage error (clearing a
-  retention has no `-y`). No, or no terminal and no `-y`, leaves those rows as they were; the other rows are
-  recorded either way. Ctrl-C at the question records nothing.
+- **The combined CSV** (decided 2026-11-27): `filo export [DIR] -o FILE [--no-scan] [--workers N]`, with no word
+  after `export`, writes every column a person edits in one CSV, so a tag seen while dating files, or a date seen
+  while tagging, is set in the same pass: `id, export, directory, name, size, modified, file_date, retention,
+  keep_until, tags`. A scan of DIR (or every root) first, every present file (see Lifespan), the `!` mark on a
+  `file_date` read from the name, the formula guard, `-o` asked about if it exists. The export is recorded as kind
+  `files`; each row keeps the hash, `file_date`, `retention`, `keep_until` and the tags cell as exported (no schema
+  change: `exports.kind` is text). It replaced the retention CSV (`filo export retention`) and the tags CSV (`filo
+  export tags`), each with half its columns, which were removed on 2026-11-27 (roadmap 40) once it had been used.
+  - **The `tags` cell** holds the file's tags, separated by `; `, in the order `filo tags` lists them. **The cell
+    replaces the file's tags:** a tag not in it is removed, so an untouched cell changes nothing and an emptied one
+    removes all. Cells are read with the spelling rules, so `type:Bill` on a file tagged `type:bill` changes nothing
+    (the first spelling stays: `filo tags rename` changes it), and a tag typed twice is one. A cell left as exported
+    is no decision, whatever happened to the file since, and a cell with the tags the file has already changes
+    nothing (a CSV applied twice). A row whose file's tags changed since the export (by `tag`, `untag` or `tags
+    rename`) to others than the cell's is refused, as a changed file is for retention, and so are a row with a tag
+    that breaks the spelling rules and a file deleted by Filo since. A cell that starts with a character a
+    spreadsheet would read as a formula (`=`, `+`, `-`, `@`), or with an apostrophe, is written after an apostrophe,
+    which the update drops. A symlink's row has an empty `tags` cell, and tags typed in it are refused, as `filo
+    tag` refuses a symlink ("give the file it points to").
+  - **Read back by `filo update FILE [--dry-run] [-y]`**, which takes a CSV with `id`, `export`, `retention` and
+    `tags` columns. Each row is checked with the rules of both halves: the retention half as described under
+    Lifespan and Retention CSV columns (file_date, retention, the `!` mark, keep_until left alone, the file unchanged
+    since the export, a newer decision not overwritten), the tags half as above. **A row refused by either half is
+    refused whole**, with each reason, so a file never ends up half updated; the other rows still apply. A file
+    listed twice (even under two exports) is refused every time it appears. A row from another kind of export is
+    refused. A CSV whose rows name `files` exports but which has lost its `retention` or its `tags` column (deleted
+    or renamed in the spreadsheet) is refused as a whole, naming the column, since a lost `tags` column would
+    otherwise read as every tag removed.
+  - **One question, before anything is written.** If any row clears a stored retention, removes a tag, or names a
+    policy that does not exist yet, the update first lists them (the first ones of each, `l` lists all) and asks
+    once, `Apply the update? Nothing is recorded otherwise. [y/N/l]`, since an emptied column (a spreadsheet that
+    lost it on a save) would clear or remove everything at once. Yes records every row that was not refused,
+    in one transaction. **No, end of input, Ctrl-C, or no terminal: nothing is recorded**, not even the rows that
+    needed no question, and one line says why and how to go on; so an emptied column never half applies. With no
+    terminal (and no `-y`) the exit code is 1, so a script or timer can tell nothing was done (the person's
+    decision, 2026-11-27); a no typed at the question is the person's choice, exit 0. `-y`
+    answers yes, for a script (the person's decision, 2026-11-27: the same `-y` for clearing, removing and new
+    policies). An update with none of these asks nothing. `--dry-run` shows the same lists, asks nothing and
+    writes nothing.
+  - The output: `Update   FILE . export #N . R rows . <root>`, then the counts (files given a retention, files put
+    on a policy with no value yet, retentions cleared, files whose tags changed, rows unchanged, rows refused, and
+    the policies created), the files whose tags changed, the refused rows, and the files left past their retention
+    with the hint to check for a typo.
+- **Renaming a file by its `name` cell** (decided 2026-11-27, roadmap 39; schema version 13). In the combined CSV, a
+  `name` cell changed from what was exported asks for the file to be renamed in its own directory; no second column.
+  This is part of the export and bulk update, not a clone of `mv`: Filo has no command that moves or copies files. It
+  is one of the two ways Filo changes the person's files, beside `filo delete` (a move by the `directory` cell is the
+  same way), and is done by
+  `internal/dispose` with the same machinery (inside its root, through the opened directories, never by path).
+  - **A change is the cell compared with the cell as exported** (`export_rows.name`; the row also keeps the path
+    shown, `path_id`, so a file moved since is told), so the formula guard
+    (`'=odd.txt`) left alone is no change. As in the tags cell, a name that starts with `'` itself is written after
+    another `'` in the combined CSV, so on a change one `'` before `=`, `+`, `-`, `@`, tab, CR or `'` is dropped from
+    the new cell and the name is always read back as typed. A row of an export made before schema 13 has no
+    exported name: a changed cell is refused, "export again". A changed `directory` cell is a move (below).
+  - **The new name must be one plain name the next scan sees as the same file in the same place.** A changed cell is
+    refused, with one line saying why, when:
+
+    | `name` cell, edited | Result |
+    |---|---|
+    | `Britsh Gas bill.pdf` → `British Gas bill.pdf`; `bill.pdf` → `Bill.pdf` | renamed |
+    | `notes.txt ` → `notes.txt` (a space at the start or end added or removed) | renamed, noted in the summary |
+    | a name holding `/`, or empty, `.` or `..` | refused: one name in the same directory |
+    | `.notes` → `notes`, or `.bashrc.bak` → `.bashrc.old` (a hidden file, in a root that includes hidden files) | refused: a hidden file is never renamed or moved |
+    | `bill.pdf` → `.bill.pdf` | refused: a rename never hides a file |
+    | a name starting `.filo-delete-`, or the path of one of Filo's own files there (a tag index's `NAME.html` or `.NAME`, the database and its companions), which no scan records | refused: Filo's own |
+    | a name the root ignores (`--ignore`) | refused: the next scan would lose it |
+    | a control character (tab, newline, escape) in it | refused |
+    | more than 255 bytes | refused (the filesystem's limit) |
+    | an old name that is not valid UTF-8 (exported with U+FFFD), its cell changed | refused: its real name cannot be written back |
+    | two rows giving one directory the same new name | both refused |
+    | a new name another row's file has now (a chain or a swap, `a`→`b` and `b`→`c`) | both refused: "rename one at a time" |
+    | a new name a registered file in that directory has | refused |
+
+  - **A hidden file is never renamed or moved by the CSV**, nor a file under a hidden directory: in a root that
+    includes hidden files, those are configuration (`.ssh/`, `.config/`), not files being sorted, and a CSV changed
+    between the export and the update (one saved in a synced or shared directory) could otherwise move a private key
+    from `.ssh/` into a synced directory, or a key a synced directory received into `.ssh/`. A changed `name` or
+    `directory` cell of such a file is refused, "rename or move it by hand"; its retention and tags are set as for any
+    file. A new path with a hidden name or directory on it is refused too, so the CSV never hides a file either.
+  - **The check at the rename** is that the file at the old name is still the very file the register knows, at the
+    name exported: through the opened directory, the same kind, inode, size and modification time as the last scan
+    recorded (for a symlink, its own). No re-hash: a rename keeps the content, and renaming a large file should not
+    read it; a changed file's typo is still a typo. A file whose register path changed since the export (moved,
+    renamed) is refused, "moved since export #N; export again"; one no longer present is refused. A file edited,
+    replaced or gone on disk since the last scan is skipped, "changed since the last scan; run filo scan and export
+    again". The rename is `renameat2(RENAME_NOREPLACE)` through the open directory, so a name taken on disk (by a file
+    not registered yet) is never replaced: skipped, "a file named X already exists". On a filesystem that ignores
+    case, a case-only rename can be seen as taken: skipped, "this filesystem ignores case; rename it by hand" (not
+    tested). On other platforms than Linux, which have no no-replace rename, renames are refused with one line
+    rather than risk replacing a file (untested). A directory Filo cannot write, or a root not mounted: skipped with
+    the reason. A hard link is renamed alone (its other names stay), as `mv` does; a symlink itself, never its target.
+    In a Syncthing folder it is an ordinary rename, which Syncthing passes on.
+  - **In the update.** Renames are checked, against the register and on disk, with the other rows before the one
+    question, and listed in its summary, so every rename asks (or needs `-y`); a fill-down on `name` shows there. After
+    yes, the register's changes (retentions, tags, policies) are recorded first, in one transaction, as without
+    renames; then each rename is checked again and done, and recorded straight after, so Ctrl-C between them leaves
+    an accurate record (it stops after the current one). A rename skipped then leaves its row's retention and tags
+    as recorded: they belong to the file, whatever its name. The exit code is 1 if any rename was refused or skipped.
+  - **Recording**, as a delete is: each root with a rename gets one `scans` row of kind `rename`; the old path
+    closes at it and the new one opens on the same file row, so retention, tags and history stay with the file; a
+    `moved` event says "renamed by filo update". The next scan finds the file at its new path, re-hashes it once
+    (a rename changes its ctime) and records no change.
+  - **Output.** The summary's renames part lists old and new names side by side under each directory, the first
+    ones (`l` lists all), with a note on a rename that may be an accident: one that changes only spaces at the start
+    or end; the extension (`2023 return.pdf` → `2023 return.pd`); or a
+    name a spreadsheet may have reformatted on saving, "looks reformatted by a spreadsheet", when the old name is all
+    digits (`0012` saved as `12`), a number (`1E5`, `1.50`) or a short date (`1-2`, `3.4.25`; a name cannot hold `/`). No note refuses
+    anything: a real rename of such a name stays possible (the person's decision, 2026-11-27). In that list a name that starts or ends
+    with a space is shown in double quotes (`"notes.txt "`), a `"` in a quoted name as `\"`; other lists keep
+    `\x20`. After the run: `N files renamed`, and the renames skipped, each with its reason, under "Skipped: run
+    filo scan, then export again" (the disk changed), and those that could not be made for a reason a scan does not
+    change (no permission, a filesystem that ignores case) under "Not renamed". A dry run says "would be renamed". If
+    the register cannot be written part-way, the run still shows what it did before the error, and how many renames
+    it did not try.
+- **Moving a file by its `directory` cell** (decided 2026-11-27, roadmap 42, in seven topics with the person). In the
+  combined CSV, a `directory` cell changed from what was exported moves the file there, within its own root; with
+  its `name` cell changed too, under its new name, in one move. It builds on the rename above (the same check, the
+  same no-replace `renameat2`, now between two opened directories, the same summary, question and recording), and is
+  done by `internal/dispose`.
+  - **Within the file's own root only.** Another root, and another filesystem (a copy then a delete, which would need
+    `filo delete`'s care), are not moves.
+  - **The cell** is an absolute path, as the export writes it: compared with the cell as exported (worked out again
+    from the path the export showed; for an export that recorded none, with the file's directory now, so a cell left
+    alone is still no change), as the name cell is; tidied of a doubled or trailing `/`; then it must be the file's root or a directory inside it. The root itself
+    moves the file to its top.
+
+    | `directory` cell | Result |
+    |---|---|
+    | as exported | no move |
+    | `/home/u/Documents/received/2026/11`, inside the root `/home/u/Documents` | moved (directories made as needed) |
+    | `/home/u/Documents//received/2026/11/` | tidied to `/home/u/Documents/received/2026/11`: moved |
+    | relative (`received/2026/11`), outside the root, or starting `~` | refused: "give the full path of a directory inside the root" |
+    | with `..` or `.` as a part | refused: never guessed at |
+    | a changed `directory` and `name` in one row | one move, to the new directory under the new name |
+
+  - **What the next scan must still see**, checked with the scan's own rule (`walk.SkipsPath`) for the new path and
+    with `OwnPaths` (only what changes is judged: the name only if it changes, and only the directories not on the old
+    path, so a file under a directory with an odd name can still move below it): no directory on it that the root ignores, or noise (`node_modules`, `__pycache__`); not inside
+    one of Filo's own paths (a tag index's `.NAME/`, the snapshot directory, a `.filo-delete-*` directory); a move
+    never hides a file (no hidden directory on the new path); each new directory's name as a new file name would be (no control
+    character, at most 255 bytes); not into a directory on another filesystem mounted inside the root (refused before
+    the question: no scan walks it, and no rename crosses filesystems).
+  - **Directories that do not exist yet** are made, inside the root: each listed in the summary as new before the
+    question (`received/2026/11/ (new)`), so a typo shows as a directory nobody expected; made just before the first
+    move into it, each step down from the root through the opened directory above it and checked to be a real
+    directory (never through a symlink); with the permissions `mkdir` gives (the umask). One the update made that no
+    move filled is removed again while empty.
+  - **What follows the file**: its row, so retention, tags, history and policy, as for a rename. Nothing is re-done
+    for the directory: a file with its own retention keeps it (no directory rule overrides it); one whose policy a
+    rule set keeps it, and does not switch to the new directory's rule; one with neither gets the new directory's
+    rule on the next scan, as any file arriving there. A tag index lists it wherever it is on its next refresh.
+  - **What it leaves behind**: nothing is removed. A directory the moves empty stays, unlike one `filo delete`
+    empties: a move is sorting, and the directory it empties is usually one files are dropped into again, such as an
+    `inbox/` cleared through the CSV (the person's decision). Only a directory the update made for a move that then failed is removed again (see above).
+  - **Collisions**, as for renames, by the new path: two rows moving files to one name in one directory, and a name
+    another registered file has there, are refused together; a chain is refused whole.
+  - **Edge cases**: a hard link moves only its own path; a symlink with a relative target is refused (it would point
+    elsewhere); a file that registered symlinks point to is moved (or renamed) with a note in the summary that they
+    would break; a file on another filesystem than its root's is refused before the question; on a filesystem that
+    ignores case, a directory cell spelled otherwise than the directory on disk is refused (the register would record a
+    path the disk does not have; not tested); a directory that cannot be written is listed under "Not renamed or
+    moved", exit 1.
+    Syncthing: a move inside one synced folder reaches the other devices as a rename; a move out of one into an
+    unsynced part of the root is a delete there, to be noted once synced directories are marked (roadmap 9a).
+  - **Output**: the summary's moves part lists each move by destination, from where, under its new name if that
+    changed (with the rename's notes), each new directory marked, and "only spaces in the directory changed" for a
+    cell that differs from the file's directory only by spaces at the start or end of a part; the result counts files moved and directories made;
+    a move not made is listed with why, as a rename is. A move that is also a rename counts as a move.
+  - **Recording**, as a rename's: the old path closes and the new opens on the same file row at the run's scan of
+    kind `rename`; the `moved` event says "moved by filo update".
 - **Register (schema version 11)**: a `tags` table on file ids (the key, the value as spelled and its folded form),
   and `tag_changes`, the history of every tag added or removed and by which command, so each change can be written
   to the journal later (9c) without rework. `export_rows` gain `tags`, the cell as exported.
@@ -1757,6 +1949,12 @@ on the person's phone opens the file).
   index, created only where nothing exists, replaced or removed only while still what Filo wrote, and a whole index
   removed only by `filo indexes remove`. `internal/tagindex` is the only code that writes or removes them. They are
   Filo's files, not the person's: `internal/dispose` stays the only code that deletes the person's files.
+  Every look, write, rename and removal goes through the directories opened from the index's directory down, as
+  `internal/dispose` reaches a file: the index's directory, `.NAME/` and each key's directory, each opened through
+  the one above it and checked to be a real directory (never a symlink) and the very one seen. A directory swapped
+  for a symlink while the pages are written (by another device syncing the directory) is then never followed, so no
+  page or temporary file lands outside the index's files. Only `filo indexes remove`'s list of what it will remove
+  looks by path: it changes nothing.
 - **When the pages are written.** At the end of every run that committed a change to the register (as the snapshot
   is, so no list of commands is kept), before the snapshot, and by `add` and `refresh`. A run that only read writes
   none. Data first (the person's idea): Filo builds each index's data, hashes it (with the version of the pages'
@@ -1768,15 +1966,19 @@ on the person's phone opens the file).
   replaced (filo indexes lists it)`, and exit 1; the command's own change stands, and the next run that changes what
   the index shows tries again. Only a fully written index records its new data hash, and `filo indexes` shows the
   problem until then.
-- **Rendering.** Go's `html/template`, with the templates and stylesheet embedded in the binary; no dependency and
-  no JavaScript. Not XSLT: Go has none (a cgo binding would be a dependency and break the static build, and
+- **Rendering.** Go's `html/template`, with the templates, stylesheets and the find page's script embedded in the
+  binary; no dependency. The static pages have no JavaScript; the find page has one script, written for it (below).
+  Not XSLT: Go has none (a cgo binding would be a dependency and break the static build, and
   `xsltproc` would have to be installed on every device), and `html/template` escapes each value for where it lands
   (text, attribute, link), as untrusted file names and tags need. Links are relative, each part of the path
   URL-encoded (`%20` for a space, so a `#` or `?` in a name cannot break one). The output is deterministic (sorted,
   no times), so syncing it makes no conflict copies.
-- **Pages.** Each has a trail at the top (`bills › sender › British Gas`).
-  - `NAME.html`: each key with its number of values and files; "other tags", the bare tags; and in a section of
-    its own, "11 files have no tags", linking to `.NAME/_untagged.html`.
+- **Pages.** `NAME.html` is the find page (below). The static pages are in `.NAME/`, for browsing one tag at a time
+  and as the fallback where a viewer runs no script; each has a trail at the top (`bills › sender › British Gas`),
+  whose first part opens the list of keys, and a "Find" link to `NAME.html`.
+  - `.NAME/index.html`: each key with its number of values and files; "other tags", the bare tags; and in a section
+    of its own, "11 files have no tags", linking to `.NAME/_untagged.html`. (Until roadmap 44, 2026-11-27, this was
+    `NAME.html`.) No key's directory is named `index.html`: a key holds no dot.
   - `.NAME/<key>/index.html`: the key's values, each with its number of files; and in a section of its own, "34
     files have no sender tag", linking to `.NAME/<key>/_none.html`. The bare tags have `.NAME/_/index.html`: a key
     has a letter, so none is named `_`. A key with a letter outside `a-z` (`café:`) has a directory named by a slug,
@@ -1791,10 +1993,61 @@ on the person's phone opens the file).
   - A tag can be spelled almost any way (`sender:no sender` is one), so the "no …" pages are told apart from tags
     by their place and wording, and by names no tag page has (`_` first; a slug never starts with one).
   - Each file row: its name (a link that opens the file), its directory, its date, and its other tags, each a link
-    to its tag's page. No size, retention, keep-until or duplicates: the pages are for finding files.
+    to its tag's page (on the find page, a tag adds itself to the selection). No size, retention, keep-until or duplicates: the pages are for finding files.
   - The files: regular files in the register, present now, under DIR at any depth, each path its own row (a hard
     link too); newest first by `file_date`, else modification time, then path. A link is as fresh as the last scan.
     Indexes nested in one another are independent.
+- **The find page** (roadmap 44, designed with the person on 2026-11-27), `NAME.html`: one page to find files by
+  several tags at once, by name, and by directory, instead of browsing one tag at a time (the person has about 100
+  tags). Indexes stay as they are (any number, on any directory, nested ones independent), and each find page covers
+  the files under its directory; the person keeps one at `~` on the laptop and one at the top of the synced
+  directory, opened on every device (desktop, laptop, iPad, iPhone and GrapheneOS, where a script was checked to
+  run from a local page). A synced directory's index is kept by one machine until decisions are shared (9c): two
+  registers would write two pages over each other.
+  - **Matching.** The selected tags of one key match either value (`sender:British Gas` or `sender:EDF`); tags of
+    different keys, and the bare tags, must all match. The directory filter and the search combine with them. The
+    search matches the file's name and directory, ignoring case. Counts narrow: only the tags still found among the
+    results are offered, each with its count among them, so a tap never leads to no files.
+  - **Picking tags.** One box at the top: as the person types, it suggests the matching tags (`sender:British Gas ·
+    12 files`), a tap adding one to the selection, and the text left searches names and directories. Below it, the
+    keys, collapsed, each with its number of values (`sender · 23 values`, "other" for the bare tags), opening to
+    its values still found, most files first. The selection is a row of removable chips above the results
+    (`sender: British Gas ×`, `in received/2026 ×`). The directory is chosen by drilling down from the index's
+    directory (`bills › received › 2026`), one directory at a time.
+  - **Results.** The file rows of the static pages, newest first, 200 at a time with "Show more", so a phone stays
+    fast with thousands of files. The selection and the search are kept in the address (`#tag=type%3Abill&dir=
+    received&q=gas`), so a search can be bookmarked; an address naming a tag the index no longer has ignores it.
+    A "Browse by key" link opens `.NAME/index.html`.
+  - **Preview.** Selecting a result previews it, with "Open" to open the file itself: an image (`jpg`, `jpeg`,
+    `png`, `gif`, `webp`, `heic`), a video or an audio file (`mp4`, `mov`, `webm`, `mp3`, `m4a`, `ogg`, `wav`) in
+    the page; a text file (`txt`, `md`, `csv`) in a frame with every script switched off (`sandbox`), as is
+    anything shown in a frame, so a file from the person's directories never runs in the index; a PDF in an embed
+    declared `application/pdf`, so the browser's own PDF viewer shows it and never reads it as a page (Chrome blocks
+    its viewer in a sandboxed frame: found in the code review, the person's choice, 2026-11-27); anything else, "No
+    preview". What the browser cannot show (a HEIC picture outside Safari, a video it has no codec for) switches to
+    "No preview" too, found by the element's load error, not by the browser's name. A pane beside the results on a
+    wide screen, the whole screen with Open and Close on a narrow one. A PDF in a frame would show only its first
+    page on iOS, so it stays an embed there too (its viewer may fetch it, below). Known gap, not checked on the
+    device yet: GrapheneOS's browser has no PDF viewer.
+  - **One file.** The data (as JSON), the script and its styles are all inside `NAME.html`, so nothing else has to
+    load (the form checked on every device); it is written again whenever the index's data changes, about 150 bytes
+    a file, deterministic as every page.
+  - **Untrusted names.** The data is written by Go's `encoding/json`, which escapes `<`, `>`, `&` and U+2028/9, so
+    no name or tag can end the script; each file's link is worked out in Go, with the static pages' encoding, and
+    used as given; the page is built with `createElement` and `textContent`, never by parsing HTML; the address is
+    read only as text to compare. A Content-Security-Policy meta tag allows only the page's own script and style
+    (by their hashes) and the person's local files for a preview (`img`, `media`, `frame`, `object`): the page never
+    loads a script, a stylesheet or anything else from the internet, so it works the same offline as online (the
+    person's reason for it), and even a mistake cannot send a name to any other origin. It also allows fetching
+    from the page's own origin (`connect-src 'self'`): Safari's PDF viewer fetches the embedded PDF, and without
+    it shows a white box. Where a viewer serves the page from a local web server (Textastic on iOS does), `'self'`
+    is that server, so a request with a name in it could reach that server, as `img-src 'self'` already allowed;
+    on a page opened as a `file:` URL, what `'self'` matches differs between browsers (not checked). The script
+    itself never fetches (a test checks it has no call that could).
+  - **Tests.** The script's logic (matching, counts, suggestions, directories, the address, the kind of preview) is
+    plain functions, tested with Node's own test runner (`node --test`, no packages), run from `go test`; Node is in
+    the dev container. The drawing code runs there too, on a small fake of the DOM. What only a browser shows (the
+    page itself, the preview) is checked by hand.
 - **Look.** One local stylesheet, `.NAME/style.css`: system fonts and nothing remote (it works offline), a viewport
   meta tag, one column, rows as cards on a narrow screen, tap targets of at least 44px, tags as chips, dark mode by
   `prefers-color-scheme`.
@@ -1804,11 +2057,11 @@ on the person's phone opens the file).
 
 ### Commands and scheduling
 - Plain names, easy to remember: `roots`, `scan`, `report`, `export`, `update`, `delete`, `duplicates` (added
-  2026-11-16, see Duplicates), `policies` and `rules` (both 2026-11-16, see Lifespan), `show` (2026-11-21, see Showing and setting a file's
-  details), `find` (2026-11-21, see Finding files), `tag`, `untag` and `tags` (2026-11-22, see Tags), `indexes`
-  (2026-11-22, see Tag index pages). No
-  themed subcommands. There is no `restore`: a file restored from a backup comes back as a new file. "Update" says
-  that only existing files change; `filo review` only says it was replaced by `export retention` and `update`.
+  2026-11-16, see Duplicates), `policies` and `rules` (both 2026-11-16, see Lifespan), `show`, `set` and `get` (2026-11-21, see Showing and
+  setting a file's details), `find` (2026-11-21, see Finding files), `tag`, `untag` and `tags` (2026-11-22, see
+  Tags), `indexes` (2026-11-22, see Tag index pages), `completion` (2026-11-28, see Bash completion). No themed
+  subcommands. There is no `restore`: a file restored from a backup comes back as a new file. "Update" says
+  that only existing files change; `filo review` only says it was replaced by `export` and `update`.
 - **Keep flags and options to a minimum** (2026-11-11). Prefer a safe default and clear output over a flag; prefer
   doing the obvious thing and saying what was done over asking.
 - **Output cannot act on the terminal** (2026-11-13). File names can hold any byte but `/` and NUL and come from
@@ -1822,15 +2075,19 @@ on the person's phone opens the file).
   and then adds only its own colour codes; it is the only way to stdout, and stderr has one too, `errorLine` (each line
   escaped, `filo: ` before it), besides the progress line's own control codes. The one exception is `filo find -0`,
   a NUL-separated list of names for a tool, written as they are by the Renderer's raw path writer and refused when
-  stdout is a terminal (see Finding files). A test
+  stdout is a terminal (see Finding files); and the candidates of `filo __complete`, for bash, also written raw by the
+  Renderer and never to a terminal, each without a control character (see Bash completion). A test
   (`TestOutputGoesThroughTheRenderer`) fails on any other write in the CLI (see Help and errors). Trailing alignment is
   dropped from a line, but a space that ends a file name is shown as `\x20` (2026-11-16, from the code review), so
   `report ` and `report` never read the same; and a relative path that starts with `~` (a directory named `~` inside a
   root) is shown as `./~/…`, so it never reads as a path in the home directory. The CSV export guards against
   spreadsheet formulas separately.
 - **Prompts only in a terminal** (2026-11-12, replacing "no interactive prompts"). A command asks only where a person
-  should look first: `filo update` before clearing dates or removing tags, and `filo delete`. Declining, or having no
-  terminal on standard input, is always the safe choice, so Filo still works the same from a script or a timer.
+  should look first: `filo delete` and `filo indexes remove` before removing anything; `filo update` before clearing
+  retentions, removing tags, creating policies, or renaming or moving files; `filo set` before replacing a stored
+  value; `filo policies set` and `move` before putting files past their retention or leaving them without a
+  `file_date` to count from; and any command before replacing an existing `-o` file. Declining, or having no terminal
+  on standard input, is always the safe choice, so Filo still works the same from a script or a timer.
 - `filo roots` lists roots (settings, mount point, files, size, last scan); `filo roots add DIR [--include-hidden]
   [--ignore NAME]... [--no-scan]` registers one and scans it (absorbing any roots inside it on the same filesystem,
   see Roots); `filo roots set DIR [--include-hidden | --skip-hidden] [--ignore NAME]...` replaces its settings.
@@ -1839,14 +2096,15 @@ on the person's phone opens the file).
   unmounted) is reported in its place on stdout (see Terminal output, Scan and roots) and the others are still
   scanned. `--workers` is 1–64, default 4.
 - `filo report [--top N]`: see section 4.
-- `filo export retention [DIR] -o FILE [--no-scan] [--workers N]` and `filo update FILE [--dry-run]`: see Lifespan. Every export
+- `filo export [DIR] -o FILE [--no-scan] [--workers N]` and `filo update FILE [--dry-run] [-y]`: the combined CSV,
+  see Tags and Lifespan. Every export
   scans first unless `--no-scan` is given (see Lifespan, "A scan first"), with `--workers` as for `filo scan`
-  (refused with `--no-scan`). The word after `export`
-  names the CSV, so a later CSV is a new word, not a new command; `update` tells the kind from the CSV's header.
+  (refused with `--no-scan`). A word after `export` names another CSV (`duplicates`, see Duplicates), so a later CSV
+  is a new word, not a new command, and no word is the combined CSV (2026-11-27); a directory named `duplicates` is
+  given as `./duplicates`. `update` tells the kind from the CSV's header.
 - `filo find [DIR] [--name PATTERN] [--tag TAG]... [--no-tag TAG]... [-0] [--no-scan] [--workers N]`: see Finding
   files and Tags.
-- `filo tag FILE... TAG...`, `filo untag FILE... TAG...`, `filo tags`, `filo tags rename OLD NEW`, and `filo export
-  tags [DIR] -o FILE [--no-scan] [--workers N]`, read back by `filo update`: see Tags.
+- `filo tag FILE... TAG...`, `filo untag FILE... TAG...`, `filo tags` and `filo tags rename OLD NEW`: see Tags.
 - `filo indexes`, `filo indexes add [DIR] [--name NAME]`, `filo indexes remove [DIR] [--name NAME] [-y]` and `filo
   indexes refresh [DIR] [--name NAME]`: see Tag index pages.
 - `filo delete [DIR] [-y]`: lists the files past their keep-until date and deletes the ones chosen (see Disposal).
@@ -1869,6 +2127,75 @@ on the person's phone opens the file).
   so timer and cron logs stay clean. Ctrl-C or SIGTERM cancels a scan; nothing is written and the lock is released.
 - Scheduling is left to the system: a systemd user timer running `filo scan` is enough (the README has an example,
   not yet tested). No daemon.
+
+### Bash completion
+
+Agreed 2026-11-20, designed 2026-11-28 (roadmap 36). Tab completes Filo's commands, flags and arguments in bash.
+
+- **Loading it.** `filo completion bash` prints the script and writes nothing. The README shows two ways: `source
+  <(filo completion bash)` in `.bashrc` (always current, run at each shell start), or the output saved once to
+  `~/.local/share/bash-completion/completions/filo`, which the `bash-completion` package loads on the first Tab
+  (written again after an upgrade that changes commands). Filo never edits `.bashrc` itself (hard rules);
+  `scripts/install.sh`, which the person runs, adds the `source` line (see Language and environment, "Build and
+  install"). Bash only
+  (zsh can load bash completions); no framework (Cobra would be a dependency and a rewrite of every command's
+  parsing).
+- **The script stays a few lines.** On Tab it runs a hidden `filo __complete LINE WORD` with the command line up to
+  the cursor (`${COMP_LINE:0:COMP_POINT}`, so Filo never has to know whether bash counts the cursor in characters or
+  bytes) and the word bash will replace (`$2`), reads the answer with `mapfile` (never through
+  word splitting or globbing), and sets `COMPREPLY`. Filo works out the arguments itself, quotes and backslashes
+  included, so bash's split of words at `:` and `=` never mangles `sender:Bri`, and the `bash-completion` package is
+  not needed. The answer's first line is how bash should treat it: `files` (bash quotes the candidates itself, shows
+  only their last part in a list, adds `/` after a directory and a space after a file) or `words` (Filo has quoted
+  them, `sender:British\ Gas`, or inside a quote already opened, and ends a finished word with a space; a key,
+  `sender:`, and a directory, `bills/`, end without one, so typing goes on). A candidate holding a control character
+  is left out: it cannot be typed, and would break the line protocol; so is one holding `!` inside an open double
+  quote, where an interactive bash expands it as history and no backslash stops it. An answer with a directory only
+  the register knows (missing, or deleted) is in words mode: in files mode bash, not finding it on disk, would end
+  it with a space, not its `/`. File names are matched in their case, tags in any case. A path is read with its
+  symlinks resolved, as the register keeps paths (a directory deleted since: the part still on disk resolved), and
+  written as typed, from `~/` or the current directory even when those are reached through a symlink. `--db=PATH`
+  and `-o=PATH` are taken as the shell passes them, with no `~` expanded (none is offered there); `~` offers nothing
+  when there is no home directory.
+- **The help is the list of flags.** Completion reads `internal/cli/help.go`: each usage line says which subcommand
+  takes which flags and arguments (`set FILE... [flags]` and `get FILE... --FIELD...` take their command's whole flag
+  list), and the placeholder words say what to complete. `TestHelpListsTheRealFlags` captures the flags each command
+  really defines (a hook where commands parse their flag set) and fails if a usage line names a flag its command does
+  not define, or if a command's flag list is not exactly the flags it defines, so neither completion nor the help can
+  drift from the code. (A usage line may name fewer flags than its set holds: `policies`, `rules` and `indexes` share
+  one set between subcommands and refuse a flag given to the wrong one with their own message, `-y is for indexes
+  remove`.) It found `roots add --workers` missing from the help, now listed.
+- **What each argument completes.** Each placeholder word has a default source, with overrides for the subcommands
+  that act on something registered; a test checks every placeholder of every usage line has one. Defaults: `DIR`
+  directories inside the roots, from disk (and the directories on the way to a root); `FILE` of `set` and `get`, and
+  `PATH` of `show`, files from the register merged with the disk; `TAG` tags; `POLICY`, `--retention` and the `NAME`
+  of `policies set`, `move`, `remove` and `show` policy names; `-o FILE` and `--db PATH` plain file names; nothing for
+  `N`, `VALUE`, `DATE`, `rules add`'s `PATTERN`, `find --name`, `--ignore NAME` and `policies add NAME` (a new value).
+  Overrides: `roots add DIR` any directory; `roots set DIR` the roots; `update FILE` `.csv` files; `delete`
+  directories and `.csv` files; `indexes remove` and `refresh` directories with an index, and their `--name` that
+  directory's index names; `rules set` and `remove` directories with rules, then their patterns; `rules move` and
+  `copy` OLD directories with rules, NEW directories inside the roots; `duplicates include PATH` what `filo
+  duplicates` lists; `policies move` policy names for both; `tags rename` OLD tags and `key:` in use, NEW tags in use
+  (to merge); `--duplicates` always, records or counted; `help` the commands. Hidden entries are offered only once
+  the typed name starts with `.`, as bash does.
+- **Tags.** Matching ignores case, and offers the spelling in use. In two steps: a key completes to `key:`, then that
+  key's values in use; bare tags beside the keys; all from the register. `filo tag FILE... TAG...` follows the
+  command's rule (a word on disk is a file, the first that is not starts the tags): files on disk and tags while every
+  earlier word is a file, only tags after the first tag; files on disk only, since a file not on disk would be read
+  as a tag. `untag` offers only the tags the files named have, and `key:` for each of their keys.
+- **Read only, and fast.** Every Tab runs `filo __complete`, so it must feel instant (under about 50 ms on a large
+  register). It opens the register read only: never upgrades the schema, never creates a database or a directory,
+  takes no lock, waits for nothing (WAL lets it read beside a running scan), writes no snapshot; a register that
+  cannot be read, or has another schema version, gives completion from the disk alone, never an error. It prints
+  nothing on stderr and honours a `--db` typed on the line, then `FILO_DB`. Paths complete one level at a time, as
+  bash completes file names, by range queries on the `(root_id, path)` index of current paths, one per entry (not
+  `LIKE`: names hold `%` and `_`). Files not present (missing, or deleted by Filo) complete too, from the hundred
+  such paths in that directory registered last: no index covers them, so the table is read from its newest row back
+  and the read stops there (a benchmark, 120,000 files, 20,000 not present: about 11 ms at the top of the root, 14
+  ms deep in it, 1.5 ms of it for the current paths; timed by hand on a throwaway tree of 100,000 files, a whole
+  `filo __complete` run, start-up included, takes about 18 ms for a path and 3 ms for a tag). Tags and policies are
+  read whole, the tags without the counts `filo tags` shows (`TagsInUse`: those read every file, 95 ms on that tree). No cap on
+  matches: bash asks before showing thousands.
 
 ### Terminal output
 The terminal is treated as a UI: output is built from components, so files, groups, problems and prompts look the
@@ -1943,16 +2270,18 @@ command's output with them. The examples here are excerpts of them.
   grouped by root; wrapping; `… N more`), `Table`, `Groups` and `HeadedTable`, `Dup` and `Dups` (a `DupGroup`:
   `contract.pdf · 8 MB each` with its keep and delete lines and symlink notes), `Problems` (line, file, reason and
   what to do; repeats collapsed), `Ask` and `Choose` (prompts), `Item` and `ItemPath` (a select-mode item and its
-  result), `Paragraph` and `Terms` (help), `PathLines` and `RawPaths` (`filo find`'s lists for a pipe), and `Next`. Commands build the
+  result), `Paragraph` and `Terms` (help), `PathLines` and `RawPaths` (`filo find`'s lists for a pipe), `Renames` and `Moves`
+  (an update's renames and moves), `Completions` (bash completion's answer, written raw, never to a terminal), and
+  `Next`. Commands build the
   data and hand it to components; they never format output themselves or decide plain or rich, relative or full
   paths. Each component writes whole lines, one write per line.
-- **Scope: every command** (roots, scan, report, export, update, delete, help and errors).
+- **Scope: every command**, help and errors included.
 
 Examples, from the golden files (plain form, as when piped; `<root>` is the test's root directory; what the person
 typed at a prompt is not echoed):
 
 ```
-Retention update   r.csv . export 1 . 4 rows . <root>
+Update   r.csv . export #1 . 4 rows . <root>
 
   [ok] 2 files given a retention
   [refused] 2 rows refused
@@ -1969,7 +2298,7 @@ Nothing has been deleted. Next: filo delete
 ```
 
 ```
-Duplicates   d.csv . export 1 . 5 groups . <root>
+Duplicates   d.csv . export #1 . 5 groups . <root>
 
 Will delete   2 copies in 1 group . 16 B
     contract.pdf . 8 B each
@@ -2073,7 +2402,7 @@ Done   deleted 1 file . freed 5 B . removed 1 empty directory
 
 ```
 $ filo scan
-Scan   scan 2 . 4 files seen . <took> . <root>
+Scan #2   4 files seen . <took> . <root>
 
   - 2 new
   - 1 changed
@@ -2103,14 +2432,14 @@ Next: filo report
 
 ```
 $ filo scan docs
-Scan   scan 3 . 0 files seen . <took> . <root>, under docs/
+Scan #3   0 files seen . <took> . <root>, under docs/
   [ok] no changes
 
 $ filo scan (one root unmounted)
 Scan   <work>/disk
   [refused] not scanned: the root looks unmounted (<work>/disk is not mounted)
 
-Scan   scan 5 . 4 files seen . <took> . <root>
+Scan #5   4 files seen . <took> . <root>
   [ok] no changes
 
 Done   2 roots . 1 scanned . 1 failed
@@ -2127,7 +2456,7 @@ Roots   5 files . 17 B . 2 roots
     never scanned
   <root>   5 files . 17 B
     hidden files skipped . ignoring build
-    last scan 4, <time>, whole root: 4 seen, new 2, changed 0, moved 0, missing 0, errors 0
+    last scan #4, <time>, whole root: 4 seen, new 2, changed 0, moved 0, missing 0, errors 0
 ```
 
 ```
@@ -2142,7 +2471,7 @@ Took in 4 roots, with their history and retentions
   - my docs   had other settings (hidden files included): these apply now
 Next: filo roots set <root> --include-hidden --ignore build, to scan .config again
 
-Scan   scan 4 . 4 files seen . <took> . <root>
+Scan #4   4 files seen . <took> . <root>
   - 2 new
 
 Next: filo report
@@ -2165,35 +2494,42 @@ Next: filo scan <root>
   `Next:` lines: hiding the scan's would hide where its findings are listed.
   With `--no-scan`, no scan block, and a `·` line in the export block: `not scanned first: as of the last scan,
   <when>`.
-- **`filo export retention`**: a heading, `Retention export`, with the export number (the one `filo update`
-  refers to), the number of files and the place (`~/Documents, under tax/`, as everywhere); a count line of files
-  without a retention and with one (`·`); a `!` line when file_dates were filled in from file names, since a wrong
-  guess moves every period counted from it; then `Next:` with the forms a retention takes and the `filo update`
-  command. The CSV's path appears once, in that `Next:` line, in full and quoted when needed (see "Paths in a `Next:`
-  line"), not also on a "written to" line. The full explanation stays in `filo help export`. Nothing to export:
-  `Retention export   no files · <place>` and `Nothing exported.`
-- **`filo export duplicates`** has the same shape: `Duplicates export` with the export number, groups, copies and the
+- **`filo export`**: a heading, `Export #18`: the export number marked as an ID by `#` (the
+  one in the CSV's `export` column and `filo update`'s heading; one sequence for every kind of export), then the
+  number of files and the place (`~/Documents, under tax/`, as everywhere); count lines of files
+  without a retention and with one, and of files tagged and without a tag (`·`); a `!` line when file_dates were
+  read from file names, saying they are marked `!` and count only once it is removed; then `Next:` with the forms a
+  retention and tags take, the cells that rename or move, and the `filo update` command. The CSV's path appears
+  once, in that `Next:` line, in full and quoted when needed (see "Paths in a `Next:` line"), not also on a
+  "written to" line. The full explanation stays in `filo help export`. Nothing to export:
+  `Export   no files · <place>` (no number is used) and `Nothing exported.` A scan's heading names its
+  number the same way, `Scan #2`; an update's heading names the export it reads as a fact, `export #1`. Every
+  message that names an export or a scan writes its number the same way (`changed since export #3`, `first seen
+  2026-11-12 (scan #3)`, `last scan #4`), so one number never shows in two forms; only the CSV's `export` column
+  holds the bare number.
+- **`filo export duplicates`** has the same shape: `Export #2 (duplicates)`, groups, copies and the
   place; the rules of the `action` column as `·` lines (too long for the `Next:` line); `Next:` with the `filo delete`
   command (see Duplicates, Output). Copies in the heading count every copy in the CSV, also those outside DIR (a group
   comes with all its copies).
 
 ```
-$ filo export retention tax
-Scan   scan 2 . 2 files seen . under 0.1 s . <root>, under tax/
+$ filo export tax
+Scan #2   2 files seen . under 0.1 s . <root>, under tax/
   [ok] no changes
 
-Retention export   export 1 . 2 files . <root>, under tax/
+Export #1   2 files . <root>, under tax/
 
   - 2 without a retention, 0 with one
-  [!] 1 file_date filled in from the file name: check it before counting from it
+  - 0 tagged, 2 without a tag
+  [!] 1 file_date read from the file name, marked !: remove the ! to accept it
 
-Next: fill in retention (7y, 18m, forever or a date), then filo update <work>/l.csv
+Next: fill in retention (7y, 18m, forever or a date) and tags (key:value or a bare value, separated by ;), or correct a name or a directory, then filo update <work>/l.csv
 
-$ filo export retention empty
-Scan   scan 3 . 0 files seen . under 0.1 s . <root>, under empty/
+$ filo export empty
+Scan #3   0 files seen . under 0.1 s . <root>, under empty/
   [ok] no changes
 
-Retention export   no files . <root>, under empty/
+Export   no files . <root>, under empty/
 Nothing exported.
 ```
 
@@ -2201,7 +2537,7 @@ Nothing exported.
 
 ```
 $ filo export duplicates photos
-Duplicates export   no groups . <root>, under photos/
+Export (duplicates)   no groups . <root>, under photos/
 Nothing exported.
 ```
 
@@ -2213,6 +2549,11 @@ Nothing exported.
   well). Commands and flags keep two columns, a description that does not fit wrapping under its own column. The words
   stay as they are, regrouped under `Commands` and `Flags` with a usage line per command (the long report paragraph
   split into sentences). The overview ends with `Next: filo help COMMAND for a command's flags and rules`.
+  The help (`internal/cli/help.go`) is the one written list of every command's usage lines and flags: a flag added,
+  changed or removed in a command is changed in its help, in the same commit (its usage lines and its flag list, with
+  the placeholder word for a flag's value), as are the overview's lines when a command or subcommand changes.
+  `TestHelpListsTheRealFlags` fails when a command's flag list differs from the flags it defines (see Bash
+  completion, "The help is the list of flags"); the descriptions are kept by hand.
 - **Errors and warnings** stay on stderr, plain (no colour, symbols or `~`: they end up in logs and get copied, and a
   full path is unambiguous there), one line each, `filo: <message>` and `filo: warning: <message>`. A usage error is
   one line too, pointing at the command's own help, `filo: roots add takes exactly one DIR (see filo help roots)`;
@@ -2266,7 +2607,7 @@ $ filo roots add
 filo: roots add takes exactly one DIR (see filo help roots)
 ```
 
-## 3. Data model (schema version 12)
+## 3. Data model (schema version 13)
 
 The register as `internal/store/schema.go` creates it (`schemaSQL`), with the meaning of each column. Keep the
 interval history and the partial unique index.
@@ -2286,7 +2627,8 @@ CREATE TABLE roots (
 CREATE TABLE scans (
     id INTEGER PRIMARY KEY, started_utc TEXT NOT NULL, finished_utc TEXT,
     root_id INTEGER NOT NULL REFERENCES roots(id),
-    kind TEXT NOT NULL DEFAULT 'scan',  -- 'scan', or 'delete' for a delete run's record in a root
+    kind TEXT NOT NULL DEFAULT 'scan',  -- 'scan'; 'delete' for a delete run's record in a root, 'rename' for an
+                                        -- update's renames in a root (schema 13)
     scope TEXT NOT NULL DEFAULT '',     -- relative to root; '' = the whole root
     include_hidden INTEGER NOT NULL DEFAULT 0, ignores TEXT,  -- the root's settings when it ran
     files_seen INTEGER, new_count INTEGER, changed_count INTEGER, moved_count INTEGER,
@@ -2337,16 +2679,18 @@ CREATE TABLE exports (
     id INTEGER PRIMARY KEY, created_utc TEXT NOT NULL,
     path TEXT,                          -- the CSV written
     after_scan INTEGER REFERENCES scans(id),           -- the latest finished scan at export
-    kind TEXT NOT NULL DEFAULT 'retention');           -- 'retention' or 'duplicates'
+    kind TEXT NOT NULL DEFAULT 'retention');           -- 'files' (combined) or 'duplicates'; 'retention' and
+                                                       -- 'tags' in a register from before 2026-11-27
 CREATE TABLE export_rows (
     export_id INTEGER NOT NULL REFERENCES exports(id), file_id INTEGER NOT NULL REFERENCES files(id),
     hash TEXT,                          -- the content shown; the update refuses the row if it has changed
     keep_until TEXT,                    -- the date exported
-    file_date TEXT, retention TEXT,     -- as exported (file_date as filled in from the name; retention a
+    file_date TEXT, retention TEXT,     -- as exported (file_date as read from the name, marked !; retention a
                                         -- policy's name for a file on one); cells left as these are untouched
     dup_group INTEGER,                  -- duplicates exports: the group number in the CSV
-    path_id INTEGER REFERENCES paths(id),              -- duplicates exports: the path shown
-    tags TEXT,                          -- tags exports: the cell as exported
+    path_id INTEGER REFERENCES paths(id),              -- duplicates and combined exports: the path shown
+    tags TEXT,                          -- combined exports: the tags cell as exported
+    name TEXT,                          -- combined exports: the name cell as exported (schema 13)
     PRIMARY KEY (export_id, file_id));
 CREATE TABLE review_batches (
     id INTEGER PRIMARY KEY, created_utc TEXT NOT NULL,
@@ -2503,8 +2847,9 @@ and put another in its place). From the code review of the snapshots: Ctrl-C can
 a snapshot being written (milliseconds for a register of a few MB), and every run that writes copies the whole register
 (fine at a few MB; a scan that found nothing takes none since 2026-11-21). From the code review of 2026-11-13: a snapshot is renamed
 into place after a check that the name is free, and a program not taking Filo's lock could create that name in between
-and be overwritten (the directory is private to the user; an atomic no-replace rename needs `golang.org/x/sys`); and the
-directories on a deleted file's path are checked by name, not held open, so a directory swapped in the microseconds
-after the last look is followed. `filo find -0` writes file names unescaped (see Finding files): it is refused when
+and be overwritten (the directory is private to the user; the no-replace `renameat2` that renames and moves use is
+Linux-only, and snapshots do not use it). A directory on the path of a file being deleted, renamed or
+moved that is itself moved in the instant between the last look and the call is not caught: the file acted on is
+still the one checked, in the directory checked, wherever that has just been moved to (see Disposal). `filo find -0` writes file names unescaped (see Finding files): it is refused when
 stdout is a terminal, but a pipe that ends in one (`filo find -0 | cat`) shows the raw names, as `find -print0 | cat`
 does; a list of names for `xargs -0` has to be the names.

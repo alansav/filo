@@ -253,14 +253,6 @@ func (w *walker) dir(ctx context.Context, rel, abs string, d *os.Root) error {
 		w.opt.Seen.Add(int64(len(entries)))
 	}
 
-	hasProject := false
-	for _, de := range entries {
-		if de.Type().IsRegular() && isProjectFile(de.Name()) {
-			hasProject = true
-			break
-		}
-	}
-
 	for _, de := range entries {
 		name := de.Name()
 		childRel := joinRel(rel, name)
@@ -270,7 +262,7 @@ func (w *walker) dir(ctx context.Context, rel, abs string, d *os.Root) error {
 			w.problem(childRel, errDeleting)
 			continue
 		}
-		if w.skipName(name, de, hasProject) || w.exclude[childAbs] {
+		if w.skipName(name) || w.exclude[childAbs] {
 			w.res.skipped[childRel] = true
 			continue
 		}
@@ -392,14 +384,8 @@ func (w *walker) symlink(rel, abs string, d *os.Root, name string, info fs.FileI
 	})
 }
 
-func (w *walker) skipName(name string, de fs.DirEntry, hasProject bool) bool {
-	if noise[name] || w.ignore[name] {
-		return true
-	}
-	if !w.opt.IncludeHidden && isHidden(name) {
-		return true
-	}
-	return hasProject && de.IsDir() && (name == "bin" || name == "obj")
+func (w *walker) skipName(name string) bool {
+	return noise[name] || w.ignore[name] || (!w.opt.IncludeHidden && isHidden(name))
 }
 
 // Covers reports whether this walk would have seen the file at rel ('/'-separated, relative to the root) if it
@@ -495,10 +481,6 @@ func Broken(abs string) (bool, error) {
 func inode(info fs.FileInfo) uint64 {
 	id, _ := fsid.FromFileInfo(info)
 	return id.Ino
-}
-
-func isProjectFile(name string) bool {
-	return strings.HasSuffix(name, ".csproj") || strings.HasSuffix(name, ".fsproj")
 }
 
 func joinRel(dir, name string) string {

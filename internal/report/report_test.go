@@ -40,13 +40,13 @@ func TestRenderUnreadable(t *testing.T) {
 			{Root: "/r", Rel: "b", Since: 5}}, 2, []string{
 			"Unreadable files   2",
 			"    since",
-			"    scan 2   /r/a",
-			"    scan 5   /r/b",
+			"    scan #2   /r/a",
+			"    scan #5   /r/b",
 		}},
 		{"more than the top", []store.UnreadableRow{{Root: "/r", Rel: "a", Since: 2}}, 1235, []string{
 			"Unreadable files   1,235",
 			"    since",
-			"    scan 2   /r/a",
+			"    scan #2   /r/a",
 			"    ... 1,234 more files",
 		}},
 	}
@@ -85,7 +85,7 @@ func TestRenderRetention(t *testing.T) {
 			"    Where most need one (to depth 2)",
 			"    files      size",
 			"    1,202   2.0 KiB   docs",
-			"    Next: filo export retention [DIR] -o FILE, then filo update FILE, or filo rules add DIR POLICY",
+			"    Next: filo export [DIR] -o FILE, then filo update FILE, or filo rules add DIR POLICY",
 			"  [!] 1 past its retention: see filo delete",
 		}},
 	}
@@ -159,7 +159,7 @@ func TestRenderDuplicatesAndEvents(t *testing.T) {
 	for _, want := range []string{"Duplicates   no groups\n",
 		"  [kept] 1 excluded directory, 2 contents marked always and 1 set of identical files kept as separate files, " +
 			"these are not counted as duplicates (use \"filo duplicates\" to view)\n",
-		"    scan 4   error   .   permission denied\n"} {
+		"    scan #4   error   .   permission denied\n"} {
 		if !strings.Contains(b.String(), want) {
 			t.Errorf("lacks %q:\n%s", want, b.String())
 		}

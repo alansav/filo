@@ -258,8 +258,8 @@ func TestRetentionByHandLeavesTheRule(t *testing.T) {
 		t.Fatalf("rule set a policy on %d files, want 2", r.Dated)
 	}
 	exportID, _ := e.export(ruleToday, policyNow)
-	if res, err := e.s.UpdateRetention(e.ctx, []RetentionRow{{Line: 2, ExportID: exportID,
-		FileID: e.knownAll("bank/a.pdf"), Retention: "2032-01-01"}}, policyNow, ruleToday, "r.csv", false,
+	if res, err := e.update([]RetentionRow{{Line: 2, ExportID: exportID,
+		FileID: e.knownAll("bank/a.pdf"), Retention: "2032-01-01"}}, policyNow, ruleToday, false,
 		nil); err != nil || res.Set != 1 {
 		t.Fatalf("update: %+v, %v", res, err)
 	}
@@ -271,8 +271,8 @@ func TestRetentionByHandLeavesTheRule(t *testing.T) {
 	}
 	// The step a scan points to, a file_date filled in under the same policy, keeps the file on its rule.
 	exportID, _ = e.export(ruleToday, policyNow)
-	if res, err := e.s.UpdateRetention(e.ctx, []RetentionRow{{Line: 2, ExportID: exportID,
-		FileID: e.knownAll("bank/b.pdf"), FileDate: "2020-01-01", HasFileDate: true, Retention: "bills"}}, policyNow, ruleToday, "r.csv",
+	if res, err := e.update([]RetentionRow{{Line: 2, ExportID: exportID,
+		FileID: e.knownAll("bank/b.pdf"), FileDate: "2020-01-01", HasFileDate: true, Retention: "bills"}}, policyNow, ruleToday,
 		false, nil); err != nil || res.Set != 1 {
 		t.Fatalf("update with a file_date: %+v, %v", res, err)
 	}

@@ -21,14 +21,12 @@ var overview = struct {
 		{Name: "roots set DIR [flags]", Text: "replace a root's settings"},
 		{Name: "scan [DIR]", Text: "scan every root, or DIR inside a root"},
 		{Name: "report [--top N]", Text: "totals, files needing a retention, largest files, duplicates, events"},
-		{Name: "export retention [DIR] -o FILE",
-			Text: "write every file under DIR (or every root) with its retention, as CSV"},
+		{Name: "export [DIR] -o FILE",
+			Text: "write every file under DIR (or every root) with its retention and tags, as CSV"},
 		{Name: "export duplicates [DIR] -o FILE",
 			Text: "write the duplicate groups with a copy under DIR, as CSV"},
-		{Name: "export tags [DIR] -o FILE",
-			Text: "write every file under DIR (or every root) with its tags, as CSV"},
-		{Name: "update FILE [--dry-run]",
-			Text: "record the retentions or tags edited in an exported CSV"},
+		{Name: "update FILE [--dry-run] [-y]",
+			Text: "apply the retentions, tags, names and directories edited in a CSV from filo export"},
 		{Name: "delete [DIR] [-y]",
 			Text: "delete the files past their retention, after asking"},
 		{Name: "delete FILE [-y]",
@@ -62,6 +60,7 @@ var overview = struct {
 		{Name: "indexes add [DIR] [--name NAME]", Text: "write a directory's tag index, kept up to date from then on"},
 		{Name: "indexes remove [DIR] [--name NAME]", Text: "stop keeping an index, and remove its pages"},
 		{Name: "indexes refresh [DIR] [--name NAME]", Text: "write an index's pages again"},
+		{Name: "completion bash", Text: "print the script that makes Tab complete filo's commands, files and tags"},
 		{Name: "help [COMMAND]", Text: "this overview, or a command's flags and rules"},
 	},
 	after: "Every command accepts --db PATH (default: $FILO_DB, then the user data directory).",
@@ -76,10 +75,23 @@ type commandHelp struct {
 }
 
 var commandHelps = map[string]commandHelp{
+	"completion": {
+		usage: []string{"filo completion bash"},
+		before: []string{
+			"Prints the script that makes Tab complete filo's commands, flags, files, directories, tags and policy " +
+				"names in bash. It writes nothing itself. Load it in every new shell with this line in ~/.bashrc: " +
+				"source <(filo completion bash). Or save it once to ~/.local/share/bash-completion/completions/filo, " +
+				"where the bash-completion package loads it on the first Tab (save it again after an upgrade that " +
+				"changes commands).",
+			"Completion only reads the register, never changes it, and takes no lock, so it works while another " +
+				"filo runs; with no register it completes from the disk alone.",
+		},
+	},
 	"roots": {
 		usage: []string{
 			"filo roots",
 			"filo roots add DIR [--include-hidden] [--ignore NAME]... [--no-scan]",
+			"          [--workers N]",
 			"filo roots set DIR [--include-hidden | --skip-hidden] [--ignore NAME]...",
 		},
 		before: []string{"A root's settings apply to every scan of it, whole or partial."},
@@ -89,6 +101,8 @@ var commandHelps = map[string]commandHelp{
 			{Name: "--ignore NAME", Text: "skip entries with this name, at any depth (repeatable); node_modules, " +
 				"__pycache__ and .filo are always skipped"},
 			{Name: "--no-scan", Text: "roots add only: register the root without scanning it"},
+			{Name: "--workers N", Text: "roots add only, for its scan: files hashed in parallel, 1-64 (default 4; " +
+				"use 1 on a spinning disk)"},
 		},
 		after: []string{
 			"roots add scans the new root straight away; --no-scan only registers it. roots set replaces the whole " +
@@ -119,29 +133,29 @@ var commandHelps = map[string]commandHelp{
 	},
 	"export": {
 		usage: []string{
-			"filo export retention [DIR] -o FILE [--no-scan] [--workers N]",
+			"filo export [DIR] -o FILE [--no-scan] [--workers N]",
 			"filo export duplicates [DIR] -o FILE [--no-scan] [--workers N]",
-			"filo export tags [DIR] -o FILE [--no-scan] [--workers N]",
 		},
 		before: []string{
 			"Scans first (DIR only; every root for export duplicates), then writes every file under DIR (inside a " +
 				"root), or under every root, as CSV (UTF-8) to FILE. A root that cannot be scanned stops the export. " +
 				"If FILE " +
 				"exists, filo asks before replacing it (only a regular file, and only at a terminal). Columns: id, " +
-				"export, directory, name, size, modified, file_date, retention, keep_until. " +
+				"export, directory, name, size, modified, file_date, retention, keep_until, tags. " +
 				"Fill in retention in a spreadsheet (a period such as 7y counted from file_date, a date, forever, or " +
-				"a policy name: filo help policies), then run filo update FILE. A blank file_date is filled in from " +
+				"a policy name: filo help policies) and tags (separated by ;, see filo help tag), correct a " +
+				"name to rename the file, or change its directory to move it within its root, then run filo update " +
+				"FILE. A directory named duplicates is given with ./ before it (./duplicates). A " +
+				"blank file_date is filled in from " +
 				"the file name when the name holds one clear date (2023-03-14, 20230314, or 2023-03 for the month's " +
-				"last day); check it. On a large system, export one directory at a time.",
+				"last day), marked with ! (!2023-03-14): check it and remove the ! to accept it; a period on a " +
+				"row whose date is still marked is refused. On a large system, export one directory at a time.",
 			"export duplicates writes each duplicate group (two or more copies of the same content; hard links to " +
 				"one file are one copy) with a copy under DIR, with all its copies. Columns: id, export, group, " +
 				"copies, directory, name, size, modified, file_date, retention, keep_until, action. In each group " +
 				"you decide on, write keep for the copy to keep and delete for the rest (or k and d); keep on two or " +
 				"more copies keeps them as separate files, each with its own retention; always on every row means the " +
 				"content belongs everywhere. A group left blank is left alone. filo delete FILE carries the CSV out.",
-			"export tags writes every file under DIR with its tags in one cell, separated by ; (see filo help tag). " +
-				"Columns: id, export, directory, name, size, modified, tags. Edit the cells, then run filo update " +
-				"FILE: each cell replaces its file's tags.",
 		},
 		flags: []view.Term{
 			{Name: "-o FILE", Text: "the CSV to write; an existing file is replaced only after asking"},
@@ -152,26 +166,31 @@ var commandHelps = map[string]commandHelp{
 	"update": {
 		usage: []string{"filo update FILE [--dry-run] [-y]"},
 		before: []string{
-			"Reads an exported retention CSV and applies the file_date and retention you changed. retention is a " +
+			"Reads an exported CSV and applies the file_date, retention and tags you changed. retention is a " +
 				"period counted from file_date (7y, 18m, 6w, 30d), forever, or a date (YYYY-MM-DD); file_date is " +
 				"a date. keep_until is worked out by filo: leave it alone. Dates in the past are fine: the file is " +
 				"then past its retention (see filo delete). Rows can be sorted, filtered or deleted, but not added. " +
-				"A blank retention clears a stored one; filo lists those files and asks first, and without a " +
-				"terminal leaves them alone. A row is refused, with one line saying why, if a value does not parse, " +
-				"a period has no file_date, the file changed since the export, or its retention was changed from a " +
-				"later export. The other rows are still applied.",
-			"A tags CSV (from export tags) is told by its header: each tags cell replaces its file's tags, so an " +
-				"untouched cell changes nothing and an emptied one removes them all. Before removing any tag, filo " +
-				"lists those rows and asks (-y answers yes); without a terminal, and without -y, it leaves them " +
-				"alone. A row is refused, with one line " +
-				"saying why, if for example a tag breaks the spelling rules (see filo help tag), the file's tags " +
-				"changed since the export (by tag, untag or tags rename), or the file is listed twice.",
+				"Each tags cell replaces its file's tags, so an untouched cell changes nothing and an emptied one " +
+				"removes them all. A row is refused, with one line saying why, if a value does not parse, a period " +
+				"has no file_date, the file changed since the export, its retention or tags were changed after " +
+				"the export, or a tag breaks the spelling rules (see filo help tag). The other rows are still " +
+				"applied.",
+			"A changed name cell renames the file, and a changed directory cell (the full path of a directory in " +
+				"the file's root) moves it there, making the directories it needs; never a hidden file or one in a " +
+				"hidden directory, never hiding one, " +
+				"leaving its root, or replacing another file, and only if the file is still the one the last scan " +
+				"saw; otherwise the row is refused or the rename or move not made, with why (run filo scan and " +
+				"export again). The directories the moves empty stay.",
+			"If any row clears a retention, removes a tag, names a policy that does not exist yet or renames a " +
+				"file or moves one, filo lists " +
+				"them first and asks once (-y answers yes); no, or no terminal without -y, records nothing at all " +
+				"(exit 1 when there was no terminal to ask in).",
 			"A duplicates CSV (from export duplicates) is refused: its decisions are not recorded, but carried " +
 				"out by filo delete FILE.",
 		},
 		flags: []view.Term{
 			{Name: "--dry-run", Text: "check everything and write nothing"},
-			{Name: "-y", Text: "a tags CSV: remove the tags its cells no longer hold without asking"},
+			{Name: "-y", Text: "apply without asking"},
 		},
 	},
 	"delete": {
@@ -228,7 +247,7 @@ var commandHelps = map[string]commandHelp{
 			"filo policies show NAME",
 		},
 		before: []string{
-			"A policy is a named retention, written once and typed in the retention column of a retention CSV in " +
+			"A policy is a named retention, written once and typed in the retention column of the CSV from filo export in " +
 				"place of a period: bills = 7y. Changing it changes every file using it. Its value is a period " +
 				"(counted from each file's own file_date), a date, or forever; a name typed in a CSV that is not a " +
 				"policy yet creates one with no value, after filo update asks.",
@@ -291,7 +310,7 @@ var commandHelps = map[string]commandHelp{
 		},
 		after: []string{
 			"Tags follow the file through moves and edits, and a new copy of a tagged file takes its tags. Find " +
-				"files by tag with filo find --tag; many files at once with filo export tags and filo update.",
+				"files by tag with filo find --tag; many files at once with filo export and filo update.",
 		},
 	},
 	"tags": {
@@ -308,11 +327,12 @@ var commandHelps = map[string]commandHelp{
 		usage: []string{"filo indexes", "filo indexes add [DIR] [--name NAME]",
 			"filo indexes remove [DIR] [--name NAME] [-y]", "filo indexes refresh [DIR] [--name NAME]"},
 		before: []string{
-			"A tag index is a set of HTML pages that list the files under a directory, at any depth, by tag, to " +
-				"browse and tap instead of typing searches: a main page of keys, a page per key of its values, a " +
-				"page per tag of its files, and the files with no tags. Each file opens from its page. The links " +
-				"are relative, so the pages work on any device that syncs the directory, and nothing is fetched " +
-				"from the network.",
+			"A tag index is a set of HTML pages that list the files under a directory, at any depth, by tag. " +
+				"NAME.html is the find page: pick several tags (two values of one key match either, different " +
+				"keys must all match), search names and directories, narrow to a directory, and preview a file " +
+				"before opening it. Behind it, pages to browse one tag at a time: the keys, a page per key of its " +
+				"values, a page per tag of its files, and the files with no tags. The links are relative, so the " +
+				"pages work on any device that syncs the directory, and nothing is fetched from the network.",
 			"add declares an index on DIR (the current directory if not given) and writes its pages: NAME.html in " +
 				"DIR, and the other pages and a stylesheet in DIR/.NAME/ (NAME is index unless given). From then " +
 				"on every command that changes the register brings them up to date, and says nothing unless it " +
@@ -359,7 +379,7 @@ var commandHelps = map[string]commandHelp{
 	"set": {
 		usage: []string{"filo set FILE... [flags]"},
 		before: []string{
-			"Sets the file_date and the retention of each file, as the retention CSV does, for a few files at once: " +
+			"Sets the file_date and the retention of each file, as the CSV from filo export does, for a few files at once: " +
 				"a retention is a period (7y, 18m, 6w, 30d, counted from file_date), forever, a date (YYYY-MM-DD) " +
 				"or a policy's name. Several flags can be given together. keep_until is worked out again.",
 			"All or nothing: if any file cannot be set (a period with no file_date, " +

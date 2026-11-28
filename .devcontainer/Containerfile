@@ -10,12 +10,31 @@ FROM ${GO_IMAGE}
 ARG UID=1000
 ARG GID=1000
 
-ARG INSTALL_CLAUDE=0
+# Claude Code is installed by default; scripts/dev.sh build --no-claude sets this to 0.
+ARG INSTALL_CLAUDE=1
 
 # sqlite3 is for inspecting filo.db by hand; the rest are everyday tools.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends sqlite3 ripgrep less procps \
  && rm -rf /var/lib/apt/lists/*
+
+# Node, only to test the tag index's find page script (node --test, run from go test; no npm packages). The LTS
+# release, pinned with the checksums from https://nodejs.org/dist/<version>/SHASUMS256.txt; the .tar.gz, since the
+# image has no xz.
+ARG NODE_VERSION=v26.13.1
+ARG NODE_SHA256_X64=518674de2b621728a5e4486f5fb3b7d2900bb3cc4aa97969edaa463db99f9778
+ARG NODE_SHA256_ARM64=80a330b35415382878df18d41afbd106ea89bfb3be0087d6608e289a14c5cc7d
+RUN case "$(dpkg --print-architecture)" in \
+      amd64) arch=x64; sum="${NODE_SHA256_X64}" ;; \
+      arm64) arch=arm64; sum="${NODE_SHA256_ARM64}" ;; \
+      *) echo "no Node build pinned for $(dpkg --print-architecture)" >&2; exit 1 ;; \
+    esac \
+ && curl -fsSLo /tmp/node.tar.gz "https://nodejs.org/dist/${NODE_VERSION}/node-${NODE_VERSION}-linux-${arch}.tar.gz" \
+ && echo "${sum}  /tmp/node.tar.gz" | sha256sum -c - \
+ && tar -xzf /tmp/node.tar.gz -C /usr/local --strip-components=1 --no-same-owner \
+      "node-${NODE_VERSION}-linux-${arch}/bin/node" \
+ && rm /tmp/node.tar.gz \
+ && node --version
 
 RUN groupadd --gid "${GID}" dev \
  && useradd --create-home --uid "${UID}" --gid "${GID}" --shell /bin/bash dev \

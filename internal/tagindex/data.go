@@ -22,7 +22,7 @@ import (
 // layout is the version of the pages' layout: it is part of the data's hash, so a Filo whose pages look different
 // writes them again even where the register has not changed. Raise it with any change to the templates or the
 // stylesheet.
-const layout = 1
+const layout = 2
 
 // BareDir is the directory of the bare tags' pages: a key has a letter, so no key's directory is named so.
 const BareDir = "_"

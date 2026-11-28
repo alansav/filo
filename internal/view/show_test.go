@@ -31,13 +31,13 @@ func TestSubjectPartFields(t *testing.T) {
 			r.Fields(0, []Field{
 				{Label: "path", Value: "/home/u/Documents/gas.pdf", Path: true, Attention: "not on disk"},
 				{Label: "modified", Value: "2022-02-03 09:14", Note: "unchanged since the last scan (2026-11-20)"},
-				{Label: "first seen", Value: "2026-11-12 (scan 3)"},
+				{Label: "first seen", Value: "2026-11-12 (scan #3)"},
 				{Label: "status", Attention: "undated: no retention"},
 				{Label: "keep_until", Value: "2020-01-31", Note: "x", Attention: "1 year ago"},
 			})
 		}, "    path        ~/Documents/gas.pdf   [!] not on disk\n" +
 			"    modified    2022-02-03 09:14   unchanged since the last scan (2026-11-20)\n" +
-			"    first seen  2026-11-12 (scan 3)\n" +
+			"    first seen  2026-11-12 (scan #3)\n" +
 			"    status      [!] undated: no retention\n" +
 			"    keep_until  2020-01-31   x   [!] 1 year ago\n"},
 		{"lined up with another part", func(r *Renderer) {

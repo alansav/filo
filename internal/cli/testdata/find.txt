@@ -1,5 +1,5 @@
 $ filo find --name '*gas*'
-Scan   scan 2 . 6 files seen . under 0.1 s . <root>
+Scan #2   6 files seen . under 0.1 s . <root>
   [ok] no changes
 
 Found   3 files . 37 B . named *gas* . <root>
@@ -10,7 +10,7 @@ Found   3 files . 37 B . named *gas* . <root>
     2026-10-03   12 B   received/2026/10/2026-10-03 British Gas Bill.pdf
 
 $ filo find received
-Scan   scan 3 . 2 files seen . under 0.1 s . <root>, under received/
+Scan #3   2 files seen . under 0.1 s . <root>, under received/
   [ok] no changes
 
 Found   2 files . 26 B . <root>, under received/
@@ -20,7 +20,7 @@ Found   2 files . 26 B . <root>, under received/
     2026-10-03   12 B   received/2026/10/2026-10-03 British Gas Bill.pdf
 
 $ filo find --name '*gaz*'
-Scan   scan 4 . 6 files seen . under 0.1 s . <root>
+Scan #4   6 files seen . under 0.1 s . <root>
   [ok] no changes
 
 Found   no files . named *gaz* . <root>

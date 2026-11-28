@@ -18,7 +18,7 @@ Took in 4 roots, with their history and retentions
   - my docs   had other settings (hidden files included): these apply now
 Next: filo roots set <root> --include-hidden --ignore build, to scan .config again
 
-Scan   scan 4 . 4 files seen . <took> . <root>
+Scan #4   4 files seen . <took> . <root>
   - 2 new
 
 Next: filo report
@@ -38,7 +38,7 @@ Roots   5 files . 17 B . 2 roots
     never scanned
   <root>   5 files . 17 B
     hidden files skipped . ignoring build
-    last scan 4, <time>, whole root: 4 seen, new 2, changed 0, moved 0, missing 0, errors 0
+    last scan #4, <time>, whole root: 4 seen, new 2, changed 0, moved 0, missing 0, errors 0
 
 $ filo roots set home --include-hidden --ignore build (covers more)
 Settings changed   <root>

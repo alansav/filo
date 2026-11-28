@@ -408,7 +408,7 @@ func Scan(ctx context.Context, s *store.Store, opt Options) (Summary, error) {
 		for _, p := range pair(earlySides, newSides()) {
 			g := earlier[p[0]]
 			pairedNew[p[1]] = true
-			detail := fmt.Sprintf("returned (missing since scan %d)", g.MissingSince)
+			detail := fmt.Sprintf("returned (missing since scan #%d)", g.MissingSince)
 			if g.LastRootID != root.ID {
 				detail += store.EventFromRoot + rootPaths[g.LastRootID]
 			}

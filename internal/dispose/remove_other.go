@@ -43,3 +43,10 @@ func isNotEmpty(err error) bool { return errors.Is(err, fs.ErrExist) }
 func removeVerified(dir *os.Root, name, path string, _ fs.FileInfo) error {
 	return removeFile(dir, name, path)
 }
+
+// renameBetween refuses: there is no rename that never replaces its target here. Untested: no Windows build is
+// tested.
+func renameBetween(from *os.Root, old string, to *os.Root, name string) error { return errNoReplace }
+
+// canRename reports whether this system has a rename that never replaces its target, which renames need.
+var canRename = false

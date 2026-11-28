@@ -1,0 +1,45 @@
+$ filo update all.csv --dry-run
+Update (dry run)   all.csv . export #1 . 6 rows . <work>/home
+
+[!] 3 files are renamed:
+    notes/
+      ideas.txt        ->  ideas.md   (extension changed)
+      "plan.txt "      ->  plan.txt   (only spaces changed)
+    tax/
+      2023 retrun.pdf  ->  2023 return.pdf
+
+  - 3 files would be renamed
+  - 3 rows unchanged
+
+Dry run: nothing was written.
+
+$ filo update all.csv (yes)
+Update   all.csv . export #1 . 6 rows . <work>/home
+
+[!] 3 files are renamed:
+    notes/
+      ideas.txt        ->  ideas.md   (extension changed)
+      "plan.txt "      ->  plan.txt   (only spaces changed)
+    tax/
+      2023 retrun.pdf  ->  2023 return.pdf
+
+Apply the update? Nothing is recorded otherwise. [y/N/l] 
+  [ok] 3 files renamed
+  - 3 rows unchanged
+
+$ filo scan (after the renames)
+Scan #4   6 files seen . under 0.1 s . <work>/home
+  [ok] no changes
+
+$ filo update again.csv (refused)
+Update   again.csv . export #2 . 6 rows . <work>/home
+
+  - 2 rows unchanged
+  [refused] 4 rows refused
+
+Refused: fix these rows in the CSV and run filo update again
+  [refused] line 2    notes/ideas.md: changed since the last scan; run filo scan and export again
+  [refused] line 3    notes/plan.txt: a rename or move never hides a file (a name or directory starting with . is hidden); rename or move it by hand if you mean to
+  [refused] line 4    received/2026/09/2026-09-02 British Gas Bill.pdf: a new name cannot hold /: to move the file, change its directory cell
+  [refused] line 6    tax/2023 return.pdf: other.pdf is another file's name in tax/; rename or move one at a time
+

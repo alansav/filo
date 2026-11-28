@@ -3,7 +3,7 @@ Register   6 files . 65 B . <root>
 Roots
   <root>   6 files . 65 B . 1 symlink
     hidden files skipped
-    last scan 1, <time>, whole root: 7 seen, new 7, changed 0, moved 0, missing 0, errors 0
+    last scan #1, <time>, whole root: 7 seen, new 7, changed 0, moved 0, missing 0, errors 0
 
 Retention   7 files and symlinks
   [!] 7 need a retention (no retention 7)
@@ -13,7 +13,7 @@ Retention   7 files and symlinks
         1    0 B   .
         1    8 B   docs
         1    5 B   notes
-    Next: filo export retention [DIR] -o FILE, then filo update FILE, or filo rules add DIR POLICY
+    Next: filo export [DIR] -o FILE, then filo update FILE, or filo rules add DIR POLICY
 
 Largest files   top 5
     size

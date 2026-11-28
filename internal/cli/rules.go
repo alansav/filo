@@ -210,7 +210,7 @@ func (e *env) ruleRunEnd(run store.RuleRun, dry bool, needs int, next, dir strin
 	case dry:
 		next = "Dry run: nothing was changed."
 	case next == "" && needs > 0:
-		next = "Next: filo export retention " + shellQuote(dir) + " -o FILE, fill in file_date, then filo update FILE"
+		next = "Next: filo export " + shellQuote(dir) + " -o FILE, fill in file_date, then filo update FILE"
 	}
 	if next != "" {
 		r.Blank()

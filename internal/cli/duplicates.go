@@ -26,7 +26,7 @@ func (e *env) exportDuplicates(ctx context.Context, s *store.Store, f store.Filt
 	// docs/design.md, Terminal output, Export, in the words of Duplicates, Output.
 	v := e.view
 	if len(groups) == 0 {
-		v.Heading("Duplicates export", where, "no groups")
+		v.Heading("Export (duplicates)", where, "no groups")
 		notScannedLine(v, notScanned)
 		v.Next("Nothing exported.")
 		return nil
@@ -48,7 +48,7 @@ func (e *env) exportDuplicates(ctx context.Context, s *store.Store, f store.Filt
 			keepFilled++
 		}
 	}
-	v.Heading("Duplicates export", where, fmt.Sprintf("export %d", id),
+	v.Heading(fmt.Sprintf("Export #%d (duplicates)", id), where,
 		report.Plural(int64(len(groups)), "group", "groups"), report.Plural(copies, "copy", "copies"))
 	v.Blank()
 	// docs/design.md, Duplicates, Output.

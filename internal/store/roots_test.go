@@ -433,20 +433,21 @@ func TestAbsorbKeepsHistoryAndReviews(t *testing.T) {
 		OtherPath: "old.txt"}}})
 	apply(docs, "tax", Changes{})
 	apply(pics, "", Changes{Events: []Event{{Kind: "moved", FileID: 99, Path: "beach.jpg", OtherPath: "x/beach.jpg",
-		Detail: "returned (missing since scan 1) from root " + abs("home/Documents")}}})
+		Detail: "returned (missing since scan #1) from root " + abs("home/Documents")}}})
 
 	// A keep_until date on a Documents file.
-	q, err := s.Files(ctx, "2026-11-11", Filter{})
+	q, err := s.FilesItems(ctx, "2026-11-11", Filter{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	now := time.Now()
-	exportID, err := s.RecordExport(ctx, "", now, q, func(int64) error { return nil })
+	exportID, err := s.RecordFilesExport(ctx, "", now, q, func(int64) error { return nil })
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res, err := s.UpdateRetention(ctx, []RetentionRow{{Line: 2, ExportID: exportID, FileID: kd["tax/2024.pdf"].FileID,
-		Retention: "2032-01-01"}}, now, "2026-11-11", "r.csv", false, nil); err != nil || res.Set != 1 {
+	if res, err := s.UpdateFiles(ctx, []FilesRow{{RetentionRow: RetentionRow{Line: 2, ExportID: exportID,
+		FileID: kd["tax/2024.pdf"].FileID, Retention: "2032-01-01"}}}, now, "2026-11-11", "r.csv",
+		FilesUpdateOptions{}); err != nil || res.Set != 1 {
 		t.Fatalf("update: %+v, %v", res, err)
 	}
 	if _, _, err := s.SetSettings(ctx, abs("home/Pictures"), Settings{Ignore: []string{"raw"}}); err != nil {
@@ -562,7 +563,7 @@ func TestAbsorbKeepsHistoryAndReviews(t *testing.T) {
 	}
 
 	// The keep_until date survived the absorb.
-	q, err = s.Files(ctx, "2026-11-11", Filter{RootID: home.ID, Scope: "Documents"})
+	q, err = s.FilesItems(ctx, "2026-11-11", Filter{RootID: home.ID, Scope: "Documents"})
 	if err != nil {
 		t.Fatal(err)
 	}

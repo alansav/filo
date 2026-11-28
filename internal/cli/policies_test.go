@@ -10,7 +10,7 @@ import (
 )
 
 // filo policies (docs/design.md, Named retention policies; slice 3): list, add, set, move, remove and show, with
-// their questions. Files are put on policies through the retention CSV, as a person would.
+// their questions. Files are put on policies through the CSV from filo export, as a person would.
 
 // policyTest is a tree of bills on the policy bills (7y), one without a file_date, and a policy bils (a typo, no value)
 // holding one file.
@@ -27,10 +27,11 @@ func newPolicyTest(t *testing.T) policyTest {
 	ct.filo(ExitOK, "", false, "roots", "add", ct.root)
 	ct.filo(ExitOK, "", false, "policies", "add", "bills", "7y")
 	csv := filepath.Join(ct.work, "r.csv")
-	ct.filo(ExitOK, "", false, "export", "retention", "-o", csv)
+	ct.contains("export", ct.filo(ExitOK, "", false, "export", "-o", csv).stdout,
+		"[!] 2 file_dates read from the file name, marked !: remove the ! from each one you accept\n")
 	// 2015-06.pdf: until 2022-06-30 (past); 2022-01.pdf: until 2029-01-31; undated.pdf: forever for now.
-	editCSV(t, csv, setRetention(map[string]string{"2015-06.pdf": "bills", "2022-01.pdf": "bills",
-		"undated.pdf": "forever", "x.pdf": "bils"}))
+	editCSV(t, csv, accepting(setRetention(map[string]string{"2015-06.pdf": "bills", "2022-01.pdf": "bills",
+		"undated.pdf": "forever", "x.pdf": "bils"})))
 	ct.filo(ExitOK, "y\n", true, "update", csv)
 	return policyTest{ct}
 }
@@ -65,7 +66,7 @@ func TestPoliciesList(t *testing.T) {
 	// it reaches "needs a file_date" through a change of the policy: forever, then 7y.
 	p.filo(ExitOK, "", false, "policies", "set", "bills", "forever", "-y")
 	csv := filepath.Join(p.work, "r2.csv")
-	p.filo(ExitOK, "", false, "export", "retention", "-o", csv)
+	p.filo(ExitOK, "", false, "export", "-o", csv)
 	editCSV(t, csv, setRetention(map[string]string{"undated.pdf": "bills"}))
 	p.filo(ExitOK, "", false, "update", csv)
 	p.filo(ExitOK, "", false, "policies", "set", "bills", "7y", "-y")
@@ -73,7 +74,7 @@ func TestPoliciesList(t *testing.T) {
 		"3 files   [!] 1 without a file_date")
 
 	p.contains("empty", newEmptyPolicies(t), "Policies   none yet",
-		"Next: filo policies add NAME VALUE, or type a policy name in a retention CSV")
+		"Next: filo policies add NAME VALUE, or type a policy name in the retention column of a CSV from filo export")
 }
 
 func newEmptyPolicies(t *testing.T) string {
@@ -108,7 +109,7 @@ func TestPoliciesSet(t *testing.T) {
 	// C4: a period for a file without a file_date, from a date policy.
 	p.filo(ExitOK, "", false, "policies", "set", "bils", "2030-12-31")
 	csv := filepath.Join(p.work, "r2.csv")
-	p.filo(ExitOK, "", false, "export", "retention", "-o", csv)
+	p.filo(ExitOK, "", false, "export", "-o", csv)
 	editCSV(t, csv, setRetention(map[string]string{"undated.pdf": "bils"}))
 	p.filo(ExitOK, "", false, "update", csv)
 	out = p.filo(ExitOK, "", false, "policies", "set", "bils", "7y").stdout
@@ -204,8 +205,8 @@ func TestPoliciesReviewFindings(t *testing.T) {
 		ct.filo(ExitOK, "", false, "roots", "add", ct.root)
 		ct.filo(ExitOK, "", false, "policies", "add", "bills", "7y")
 		csv := filepath.Join(ct.work, "r.csv")
-		ct.filo(ExitOK, "", false, "export", "retention", "-o", csv)
-		editCSV(t, csv, setRetention(names))
+		ct.filo(ExitOK, "", false, "export", "-o", csv)
+		editCSV(t, csv, accepting(setRetention(names)))
 		ct.filo(ExitOK, "", false, "update", csv)
 		out := ct.filo(ExitOK, "l\nn\n", true, "policies", "set", "bills", "1y").stdout
 		ct.contains("cut", out, "[!] 12 files would be past their retention:", "... 2 more files",
@@ -231,7 +232,7 @@ func TestReportPolicies(t *testing.T) {
 	p := newPolicyTest(t)
 	p.filo(ExitOK, "", false, "policies", "set", "bills", "forever", "-y")
 	csv := filepath.Join(p.work, "r2.csv")
-	p.filo(ExitOK, "", false, "export", "retention", "-o", csv)
+	p.filo(ExitOK, "", false, "export", "-o", csv)
 	editCSV(t, csv, setRetention(map[string]string{"undated.pdf": "bills"}))
 	p.filo(ExitOK, "", false, "update", csv)
 	p.filo(ExitOK, "", false, "policies", "set", "bills", "7y", "-y")
@@ -264,7 +265,7 @@ func TestReportPoliciesReviewFindings(t *testing.T) {
 		// made unreadable, so it counts as unreadable and bils is not named.
 		p.filo(ExitOK, "", false, "policies", "set", "bills", "forever", "-y")
 		csv := filepath.Join(p.work, "r2.csv")
-		p.filo(ExitOK, "", false, "export", "retention", "-o", csv)
+		p.filo(ExitOK, "", false, "export", "-o", csv)
 		editCSV(t, csv, setRetention(map[string]string{"undated.pdf": "bills"}))
 		p.filo(ExitOK, "", false, "update", csv)
 		p.filo(ExitOK, "", false, "policies", "set", "bills", "7y", "-y")
@@ -283,7 +284,7 @@ func TestReportPoliciesReviewFindings(t *testing.T) {
 		p := newPolicyTest(t)
 		p.filo(ExitOK, "", false, "policies", "set", "bils", "2030-12-31")
 		csv := filepath.Join(p.work, "r2.csv")
-		p.filo(ExitOK, "", false, "export", "retention", "-o", csv)
+		p.filo(ExitOK, "", false, "export", "-o", csv)
 		editCSV(t, csv, setRetention(map[string]string{"2022-01.pdf": "bils"}))
 		p.filo(ExitOK, "", false, "update", csv)
 		// bils: x.pdf (no file_date) and 2022-01.pdf (2022-01-31); 1y puts 2022-01.pdf past and x.pdf without one.

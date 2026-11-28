@@ -44,7 +44,7 @@ func TestDeleteRoundTrip(t *testing.T) {
 
 	filo(ExitOK, "", false, "roots", "add", root)
 	csvPath := filepath.Join(work, "r.csv")
-	filo(ExitOK, "", false, "export", "retention", "-o", csvPath)
+	filo(ExitOK, "", false, "export", "-o", csvPath)
 	past := map[string]string{}
 	for _, n := range []string{"a.txt", "b.txt", "c.txt", "d.txt", "e.txt", "f.txt", "link"} {
 		past[n] = "2026-11-01"
@@ -142,7 +142,7 @@ func TestDeleteInterruptedAtPrompt(t *testing.T) {
 	ct.write("a.txt", "a")
 	run(t, ctx, env, "roots", "add", root)
 	csvPath := filepath.Join(work, "r.csv")
-	run(t, ctx, env, "export", "retention", "-o", csvPath)
+	run(t, ctx, env, "export", "-o", csvPath)
 	editCSV(t, csvPath, setRetention(map[string]string{"a.txt": "2026-11-01"}))
 	run(t, ctx, env, "update", csvPath)
 
@@ -199,7 +199,7 @@ func TestDeleteGolden(t *testing.T) {
 	write("video/2015/summer holiday in the south of France with the whole family, day 3.mp4", "video")
 	filo(ExitOK, "", false, "roots", "add", root)
 	rcsv := filepath.Join(work, "r.csv")
-	filo(ExitOK, "", false, "export", "retention", "-o", rcsv)
+	filo(ExitOK, "", false, "export", "-o", rcsv)
 	editCSV(t, rcsv, setRetention(map[string]string{"2017 return.pdf": "2024-12-31", "meeting.txt": "2025-06-30",
 		"summer holiday in the south of France with the whole family, day 3.mp4": "2025-09-01"}))
 	filo(ExitOK, "", false, "update", rcsv)
@@ -245,7 +245,7 @@ func TestDeleteCutList(t *testing.T) {
 	}
 	ct.filo(ExitOK, "", false, "roots", "add", ct.root)
 	csvPath := filepath.Join(ct.work, "r.csv")
-	ct.filo(ExitOK, "", false, "export", "retention", "-o", csvPath)
+	ct.filo(ExitOK, "", false, "export", "-o", csvPath)
 	editCSV(t, csvPath, setRetention(past))
 	ct.filo(ExitOK, "", false, "update", csvPath)
 	plain := map[string]string{"FILO_DB": ct.db, "NO_COLOR": "1"}
@@ -288,7 +288,7 @@ func TestDeleteNoQuestionWhenOutputRedirected(t *testing.T) {
 	ct.write("a.txt", "a")
 	ct.filo(ExitOK, "", false, "roots", "add", ct.root)
 	csvPath := filepath.Join(ct.work, "r.csv")
-	ct.filo(ExitOK, "", false, "export", "retention", "-o", csvPath)
+	ct.filo(ExitOK, "", false, "export", "-o", csvPath)
 	editCSV(t, csvPath, setRetention(map[string]string{"a.txt": "2026-11-01"}))
 	ct.filo(ExitOK, "", false, "update", csvPath)
 	r := runIn(t, ct.ctx, ct.env, terminalInput{strings.NewReader("a\n")}, "delete") // stdout is a plain buffer
@@ -331,7 +331,7 @@ func TestDeleteStopsWhenOutputFails(t *testing.T) {
 			ct.write("a.txt", "a")
 			ct.filo(ExitOK, "", false, "roots", "add", ct.root)
 			csvPath := filepath.Join(ct.work, "r.csv")
-			ct.filo(ExitOK, "", false, "export", "retention", "-o", csvPath)
+			ct.filo(ExitOK, "", false, "export", "-o", csvPath)
 			editCSV(t, csvPath, setRetention(map[string]string{"a.txt": "2026-11-01"}))
 			ct.filo(ExitOK, "", false, "update", csvPath)
 			var errb bytes.Buffer

@@ -222,7 +222,7 @@ var scanKinds = []scanKind{
 // heading and "no changes". It reports whether anything changed, so the caller adds the next step; a directory on
 // another filesystem is found by every scan and is not a change.
 func renderScan(v *view.Renderer, sum reconcile.Summary, took time.Duration) bool {
-	v.Heading("Scan", view.Where{Roots: []string{sum.Root}, Under: sum.Scope}, fmt.Sprintf("scan %d", sum.ScanID),
+	v.Heading(fmt.Sprintf("Scan #%d", sum.ScanID), view.Where{Roots: []string{sum.Root}, Under: sum.Scope},
 		report.Plural(int64(sum.Seen), "file seen", "files seen"), duration(took))
 	changes, found := 0, 0
 	var rows []view.FileRow

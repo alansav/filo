@@ -40,3 +40,19 @@ func TestRawPaths(t *testing.T) {
 		t.Errorf("wrote %q to a terminal", b.String())
 	}
 }
+
+// TestCompletions: the mode, then each candidate as it is, one per line; one with a control character left out; and
+// nothing at all on a terminal.
+func TestCompletions(t *testing.T) {
+	cands := []string{`British\ Gas `, "notes (old)/", "new\nline", "esc\x1b[2J", "caf\xc3\xa9"}
+	r, b := plainView()
+	r.Completions("words", cands)
+	if want := "words\nBritish\\ Gas \nnotes (old)/\ncafé\n"; b.String() != want {
+		t.Errorf("got %q, want %q", b.String(), want)
+	}
+	r, b = termView(80, true)
+	r.Completions("files", cands)
+	if b.Len() != 0 {
+		t.Errorf("wrote %q to a terminal", b.String())
+	}
+}

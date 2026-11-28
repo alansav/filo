@@ -7,17 +7,14 @@ Commands
   scan [DIR]               scan every root, or DIR inside a root
   report [--top N]         totals, files needing a retention, largest files,
                            duplicates, events
-  export retention [DIR] -o FILE
-                           write every file under DIR (or every root) with its
-                           retention, as CSV
+  export [DIR] -o FILE     write every file under DIR (or every root) with its
+                           retention and tags, as CSV
   export duplicates [DIR] -o FILE
                            write the duplicate groups with a copy under DIR, as
                            CSV
-  export tags [DIR] -o FILE
-                           write every file under DIR (or every root) with its
-                           tags, as CSV
-  update FILE [--dry-run]  record the retentions or tags edited in an exported
-                           CSV
+  update FILE [--dry-run] [-y]
+                           apply the retentions, tags, names and directories
+                           edited in a CSV from filo export
   delete [DIR] [-y]        delete the files past their retention, after asking
   delete FILE [-y]         carry out a duplicates CSV: delete the copies marked
                            delete, after asking
@@ -64,6 +61,8 @@ Commands
                            stop keeping an index, and remove its pages
   indexes refresh [DIR] [--name NAME]
                            write an index's pages again
+  completion bash          print the script that makes Tab complete filo's
+                           commands, files and tags
   help [COMMAND]           this overview, or a command's flags and rules
 
 Every command accepts --db PATH (default: $FILO_DB, then the user data

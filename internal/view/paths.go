@@ -1,5 +1,10 @@
 package view
 
+import (
+	"strings"
+	"unicode"
+)
+
 // PathLines writes absolute paths for a pipe, one per line, escaped as all output is (a newline in a name shows as
 // \n, a backslash as \\), and returns how many were changed by it: those will not match the file on disk, so the
 // command says so (docs/design.md, Finding files). A trailing space stays a space: the line is for a tool, which needs
@@ -25,5 +30,22 @@ func (r *Renderer) RawPaths(paths []string) {
 	}
 	for _, p := range paths {
 		r.out(p + "\x00")
+	}
+}
+
+// Completions writes bash completion's answer (docs/design.md, Bash completion): how bash should treat the
+// candidates ("files" or "words"), then one per line, as they are, for the script to read. Like RawPaths it is not
+// escaped, so it is never written to a terminal (bash always reads it from a pipe), and a candidate holding a
+// control character, which could only come from a name and would break the lines, is left out.
+func (r *Renderer) Completions(mode string, candidates []string) {
+	if r.o.Terminal {
+		return
+	}
+	r.out(mode + "\n")
+	for _, c := range candidates {
+		if strings.ContainsFunc(c, unicode.IsControl) {
+			continue
+		}
+		r.out(c + "\n")
 	}
 }

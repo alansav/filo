@@ -41,22 +41,22 @@ func setAction(values map[string]string) func(map[string]string) {
 	}
 }
 
-// TestUpdateRetentionWithGroupColumn: a retention CSV with a group column of the person's own is still a retention
-// CSV (found in the code review of 2026-11-14).
-func TestUpdateRetentionWithGroupColumn(t *testing.T) {
+// TestUpdateWithGroupColumn: a combined CSV with a group column of the person's own is still a combined CSV (found
+// for the retention CSV in the code review of 2026-11-14).
+func TestUpdateWithGroupColumn(t *testing.T) {
 	ct := newCLITest(t)
 	setNow(t, time.Date(2026, 11, 14, 12, 0, 0, 0, time.Local))
 	ct.write("a.txt", "a")
 	ct.filo(ExitOK, "", false, "roots", "add", ct.root)
 	rcsv := filepath.Join(ct.work, "r.csv")
-	ct.filo(ExitOK, "", false, "export", "retention", "-o", rcsv)
+	ct.filo(ExitOK, "", false, "export", "-o", rcsv)
 	rows := readRows(t, rcsv)
-	data := "id,export,retention,group\n" + rows[0]["id"] + "," + rows[0]["export"] + ",forever,bills\n"
+	data := "id,export,retention,tags,group\n" + rows[0]["id"] + "," + rows[0]["export"] + ",forever,,bills\n"
 	if err := os.WriteFile(rcsv, []byte(data), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	ct.contains("update of a retention CSV with a group column", ct.filo(ExitOK, "", false, "update", rcsv).stdout,
-		"Retention update", "1 file given a retention")
+	ct.contains("update of a CSV with a group column", ct.filo(ExitOK, "", false, "update", rcsv).stdout,
+		"Update   r.csv", "1 file given a retention")
 }
 
 // TestUpdateRefusesDuplicatesCSV: decisions to delete are not stored any more (docs/design.md, Duplicates), so filo
@@ -98,7 +98,7 @@ func TestExportMergesOneFileSeenTwice(t *testing.T) {
 		return id, err
 	}))
 	out := ct.filo(ExitOK, "", false, "export", "duplicates", "-o", filepath.Join(ct.work, "d.csv")).stdout
-	ct.contains("export", out, "Duplicates export   no groups", "\nNothing exported.\n")
+	ct.contains("export", out, "Export (duplicates)   no groups", "\nNothing exported.\n")
 }
 
 // TestDistinctOnDiskRecords: copies merged as one file on disk (a bind mount) are decided again: two records of one

@@ -24,4 +24,4 @@ filo untag FILE... TAG...
 
   Tags follow the file through moves and edits, and a new copy of a tagged file
   takes its tags. Find files by tag with filo find --tag; many files at once
-  with filo export tags and filo update.
+  with filo export and filo update.

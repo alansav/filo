@@ -3,7 +3,7 @@ package store
 // SchemaVersion is the schema this build reads and writes. It is stored in meta.schema_version when a database is
 // created. An older database with a migration in migrations is upgraded when it is opened; any other version is
 // refused.
-const SchemaVersion = 12
+const SchemaVersion = 13
 
 // Meta keys.
 const (
@@ -30,7 +30,8 @@ CREATE TABLE scans (
     started_utc TEXT NOT NULL,
     finished_utc TEXT,
     root_id INTEGER NOT NULL REFERENCES roots(id),
-    kind TEXT NOT NULL DEFAULT 'scan',  -- 'scan', or 'delete' for a delete run's record of what it did in a root
+    kind TEXT NOT NULL DEFAULT 'scan',  -- 'scan'; 'delete' for a delete run's record of what it did in a root;
+                                        -- 'rename' for an update's renames in a root
     scope TEXT NOT NULL DEFAULT '',
     include_hidden INTEGER NOT NULL DEFAULT 0,
     ignores TEXT,
@@ -91,7 +92,7 @@ CREATE TABLE events (
 );
 ` + reviewSQL + duplicatesSQL + policiesSQL + rulesSQL + tagsSQL + tagIndexSQL
 
-// reviewSQL is the export and review tables, as of schema version 11.
+// reviewSQL is the export and review tables, as of schema version 13.
 const reviewSQL = `
 CREATE TABLE exports (
     id INTEGER PRIMARY KEY,
@@ -109,8 +110,9 @@ CREATE TABLE export_rows (
     file_date TEXT,
     retention TEXT,
     dup_group INTEGER,                      -- duplicates exports: the group number in the CSV
-    path_id INTEGER REFERENCES paths(id),   -- duplicates exports: the path shown
+    path_id INTEGER REFERENCES paths(id),   -- duplicates and combined exports: the path shown
     tags TEXT,                              -- tags exports: the cell as exported
+    name TEXT,                              -- combined exports: the name cell as exported (schema 13)
     PRIMARY KEY (export_id, file_id)
 );
 
@@ -234,6 +236,11 @@ ALTER TABLE export_rows ADD COLUMN tags TEXT;
 ` + tagsSQL,
 	// 11 -> 12: tag index pages (docs/design.md, Tag index pages). Only new tables: no index exists yet.
 	11: tagIndexSQL,
+	// 12 -> 13: renaming by the name cell (docs/design.md, Tags, "Renaming a file by its name cell"). The name cell
+	// as exported; a combined export made before has none, so its rows cannot ask for a rename.
+	12: `
+ALTER TABLE export_rows ADD COLUMN name TEXT;
+`,
 }
 
 // tagIndexSQL is the tag index pages, added in schema version 12. An index is declared on a directory of a root

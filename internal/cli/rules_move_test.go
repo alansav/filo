@@ -63,7 +63,7 @@ func TestRulesMoveCopy(t *testing.T) {
 	}
 	rt.contains("moved", rt.filo(ExitOK, "", false, "rules", "move", bank, rt.in("banking")).stdout,
 		"Done   moved 2 rules from bank to banking . policy set on 1 file . 1 needs a file_date",
-		"Next: filo export retention "+rt.in("banking")+" -o FILE, fill in file_date, then filo update FILE")
+		"Next: filo export "+rt.in("banking")+" -o FILE, fill in file_date, then filo update FILE")
 	out := list()
 	rt.contains("at the new place", out, "  banking\n    *Statement*", "  banking/2024\n    *  ")
 	rt.lacks("flag gone", out, "no such directory", "  bank\n")

@@ -832,8 +832,8 @@ func TestTestTree(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := countsOf(first); got != (counts{New: 15}) {
-		t.Fatalf("first scan = %+v, want 15 new", got)
+	if got := countsOf(first); got != (counts{New: 16}) {
+		t.Fatalf("first scan = %+v, want 16 new", got)
 	}
 
 	run("mutate")

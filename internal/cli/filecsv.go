@@ -1,0 +1,500 @@
+package cli
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"io/fs"
+	"os"
+	pathpkg "path"
+	"path/filepath"
+	"regexp"
+	"slices"
+	"strings"
+	"time"
+
+	"github.com/alansav/filo/internal/dispose"
+	"github.com/alansav/filo/internal/filecsv"
+	"github.com/alansav/filo/internal/report"
+	"github.com/alansav/filo/internal/store"
+	"github.com/alansav/filo/internal/view"
+)
+
+// exportFiles is filo export [DIR] -o FILE, the combined CSV (docs/design.md, Tags, "The combined CSV"), after
+// export's checks and its scan: every present file under DIR (or every root) with its retention and its tags.
+func (e *env) exportFiles(ctx context.Context, s *store.Store, f store.Filter, where view.Where, csvPath string,
+	asked fs.FileInfo, notScanned string) error {
+	items, err := s.FilesItems(ctx, today(), f)
+	if err != nil {
+		return err
+	}
+	suggested := markNameDates(len(items), func(i int) *store.FileItem { return &items[i].FileItem })
+	filecsv.SetNameCells(items) // recorded, so an edited name cell asks for a rename
+	v := e.view
+	if len(items) == 0 {
+		v.Heading("Export", where, "no files")
+		notScannedLine(v, notScanned)
+		v.Next("Nothing exported.")
+		return nil
+	}
+	id, err := writeExport(csvPath, asked, func(write func(int64) error) (int64, error) {
+		return s.RecordFilesExport(ctx, csvPath, now(), items, write)
+	}, func(w io.Writer, id int64) error { return filecsv.WriteCSV(w, id, items, time.Local) })
+	if err != nil {
+		return err
+	}
+	undated, tagged := 0, 0
+	for _, it := range items {
+		if it.Retention == "" {
+			undated++
+		}
+		if len(it.Tags) > 0 {
+			tagged++
+		}
+	}
+	v.Heading(fmt.Sprintf("Export #%d", id), where, report.Plural(int64(len(items)), "file", "files"))
+	v.Blank()
+	v.Count(view.Neutral, report.Count(int64(undated))+" without a retention, "+
+		report.Count(int64(len(items)-undated))+" with one")
+	v.Count(view.Neutral, report.Count(int64(tagged))+" tagged, "+report.Count(int64(len(items)-tagged))+
+		" without a tag")
+	markedLine(v, suggested)
+	notScannedLine(v, notScanned)
+	v.Blank()
+	v.Next("Next: fill in retention (7y, 18m, forever or a date) and tags (key:value or a bare value, separated " +
+		"by ;), or correct a name or a directory, then filo update " + shellQuote(csvPath))
+	return nil
+}
+
+// filesExports reports whether any of the exports is a combined one, and the first such.
+func filesExports(ctx context.Context, s *store.Store, exports []int64) (int64, error) {
+	kinds, err := s.ExportKinds(ctx, exports)
+	if err != nil {
+		return 0, err
+	}
+	for _, id := range exports {
+		if kinds[id] == store.ExportFiles {
+			return id, nil
+		}
+	}
+	return 0, nil
+}
+
+// lostColumn refuses a CSV without its column named missing whose rows name a combined export: a combined CSV that
+// lost that column (deleted or renamed in the spreadsheet), named so rather than as "not a filo CSV" (docs/design.md,
+// Tags, "The combined CSV"). It returns nil when no row names a combined export.
+func lostColumn(ctx context.Context, s *store.Store, path string, exports []int64, missing string) error {
+	id, err := filesExports(ctx, s, exports)
+	if err != nil || id == 0 {
+		return err
+	}
+	return fmt.Errorf("%s is from export #%d, a CSV with both retention and tags, but it has no %s column; put "+
+		"it back with that name, or export again with filo export", path, id, missing)
+}
+
+// updateFiles is filo update FILE for a combined CSV: both halves of each row, asking once before anything is
+// written if any row clears a retention, removes a tag or names a new policy, unless yes (-y) answers.
+func (e *env) updateFiles(ctx context.Context, s *store.Store, path string, parsed filecsv.Parsed, dry,
+	yes bool) error {
+	roots, err := registeredRoots(ctx, s)
+	if err != nil {
+		return err
+	}
+	r := e.view
+	var exports []int64
+	for _, row := range parsed.Rows {
+		if !slices.Contains(exports, row.ExportID) {
+			exports = append(exports, row.ExportID)
+		}
+	}
+	title := "Update"
+	if dry {
+		title += " (dry run)"
+	}
+	total := len(parsed.Rows) + len(parsed.Problems)
+	r.Heading(title, view.Where{Roots: roots}, csvFacts(path, exports, report.Plural(int64(total), "row", "rows"))...)
+	r.Blank()
+
+	asking := e.canPrompt() && !yes
+	var pr *prompter
+	if asking {
+		pr = newPrompter(e.stdin)
+		pr.end, pr.check = r.Blank, e.outputErr
+		defer pr.close()
+	}
+	asked := false
+	var askErr error // the question could not be asked (output failed): nothing is recorded, and the run says why
+	confirm := func(p store.FilesPending) bool {
+		if yes {
+			return true
+		}
+		if !asking {
+			return false
+		}
+		asked = true
+		var ok bool
+		ok, askErr = e.confirmPending(ctx, pr, roots, p)
+		return ok && askErr == nil
+	}
+	res, err := s.UpdateFiles(ctx, parsed.Rows, now(), today(), path, store.FilesUpdateOptions{DryRun: dry,
+		Confirm: confirm, CheckPath: dispose.CheckPath, CheckDisk: dispose.CheckMove, Moves: true})
+	switch {
+	case err != nil:
+	case ctx.Err() != nil:
+		err = ctx.Err() // interrupted at the question: nothing was written, though nothing failed
+	case askErr != nil:
+		return fmt.Errorf("nothing recorded: %w", askErr)
+	}
+	if err != nil {
+		return interruptedUpdate(err)
+	}
+	if dry && !res.Pending.Empty() {
+		e.showPending(roots, res.Pending, r.Overview())
+	}
+
+	// The renames and moves, after the register's changes (docs/design.md, Tags, "Renaming a file by its name cell"
+	// and "Moving a file by its directory cell").
+	var renames renameResult
+	if !dry && !res.Declined {
+		renames = e.makeRenames(ctx, s, res.Pending.Renames) // what it did is shown below, an error last
+	}
+	refused := refusalProblems(roots, parsed.Problems, res.Refusals)
+	if res.Declined {
+		why := "not confirmed; edit the CSV and run filo update again"
+		if !asked {
+			why = "there is no terminal to ask in; run filo update in a terminal, or with -y"
+		}
+		r.Count(view.Attention, "nothing recorded: "+why)
+	} else {
+		e.filesCounts(res, dry, len(refused), renames)
+	}
+	if len(refused) > 0 {
+		r.Count(view.Refused, report.Plural(int64(len(refused)), "row", "rows")+" refused")
+	}
+	if !res.Declined && len(res.TagsChanged) > 0 {
+		r.Blank()
+		r.Files(view.FileList{Rows: tagChangeRows(roots, res.TagsChanged), Max: r.Overview(), More: "files",
+			MoreOne: "file"})
+	}
+	if len(refused) > 0 {
+		r.Blank()
+		r.Problems("Refused: fix these rows in the CSV and run filo update again", view.Refused, refused)
+	}
+	if len(renames.skipped) > 0 {
+		r.Blank()
+		r.Problems("Skipped: run filo scan, then export again", view.Attention, renames.skipped)
+	}
+	if len(renames.failed) > 0 {
+		r.Blank()
+		r.Problems("Not renamed or moved", view.Refused, renames.failed)
+	}
+	if !res.Declined {
+		nowPast(r, roots, res.NowPast, dry, r.Overview())
+	}
+	switch {
+	case renames.err != nil && ctx.Err() == nil: // the register could not be written: stop, after showing what was done
+		return fmt.Errorf("%w; %d renames or moves not tried", renames.err, renames.untried)
+	case ctx.Err() != nil && renames.untried > 0:
+		// Ctrl-C between them: those made are recorded, the rest were not made.
+		return fmt.Errorf("interrupted: %d of %d renames and moves made and recorded; the others were not made",
+			renames.done(), len(res.Pending.Renames))
+	}
+	switch {
+	case dry:
+		r.Blank()
+		r.Next("Dry run: nothing was written.")
+	case !res.Declined && len(res.NowPast) > 0:
+		r.Blank()
+		r.Next("Nothing has been deleted. Next: filo delete")
+	}
+	if len(refused)+len(renames.skipped)+len(renames.failed) > 0 || (res.Declined && !asked) { // or no one was asked
+		return errReported
+	}
+	return nil
+}
+
+// filesCounts are a combined update's count lines: what it recorded (or, in a dry run, would record).
+func (e *env) filesCounts(res store.FilesUpdateResult, dry bool, refused int, renames renameResult) {
+	r := e.view
+	would := func(done, dryRun string) string {
+		if dry {
+			return dryRun
+		}
+		return done
+	}
+	if n := len(res.Pending.NewPolicies); dry && n > 0 {
+		r.Count(view.Neutral, report.Plural(int64(n), "policy", "policies")+" would be created")
+	}
+	if res.PoliciesCreated > 0 {
+		names := make([]string, len(res.Pending.NewPolicies))
+		for i, p := range res.Pending.NewPolicies {
+			names[i] = p.Name
+		}
+		r.Count(view.Done, report.Plural(int64(res.PoliciesCreated), "policy", "policies")+" created: "+
+			strings.Join(names, ", "))
+	}
+	if n := res.Set - res.NoValue; n > 0 {
+		r.Count(view.Done, report.Plural(int64(n), "file", "files")+would(" given a retention",
+			" would be given a retention"))
+	}
+	if res.NoValue > 0 {
+		r.Count(view.Attention, report.Plural(int64(res.NoValue), "file", "files")+would(" put on", " would be put on")+
+			" a policy with no value yet: they need a retention until it has one (filo policies set NAME VALUE)")
+	}
+	if res.Cleared > 0 {
+		r.Count(view.Done, report.Plural(int64(res.Cleared), "retention", "retentions")+would(" cleared",
+			" would be cleared"))
+	}
+	if n := len(res.TagsChanged); n > 0 {
+		r.Count(view.Done, report.Plural(int64(n), "file", "files")+would(pluralWord(n, " had its tags changed",
+			" had their tags changed"), pluralWord(n, " would have its tags changed", " would have their tags changed")))
+	}
+	if dry {
+		moving := 0
+		for _, rn := range res.Pending.Renames {
+			if rn.Moves() {
+				moving++
+			}
+		}
+		if n := len(res.Pending.Renames) - moving; n > 0 {
+			r.Count(view.Neutral, report.Plural(int64(n), "file", "files")+" would be renamed")
+		}
+		if moving > 0 {
+			r.Count(view.Neutral, report.Plural(int64(moving), "file", "files")+" would be moved")
+		}
+	}
+	if renames.renamed > 0 {
+		r.Count(view.Done, report.Plural(int64(renames.renamed), "file", "files")+" renamed")
+	}
+	if renames.moved > 0 {
+		r.Count(view.Done, report.Plural(int64(renames.moved), "file", "files")+" moved")
+	}
+	if renames.made > 0 {
+		r.Count(view.Done, report.Plural(int64(renames.made), "directory", "directories")+" made")
+	}
+	if n := len(renames.skipped) + len(renames.failed); n > 0 {
+		r.Count(view.Attention, report.Plural(int64(n), "rename or move", "renames and moves")+" not made")
+	}
+	if res.Unchanged > 0 {
+		r.Count(view.Neutral, report.Plural(int64(res.Unchanged), "row", "rows")+" unchanged")
+	}
+	if res.Set+res.Cleared+len(res.TagsChanged)+len(res.Pending.Renames)+res.Unchanged+refused == 0 {
+		r.Count(view.Neutral, "nothing to change")
+	}
+}
+
+// showPending lists what a combined update asks about: the retentions cleared, the tags removed, the new policies,
+// the renames and the moves, max of each before "… N more" (0: all), each part followed by a blank line.
+func (e *env) showPending(roots []string, p store.FilesPending, max int) {
+	r := e.view
+	if n := len(p.Clears); n > 0 {
+		r.Note(view.Attention, report.Plural(int64(n), "retention is", "retentions are")+" cleared by a blank cell:")
+		clearList(r, roots, p.Clears, max)
+		r.Blank()
+	}
+	if n := len(p.Removals); n > 0 {
+		r.Note(view.Attention, report.Plural(int64(n), "file loses", "files lose")+" tags:")
+		r.Files(view.FileList{Rows: tagChangeRows(roots, p.Removals), Max: max, More: "files", MoreOne: "file"})
+		r.Blank()
+	}
+	if len(p.NewPolicies) > 0 {
+		showNewPolicies(r, p.NewPolicies)
+		r.Blank()
+	}
+	var renames []store.Rename
+	for _, rn := range p.Renames {
+		if !rn.Moves() {
+			renames = append(renames, rn)
+		}
+	}
+	if n := len(renames); n > 0 {
+		r.Note(view.Attention, report.Plural(int64(n), "file is", "files are")+" renamed:")
+		r.Renames(view.RenameList{Rows: renameRows(renames), Max: max})
+		r.Blank()
+	}
+	if moves := moveRows(p.Renames); len(moves) > 0 {
+		n := len(moves)
+		r.Note(view.Attention, report.Plural(int64(n), "file is", "files are")+" moved:")
+		r.Moves(view.MoveList{Rows: moves, Max: max})
+		r.Blank()
+	}
+}
+
+// moveRows are the moves among rs as the summary lists them: by root and destination, the destination marked new if
+// it does not exist yet, the new name if it changes (with renameNote's note), and the registered symlinks that point
+// at the file, which the move would break.
+func moveRows(rs []store.Rename) []view.MoveRow {
+	var rows []view.MoveRow
+	for _, rn := range rs {
+		if !rn.Moves() {
+			continue
+		}
+		row := view.MoveRow{Root: rn.RootPath, Dir: rn.Dir, From: rn.Path, Symlinks: rn.Symlinks}
+		if old := pathpkg.Base(rn.Path); rn.Name != old {
+			row.Name, row.Note = rn.Name, renameNote(old, rn.Name)
+		}
+		if row.Note == "" && sameButSpaces(dirOf(rn.Path), rn.Dir) {
+			row.Note = "only spaces in the directory changed" // a stray space would make a new directory beside it
+		}
+		fi, err := os.Lstat(filepath.Join(rn.RootPath, filepath.FromSlash(rn.Dir)))
+		row.New = err != nil || !fi.IsDir()
+		rows = append(rows, row)
+	}
+	slices.SortStableFunc(rows, func(a, b view.MoveRow) int {
+		return strings.Compare(a.Root+"\x00"+a.Dir, b.Root+"\x00"+b.Dir)
+	})
+	return rows
+}
+
+// renameRows are the renames as the summary lists them: by root and directory, each with a note on a rename that
+// may be an accident (only spaces at the start or end changed, or the extension).
+func renameRows(rs []store.Rename) []view.RenameRow {
+	rows := make([]view.RenameRow, len(rs))
+	for i, rn := range rs {
+		dir, old := pathpkg.Split(rn.Path)
+		rows[i] = view.RenameRow{Root: rn.RootPath, Dir: strings.TrimSuffix(dir, "/"), Old: old, New: rn.Name,
+			Note: renameNote(old, rn.Name), Symlinks: rn.Symlinks}
+	}
+	slices.SortStableFunc(rows, func(a, b view.RenameRow) int {
+		return strings.Compare(a.Root+"\x00"+a.Dir, b.Root+"\x00"+b.Dir)
+	})
+	return rows
+}
+
+// renameNote is the note on a new name that may be an accident: a name a spreadsheet may have reformatted, only
+// spaces at the start or end changed, or the extension; "" for none.
+func renameNote(old, name string) string {
+	switch {
+	case reformattable.MatchString(old):
+		return "looks reformatted by a spreadsheet"
+	case strings.TrimSpace(old) == strings.TrimSpace(name):
+		return "only spaces changed"
+	case extension(old) != extension(name):
+		return "extension changed"
+	}
+	return ""
+}
+
+// sameButSpaces reports whether two directories ('/'-separated) differ only by spaces at the start or end of their
+// parts.
+func sameButSpaces(a, b string) bool {
+	pa, pb := strings.Split(a, "/"), strings.Split(b, "/")
+	if a == b || len(pa) != len(pb) {
+		return false
+	}
+	for i := range pa {
+		if strings.TrimSpace(pa[i]) != strings.TrimSpace(pb[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+// dirOf is the directory of rel ('/'-separated), "" for the root.
+func dirOf(rel string) string {
+	if d := pathpkg.Dir(rel); d != "." {
+		return d
+	}
+	return ""
+}
+
+// reformattable matches a name a spreadsheet may rewrite when it saves the CSV (docs/design.md, Tags, "Renaming a
+// file by its name cell"): all digits (0012 becomes 12), a number (1E5, 1.50), or a short date (1-2, 3.4.25).
+var reformattable = regexp.MustCompile(`^(\d+|\d*\.\d+|\d+(\.\d+)?[eE][+-]?\d+|\d{1,4}[-.]\d{1,2}([-.]\d{1,4})?)$`)
+
+// extension is a name's extension (a renamed name is never hidden, so a leading dot never counts as one).
+func extension(name string) string { return pathpkg.Ext(name) }
+
+// renameResult is what making an update's renames did: how many were made, those not made with why (skipped: the
+// disk changed, so a scan and a new export put it right; failed: something a scan does not change), and, if the run
+// stopped (Ctrl-C, or err: the register could not be written), how many were not tried.
+type renameResult struct {
+	renamed, moved  int // made (a move that is also a rename counts as a move)
+	made            int // directories made for the moves
+	skipped, failed []view.Problem
+	untried         int
+	err             error
+}
+
+func (r renameResult) done() int { return r.renamed + r.moved }
+
+// makeRenames makes each rename or move, checked again on disk just before, and records each straight after; one
+// not made is listed with why. Ctrl-C stops after the current one, as does a register that cannot be written (err).
+// The directories the moves empty stay.
+func (e *env) makeRenames(ctx context.Context, s *store.Store, rs []store.Rename) (out renameResult) {
+	if len(rs) == 0 {
+		return out
+	}
+	roots, err := registeredRoots(context.WithoutCancel(ctx), s)
+	if err != nil {
+		out.err, out.untried = err, len(rs)
+		return out
+	}
+	run := s.BeginRenameRun(now())
+	defer func() {
+		if err := run.Finish(context.WithoutCancel(ctx), now()); err != nil {
+			e.errorLine(err.Error())
+		}
+	}()
+	m := dispose.NewMover(run, now)
+	for i, rn := range rs {
+		o, err := m.Move(ctx, rn)
+		switch {
+		case o.Done && rn.Moves():
+			out.moved++ // made, even when its record failed (the error says so)
+		case o.Done:
+			out.renamed++
+		}
+		out.made += len(o.Made)
+		if err != nil {
+			if ctx.Err() == nil {
+				out.err = err
+			}
+			out.untried = len(rs) - i - 1
+			if !o.Done {
+				out.untried++
+			}
+			return out
+		}
+		if o.Done {
+			continue
+		}
+		p := view.Problem{Reason: o.Reason}
+		p.Root, p.Rel = view.SplitRoot(roots, rn.AbsPath())
+		if o.Failed {
+			out.failed = append(out.failed, p)
+		} else {
+			out.skipped = append(out.skipped, p)
+		}
+	}
+	return out
+}
+
+// confirmPending shows what the update asks about (the first ones, or all with l) and asks once. Only a yes
+// confirms; anything else records nothing.
+func (e *env) confirmPending(ctx context.Context, pr *prompter, roots []string, p store.FilesPending) (bool, error) {
+	e.showPending(roots, p, e.view.Overview())
+	return e.askYesNo(ctx, pr, "Apply the update? Nothing is recorded otherwise.", func() { e.showPending(roots, p, 0) })
+}
+
+// tagChangeRows lists what an update does to each file's tags: "added urgent; kind:x   removed type:bill".
+func tagChangeRows(roots []string, cs []store.TagChange) []view.FileRow {
+	rows := make([]view.FileRow, len(cs))
+	for i, c := range cs {
+		var what []string
+		if len(c.Added) > 0 {
+			what = append(what, "added "+store.JoinTags(c.Added))
+		}
+		if len(c.Removed) > 0 {
+			what = append(what, "removed "+store.JoinTags(c.Removed))
+		}
+		row := view.FileRow{Note: strings.Join(what, "   ")}
+		if c.Path == "" {
+			row.Label = fmt.Sprintf("file %d, no current path", c.FileID)
+		} else {
+			row.Root, row.Rel = view.SplitRoot(roots, c.Path)
+		}
+		rows[i] = row
+	}
+	return rows
+}

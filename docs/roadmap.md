@@ -7,7 +7,7 @@ Everything Filo does not do: the work planned, ideas, open questions, deferred i
 Filo does today is in `design.md`; how it was built is in `history.md`. An item stays here while it is discussed and
 designed. When work on it starts, its design moves into `design.md` (the first commit of its branch); when it is
 complete, nothing of it is left here. Items keep their numbers, so gaps in the numbering are work already done, or ideas
-rejected (see Rejected, at the end: 14 is deleting to the trash). Last updated: 2026-11-22.
+rejected (see Rejected, at the end: 14 is deleting to the trash). Last updated: 2026-11-27.
 
 ## Direction
 
@@ -17,7 +17,9 @@ and getting rid of it safely when its time comes. The register is how it does th
 - **Filo knows and decides; it deletes because deletion needs its checks** (the re-hash, the root check and the
   hard-link check at the moment of deleting). **Any other action on files is done by standard tools, from lists
   Filo writes** (a list for `tar`, a script of `mv` lines the person reads and runs). This keeps it one tool, in the
-  Unix sense of programs that work together.
+  Unix sense of programs that work together. Clarified 2026-11-27: this rules out clones of file commands (`filo
+  mv`, `filo cp`), not changes made through the export and bulk update, such as renaming a file by editing its
+  `name` cell (built, see `design.md`).
 - **Filo stays outside the file system.** Making Filo a file system (every move seen as it happens, no scans) was
   considered and not taken: a bug in it could then lose data on every read and write, while today a broken Filo
   leaves the files untouched and the worst case is a wrong register, which the snapshots cover (principle 3, fail
@@ -38,7 +40,7 @@ on the other device: a retention by content hash (an edited file needs a new dec
 
 The pieces, in the order agreed: finding files (`filo find`, item 19, built 2026-11-21), 18a tags (built
 2026-11-22), 38 the tag index
-pages (built 2026-11-22), 36 bash completion, then the sync items
+pages (built 2026-11-22), 36 bash completion (built 2026-11-28), then the sync items
 (9b device ID, 9a synced directories, 9c the journal, which also carries tags), then 20 the Filo directory and 18b
 project notes and packages. 36 comes after tags so that its completion covers tag names from the start (reordered
 2026-11-20).
@@ -49,21 +51,25 @@ nothing extra; meanwhile tags are used on one device.
 ## Priority
 
 Provisional, agreed 2026-11-17, with the first places reordered on 2026-11-20 for the goal above; the value and
-complexity scores (1 to 10, Claude's estimates) are still to be settled with the person. Items 22 to 33, and
-35, are not placed yet.
+complexity scores (1 to 10, Claude's estimates) are still to be settled with the person. Items 22 to 33, 35 and
+43 are not placed yet.
 
-1. 36 bash completion
-2. 9b device ID, 9a marking synced directories, 9c sharing decisions
-3. 20 the Filo directory, 18b project notes and packages
-4. 5a progress line, 5b `--needing-retention`
-5. 13 removing empty directories
-6. 21 script mode, 34 received documents (needs 21 and 9a)
-7. 6 one decision for all copies
-8. 16 undoing an update batch, 17 suggested rules
-9. 15 where the space goes
-10. 7a–7c verifying content, 8 backup awareness, 9d snapshots to the backup machine
-11. 10 a summary for scheduled scans
-12. Later a and c–e
+Next, agreed 2026-11-27 (friction week, on the `improvements` branch, after the combined CSV, 39 renaming by the
+`name` cell, 41 no `bin`/`obj` special case, 42 moving by the `directory` cell and 40 removing the retention and tags
+exports, all built that day, and 44 the tag index's find page, built the same evening; 36 bash completion built on
+2026-11-28): the list below.
+
+1. 9b device ID, 9a marking synced directories, 9c sharing decisions
+2. 20 the Filo directory, 18b project notes and packages
+3. 5a progress line, 5b `--needing-retention`
+4. 13 removing empty directories
+5. 21 script mode, 34 received documents (needs 21 and 9a)
+6. 6 one decision for all copies
+7. 16 undoing an update batch, 17 suggested rules
+8. 15 where the space goes
+9. 7a–7c verifying content, 8 backup awareness, 9d snapshots to the backup machine
+10. 10 a summary for scheduled scans
+11. Later a and c–e
 
 ## Items
 
@@ -74,7 +80,7 @@ starting points for the design, not decisions, unless they say so.
 A line in `filo report` showing how far dating has got: files with a `file_date`, files with a retention, and per
 directory what is left. The report's "Where most need one" list already covers part of the last.
 
-### 5b. `filo export retention --needing-retention` (V6, C2)
+### 5b. `filo export --needing-retention` (V6, C2)
 Writes only the files the report counts as needing a retention, so each CSV is shorter and holds only work still to
 do.
 
@@ -119,7 +125,10 @@ devices is needed (changed 2026-11-19: the shared name was meant for decision lo
 which now live in the synced directory itself). Open: whether a synced directory is always a root or can be a
 directory inside one (a root `~` holding `~/Sync`), and whether one can contain another. What Filo then does
 differently: a sync service propagates deletes (see `design.md`, Disposal), and a list of name patterns for
-conflict copies, set by the person because every service names them differently, could be surfaced.
+conflict copies, set by the person because every service names them differently, could be surfaced. Noted
+2026-11-27 with 42: a move by the `directory` cell out of a synced directory into an unsynced part of its root is a
+delete on the other devices, so the update's summary should note it once synced directories are marked. Noted
+2026-11-27 with 44: marking a synced directory could offer a tag index at its top, the one every device opens.
 
 ### 9b. A device ID (V3, C1)
 A random device ID in `meta`, made when the database is created, and recorded with each decision, so no decision
@@ -242,7 +251,9 @@ records what it planned, so the next scan records a file gone with its hash matc
 ### 22. `filo version` (V4, C2)
 Filo's own version (no build version is stamped yet) and the database in use: its path, schema version and when it
 was created. Today the schema version can only be read with `sqlite3 DB "SELECT key, value FROM meta"`. Showing the
-same in `filo report` was considered as a simpler alternative.
+same in `filo report` was considered as a simpler alternative. The build version would be stamped by `make build`
+with `-ldflags "-X main.version=$(VERSION)"`, `VERSION` from `git describe --tags --always --dirty` (`dev` when that
+fails), into a `var version = "dev"` in `cmd/filo`, so a plain `go build` still gives `dev`.
 
 ### 23. All of a scan's events (V3, C2)
 A scan shows the first 10 events of each kind and `… N more`; the report shows only the latest events overall, so
@@ -325,22 +336,19 @@ named in the register, which outlives the retention that deleted it.
   register's `freelist` needs a `VACUUM` so forgotten names are really gone from the file; how it fits 9c's delete
   records, which other devices read.
 
-### 36. Bash completion (V5, C4)
-Agreed with the person on 2026-11-20. Tab completes Filo's commands, flags and arguments in bash.
-- **Loading it.** `filo completion bash` prints the script and writes nothing. The README shows two ways: `source
-  <(filo completion bash)` in `.bashrc` (always current, run at each shell start), or the output saved once to
-  `~/.local/share/bash-completion/completions/filo`, which the `bash-completion` package loads on the first Tab
-  (rewritten after an upgrade that changes commands). Filo never edits `.bashrc` itself (hard rules).
-- **Static:** commands, subcommands and flags. Commands are a `switch` in `internal/cli` and each command's flags are
-  known only inside it, so the list is written down once or the flags move into a table; a test checks that every
-  command and flag the CLI accepts is completed, so the two cannot drift apart.
-- **Dynamic:** a hidden `filo __complete WORDS...` the script calls on Tab. Strictly read-only: no snapshot, never
-  creates a database, prints nothing on failure, and honours a `--db` typed on the line. It completes file paths
-  from the register merged with the disk (so missing files, and files deleted by Filo, complete; the typed word,
-  relative or starting with `~`, is turned into a root and a path in it, as `filo show` does), policy names, rule patterns,
-  and tag names (tags are built).
-- Bash only at first (zsh can load bash completions). No framework: Cobra would be a new dependency and a rewrite of
-  every command's parsing.
+### 43. Restoring a register snapshot (V5, C3)
+Agreed as wanted on 2026-11-27, design not started; promoted from the deferred improvements, where it was one line.
+Restoring is by hand today (see `design.md`, Register snapshots, "Restoring"): with no filo running, move `filo.db`
+and its `-wal` and `-shm` files aside and copy a snapshot in, where forgetting the `-wal` file can let SQLite apply
+newer changes to the old copy. Worth more now that one update can clear retentions, remove tags, and rename and move
+files: the snapshots are the safety net for a bad CSV, so going back should be one command.
+- A first idea, not decided: `filo snapshots` lists them; a restore takes the lock, checks the snapshot opens as a
+  register, shows what it goes back to, asks, keeps the current register as a snapshot of its own (so a restore can
+  be undone), and swaps the files in without a moment with no register.
+- **To decide first:** a snapshot restores the register, never the files. A file Filo deleted, renamed or moved
+  after the snapshot stays so on disk; the next scan pairs a rename or move by its hash, but a file deleted since
+  comes back in the register only to be reported missing, not "deleted by filo". The command should say so before
+  it asks.
 
 ### Docs
 
@@ -399,7 +407,7 @@ one watch per directory and drops events when its queue fills.
 
 Smaller improvements to what exists, noted while it was built. Not prioritised.
 
-- **Register:** a restore command for snapshots (restoring is by hand today); skipping a snapshot when a scan changed
+- **Register:** skipping a snapshot when a scan changed
   nothing, if registers grow large (every run that writes copies the whole register); an atomic no-replace rename
   for snapshots (needs `golang.org/x/sys`), so a program not taking Filo's lock cannot slip a file in under the
   snapshot's name.

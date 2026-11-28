@@ -62,8 +62,8 @@ func TestReadCSVRefusesOtherCSVs(t *testing.T) {
 		{"the first design's CSV, with a delete column",
 			sheet.BOM + "id,export,group,copies,directory,name,size,modified,file_date,retention,keep_until,delete\r\n" +
 				"1,1,1,2,/r,x,1,2026-11-15 10:00,,,,Y\r\n", ErrOlderCSV},
-		{"a retention CSV",
-			sheet.BOM + "id,export,directory,name,size,modified,file_date,retention,keep_until\r\n", ErrRetentionCSV},
+		{"a CSV from filo export",
+			sheet.BOM + "id,export,directory,name,size,modified,file_date,retention,keep_until,tags\r\n", ErrFilesCSV},
 		{"no action column", sheet.BOM + "id,export,group,copies\r\n", ErrNoAction},
 		{"not a filo CSV", "a,b,c\r\n1,2,3\r\n", ErrNotDuplicatesCSV},
 	}
@@ -76,7 +76,7 @@ func TestReadCSVRefusesOtherCSVs(t *testing.T) {
 	}
 }
 
-// exported is export 7 as the register recorded it: group 1 holds files 1, 2 and 3; group 2 holds files 4 and 5;
+// exported is export #7 as the register recorded it: group 1 holds files 1, 2 and 3; group 2 holds files 4 and 5;
 // group 3 holds files 6 and 7. Export 8 holds file 9 in group 1.
 var exported = map[int64]map[int64]int64{
 	7: {1: 1, 2: 1, 3: 1, 4: 2, 5: 2, 6: 3, 7: 3},
@@ -161,11 +161,11 @@ func TestPlanStructure(t *testing.T) {
 		{"C2: a row's group edited refuses both groups it touches",
 			append([][4]string{{"7", "1", "1", "keep"}, {"7", "1", "2", "delete"}, {"7", "3", "3", "delete"},
 				{"7", "3", "6", "keep"}, {"7", "3", "7", "delete"}}, decided2...),
-			[]GroupKey{{7, 1}, {7, 3}}, "in group 1 of export 7, not group 3"},
+			[]GroupKey{{7, 1}, {7, 3}}, "in group 1 of export #7, not group 3"},
 		{"C2: a row from another export pasted in",
 			append([][4]string{{"7", "1", "1", "keep"}, {"7", "1", "2", "delete"}, {"7", "1", "3", "delete"},
 				{"7", "1", "9", "delete"}}, decided2...),
-			[]GroupKey{{7, 1}}, "is not in export 7"},
+			[]GroupKey{{7, 1}}, "is not in export #7"},
 		{"C2: a row duplicated",
 			append([][4]string{{"7", "1", "1", "keep"}, {"7", "1", "2", "delete"}, {"7", "1", "3", "delete"},
 				{"7", "1", "3", "delete"}}, decided2...),
@@ -180,7 +180,7 @@ func TestPlanStructure(t *testing.T) {
 			[]GroupKey{{7, 1}, {7, 3}}, "export again"},
 		{"C2: an export this register does not have",
 			append([][4]string{{"12", "1", "1", "keep"}, {"12", "1", "2", "delete"}}, decided2...),
-			[]GroupKey{{12, 1}}, "export 12 is not a duplicates export of this register"},
+			[]GroupKey{{12, 1}}, "export #12 is not a duplicates export of this register"},
 		{"C5: sorted rows are fine",
 			[][4]string{{"7", "1", "3", "delete"}, {"7", "2", "5", "delete"}, {"7", "1", "1", "keep"},
 				{"7", "2", "4", "keep"}, {"7", "1", "2", "delete"}},
@@ -225,10 +225,10 @@ func TestPlanStructure(t *testing.T) {
 				[4]string{"7", "1", "3", "delete"}, [4]string{"9", "1", "1", tc.actions[0]},
 				[4]string{"9", "1", "2", tc.actions[1]}, [4]string{"9", "1", "3", tc.actions[2]}))
 			if g := plans[GroupKey{7, 1}]; g.Status != Decided {
-				t.Errorf("export 9 %q: group 7/1 = %+v, want decided", tc.actions, g)
+				t.Errorf("export #9 %q: group 7/1 = %+v, want decided", tc.actions, g)
 			}
 			if g := plans[GroupKey{9, 1}]; g.Status != tc.want {
-				t.Errorf("export 9 %q: group 9/1 = %+v, want status %d", tc.actions, g, tc.want)
+				t.Errorf("export #9 %q: group 9/1 = %+v, want status %d", tc.actions, g, tc.want)
 			}
 		}
 	})

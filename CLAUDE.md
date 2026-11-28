@@ -16,34 +16,42 @@ done, and `design.md` only what exists.
 
 ## Current state
 
-Everything `docs/design.md` describes is built and merged (schema 12): scan, register and report; retention through
-the retention CSV (`filo export retention`, `filo update`); `filo delete [DIR] [-y]`, which deletes a file only after
-it is re-read and found unchanged; register snapshots; duplicates (`filo delete FILE.csv`, `filo duplicates`); the
-terminal output (every command prints through `internal/view`); named retention policies (`filo policies`); directory
-rules (`filo rules`); showing and setting a file's details (`filo show`, `filo set`, `filo get`); finding files
-(`filo find`); tags (`filo tag`, `untag`, `tags`, `find --tag`, the tags CSV); tag index pages (`filo indexes`; on
-branch `tag-index` until merged). What is next is in `docs/roadmap.md`, Priority (provisional, reordered 2026-11-21:
-36 bash completion, then the sync items).
-**`internal/dispose` is the only code allowed to delete the user's files**, and only from `filo delete`; everything
-else stays read-only on them, and nothing overwrites an existing file without asking (only an `-o` output file, and
-a tag index's own pages, see the hard rules). Stay inside the current piece of work.
+Everything `docs/design.md` describes is built (schema 13; the newest on branch `improvements` until merged): scan,
+register and report; retention through the CSV (`filo export`, `filo update`); `filo delete [DIR]
+[-y]`, which deletes a file only after it is re-read and found unchanged; register snapshots; duplicates (`filo delete
+FILE.csv`, `filo duplicates`); the terminal output (every command prints through `internal/view`); named retention
+policies (`filo policies`); directory rules (`filo rules`); showing and setting a file's details (`filo show`, `filo
+set`, `filo get`); finding files (`filo find`); tags (`filo tag`, `untag`, `tags`, `find --tag`); tag index pages
+(`filo indexes`), whose `NAME.html` is a find page with a script (tested with Node from `go test`); the combined CSV (`filo export [DIR] -o FILE`, the one CSV for retentions and tags since the
+retention and tags exports were removed), renaming by its `name` cell and moving by its `directory` cell (never a
+hidden file; a move leaves the directories it empties); bash completion (`filo completion bash`, tested with bash
+from `go test`) (all on branch `improvements` until merged). What is next is in `docs/roadmap.md`, Priority
+(2026-11-28: the sync items, 9b, 9a and 9c).
+**`internal/dispose` is the only code allowed to change the user's files**: deleting them only from `filo delete`,
+renaming or moving them within their root only from `filo update` (a changed `name` or `directory` cell in the
+combined CSV, making the directories a move needs; `TestOnlyDisposeChangesUserFiles` guards it); everything else stays
+read-only on them, and nothing overwrites an existing file without asking (only an `-o` output file, and a tag index's
+own pages, see the hard rules). Stay inside the current piece of work.
 
 ## Hard rules
 
 - Filo must not modify, move, rename, delete or overwrite any file outside its own data directory (or the `--db` path
-  given, its companion files and its `<db>.snapshots/` directory) except through `filo delete`, or the later work
-  that calls for it, and the output file named with `-o`: if that file exists, Filo asks before replacing it (no
-  terminal: refused; `-y` does not answer it; see `docs/design.md`, Lifespan), and the files of a tag index
-  (`NAME.html` and `.NAME/` in a directory given to `filo indexes add`), which Filo creates only where nothing
-  exists, replaces or removes only while still exactly what it wrote (its hash matches; anything else is left alone
-  and reported), and removes as a whole only through `filo indexes remove`, which shows what it will remove and asks
-  (or `-y`). `internal/tagindex` is the only code that writes or removes them (`TestOnlyWriteTouchesTheDisk`
-  guards it); they are Filo's files, not the user's (see `docs/design.md`, Tag index pages). Anything destructive
-  shows what it will do and asks first (or needs `-y`).
+  given, its companion files and its `<db>.snapshots/` directory) except through `filo delete`; renaming a file, or
+  moving it within its root (making the directories it needs), through `filo update`, only after the update has listed
+  it and been confirmed (or `-y`), never over an existing file, and never a file that is no longer the one exported
+  (see `docs/design.md`, Tags, "Renaming a file by its `name` cell"); and the output file named with `-o`: if that
+  file exists, Filo asks before replacing it (no terminal: refused; `-y` does not answer it; see `docs/design.md`,
+  Lifespan), and the files of a tag index (`NAME.html` and `.NAME/` in a directory given to `filo indexes add`), which
+  Filo creates only where nothing exists, replaces or removes only while still exactly what it wrote (its hash
+  matches; anything else is left alone and reported), and removes as a whole only through `filo indexes remove`, which
+  shows what it will remove and asks (or `-y`). `internal/tagindex` is the only code that writes or removes them
+  (`TestOnlyWriteTouchesTheDisk` guards it); they are Filo's files, not the user's (see `docs/design.md`, Tag index
+  pages). Anything destructive shows what it will do and asks first (or needs `-y`).
 - Treat file names and the register as untrusted input: delete only inside a root (`internal/dispose` checks), and
   print through `internal/view` (its Renderer escapes every text it is given with `view.Escape`, then adds only its
-  own colour codes; the one exception is `filo find -0`'s raw path list, written by the Renderer and refused when
-  stdout is a terminal); stderr only through the CLI's `errorLine` (each line escaped, `filo: ` before it), and the
+  own colour codes; the two exceptions are `filo find -0`'s raw path list, written by the Renderer and refused when
+  stdout is a terminal, and `filo __complete`'s candidates for bash, also written raw by the Renderer, never to a
+  terminal and never one holding a control character); stderr only through the CLI's `errorLine` (each line escaped, `filo: ` before it), and the
   progress line. Never write text straight to `os.Stdout` or `os.Stderr` (`TestOutputGoesThroughTheRenderer` guards
   it). Write each line of output with one call (a newline inside a write is escaped, since only a file name puts one
   there).
@@ -70,10 +78,13 @@ a tag index's own pages, see the hard rules). Stay inside the current piece of w
 ## Commands
 
 You run inside the dev container, so run Go commands directly. (From the host they need the `scripts/dev.sh run`
-prefix.)
+prefix.) The image is built with Claude Code by default (`scripts/dev.sh build`; `--no-claude` leaves it out, and
+`scripts/dev.sh claude` then refuses with how to rebuild).
 
-- Build: `go build -o bin/filo ./cmd/filo`
-- Test: `go test ./...`
+- Build: `make build` (a static `bin/filo`; `scripts/install.sh` builds it, copies it to `~/.local/bin` and adds the
+  completion line to `~/.bashrc`; it is for the user to run on the host, not you)
+- Test: `go test ./...` (it also runs the tag index's find page script tests with `node --test`; Node is in the dev
+  container, and a container built before Node was added needs a rebuild)
 - Vet and lint: `go vet ./...` and `staticcheck ./...`
 - Format: `gofmt -l -w .`
 - Throwaway test tree: `scripts/testtree.sh init DIR` then `scripts/testtree.sh mutate DIR`, with DIR under your own
@@ -82,7 +93,7 @@ prefix.)
 - Example dev run, always with a throwaway database and tree, in a private directory (Filo refuses a database in a
   directory others can write to, such as `/tmp`): `T=$(mktemp -d)`, then `bin/filo --db $T/f.db roots add DIR` (adds
   and scans), `bin/filo --db $T/f.db scan`, `bin/filo --db $T/f.db report`, then
-  `bin/filo --db $T/f.db export retention DIR/notes -o $T/l.csv`, fill in `retention`, `update $T/l.csv` and `delete`
+  `bin/filo --db $T/f.db export DIR/notes -o $T/l.csv`, fill in `retention`, `update $T/l.csv` and `delete`
   (export refuses an existing file, so remove `$T/l.csv` between runs).
   `delete` really deletes: run it only with a throwaway `--db` whose roots are a throwaway tree
 

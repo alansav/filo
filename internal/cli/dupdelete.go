@@ -431,7 +431,7 @@ func once(jobs []*dupJob) {
 	recording := map[int64]duplicates.GroupKey{} // file -> the group storing it as a record
 	always := map[string]duplicates.GroupKey{}   // content -> the group making it always
 	where := func(k duplicates.GroupKey) string {
-		return "group " + strconv.FormatInt(k.Group, 10) + " of export " + strconv.FormatInt(k.Export, 10)
+		return "group " + strconv.FormatInt(k.Group, 10) + " of export #" + strconv.FormatInt(k.Export, 10)
 	}
 	for _, j := range jobs {
 		if j.state != jobDelete && j.state != jobRecord {
@@ -659,7 +659,7 @@ type dupList struct {
 	csv      string
 	exports  []int64
 	jobs     []*dupJob
-	problems []duplicates.Problem
+	problems []sheet.Problem
 	links    map[string][]string
 }
 
@@ -702,7 +702,7 @@ func (l *dupList) draw(r *view.Renderer, max int) (cut bool) {
 	}
 	var exs []string
 	for _, id := range l.exports {
-		exs = append(exs, strconv.FormatInt(id, 10))
+		exs = append(exs, "#"+strconv.FormatInt(id, 10))
 	}
 	r.Heading("Duplicates", view.Where{Roots: roots}, l.csv, ex+strings.Join(exs, ", "),
 		report.Plural(int64(len(l.jobs)), "group", "groups"))
@@ -759,7 +759,7 @@ func (l *dupList) draw(r *view.Renderer, max int) (cut bool) {
 	}
 	prefix := func(j *dupJob) string {
 		if len(l.exports) > 1 {
-			return "export " + strconv.FormatInt(j.key.Export, 10) + ": "
+			return "export #" + strconv.FormatInt(j.key.Export, 10) + ": "
 		}
 		return ""
 	}

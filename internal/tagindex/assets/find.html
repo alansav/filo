@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="{{.Policy}}">
+<meta name="generator" content="filo">
+<title>{{.Title}}</title>
+<style>{{.Style}}</style>
+</head>
+<body>
+<header>
+<h1>{{.Title}}</h1>
+<p class="counts" id="counts">{{.Counts}}</p>
+<p class="browse"><a href="{{.Browse}}">Browse by key</a></p>
+</header>
+<noscript><p class="empty">Finding needs the page's script, which this viewer does not run: browse by key instead.</p></noscript>
+<main id="find" hidden>
+<div class="box">
+<input id="q" type="search" placeholder="Search names, or type a tag" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Search names and directories, or find a tag">
+<ul id="suggest" class="suggest" hidden></ul>
+</div>
+<div id="chips" class="chips"></div>
+<details id="dirs" class="dirs"><summary>Directory</summary><div id="crumbs" class="crumbs"></div><ul id="subdirs" class="rows"></ul></details>
+<div id="keys" class="keys"></div>
+<p id="none" class="empty" hidden>No file matches.</p>
+<ul id="results" class="files"></ul>
+<button id="more" class="more" type="button" hidden>Show more</button>
+</main>
+<aside id="preview" class="preview" hidden aria-label="Preview">
+<div class="preview-bar"><span id="preview-name" class="preview-name"></span><a id="preview-open" class="open">Open</a><button id="preview-close" class="close" type="button">Close</button></div>
+<div id="preview-body" class="preview-body"></div>
+</aside>
+<script type="application/json" id="data">{{.Data}}</script>
+<script>{{.Script}}</script>
+</body>
+</html>

@@ -93,11 +93,11 @@ func (d dupTest) groups() int {
 	return len(n)
 }
 
-// setRetentions gives files (path relative to the root -> retention) a retention through a retention CSV.
+// setRetentions gives files (path relative to the root -> retention) a retention through the CSV from filo export.
 func (d dupTest) setRetentions(values map[string]string) {
 	d.t.Helper()
 	p := filepath.Join(d.work, "r-"+strconv.FormatInt(time.Now().UnixNano(), 36)+".csv")
-	d.filo(ExitOK, "", false, "export", "retention", "-o", p)
+	d.filo(ExitOK, "", false, "export", "-o", p)
 	editCSV(d.t, p, func(row map[string]string) {
 		rel, _ := filepath.Rel(d.root, filepath.Join(row["directory"], row["name"]))
 		if v, ok := values[filepath.ToSlash(rel)]; ok {
@@ -382,8 +382,9 @@ func TestDuplicatesDeleteAsking(t *testing.T) {
 	d.there("declined", all)
 
 	r := filepath.Join(d.work, "r.csv")
-	d.filo(ExitOK, "", false, "export", "retention", "-o", r)
-	d.contains("a retention CSV", d.filo(ExitError, "", false, "delete", r).stderr, "this is a retention CSV")
+	d.filo(ExitOK, "", false, "export", "-o", r)
+	d.contains("a CSV from filo export", d.filo(ExitError, "", false, "delete", r).stderr,
+		"this is a CSV from filo export")
 }
 
 // TestDuplicatesDeleteGolden: filo delete FILE.csv's whole plain output (docs/design.md, Terminal output): a run
@@ -428,7 +429,7 @@ func TestDuplicatesDeleteReviewFindings(t *testing.T) {
 			t.Fatal(err)
 		}
 		out := d.run(ExitOK, both)
-		d.contains("run", out, "Will delete   2 copies in 1 group", "the same as group 1 of export 1, which does it",
+		d.contains("run", out, "Will delete   2 copies in 1 group", "the same as group 1 of export #1, which does it",
 			"Done   deleted 2 copies")
 		d.lacks("run", out, "Skipped")
 		d.there("run", map[string]bool{"a/contract.pdf": true, "b/contract.pdf": false, "c/contract.pdf": false})

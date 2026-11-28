@@ -1,4 +1,4 @@
-Duplicates   d.csv . export 1 . 5 groups . <root>
+Duplicates   d.csv . export #1 . 5 groups . <root>
 
 Will delete   2 copies in 1 group . 16 B
     contract.pdf . 8 B each

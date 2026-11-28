@@ -1,26 +1,27 @@
-$ filo export retention tax
-Scan   scan 2 . 2 files seen . under 0.1 s . <root>, under tax/
+$ filo export tax
+Scan #2   2 files seen . under 0.1 s . <root>, under tax/
   [ok] no changes
 
-Retention export   export 1 . 2 files . <root>, under tax/
+Export #1   2 files . <root>, under tax/
 
   - 2 without a retention, 0 with one
-  [!] 1 file_date filled in from the file name: check it before counting from it
+  - 0 tagged, 2 without a tag
+  [!] 1 file_date read from the file name, marked !: remove the ! to accept it
 
-Next: fill in retention (7y, 18m, forever or a date), then filo update <work>/l.csv
+Next: fill in retention (7y, 18m, forever or a date) and tags (key:value or a bare value, separated by ;), or correct a name or a directory, then filo update <work>/l.csv
 
-$ filo export retention empty
-Scan   scan 3 . 0 files seen . under 0.1 s . <root>, under empty/
+$ filo export empty
+Scan #3   0 files seen . under 0.1 s . <root>, under empty/
   [ok] no changes
 
-Retention export   no files . <root>, under empty/
+Export   no files . <root>, under empty/
 Nothing exported.
 
 $ filo export duplicates
-Scan   scan 4 . 4 files seen . under 0.1 s . <root>
+Scan #4   4 files seen . under 0.1 s . <root>
   [ok] no changes
 
-Duplicates export   export 2 . 1 group . 2 copies . <root>
+Export #2 (duplicates)   1 group . 2 copies . <root>
 
   - in each group: keep for the copy to keep, delete for the rest; always on every row if the content belongs everywhere
   - keep on two or more copies: they are kept as separate files, each with its own retention

@@ -138,7 +138,7 @@ func TestUsageAndHelp(t *testing.T) {
 		{"help export", []string{"help", "export"}, ExitOK, "keep_until", ""},
 		{"scan no longer takes root settings", []string{"--db", db, "scan", "--include-hidden"}, ExitUsage, "",
 			"include-hidden"},
-		{"review is gone", []string{"--db", db, "review"}, ExitUsage, "", "export retention and update"},
+		{"review is gone", []string{"--db", db, "review"}, ExitUsage, "", "export and update"},
 		{"unknown roots command", []string{"--db", db, "roots", "bogus"}, ExitUsage, "", `unknown roots command "bogus"`},
 		{"roots set without a dir", []string{"--db", db, "roots", "set"}, ExitUsage, "",
 			"filo: roots set takes exactly one DIR (see filo help roots)\n"},
@@ -229,7 +229,7 @@ func TestEndToEnd(t *testing.T) {
 	sh("init")
 	// roots add scans the new root straight away.
 	if out := must("roots", "add", tree); !strings.Contains(out, "Root added   "+tree+"\n  - hidden files skipped\n") ||
-		!strings.Contains(out, "15 files seen") || !strings.Contains(out, "\n  - 15 new\n") {
+		!strings.Contains(out, "16 files seen") || !strings.Contains(out, "\n  - 16 new\n") {
 		t.Errorf("roots add: %s", out)
 	}
 	if out := must("roots"); !strings.Contains(out, "last scan") || !strings.Contains(out, "\n    hidden files skipped\n") {
@@ -268,13 +268,13 @@ func TestEndToEnd(t *testing.T) {
 		"Broken symlinks   2",
 		"    broken-link   -> nowhere",
 		"     117 KiB   photos/img2-renamed.bin", // largest first
-		"last scan 2",
+		"last scan #2",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("report lacks %q:\n%s", want, out)
 		}
 	}
-	wantUnreadable := "Unreadable files   1\n    since\n    scan 2   docs/private.txt\n"
+	wantUnreadable := "Unreadable files   1\n    since\n    scan #2   docs/private.txt\n"
 	if asRoot {
 		wantUnreadable = "Unreadable files   none\n"
 	}

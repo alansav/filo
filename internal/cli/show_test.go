@@ -22,8 +22,8 @@ func newShowTest(t *testing.T) *cliTest {
 	ct.filo(ExitOK, "", false, "roots", "add", ct.root)
 	ct.filo(ExitOK, "", false, "policies", "add", "bills", "7y")
 	csv := filepath.Join(ct.work, "r.csv")
-	ct.filo(ExitOK, "", false, "export", "retention", "-o", csv)
-	editCSV(t, csv, setRetention(map[string]string{"2022-01 British Gas.pdf": "bills"}))
+	ct.filo(ExitOK, "", false, "export", "-o", csv)
+	editCSV(t, csv, accepting(setRetention(map[string]string{"2022-01 British Gas.pdf": "bills"})))
 	ct.filo(ExitOK, "y\n", true, "update", csv)
 	if err := os.Rename(ct.in("inbox/water.pdf"), ct.in("bills/2025-03 Water.pdf")); err != nil {
 		t.Fatal(err)

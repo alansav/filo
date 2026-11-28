@@ -8,7 +8,7 @@
 <link rel="stylesheet" href="{{.Style}}">
 </head>
 <body>
-<nav class="trail">{{range $i, $l := .Trail}}{{if $i}} <span class="sep">›</span> {{end}}{{if $l.Href}}<a href="{{$l.Href}}">{{$l.Text}}</a>{{else}}<span>{{$l.Text}}</span>{{end}}{{end}}</nav>
+<nav class="trail"><a class="find" href="{{.Find}}">Find files</a>{{range $i, $l := .Trail}}{{if $i}} <span class="sep">›</span> {{end}}{{if $l.Href}}<a href="{{$l.Href}}">{{$l.Text}}</a>{{else}}<span>{{$l.Text}}</span>{{end}}{{end}}</nav>
 <header>
 <h1>{{.Heading}}</h1>
 <p class="counts">{{.Counts}}</p>

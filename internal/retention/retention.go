@@ -1,15 +1,10 @@
-// Package retention reads and writes the retention CSV: every present file with its file_date, retention and the date it
-// is kept until, works out keep_until from a retention, and reads dates from file names. The register
-// side (listing files, recording exports, applying updates) is in package store.
+// Package retention reads the retention cells of the combined CSV (file_date, retention and keep_until, the date a
+// file is kept until), works out keep_until from a retention, and reads dates from file names. The register side
+// (listing files, recording exports, applying updates) is in package store; the CSV itself is package filecsv's.
 package retention
 
 import (
-	"encoding/csv"
-	"errors"
 	"fmt"
-	"io"
-	"path"
-	"strconv"
 	"strings"
 	"time"
 
@@ -17,9 +12,9 @@ import (
 	"github.com/alansav/filo/internal/store"
 )
 
-// Header is the CSV's columns, in order. The update finds columns by name, so a spreadsheet may reorder them or add
-// its own; it reads only id, export, file_date and retention, and checks that keep_until (worked out by filo, for
-// display) was left alone.
+// Header is the combined CSV's columns up to its retention cells, in order (package filecsv adds tags). The update
+// finds columns by name, so a spreadsheet may reorder them or add its own; of these it reads id, export, file_date
+// and retention, and checks that keep_until (worked out by filo, for display) was left alone.
 var Header = []string{"id", "export", "directory", "name", "size", "modified", "file_date", "retention", "keep_until"}
 
 const dateLayout = store.DateLayout
@@ -38,6 +33,20 @@ func ParseDate(s string) (string, error) {
 		return "", fmt.Errorf("%q is not a date: use YYYY-MM-DD, for example 2023-03-14%s", s, formatHint)
 	}
 	return t.Format(dateLayout), nil
+}
+
+// parseFileDate checks a file_date cell: a date as ParseDate takes it, or one marked as read from the file name
+// ("!2023-07-14", store.MarkedDate), which is passed on marked for the update to decide.
+func parseFileDate(s string) (string, error) {
+	s = strings.TrimSpace(s)
+	if !store.IsMarkedDate(s) {
+		return ParseDate(s)
+	}
+	d, err := ParseDate(strings.TrimPrefix(s, "!"))
+	if err != nil || d == "" {
+		return "", fmt.Errorf("%q is not a date: remove the ! and use YYYY-MM-DD, for example 2023-03-14%s", s, formatHint)
+	}
+	return store.MarkedDate(d), nil
 }
 
 // ParseRetention checks a typed retention: "" stays "" (a blank cell); forever (in any case) is store.Forever; a
@@ -175,135 +184,25 @@ func isDigit(c byte) bool { return c >= '0' && c <= '9' }
 // Today is t's date in its location, as YYYY-MM-DD.
 func Today(t time.Time) string { return t.Format(dateLayout) }
 
-// WriteCSV writes items as one export: the file_date, retention and keep_until they carry (the caller fills in
-// file_date from the name first, and records the same values with the export). Times are shown in loc.
-func WriteCSV(w io.Writer, exportID int64, items []store.FileItem, loc *time.Location) error {
-	if _, err := io.WriteString(w, sheet.BOM); err != nil {
-		return err
+// ReadRow reads a row's retention cells, the file_date and keep_until ones if the sheet has them, for the file id of
+// export ex: the row, or why it is refused.
+func ReadRow(sh *sheet.Sheet, row sheet.Row, id, ex int64) (store.RetentionRow, string) {
+	rr := store.RetentionRow{Line: row.Line, ExportID: ex, FileID: id}
+	var err error
+	if rr.Retention, err = ParseRetention(row.Get("retention")); err != nil {
+		return rr, fmt.Sprintf("retention %v", err)
 	}
-	cw := csv.NewWriter(w)
-	if err := cw.Write(Header); err != nil {
-		return err
-	}
-	ex := strconv.FormatInt(exportID, 10)
-	for _, it := range items {
-		dir, name := path.Split(it.Path)
-		directory := it.RootPath
-		if dir = strings.TrimSuffix(dir, "/"); dir != "" {
-			directory = it.RootPath + "/" + dir
-		}
-		rec := []string{
-			strconv.FormatInt(it.FileID, 10), ex, sheet.Cell(directory), sheet.Cell(name), strconv.FormatInt(it.Size, 10),
-			time.Unix(0, it.MtimeNS).In(loc).Format("2006-01-02 15:04"), it.FileDate, it.Retention, it.KeepUntil,
-		}
-		if err := cw.Write(rec); err != nil {
-			return err
+	if sh.Has("file_date") {
+		rr.HasFileDate = true
+		if rr.FileDate, err = parseFileDate(row.Get("file_date")); err != nil {
+			return rr, fmt.Sprintf("file_date %v", err)
 		}
 	}
-	cw.Flush()
-	return cw.Error()
-}
-
-// Problem is a row the update refuses before it reaches the register.
-type Problem struct {
-	Line int
-	Msg  string
-}
-
-// Parsed is what ReadCSV found.
-type Parsed struct {
-	Rows     []store.RetentionRow // every readable row; the register decides which changed
-	Problems []Problem
-}
-
-var (
-	// ErrNotRetentionCSV means the file has no header with the columns the update needs.
-	ErrNotRetentionCSV = errors.New("not a filo retention CSV: the header needs id, export and retention columns")
-	// ErrOldCSV means the file is a review or retention CSV from an older filo.
-	ErrOldCSV = errors.New("this CSV is from an older filo; export again with: filo export retention")
-	// ErrNoRetention means a current retention CSV lost its retention column (deleted or renamed in the spreadsheet).
-	ErrNoRetention = errors.New("the CSV has no retention column, which filo update needs; put it back with that " +
-		"name, or export again")
-)
-
-// ReadCSV reads an edited retention CSV, as spreadsheets save it (see package sheet). A row listed more than once
-// is refused every time it appears, rather than guessing which one is meant.
-func ReadCSV(r io.Reader) (Parsed, error) {
-	data, err := sheet.ReadAll(r)
-	if err != nil {
-		return Parsed{}, err
+	if sh.Has("keep_until") {
+		rr.HasKeepUntil = true
+		if rr.KeepUntil, err = parseKeepUntil(row.Get("keep_until")); err != nil {
+			return rr, fmt.Sprintf("keep_until %v", err)
+		}
 	}
-	return ParseCSV(data)
-}
-
-// ParseCSV is ReadCSV on a CSV already read (with sheet.ReadFile or sheet.ReadAll), so it is not copied again.
-func ParseCSV(data []byte) (Parsed, error) {
-	var p Parsed
-	if len(data) > sheet.MaxSize {
-		return p, sheet.ErrTooLarge
-	}
-	sh, headers := sheet.Open(data, "id", "export", "retention")
-	if sh == nil {
-		for _, cols := range headers {
-			if sheet.HasAll(cols, "id", "export", "file_date") {
-				return p, ErrNoRetention // a current CSV without its retention column
-			}
-		}
-		for _, cols := range headers {
-			if sheet.HasAll(cols, "id", "export", "review_date") || sheet.HasAll(cols, "id", "export", "keep_until") {
-				return p, ErrOldCSV
-			}
-		}
-		return p, ErrNotRetentionCSV
-	}
-
-	err := sh.Each(func(row sheet.Row) {
-		bad := func(format string, args ...any) {
-			p.Problems = append(p.Problems, Problem{row.Line, fmt.Sprintf(format, args...)})
-		}
-		id, idErr := strconv.ParseInt(row.Get("id"), 10, 64)
-		ex, exErr := strconv.ParseInt(row.Get("export"), 10, 64)
-		switch {
-		case idErr != nil || id < 1:
-			bad("id %q is not a file ID", row.Get("id"))
-			return
-		case exErr != nil || ex < 1:
-			bad("export %q is not an export number", row.Get("export"))
-			return
-		}
-		if v := row.Beyond(); v != "" {
-			bad("%q is outside the columns; put it under file_date or retention", v)
-			return
-		}
-		rr := store.RetentionRow{Line: row.Line, ExportID: ex, FileID: id}
-		var err error
-		if rr.Retention, err = ParseRetention(row.Get("retention")); err != nil {
-			bad("retention %v", err)
-			return
-		}
-		if sh.Has("file_date") {
-			rr.HasFileDate = true
-			if rr.FileDate, err = ParseDate(row.Get("file_date")); err != nil {
-				bad("file_date %v", err)
-				return
-			}
-		}
-		if sh.Has("keep_until") {
-			rr.HasKeepUntil = true
-			if rr.KeepUntil, err = parseKeepUntil(row.Get("keep_until")); err != nil {
-				bad("keep_until %v", err)
-				return
-			}
-		}
-		p.Rows = append(p.Rows, rr)
-	})
-	if err != nil {
-		return p, err // a broken quote: csv says where
-	}
-	p.Rows = sheet.DropRepeated(p.Rows, func(r store.RetentionRow) [2]int64 { return [2]int64{r.ExportID, r.FileID} },
-		func(r store.RetentionRow) {
-			p.Problems = append(p.Problems, Problem{r.Line,
-				fmt.Sprintf("file %d of export %d is listed more than once", r.FileID, r.ExportID)})
-		})
-	return p, nil
+	return rr, ""
 }

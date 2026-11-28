@@ -18,7 +18,7 @@ import (
 )
 
 // set is filo set FILE... (docs/design.md, Showing and setting a file's details): a file_date and a retention set by
-// command, by the retention CSV's rules, all or nothing. It asks only when a stored value would be replaced (-y
+// command, by the combined CSV's retention rules, all or nothing. It asks only when a stored value would be replaced (-y
 // answers yes; with no terminal nothing changes); --dry-run shows what it would do.
 func (e *env) set(ctx context.Context, dbBefore string, args []string) error {
 	fs := e.flags("set")
@@ -172,20 +172,7 @@ func (e *env) set(ctx context.Context, dbBefore string, args []string) error {
 				"it has one")
 		}
 	}
-	if n := len(res.NowPast); n > 0 {
-		rows := make([]view.FileRow, n)
-		for i, p := range res.NowPast {
-			root, rel := view.SplitRoot(roots, p.Path)
-			rows[i] = view.FileRow{Root: root, Rel: rel, Cells: []string{p.Retention, p.KeepUntil}}
-		}
-		r.Blank()
-		what := report.Plural(int64(n), "file is now past its", "files are now past their")
-		if *dry {
-			what = report.Plural(int64(n), "file would be past its", "files would be past their")
-		}
-		r.Note(view.Attention, what+" retention. Check for a typo, such as 7d for 7y:")
-		r.Files(view.FileList{Columns: []view.Column{{Header: "retention"}, {Header: "until"}}, Rows: rows})
-	}
+	nowPast(r, roots, res.NowPast, *dry, 0) // every one: a command shows every file it affected, unlike the CSV update
 	switch {
 	case *dry:
 		r.Blank()

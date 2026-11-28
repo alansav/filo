@@ -8,14 +8,20 @@ case someone asks").
 backups of your files, and of Filo's register and its snapshots (see [Register snapshots](docs/design.md#register-snapshots)).
 
 **Status: scan, lifespan, delete, duplicates, retention policies, directory rules, show, set and get, finding files,
-tags and tag index pages done.** You give every file a retention (how long to keep it, often through a named policy
-such as `bills = 7y`, which a directory rule can give the files under a directory as they arrive), and `filo delete`
-lists the files past theirs, asks, and deletes the ones you choose. For identical copies you decide which to keep in a spreadsheet, and `filo delete` carries
-that out the same careful way. `filo show` shows everything Filo holds about a file or directory, and `filo set` changes
-a few files from the command line. Apart from that, Filo is **read-only on your files**: no other command modifies,
-moves, renames or deletes anything outside its own database, besides the files you ask it to write (an export's
-`-o` file, and the pages of a [tag index](#tag-index-pages), which it replaces only while they are as it wrote them).
-See [Roadmap](#roadmap) for what comes next.
+tags, tag index pages, the one CSV for retentions, tags, names and directories, and bash completion done.**
+
+You give every file a retention (how long to keep it, often through a named policy such as `bills = 7y`, which a
+directory rule can give the files under a directory as they arrive), and `filo delete` lists the files past theirs,
+asks, and deletes the ones you choose. For identical copies you decide which to keep in a spreadsheet, and `filo
+delete` carries that out the same careful way. `filo show` shows everything Filo holds about a file or directory, and
+`filo set` changes a few files from the command line.
+
+Filo changes your files in only two ways: `filo delete` deletes the files you confirm, and `filo update` renames or
+moves a file, within its root, when you edit its `name` or `directory` cell in the exported CSV (it lists them and
+asks first). Apart from that, Filo is **read-only on your files**: no other command modifies, moves, renames or
+deletes anything outside its own database, besides the files you ask it to write (an export's `-o` file, and the
+pages of a [tag index](#tag-index-pages), which it replaces only while they are as it wrote them). See
+[Roadmap](#roadmap) for what comes next.
 
 ## What it does today
 
@@ -50,8 +56,9 @@ See [Roadmap](#roadmap) for what comes next.
 - **Tags files**, so you find them by what they are rather than where they are: `filo tag bill.pdf 'sender:British
   Gas' type:bill`. A project is a tag (`project:house sale`). Tags follow a file when it moves or is edited, and a
   new copy of a tagged file takes its tags. See [Tags](#tags).
-- **Writes pages to browse files by tag**: `filo indexes add ~/Documents/bills` writes HTML pages listing the files
-  under it by tag, each file a link that opens it, and keeps them up to date. See [Tag index pages](#tag-index-pages).
+- **Writes pages to find files by tag**: `filo indexes add ~/Documents/bills` writes an HTML page to find the files
+  under it by several tags, by name and by directory, with a preview, and pages to browse them one tag at a time,
+  and keeps them up to date. See [Tag index pages](#tag-index-pages).
 - **Deletes what you confirm**, after reading each file again just before deleting it: a file that changed since its
   retention was set, moved, or can't be read is skipped, never deleted.
 - **Clears out duplicates you decide on**: export the groups of identical copies, write `keep` or `delete` against
@@ -78,16 +85,42 @@ It is built to fail safe:
 
 ## Install
 
-Filo is pure Go (no C toolchain needed). It needs Go 1.27.4 or later and runs on Linux, macOS and the BSDs. Windows is
+Filo is pure Go (no C toolchain needed). It needs Go 1.27.4 or later (or Podman, to build in the dev container) and
+runs on Linux, macOS and the BSDs. Windows is
 not supported yet: file locking and inode lookup aren't implemented there.
 
 ```sh
 git clone https://github.com/alansav/filo.git
 cd filo
-go build -o bin/filo ./cmd/filo
+scripts/install.sh    # builds bin/filo, copies it to ~/.local/bin, loads tab completion from ~/.bashrc
 ```
 
-Copy `bin/filo` somewhere on your `PATH`, or run it from the repository.
+`scripts/install.sh` builds Filo with Go if the host has it, otherwise in the dev container (see
+[Development](#development)). It copies the binary to `~/.local/bin` (replacing an older copy), so `filo` runs from
+anywhere if `~/.local/bin` is on your `PATH`, and adds the line that loads tab completion to `~/.bashrc` if it is not
+there yet. Run it again after every change. With Go installed, `make install` does the same, and `make build` only
+builds `bin/filo`. The binary is static (`CGO_ENABLED=0`).
+
+### Tab completion in bash
+
+Tab completes Filo's commands, flags, files and directories, tags (`sender:` then its values) and policy names.
+`scripts/install.sh` adds this line to `~/.bashrc` (once), which loads it in every new shell; without the script, add it
+yourself:
+
+```sh
+command -v filo >/dev/null 2>&1 && source <(filo completion bash)
+```
+
+Or save it once where the `bash-completion` package finds it, and save it again after an upgrade that changes
+commands:
+
+```sh
+filo completion bash > ~/.local/share/bash-completion/completions/filo
+```
+
+Completion only reads the register: it never changes it, takes no lock (so it works while a scan runs), and
+completes from the disk alone when there is no register. A file Filo deleted, or one gone missing, still completes
+for `filo show`.
 
 ## Quick start
 
@@ -101,7 +134,7 @@ A scan prints a summary like this (paths are relative to the root named at the t
 symbols and colours):
 
 ```
-Scan   scan 2 . 15 files seen . 0.4 s . ~/FiloTest
+Scan #2   16 files seen . 0.4 s . ~/FiloTest
 
   - 3 new
   - 2 changed
@@ -147,7 +180,7 @@ Duplicates                                 1 group · 3 copies · 195 KiB reclai
 
 Unreadable files                                                                1
     since
-    scan 2   docs/private.txt
+    scan #2   docs/private.txt
 
 Recent events                                                                none
 ```
@@ -157,14 +190,18 @@ Recent events                                                                non
 For a few files, `filo set` is quicker (see [One file at a time](#one-file-at-a-time)). For many, use the CSV:
 
 ```sh
-filo export retention ~/Documents -o docs.csv    # scan ~/Documents, then every file under it, with its retention
+filo export ~/Documents -o docs.csv    # scan ~/Documents, then every file under it, with its retention and tags
 # open docs.csv in a spreadsheet, fill in retention, save it as CSV
-filo update docs.csv                            # apply what you changed
-filo delete                                     # list the files past their retention, ask, delete
+filo update docs.csv                  # apply what you changed
+filo delete                           # list the files past their retention, ask, delete
 ```
 
-The CSV has one row per file: `id, export, directory, name, size, modified, file_date, retention, keep_until`. Sort
-and filter it however you like.
+The CSV has one row per file: `id, export, directory, name, size, modified, file_date, retention, keep_until, tags`.
+Sort and filter it however you like. The same CSV sets tags (see [Tags](#tags)), and renames or moves files: a
+changed `name` cell renames the file in its directory, and a changed `directory` cell (the full path of a directory
+in the same root) moves it there, making the directories it needs. Filo never replaces another file, never renames
+or moves a hidden file (or one in a hidden directory), never hides one, and renames or moves a file only if it is
+still the one the last scan saw.
 
 - **`retention`** is how long to keep the file:
   - a period counted from `file_date`: `7y`, `18m`, `6w` or `30d`;
@@ -175,16 +212,19 @@ and filter it however you like.
   date). If it's blank, the export fills it in from the file name when the name holds one clear date:
   `2023-03-14 invoice.pdf`, `IMG_20230714_1032.jpg`, or `2023-03 rent.pdf` (the month's last day, so nothing is kept
   for less time than meant). A lone year, a name with two dates, or `14-03-2023` (is that day or month first?) are
-  left blank. A filled-in date you leave as it is only counts when you give that file a period; otherwise it is
-  dropped. Check it before counting from it.
+  left blank. A date read from the name is marked with `!` (`!2023-03-14`), so you can filter on it, and only counts
+  once you remove the `!`: a period on a row whose date is still marked is refused. To accept a whole column of
+  checked dates, find and replace `!` with nothing in the `file_date` column; format the column as text first, or
+  the spreadsheet may save the dates in your locale's format (`14/03/2023`), which `filo update` refuses.
 - **`keep_until`** is worked out by Filo, so you can sort by it. Leave it alone: a cell holding a different date is
   refused.
 
 To set a whole directory at once, filter on `directory` and fill the retention down. Filtering on a blank `retention`
 shows the files still to decide.
 
-- Only `id`, `export`, `file_date` and `retention` are read back, so you can reorder columns or add your own. Rows
-  can be sorted, filtered or deleted, but not added.
+- Only `id`, `export`, `file_date`, `retention` and `tags` are read back, with `name` and `directory` compared with
+  what was exported, so you can reorder columns or add your own. Rows can be sorted, filtered or deleted, but not
+  added.
 - Dates are `YYYY-MM-DD` and must be real (`2027-02-29` is refused). Anything else is refused rather than guessed.
   If your spreadsheet turns dates into `01/06/2027`, format those columns as text.
 - Dates in the past are fine: a 2015 invoice with `7y` ended in 2022, so it's simply past its retention.
@@ -192,8 +232,9 @@ shows the files still to decide.
 - A period with no `file_date` is refused for that row, since there's nothing to count from.
 - Cells left as exported change nothing. Editing the same CSV again and running `filo update` again replaces what it
   set.
-- A blank `retention` where one was set clears it, so the file needs a decision again. Filo lists those files and
-  asks first; without a terminal it leaves them alone.
+- A blank `retention` where one was set clears it, so the file needs a decision again. If any row clears a
+  retention, removes a tag, creates a policy, or renames or moves a file, Filo lists them and asks once; no, or no
+  terminal, records nothing at all. `-y` answers yes, for a script.
 - A row is refused, with one line saying why, if the file changed since the export or its retention was changed
   after it (from a later export, or by `filo policies move`). The other rows are still applied. `--dry-run` checks everything and writes nothing.
 - On a large system, export one directory at a time, so the spreadsheet stays fast.
@@ -209,7 +250,7 @@ the rule changes every file using it. If the law moves financial records from 7 
 
 ```sh
 filo policies add bills 7y        # a policy: bills = 7y
-# in a retention CSV, type bills in the retention column of each bill, then filo update the CSV
+# in a CSV from filo export, type bills in the retention column of each bill, then filo update the CSV
 filo policies set bills 10y       # every file on bills is now kept 10 years from its own file_date
 filo policies                     # list them, with what needs attention
 ```
@@ -218,8 +259,8 @@ filo policies                     # list them, with what needs attention
   every file of it ends that day), or `forever`. Names are letters, digits, `-` and `_`, starting with a letter, in
   any case (`Bills` is `bills`); `forever` can't be a name.
 - **Typing a new name in the CSV creates the policy**, with no value yet. `filo update` lists the new names and asks
-  once (`Create 2 policies? [y/N]`), so a typo such as `bils` doesn't quietly become one; declined, those rows are
-  left alone. Its files need a retention until the policy gets a value: `filo policies set bils 7y`.
+  with the update's one question, so a typo such as `bils` doesn't quietly become one; declined, nothing is
+  recorded. Its files need a retention until the policy gets a value: `filo policies set bils 7y`.
 - **Changing a policy** works out every file's `keep_until` again. Lengthening just does it. Shortening asks first
   if it would put files past their retention, and lists them. Setting a period asks first if some files have no
   `file_date` to count from; those then **need a file_date**, which `filo report`, `filo policies` and `filo
@@ -383,7 +424,7 @@ pass.
 `filo delete dupes.csv` checks every decided group against the disk first, then lists what it will do:
 
 ```
-Duplicates   dupes.csv · export 7 · 12 groups · ~/Documents
+Duplicates   dupes.csv · export #7 · 12 groups · ~/Documents
 
 Will delete                                              9 copies in 6 groups · 1.2 GB
     contract.pdf · 8 MB each
@@ -456,7 +497,7 @@ $ filo show "$HOME/Documents/bills/2022-01 British Gas.pdf"
     size        184 KiB
     modified    2022-02-03 09:14   unchanged since the last scan (2026-11-20)
     sha256      3f9a1c0e8b2d47f6a9e0c5d1b7a3f2e8c4d6b0a9e1f3c5d7b9a2e4f6c8d0e21e
-    first seen  2026-11-12 (scan 3)
+    first seen  2026-11-12 (scan #3)
     moved from  ~/Documents/inbox/british-gas.pdf   2026-11-12 to 2026-11-13
   Retention
     status      kept
@@ -505,7 +546,7 @@ filo find --tag 'project:house sale' -0 | tar --null -T - -czf house.tgz   # a p
 
 ```
 $ filo find --name '*gas*'
-Scan   scan 12 · 5,310 files seen · 0.4 s · ~/Documents
+Scan #12   5,310 files seen · 0.4 s · ~/Documents
   ✓ no changes
 
 Found   3 files · 412 KiB · named *gas* · ~/Documents
@@ -560,17 +601,23 @@ Tagged   1 file · sender:British Gas · type:bill · ~/Documents
   scanning its directory. One that looks moved from a file Filo knows is refused until `filo scan` pairs the two.
 - **Tags follow the file**: through moves, renames and edits (unlike a retention, which an edit asks for again). A new
   copy of a tagged file takes its tags when a scan first sees it; `filo scan` says so when the copies' tags differed.
-- **Many files at once**: `filo export tags [DIR] -o tags.csv` writes every file with its tags in one cell,
-  separated by `;`. Edit the cells and run `filo update tags.csv`: each cell replaces its file's tags, and Filo asks
-  before removing any (`-y` answers yes, for a script).
+- **Many files at once**: the CSV from `filo export [DIR] -o FILE` has every file's tags in one cell, separated by
+  `;`. Edit the cells and run `filo update FILE`: each cell replaces its file's tags, and Filo asks before removing
+  any (`-y` answers yes, for a script).
 - In a terminal, `filo find` shows each file's tags after its path, and `filo show` lists them.
 
 ## Tag index pages
 
-A tag index is a set of HTML pages listing the files under a directory by tag, to browse and tap instead of typing
-searches: a main page of keys (`sender`, `type`), a page per key of its values, a page per tag of its files, and the
-files with no tags (or none for a key: the tagging to-do list). Each file name opens the file, and each of its tags
-leads to that tag's page.
+A tag index is a set of HTML pages for the files under a directory, to find and open them by tag on any device.
+
+- **The find page** (`index.html`): type in the box to search file names and directories; it also suggests the tags
+  that match, and a tap adds one. Or open a key (`sender · 23 values`) and pick from its values. Two values of one
+  key match either (`sender:British Gas` or `sender:EDF`); tags of different keys must all match. Narrow to a
+  directory, and see the counts shrink as you go. The selection stays in the page's address, so a search can be
+  bookmarked. Tap a file to preview it (pictures, video, audio, PDFs and text files; on some phones a PDF only
+  opens), then Open it.
+- **Browse by key**, linked from the find page: a page of keys, a page per key of its values, a page per tag of its
+  files, and the files with no tags (or none for a key: the tagging to-do list). These need no script.
 
 ```sh
 filo indexes add ~/Documents/bills                 # writes bills/index.html and bills/.index/
@@ -591,7 +638,9 @@ Next: open ~/Documents/bills/index.html in a browser
 - **Kept up to date.** Every command that changes the register (a scan, a tag, a deletion) brings the pages up to
   date, and says nothing unless it cannot. Only the pages that changed are written.
 - **The links are relative**, so the pages work on any device that syncs the directory, a phone included, and
-  nothing is fetched from the network: the stylesheet is a local file, and there is no JavaScript.
+  nothing is fetched from the network: the find page holds its data and script itself and is forbidden any network
+  access, and file names can't run as code in it. For a synced directory, keep its index on one machine until Filo
+  shares tags between devices.
 - **Only Filo's own files.** Filo replaces or removes a page only while it is exactly as Filo wrote it. A page you
   edit, or a file you put in `.index/`, is left alone and reported, and the command exits 1: move it aside, then
   `filo indexes refresh`. `add` refuses a directory where `index.html` or `.index` already exists (`--name` picks
@@ -606,10 +655,9 @@ Next: open ~/Documents/bills/index.html in a browser
 | `filo roots set DIR` | Replace a root's settings. |
 | `filo scan [DIR]` | Scan `DIR` (a directory inside a root: a partial scan), or every root if omitted. |
 | `filo report [--top N]` | Show the overview; `--top` sets how many entries each list shows (default 10). |
-| `filo export retention [DIR] -o FILE [--no-scan] [--workers N]` | Scan `DIR` (or every root), then write every file under it with its retention, as CSV. |
+| `filo export [DIR] -o FILE [--no-scan] [--workers N]` | Scan `DIR` (or every root), then write every file under it with its retention and tags, as CSV. |
 | `filo export duplicates [DIR] -o FILE [--no-scan] [--workers N]` | Scan every root, then write the duplicate groups with a copy under `DIR` as CSV, to decide which copies to keep. See [Duplicates](#duplicates). |
-| `filo export tags [DIR] -o FILE [--no-scan] [--workers N]` | Scan `DIR` (or every root), then write every file under it with its tags, as CSV. See [Tags](#tags). |
-| `filo update FILE [--dry-run] [-y]` | Apply the retentions or tags edited in an exported retention or tags CSV; `-y` removes tags without asking. |
+| `filo update FILE [--dry-run] [-y]` | Apply the retentions, tags, names and directories edited in a CSV from `filo export`, asking once first if it clears, removes, creates, renames or moves anything; `-y` answers yes. |
 | `filo delete [DIR] [-y]` | List the files past their retention, ask, and delete the ones you choose. See [Deleting](#deleting). |
 | `filo delete FILE [-y]` | Carry out a duplicates CSV: check it against the disk, list, ask, and delete the copies marked `delete`. |
 | `filo duplicates` | List what is not counted as duplicates: excluded directories, contents marked always, identical files kept as separate files. |
@@ -639,6 +687,7 @@ Next: open ~/Documents/bills/index.html in a browser
 | `filo indexes add [DIR] [--name NAME]` | Write HTML pages of the files under `DIR` (the current directory) by tag, kept up to date from then on. |
 | `filo indexes remove [DIR] [--name NAME] [-y]` | Stop keeping an index, and remove its pages; asks first. |
 | `filo indexes refresh [DIR] [--name NAME]` | Write an index's pages again (every index's, with no `DIR`). |
+| `filo completion bash` | Print the bash completion script (see [Install](#install)). |
 | `filo help [COMMAND]` | Show usage. `-h` works on every command. |
 
 Options for `filo roots add` and `filo roots set`, which every scan of the root then uses:
@@ -649,6 +698,7 @@ Options for `filo roots add` and `filo roots set`, which every scan of the root 
 | `--skip-hidden` | Skip them again (`roots set` only). |
 | `--ignore NAME` | Skip entries with this name, at any depth. Repeatable. `roots set` replaces the whole list. |
 | `--no-scan` | Register the root without scanning it now (`roots add` only). |
+| `--workers N` | For its scan: files hashed in parallel, 1–64 (default 4; use 1 on a spinning disk) (`roots add` only). |
 
 Options for `filo scan`:
 
@@ -676,8 +726,9 @@ is not a failure), `1` an error, a root that failed during `filo scan` of every 
 refused, a file `filo delete` couldn't read or delete, a group of a duplicates CSV it refused, a path `filo show`
 or `filo get` couldn't show (not in the register, skipped by its root's settings, or for `get` a directory; the others
 are still shown), a file `filo set`, `filo tag` or `filo untag` refused, a tag `filo tags rename` found on no file,
-a root `filo find` couldn't scan or a name it had to escape, or a tag index whose pages couldn't be brought up to date
-(or that `filo indexes remove` had to leave files of), `2` a usage error. `filo find` that finds nothing exits `0`.
+a root `filo find` couldn't scan or a name it had to escape, a rename or move `filo update` refused or skipped (or an
+update that needed to ask with no terminal to ask in), or a tag index whose pages couldn't be brought up to date (or
+that `filo indexes remove` had to leave files of), `2` a usage error. `filo find` that finds nothing exits `0`.
 
 ## Roots
 
@@ -699,7 +750,11 @@ a root `filo find` couldn't scan or a name it had to escape, or a tag index whos
 ## What a scan skips
 
 - Hidden entries (names starting with `.`), unless the root includes them (`--include-hidden`).
-- `node_modules`, `__pycache__`, `.filo`, and `bin`/`obj` next to a `.csproj` or `.fsproj` file.
+- `node_modules`, `__pycache__` and `.filo`. Build directories such as `bin` and `obj` are scanned like any other.
+  To skip them, add `--ignore bin --ignore obj` to the root's settings. `filo roots set` replaces all of them, so
+  give the root's other settings again (`filo roots` lists them), for example
+  `filo roots set DIR --include-hidden --ignore target --ignore bin --ignore obj`. An ignored name skips every file or
+  directory of that name in the root.
 - Anything the root ignores (`--ignore`).
 - Other filesystems mounted inside the root (each can be its own root).
 - Filo's own database files, and the pages of its tag indexes.
@@ -737,7 +792,7 @@ tested by the project yet:
 # ~/.config/systemd/user/filo-scan.service
 [Service]
 Type=oneshot
-ExecStart=%h/bin/filo scan
+ExecStart=%h/.local/bin/filo scan
 Nice=19
 IOSchedulingClass=idle
 
@@ -765,10 +820,13 @@ Enable it with `systemctl --user enable --now filo-scan.timer`.
 8. **Show, set and get**: everything about a file or directory, and its decisions changed from the command line.
    Done.
 9. **Finding files** by name: `filo find`. Done.
-10. **Tags**: `filo tag`, `untag`, `tags`, finding by tag, and the tags CSV. Done.
-11. **Tag index pages**: HTML pages listing a directory's files by tag, kept up to date. Done.
-12. **Next**: what is planned, in order, is in [docs/roadmap.md](docs/roadmap.md): bash completion, sharing decisions
-    between devices, and more.
+10. **Tags**: `filo tag`, `untag`, `tags` and finding by tag. Done.
+11. **Tag index pages**: HTML pages listing a directory's files by tag, with a find page, kept up to date. Done.
+12. **One CSV**: `filo export [DIR] -o FILE` holds retentions and tags together, and editing a `name` or `directory`
+    cell renames or moves the file. Done.
+13. **Bash completion**: `filo completion bash`. Done.
+14. **Next**: what is planned, in order, is in [docs/roadmap.md](docs/roadmap.md): a device ID, marking synced
+    directories and sharing decisions between devices, then more.
 
 Principles that won't change:
 - A retention is never a trigger: reaching its end makes a file a candidate you confirm.
@@ -783,29 +841,30 @@ How Filo works and why is in [docs/design.md](docs/design.md); what is planned i
 The repository includes a Podman dev container (`.devcontainer/Containerfile`), driven by `scripts/dev.sh`:
 
 ```sh
-scripts/dev.sh run go build -o bin/filo ./cmd/filo   # build in the container
-scripts/dev.sh run go test ./...                     # run the tests in the container
-scripts/dev.sh run go vet ./...                      # vet
-scripts/dev.sh shell                                 # or work inside it
+scripts/dev.sh run make build       # build bin/filo in the container
+scripts/dev.sh run go test ./...    # run the tests in the container
+scripts/dev.sh run go vet ./...     # vet
+scripts/dev.sh shell                # or work inside it
 ```
 
-The first call builds the image (Claude Code is installed only with `scripts/dev.sh build --claude`). The container
-mounts only the repo, so `scripts/dev.sh run bin/filo ...` sees the repo and the container's own home, never your
-files. To run Filo on your own files, build it static in the container and run it from the host. The SQLite driver
-is pure Go, so `CGO_ENABLED=0` gives a binary with no library dependencies that runs on any x86-64 Linux, including
-older CPUs (Go's default target is `GOAMD64=v1`). Without it, the binary links the container's C library and may not
-start on an older host:
+The first call builds the image, with Claude Code (`scripts/dev.sh build --no-claude` builds it without, and
+`scripts/dev.sh claude` then says so and how to rebuild). The container mounts only the repo, so `scripts/dev.sh run
+bin/filo ...` sees the repo and the container's own home, never your files. To run Filo on your own files, build it
+in the container and run it from the host. `make build` builds it static: the SQLite driver is pure Go, so `CGO_ENABLED=0` gives a binary with no library dependencies that runs on any
+x86-64 Linux, including older CPUs (Go's default target is `GOAMD64=v1`). Without it, the binary links the
+container's C library and may not start on an older host. `scripts/install.sh`, run on the host, builds it in the
+container (when the host has no Go), copies it to `~/.local/bin` and loads tab completion from `~/.bashrc`:
 
 ```sh
-scripts/dev.sh run env CGO_ENABLED=0 go build -o bin/filo ./cmd/filo
-T=$(mktemp -d)                                         # on the host: a private directory
-bin/filo --db $T/f.db roots add ~/FiloTest
+scripts/install.sh               # on the host: builds, then bin/filo to ~/.local/bin
+T=$(mktemp -d)                   # on the host: a private directory
+filo --db $T/f.db roots add ~/FiloTest
 ```
 
 Inside the container (or with Go installed locally):
 
 ```sh
-go build -o bin/filo ./cmd/filo
+make build
 go test ./...
 go vet ./... && staticcheck ./...
 ```
@@ -825,7 +884,7 @@ bin/filo --db $T/f.db scan
 bin/filo --db $T/f.db report
 scripts/testtree.sh unlock $T/FiloTest
 bin/filo --db $T/f.db scan        # nothing new, changed or missing; the unreadable flag clears
-bin/filo --db $T/f.db export retention $T/FiloTest/notes -o $T/l.csv
+bin/filo --db $T/f.db export $T/FiloTest/notes -o $T/l.csv
 # fill in retention in $T/l.csv
 bin/filo --db $T/f.db update $T/l.csv
 bin/filo --db $T/f.db delete

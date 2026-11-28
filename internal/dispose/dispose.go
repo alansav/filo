@@ -1,7 +1,7 @@
 // Package dispose deletes deletion candidates, one at a time, each only after the check at the moment of deleting
 // (docs/design.md, Disposal): the file is still at its recorded path as the same file, it can be read, and its
-// content is the content its retention was set on. It then removes the directories the run emptied. This is the only
-// package that deletes the user's files.
+// content is the content its retention was set on. It then removes the directories the run emptied. It also renames
+// a file in its own directory for filo update (Rename). This is the only package that changes the user's files.
 package dispose
 
 import (
@@ -30,8 +30,10 @@ type Recorder interface {
 // Outcome is what happened to one candidate.
 type Outcome struct {
 	Deleted bool
-	Reason  string // why it was not deleted; "" if it was
-	Failed  bool   // it could not be read or deleted (the command then exits 1)
+	Done    bool     // a rename or move: the file was moved
+	Made    []string // a move: the directories made for it (absolute)
+	Reason  string   // why it was not deleted (or renamed); "" if it was
+	Failed  bool     // it could not be read, deleted or renamed (the command then exits 1)
 }
 
 // Disposer deletes candidates and remembers the directories it took entries from.
@@ -389,7 +391,11 @@ func sameIno(a, b uint64) bool { return a == 0 || b == 0 || a == b }
 // all (hidden ones included), then each parent that removal emptied, stopping below the root. A directory that was
 // already empty, or that the run deleted nothing from, is never touched. It returns the directories removed, deepest
 // first, and any directory that looked empty but could not be removed.
-func (d *Disposer) PruneDirs() (removed []string, problems []error) {
+func (d *Disposer) PruneDirs() (removed []string, problems []error) { return pruneDirs(d.dirs) }
+
+// pruneDirs removes each directory of dirs (each mapped to its root) that has no entries at all, then each parent
+// that removal emptied, stopping below the root (see PruneDirs).
+func pruneDirs(dirs map[string]string) (removed []string, problems []error) {
 	byDepth := map[int][]string{}
 	root := map[string]string{}
 	maxDepth := 0
@@ -402,7 +408,7 @@ func (d *Disposer) PruneDirs() (removed []string, problems []error) {
 		byDepth[n] = append(byDepth[n], dir)
 		maxDepth = max(maxDepth, n)
 	}
-	for dir, r := range d.dirs {
+	for dir, r := range dirs {
 		add(dir, r)
 	}
 	for n := maxDepth; n >= 0; n-- {

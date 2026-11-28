@@ -2,6 +2,7 @@ package store
 
 import (
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -61,6 +62,18 @@ func TestTagSummary(t *testing.T) {
 	}
 	if sum.Tagged != 3 || sum.Untagged != 2 { // a, b, gone (missing); c and plain
 		t.Errorf("tagged %d, untagged %d", sum.Tagged, sum.Untagged)
+	}
+	// Completion's lighter read gives the same tags, in the same spellings and order.
+	inUse, err := e.s.TagsInUse(e.ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var want []tags.Tag
+	for _, c := range sum.Tags {
+		want = append(want, c.Tag)
+	}
+	if !slices.Equal(inUse, want) {
+		t.Errorf("TagsInUse = %v, want %v", inUse, want)
 	}
 }
 

@@ -300,3 +300,15 @@ func unwrapPath(err error) error {
 	}
 	return err
 }
+
+// renameBetween renames old in from to name in to, never replacing a file at name (renameat2 with
+// RENAME_NOREPLACE).
+func renameBetween(from *os.Root, old string, to *os.Root, name string) error {
+	if sysRenameat2 == 0 {
+		return errNoReplace
+	}
+	return renameat(from, old, to, name, renameNoReplace)
+}
+
+// canRename reports whether this system has a rename that never replaces its target, which renames need.
+var canRename = sysRenameat2 != 0

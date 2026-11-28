@@ -241,7 +241,7 @@ func (r Report) Render(v *view.Renderer) {
 		v.Section("Unreadable files", Count(r.UnreadTotal))
 		rows := make([]view.FileRow, len(r.Unreadable))
 		for i, u := range r.Unreadable {
-			rows[i] = view.FileRow{Root: u.Root, Rel: u.Rel, Cells: []string{fmt.Sprintf("scan %d", u.Since)}}
+			rows[i] = view.FileRow{Root: u.Root, Rel: u.Rel, Cells: []string{fmt.Sprintf("scan #%d", u.Since)}}
 		}
 		v.Files(view.FileList{Columns: []view.Column{{Header: "since"}}, Rows: rows})
 		if more := r.UnreadTotal - int64(len(r.Unreadable)); more > 0 {
@@ -256,7 +256,7 @@ func (r Report) Render(v *view.Renderer) {
 		v.Section("Recent events", fmt.Sprintf("latest %s", Count(int64(len(r.Events)))))
 		rows := make([]view.FileRow, len(r.Events))
 		for i, e := range r.Events {
-			rows[i] = EventRow(e.RootPath, e.Event, fmt.Sprintf("scan %d", e.ScanID))
+			rows[i] = EventRow(e.RootPath, e.Event, fmt.Sprintf("scan #%d", e.ScanID))
 		}
 		v.Files(view.FileList{Columns: []view.Column{{Header: "scan"}, {Header: "event"}}, Rows: rows})
 	}
@@ -283,7 +283,7 @@ func RootEntries(v *view.Renderer, roots []store.RootTotal) {
 			if ls.Scope != "" {
 				scope = ls.Scope
 			}
-			v.Detail(4, fmt.Sprintf("last scan %d, %s, %s: %s seen, new %s, changed %s, moved %s, missing %s, errors %s",
+			v.Detail(4, fmt.Sprintf("last scan #%d, %s, %s: %s seen, new %s, changed %s, moved %s, missing %s, errors %s",
 				ls.ID, Time(ls.FinishedUTC), scope, Count(ls.FilesSeen), Count(ls.New), Count(ls.Changed),
 				Count(ls.Moved), Count(ls.Missing), Count(ls.Errors)))
 		} else {
@@ -366,7 +366,7 @@ func (r Report) renderRetention(v *view.Renderer) {
 		}
 		v.Files(view.FileList{Columns: []view.Column{{Header: "files", Right: true}, {Header: "size", Right: true}},
 			Rows: rows})
-		v.Detail(4, "Next: filo export retention [DIR] -o FILE, then filo update FILE, or filo rules add DIR POLICY")
+		v.Detail(4, "Next: filo export [DIR] -o FILE, then filo update FILE, or filo rules add DIR POLICY")
 	}
 	// The files no rule gives a policy, each with the rules that match it equally (they are among those above).
 	if n := int64(len(r.RuleTies)); n > 0 {

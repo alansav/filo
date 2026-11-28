@@ -633,6 +633,401 @@ index, a tag updating the pages without a word, a scan finding no new file. Not 
 built (two tags with one page name, which the hash makes all but impossible to produce); the pages in a real browser
 or on a phone.
 
+## Makefile and install script
+
+Added 2026-11-23 on branch `improvements`: a Makefile (`make build`, a static `CGO_ENABLED=0` build; `make install`)
+and `scripts/install.sh`, which copies `bin/filo` to `~/.local/bin` on the host. A review the same day found that the
+first commit had no `install` target (its message named one) and passed `-X main.version` to a variable `cmd/filo`
+does not have, which the linker ignores; the target was added and the stamp moved to roadmap item 22 (`filo
+version`). Checked by hand: `make build`, and `scripts/install.sh` with `HOME` set to a throwaway directory, from the
+repo and from `/`.
+
+## Export headings and marked file_dates
+
+A friction fix from real use, discussed and built 2026-11-24 on branch `improvements`. The export's heading,
+`Retention export   export 18 · 5,222 files`, said "export" twice and did not show that 18 was an ID; it became
+`Export #18 (retention)`, with `Scan #17` and `export #18` in update headings to match. The `!` line asked to check
+2,766 dates read from file names, but the CSV gave no way to find them, and filling `7y` down a directory accepted
+every guess unseen; such a date is now written `!2023-07-14` and counts only once the `!` is removed. Considered and
+left out: an info line or per-directory lines in the CSV (they break sort, filter and fill-down), a separate Y/N
+"reviewed" column (filling it down checks nothing), and recording in the register where each file_date came from
+(the mark keeps unchecked guesses out of it). Links to files from the CSV stay roadmap item 29.
+
+Commits: the design, the update reading marked dates, the export writing them, the README, the headings. The code
+review (medium) found a test that could no longer fail (it looked for the old heading), a refusal calling an edited
+marked date "read from the file name", "accept one" in the plural `!` line, help text saying a marked date "is not
+used" where a period on it is refused, no test of a marked date on a period policy, and `#` only in headings; on
+the last, the number became `#N` in every message (refusals, report, show, scan events), and the design and README
+now say to format the `file_date` column as text before removing the marks (checked by hand in LibreOffice Calc on 2026-11-24: removing the `!` kept
+the date as `YYYY-MM-DD`; Excel not checked). Tests: a
+table of the update's cases for marked dates in `internal/store`, marked cells in the CSV parser, the plural `!`
+line, golden files, and a run by hand on a throwaway tree.
+
+## The stall after commands
+
+A friction fix from real use, found and built 2026-11-25 on branch `improvements`. Commands stalled after their work
+was done. The guess was the tag index pages, with a single page reading JSON proposed instead. Measured on a
+throwaway tree of 20,000 tagged files, the stall was a query: the hard-link count in `store.FindFiles` searched
+`paths` by root for each file, as SQLite has no statistics to prefer `ix_files_inode`, so it read every current path
+of the root once per file (more than 100 s for the query alone). Every command that changes the register ran it once
+an index existed, since an index's data is built before its hash says whether the pages need writing; `filo find`
+and the tags export ran it too. Writing `+lp.root_id` makes it search files by inode and then their paths: 0.2 s
+for the 20,000 files. After the fix, a run that changes what an index shows took 1.4 to 1.8 s on that tree, nearly
+all of it rendering 26 MB of pages (mostly the pages of files with none of a key's values); a run that does not
+change it, about 0.2 s. The single page was not needed for speed.
+
+Commits: the fix and a test of the query's plan. The code review (medium) found no bug in the query; on the test,
+it found that the check read past the subquery's steps (a later outer step could fail a good plan), did not require
+the paths step to use `ix_paths_file`, and matched SQLite's exact plan wording; all three were fixed. Tests: the plan
+check, for every root, a root and a scope, failing without the `+`; `TestFindFilesLinks` unchanged; and timings by
+hand on the throwaway tree.
+
+## Faster tags updates and index pages
+
+A performance review after the stall fix, built 2026-11-25 on branch `improvements`. Profiled on a throwaway tree of
+20,000 tagged files with one tag index. Two changes, picked from the review's list; the others (planner statistics
+with `PRAGMA optimize`, fewer pages, cheaper snapshots, one query for `FileTags`) were left, the first three needing a
+design decision.
+
+- The tags CSV update compiled the same few queries again for each row: a third of its time. `store.stmtCache`
+  prepares each distinct query once in the transaction, and a tag's spelling is looked up once per spelling as
+  written while the rows are checked. `UpdateTags` on 20,000 rows: 2.7 s to 1.2 s.
+- Rendering a changed index was nearly all `html/template`, one page at a time. `tagindex.Render` now makes every
+  page and then executes them on every processor, longest first; the pages are the same bytes. `filo indexes
+  refresh` (and `filo tag` under the index) with 97 MB of pages: 6.0-7.1 s to 2.4 s on 8 processors. What is left is
+  mostly the single largest page (4.3 MB), which renders on one processor.
+
+Commits: the statement cache, the parallel rendering. The code review (medium) found no bug; it found that a failed
+page's name in the error had changed, that the longest-first order ignored pages of rows, and that the cache's
+comment did not say a failed prepare runs the query again uncached: all three fixed. Not done: stopping early when a
+page fails, and a test that the error is the same on every run (a page cannot fail with the embedded template).
+Tests: `TestStmtCache`, a case of a spelling repeated over rows in `TestUpdateTags` (a dry run shows each as written),
+`TestRenderParallel` (one processor and eight give the same pages), the unchanged golden file, the race detector on
+both packages, and timings by hand on the throwaway tree.
+
+## Duplicated code merged
+
+A review for duplicated lines, built 2026-11-25 on branch `improvements`. A scan for runs of six or more identical
+lines in the non-test code found little copying; most runs were import blocks, OS-specific twins and a migration's
+copy of a table, all left as they are. Three were merged:
+
+- The retention, tags and duplicates CSVs each wrote the byte order mark and header, and a file's directory, name,
+  size and modified cells, themselves; the retention and tags updates each read the id and export and checked for
+  text past the columns; and three packages had the same `Problem` type. These are now `sheet.NewWriter`,
+  `sheet.FileCells`, `sheet.ReadIDs` and `sheet.Problem` (the tags update no longer copies its problems into
+  retention's to list them).
+- `filo set` and `filo update` each built the "now past its retention" list; both call `nowPast`. The update, from a
+  CSV, shows the first ten in a terminal; `filo set`, a command naming its files, shows every one (the user's
+  decision, now in `design.md`).
+- `store.IndexFiles` repeated `TagItems`' steps; it calls it.
+
+Proposed and not done: one helper for the "all, select, list, none" question that `filo delete` and `filo delete
+FILE.csv` each have (the destructive path, left for a separate decision), and smaller ones (the prompter setup,
+hand-written row loops).
+
+Commits: `IndexFiles` on `TagItems`, the sheet parts, the CSVs using them, `nowPast`. The code review (medium) found
+no bug; two nits (`sheet.Problem`'s comment named only updates; `nowPast`'s parameter `max` hid the built-in) were
+fixed. The rename of `max` was made by a text replacement that also changed the same text in the clears list, and
+was committed without the checks passing: commit `18a463f` does not build, and the commit after it fixes it. Found
+by the review and older than this work: with a root at `/`, the CSVs wrote a directory cell such as `//etc`;
+`FileCells` now joins with `filepath.Join` (fixed after the series, at the user's request, with two cases added to
+`TestFileCells`). Tests: `TestNewWriter`, `TestFileCells`, `TestReadIDs`; the CSV golden files and the message tests of the
+retention and tags updates, unchanged.
+
+## One CSV with every column
+
+A friction fix, built 2026-11-27 on branch `improvements`, the first of three parts agreed that day (then roadmap 39,
+renaming by the `name` cell, and 40, removing the retention and tags exports). Editing a retention CSV the person kept
+seeing tags to set, and dates while tagging; `filo export [DIR] -o FILE` now writes `file_date`, `retention`,
+`keep_until` and `tags` in one CSV, recorded as an export of kind `files` (no schema change). Decided with the person:
+`-y` means the same for clearing a retention, removing a tag and creating a policy, and the update shows them all
+before it writes anything and asks once; no records nothing. Decided while building, and checked with the person
+afterwards: a row refused by either half is refused whole; a CSV with both columns is combined only if its rows name a
+combined export (so a retention CSV with a `tags` column of the person's own stays one); a combined CSV that lost a
+column is refused as a whole; a symlink's row cannot take tags.
+
+Commits, lower layers first: the roadmap items, the design (and the symlink rule), `FilesItems` and
+`RecordFilesExport`, a refactor giving `checkRow` and `checkTagRow` the export kind and moving the writes into
+`createPolicies`, `applyRetentions` and `applyTagChanges`, `UpdateFiles`, package `filecsv` (with `retention.ReadRow`
+and `tagcsv.GuardCell` exported for it), `ExportKinds`, and the CLI. The code review (medium) found one important
+issue, fixed: a combined CSV whose rows were all refused for their cells was read as a retention CSV, with the wrong
+reasons; `filecsv.Parsed.Exports` now names every export a row names. Nits fixed: a file listed twice, one copy
+refused for its cells, had the other applied; a lost `tags` column given `-y` got the `-y` usage error; that error
+was out of date; messages named the kind `files` (now "combined"); a question that could not be shown read as "not
+confirmed"; the `./tags` wording. One nit was the person's decision: with no terminal and no `-y`, nothing recorded
+now exits 1 (a no typed at the question stays 0). Tests: `TestFilesItemsAndExport`, `TestUpdateFiles`,
+`TestExportKinds`, the `filecsv` tests, `TestFilesCSVGolden` (`files-csv.txt`), `TestFilesCSVKinds`,
+`TestFilesUpdateInterruptedAtPrompt`, and the help golden files. Checked by hand on a throwaway tree: export, update
+without a question, the no-terminal refusal, a dry run and `-y`.
+
+## Renaming by the name cell
+
+Roadmap 39, built 2026-11-27 on branch `improvements`, the second of the three parts agreed that day. A changed
+`name` cell in the combined CSV renames the file in its own directory. The design was settled in seven topics: the
+hard rule (one package, `internal/dispose`, now changes the user's files in two ways, deleting from `filo delete` and
+renaming in place from `filo update`); the check (the very file the last scan saw, no re-hash); the names allowed
+(the person chose to allow a change of spaces at the start or end, and to refuse hiding or unhiding, not every
+leading dot); recording (a scan of kind `rename`, a `moved` event, schema 13 with `export_rows.name`); the order
+(the register's changes first, then each rename, recorded straight after; a rename not made keeps its row's other
+changes); the output (old and new names side by side, quoted when a space starts or ends one); edge cases (hard
+links, symlinks, Syncthing, no `renameat2` off Linux). The Direction's "standard tools" rule was clarified by the
+person: it rules out clones of file commands, not changes through the export and bulk update.
+
+Added while building, each with its own design commit: a name cell doubles a leading apostrophe, as the tags cell
+does; a combined export row keeps the path it showed (`path_id`); in a chain or swap both rows are refused.
+
+Commits: the design; schema 13; `dispose.CheckName`; `sheet.Row.Raw` (a cell with its spaces); the `filecsv` name
+cell; `dispose.Rename`; `store.RenameRun` and the exported path; the update's rename checks; `dispose.CheckRename`;
+the view's `Renames`; a store fix naming a refused row's file; the CLI. Commit `26b0b0a` was made with a test
+failing (its output was piped through `grep`, which hid the exit code); `9ce2e19` fixes the test, with no code
+change, and every commit after was checked on the test's own exit code.
+
+The code review (medium) found three important issues, all fixed: a Ctrl-C landing between a rename and its record
+could leave the file renamed on disk but not in the register (the record now ignores cancellation); a rename could
+give a file the path of one of Filo's own files (a tag index's pages, the database), which no scan records (now
+refused, from `OwnPaths`); a register write failing part-way hid what the run had done (now shown, then the error).
+Nits fixed: a rename that a scan cannot put right is listed under "Not renamed", and on a system without
+`renameat2` every rename is refused before the question (that change went into commit `e5311cb`, whose message names
+only the Ctrl-C fix); an untouched name cell of an export from before schema 13 no longer refuses its row; a name
+starting with `'` is made valid UTF-8; no "0 of 0 renames" after Ctrl-C; a hidden name's dot is not an extension.
+One was the person's decision: a rename of a name a spreadsheet may have reformatted (`0012`, `1E5`, `1-2`) is
+noted in the summary, not refused. Also at the person's request: `TestOnlyDisposeChangesUserFiles`, which parses
+every Go file of the module and fails on a call that removes or renames on the disk outside `internal/dispose` and
+the three files that handle only Filo's own files (checked by planting such calls). Until then no test guarded the
+rule that only `internal/dispose` deletes; an earlier message in the design talk had said one did.
+
+Tests: `TestCheckName`, `TestRename`, `TestRenameNeverReplaces`, `TestRenameSymlink`, `TestCheckRename`,
+`TestRenameRecordedAfterCtrlC`, `TestRowRaw`, `TestNameCell`, `TestNameColumn`, `TestMigrateFromV12`,
+`TestRenameRun`, `TestFilesExportRecordsPath`, `TestUpdateFilesRenames`, `TestRenames`, `TestRenameRowNotes`,
+`TestRenameGolden` (`rename.txt`), `TestRenameNoTerminal`, `TestOnlyDisposeChangesUserFiles`. Checked by hand on a
+throwaway tree: two renames from the CSV (one only removing a trailing space), a dry run, `-y`, and a scan after
+finding no changes.
+
+## No special case for bin and obj
+
+Roadmap 41, built 2026-11-27 on branch `improvements`, agreed while designing 42 (moving by the `directory` cell),
+whose check of what the next scan sees would otherwise have had to repeat it. Until then a scan skipped `bin` and
+`obj` in a directory holding a `.csproj` or `.fsproj`: a hard-coded case, which the person judged "a can of worms".
+Now they are scanned like any directory. **On upgrading**, the next scan of a root holding a .NET project registers
+everything its build directories hold, as new files needing a retention (and Debug and Release copies of one output
+as duplicates); adding `--ignore bin --ignore obj` to the root's settings, with its other settings given again since
+`filo roots set` replaces them all, keeps them out.
+
+Commits: the roadmap item, the design, the walk (`skipName` and `SkipsPath` lose the case; `SkipsPath` its root
+parameter, used only to look for project files), the README. The test tree's `bin/out.dll` is now scanned, so its
+first scan finds 16 files. The code review (medium) found one important issue, fixed: the README's `--ignore` hint,
+typed as given, replaced the root's other settings (`roots set` replaces them all). Nits fixed: an ignored name skips
+files too; the README's sample scan count; the replaced decision moved here from `design.md`. Tests:
+`TestSkipsPath`, the walk table's "bin and obj beside a project file are directories like any other",
+`TestTestTree` (walk, reconcile) and `TestEndToEnd` with the new count.
+
+## Moving by the directory cell
+
+Roadmap 42, built 2026-11-27 on branch `improvements`, after 41. A changed `directory` cell in the combined CSV moves
+the file within its root, making the directories it needs. Designed in seven topics with the person: within the
+file's own root only; directories made as needed, listed as new first (the person chose this over existing
+directories only); what the next scan sees (the scan's own rule, which led to 41: the person asked that `bin`/`obj`
+be dropped from the scan rather than repeated); nothing re-done for directory rules (a retention of its own overrides
+any directory's, the person added); emptied directories removed as `filo delete` does (the person's decision, over
+leaving them: an emptied `inbox/` goes too); absolute cells only; edge cases (relative symlinks refused, breaking
+symlinks noted, Syncthing noted for 9a).
+
+Commits: the design; the store's move checks (behind an option, so no commit in between moved anything); `dispose.
+CheckPath`; the `Mover` (a rename is now a move within one directory; `pruneDirs` shared with `filo delete`); the guard
+test extended to making directories, each of Filo's own files allowed only the calls it needs; `filecsv` reading the
+directory cell; the view's `Moves`; the symlinks a move breaks; the CLI. No schema change: the directory cell as
+exported is worked out again from the path the export recorded.
+
+Found while building: the first end-to-end run hung. The question is asked inside the update's transaction, and the
+summary read the symlinks through the store, which has one connection; they are now read inside the transaction.
+
+The code review (medium) found two important issues, both fixed: a combined export that recorded no path had every
+row refused (its directory cell is now compared with the file's directory now); and the path checks judged the
+directories and name the file already had, so a plain rename under an oddly named directory was refused (only what
+changes is judged now). Nits fixed: on a filesystem that ignores case, a directory spelled otherwise than on disk is
+refused (not tested: the dev container's filesystems are case-sensitive); a move into Filo's own directory names the
+directory; a file on another filesystem is refused before the question; a directory changed only by spaces is noted;
+the unused `Rename` and `CheckRename` became test helpers. One was older than this work: a rename breaks symlinks too,
+and now says so.
+
+Tests: `TestCheckPath`, `TestMove`, `TestMoveUnmakesDirs`, `TestMovePrunes`, `TestOnlyDisposeChangesUserFiles` (now
+with directories made; checked by planting calls), `TestDirInRoot`, `TestUpdateFilesMoves`, `TestMoves`,
+`TestMoveRowNotes`, `TestMoveGolden` (`move.txt`), and the rename tests, now through the `Mover`. Checked by hand on a
+throwaway tree: three files moved (one renamed too), four directories made, the emptied `notes/` removed, and the next
+scan found no changes.
+
+## Removing the retention and tags exports
+
+Roadmap 40, built 2026-11-27 on branch `improvements`, after 42, once the person had used the combined CSV ("filo
+export works brilliantly"). `filo export retention` and `filo export tags` and their updates went, leaving `filo
+export [DIR] -o FILE` and `filo export duplicates`. The open question, whether `filo update` kept reading an old
+retention or tags CSV for a while, was settled by the person: refuse them. At first with a pointer to `filo export`;
+then, since only the person had used them, with no hint at all: an old CSV is "not a filo CSV", and `retention` and
+`tags` after `export` are directory names like any other (only `./duplicates` needs the `./`). `-y` now means the
+same for every update.
+
+Commits: the design (Lifespan and Retention CSV columns now describe the combined CSV's retention half; the tags
+CSV's cell rules moved under "The combined CSV"); `filecsv.LostColumn`, which tells a combined CSV that lost a column
+without the old readers; the CLI; the README, which had not yet described the combined CSV, renames or moves; the old
+CSVs' readers and writers in `retention`, `tagcsv` and `filecsv` (the retention reader's row tests moved to
+`filecsv.ParseCSV`); the store's own functions for the old exports (`RecordExport`, `UpdateRetention(With)`,
+`RecordTagsExport`, `UpdateTags`, the `retention` and `tags` kind constants), its tests moved to `UpdateFiles`
+through two helpers; the last mentions (the `;` refusal now says it separates tags in a CSV). No schema change:
+older registers keep exports of the old kinds, whose rows the combined update refuses by kind.
+
+The code review (medium) found six nits. Fixed: Named retention policies still described the old update's own
+policy question; a `group` column of the person's own hid a lost column; a row typed past the last column did not
+count its export, so a lost column was reported as "not a filo CSV"; the overview help for `update` left out `-y`,
+names and directories; a test comment said the register was not opened before an old CSV is refused (it is read, to
+tell it from a combined CSV that lost a column). Not fixed, by the person's decision: `export retention` is read as a
+directory, with no pointer.
+
+Tests: `TestLostColumn`, `TestParseCSVRetentionHalf`, `TestParseCSVLimits`, `TestGuardCell`, `TestParseCell`,
+`TestUpdateNotAFilesCSV`, `TestFilesCSVKinds` (both columns lost; `./duplicates`; a directory named `tags`),
+`TestUpdateWithGroupColumn`, `TestTagItems`, `TestUpdateTags` and `TestUpdatePolicies` (now on the combined update:
+a declined question records nothing), the round trips and goldens through `filo export` (`update.txt`,
+`update-dry.txt` and `update-clear.txt`, renamed from `update-retention*`; `tags-csv.txt` removed). Checked by hand on
+a throwaway tree: `export retention` exports a directory named `retention`, an old retention CSV is not a filo CSV.
+
+## The tag index's find page
+
+Roadmap 44, designed with the person and built on 2026-11-27 on branch `improvements` (the person: one feature
+branch and one PR at the end of the week), right after 40. With about 100 tags, browsing one tag at a time was the
+friction. Designed topic by topic: matching (either value within a key, keys and bare tags all, counts that narrow);
+placement (the person first asked for one page at `~` with directories as a filter, maybe no indexes; since every
+device opens the index from the synced `~/Files`, indexes stay as they are and each page gets a directory filter;
+the person keeps one at `~` and one at `~/Files`; offering an index at the top of a synced directory is noted for
+9a); the tag picker (one box suggesting tags, collapsed keys, chips); everything inline in `NAME.html` (the person
+had checked a script and an external stylesheet run on all five devices); untrusted names (JSON, `textContent`,
+links from Go, a Content-Security-Policy with no network); a preview pane (the person's idea); one machine keeps a
+synced index until 9c (Filo runs on the laptop only for now). The device check with a test page was skipped.
+
+Commits: the design; Node 26 LTS in the Containerfile (the person agreed to the dependency, for tests only; the image
+build itself was not run here, only its download, checksum and extraction); the script's logic with `node --test`
+tests run from `TestFindScript`; the find page (the list of keys moved to `.NAME/index.html`, a "Find files" link
+on every static page, `layout` 2); a gofmt fix for the previous commit, which was committed although `gofmt -l`
+flagged it (the check chain now stops before committing); the preview pane; README and help.
+
+The code review (medium) found three important issues. Fixed: tags were suggested only among files whose names held
+the typed text, so typing a tag's name usually suggested nothing (the page test had typed a word that was in a file
+name); "Show more" never hid (a rule's `display` beat the `hidden` attribute); Chrome blocks its PDF viewer in a
+sandboxed frame, so PDFs now preview in an embed declared `application/pdf` (the person's choice; design.md
+changed). Nits fixed: the header lost its tag count; a tag missing from the index's list would have been shown as
+another tag (now an error); a stale comment; a test helper that could panic; HEIC pictures outside Safari (the pane
+switches to "No preview" on a load error, the person's choice). Fixing the policy test also showed it had passed
+only by luck: `html/template` writes a `+` in an attribute as `&#43;`, and the test now reads the attribute as a
+browser does.
+
+Tests: `find_test.js` (matching, facets, suggestions, subdirectories, the address, the kind of preview, and the
+drawing code on a fake DOM), `TestFindScript`, `TestRenderFindPage` (the policy against what is inlined, the data),
+`TestRenderEscapes` (hostile names in the data, a tag named `</script>`), the goldens. Checked on a throwaway tree:
+the page's data parses and its script's hash is in the policy. Not checked in a browser or on the devices yet: how
+the page looks and behaves there, PDF previews on each device.
+
+**The PDF preview on the iPad** (2026-11-27). The person found the page worked on the desktop and laptop, but on the
+iPad, in Textastic, the preview was white and Open did nothing. Checked with throwaway pages copied to the iPad (not
+committed), one question at a time. Textastic serves the page from its own local web server
+(`http://localhost:8080/External/<id>/…`); once it was opened from there, Open, pictures and text files all worked
+with the policy unchanged. Open doing nothing was most likely a one-off: the first page checked once loaded as
+`about:blank` with no address, so no relative link could work, and never did again. What stayed broken was the PDF:
+the console showed `connect-src` blocking it, since Safari's PDF viewer fetches the embedded file. With `connect-src
+'self'` an `embed` (and an `object`) showed both pages of a two-page test PDF; a frame, sandboxed or not, showed only
+the first. The person agreed to the change: the policy was there so the page never loads scripts or stylesheets
+from the internet and works offline, not to stop it reaching the server that serves it. Replaces "no network" above
+with "nothing from any other origin".
+
+Commits: the design; the policy; one review (medium), no bugs, five nits fixed: the design overclaimed ("cannot send
+a name anywhere"), asserted untested what `'self'` matches on a `file:` page, and held dated device notes (now here);
+a test that the script has no call that could fetch (it fails on a planted `fetch`); and this note. Tests:
+`TestRenderFindPage` (the policy, no fetching call), the goldens. Not checked yet: a PDF in the real find page on the
+iPad, and the other devices since the change.
+
+## Security review of 2026-11-27
+
+A security review of the whole code, asked for by the person on 2026-11-27, looking for exploits, each tried on a
+throwaway tree. Built on 2026-11-27/28 on branch `improvements`, straight from the review (no roadmap items: the
+person chose to do them at once). Found sound: disposal through the opened directories, `view.Escape`, the pages'
+`html/template` and Content-Security-Policy, parameterised SQL, `O_EXCL` output files and the private register.
+
+- **A tag index written through its opened directories** (`7fdfdf5` design, `13e3f99`, `8197278` review fixes).
+  `internal/tagindex` looked with `os.Lstat` and then acted by path, so a `.NAME/` swapped for a symlink between the
+  two was followed. Reproduced: a refresh of 300 changed pages, racing a loop that swapped `.index` with a symlink
+  (`mv -T --exchange`), left three temporary page files in a directory outside the index and 170 pages unwritten.
+  Now every change goes through `os.Root`s opened from the index's directory down, each a real directory and the one
+  lstat saw, opened as soon as it is made or checked; the same race left nothing outside. Tests:
+  `TestWriteNeverFollowsASwappedDirectory` (a hook swaps `.index`, then `.index/a`, before the first write),
+  `TestWriteForgetsFilesOfADirectoryNoLongerFilos`, and `TestOnlyWriteTouchesTheDisk` now refusing path-based changes
+  in `write.go` too (it fails on the old code).
+- **No renaming or moving of hidden files by the CSV** (`37d1a3c` design, `1ee9576`, `0562ae5` and `1875100` review
+  fixes). The rule was that a rename or move never hides or unhides a file, so in a root with `--include-hidden` a
+  move between hidden directories passed. Reproduced with an edited CSV: `.ssh/id_ed25519` moved into
+  `Sync/.stversions/` (and the emptied `.ssh` removed), and `Sync/.peer/authorized_keys`, as another Syncthing device
+  could leave it, moved into a new `.ssh/`. Now a file with a hidden part on its path is never renamed or moved, nor
+  given a hidden path; its retention and tags still apply. This replaced the "hidden to hidden is renamed" row of the
+  rename table. Test: `TestUpdateNeverMovesHiddenFiles` (both moves, the rename of `inbox/.notes`, and the key's
+  retention still set).
+- **Moves leave the directories they empty** (`491ce8e` design, `410747b`). Not a security fix: raised by the person
+  in the same discussion, since clearing an inbox through the CSV removed the inbox. Replaces their decision recorded
+  with the moves (roadmap 42), "an emptied `inbox/` goes too". `filo delete` still removes what its run empties; a
+  hidden `.keep` keeps a directory a delete would empty. Test: `TestMoveLeavesDirectories`.
+- **Not acted on.** The formula guard looks only at a cell's first character, so a name such as `report;=1+1;x.txt`
+  goes into the CSV unquoted and a spreadsheet splitting at `;` would make `=1+1` a cell. The person's LibreOffice
+  splits at commas (a tags cell, `;`-separated, stays whole) and leaves "Evaluate formulas" off, so nothing was
+  changed; excluding such names from the export, and listing them, was the fix kept in reserve. The find page's PDF
+  preview is an `embed` with no sandbox: a server that sniffs content could show a `.pdf` holding HTML as a page of
+  the same origin. The servers used (Textastic's, files opened locally) go by the extension.
+
+One review (medium), six nits, five fixed: `NAME.html`'s rename went by path through `.index` with no check that it
+was still the directory opened, and a swap showed `os.Root`'s "path escapes from parent" (now checked before and
+after the rename, reported in Filo's words); a page in a directory that is no longer Filo's stayed recorded and was
+reported on every run; a design clause and `extension()`'s case for a hidden name, both dead once hidden files are not
+renamed; a garbled README sentence. Not fixed: every opened key directory stays open until the end of the run, one
+descriptor each; an index has a few keys, and Go raises the soft limit on open files to the hard one.
+
+## Bash completion: how item 36 was built
+
+Roadmap 36, agreed 2026-11-20 and designed with the person on 2026-11-28, one open point at a time (where the flag
+list lives, tags, what each argument completes, speed), then built the same day on branch `improvements` (the
+person's choice: with the week's fixes, not on a branch of its own).
+
+Commits: the design (`5ebcd43`); the store's read-only open and the entries of a directory (`c999eb8`); package
+`complete`, the text side (`8828336`); the Renderer's raw answer (`054cb2d`); the help test (`367a58b`); a leading
+`~/` left unescaped (`3da6722`); the CLI, `filo completion bash` and `filo __complete` (`bb57787`); the tags in use
+without their counts (`6bf8945`, `0b3d47d`); CLAUDE.md's hard rule naming the second raw output (`79e7572`).
+
+- **Decided in the design session**: the help as the list of flags (one flag table every command parses from was
+  not taken: it rewrites about 20 commands' parsing for a V5 feature; nor a separate completion list, a third copy);
+  Filo working out the word itself from the line, so bash's split at `:` never matters and the `bash-completion`
+  package is not needed; tags in two steps, matched in any case; `untag` offering only the files' own tags; `tags
+  rename NEW` offering the tags in use; files not present still completing, capped.
+- **Changed while building**: the script passes the line cut at the cursor (`${COMP_LINE:0:COMP_POINT}`), not the
+  cursor's position, so Filo never has to know whether bash counts it in characters or bytes. `set` and `get` take
+  their command's flag list, so no usage line was rewritten. `tag` and `untag` complete files on disk only (a file not
+  on disk would be read as a tag). The cap on files not present takes the paths registered last, not those gone
+  last, so SQLite reads the table from its newest row and stops: 11 ms at the top of a 120,000-file root, against
+  44 ms sorting by the closing scan. A read-only open of a database in WAL mode made the WAL and shared-memory files
+  and left them, so with no WAL file it opens immutable as well. Completing a tag first read `filo tags`' summary,
+  whose counts read every file: 95 ms on 100,000 files, 3 ms with `TagsInUse`.
+- **The help test** checks each usage line one way only (the flags it names exist): `policies`, `rules` and
+  `indexes` share one flag set between subcommands and refuse a flag given to the wrong one with their own, tested,
+  messages. It found `roots add --workers` missing from the help and the README.
+- **Review** (medium, one round): ten findings, all fixed. Important: registered paths in the `~/` and relative forms
+  found nothing with a symlinked home or current directory (the register keeps paths resolved); a deleted directory
+  under a symlinked path never completed (resolving failed on the missing part); a directory only the register knows
+  got a space, not its `/`, from bash in files mode. Nits: `untag` of a symlink looked up its target; file names
+  matched in any case among tags; `--db=~/x` expanded `~`, which the shell does not; `completion` offered `--db`;
+  `~` with no home directory read the current directory; `!` inside an open double quote (history expansion); an
+  unreachable `-h` arm.
+- **Tests**: `TestOpenReadOnly`, `TestEntriesIn`, `TestEntriesInUsesTheIndex` and `BenchmarkEntriesIn` (store);
+  `TestParse`, `TestInsert`, `TestRest`, `TestParseUsage` and friends (complete); `TestCompletions` (view);
+  `TestHelpListsTheRealFlags`; `TestCompleteCommandsAndFlags`, `TestCompletePaths`, `TestCompleteTags`,
+  `TestCompleteRegistered`, `TestCompleteWithoutARegister`, `TestCompleteThroughSymlinks`, `TestCompleteEdges`,
+  `TestEveryPlaceholderHasASource`, `TestSlots`; and `TestCompletionScriptInBash`, the script in a real bash with a
+  `filo` built from the tree. Checked by hand, not by a test: in an interactive bash under a pseudo-terminal, Tab
+  gave lines whose arguments came out whole (`~/` expanded; `bills 2026/gas.pdf`, `a:b.txt` and `sender:British
+  Gas` one argument each), since readline's quoting runs only in an interactive terminal; and the timing on a
+  throwaway tree of 100,000 files: about 18 ms for a path and 3 ms for a tag, start-up included.
+
 ## Notes on decisions
 
 Short notes taken out of `design.md` on 2026-11-17, by the section they were in.

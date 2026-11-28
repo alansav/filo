@@ -72,7 +72,7 @@ func TestRulesAdd(t *testing.T) {
 	rt.contains("nothing added", rt.filo(ExitOK, "", false, "rules").stdout, "Rules   none yet")
 	rt.contains("add in a terminal", rt.filo(ExitOK, "", true, "rules", "add", bank, "*Statement*",
 		"statements").stdout, "policy set on 3 files", "3 need a file_date",
-		"Next: filo export retention "+bank+" -o FILE, fill in file_date, then filo update FILE")
+		"Next: filo export "+bank+" -o FILE, fill in file_date, then filo update FILE")
 	rt.contains("add, not a terminal", rt.filo(ExitOK, "", false, "rules", "add", rt.in("personal"), "bills").stdout,
 		"Done   personal . * -> bills . policy set on 1 file")
 
@@ -243,5 +243,5 @@ func TestReportRules(t *testing.T) {
 	out := strings.ReplaceAll(rt.filo(ExitOK, "", false, "report").stdout, rt.root, "<root>")
 	rt.contains("report", out, "  - 4 with a policy set by directory rules (filo rules)",
 		"  [!] 1 not given a policy: two rules match it equally\n    bank/new-2024-bank.pdf   rules of bank: *2024*, *bank*",
-		"Next: filo export retention [DIR] -o FILE, then filo update FILE, or filo rules add DIR POLICY")
+		"Next: filo export [DIR] -o FILE, then filo update FILE, or filo rules add DIR POLICY")
 }

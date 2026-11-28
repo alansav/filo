@@ -1,28 +1,33 @@
 filo update FILE [--dry-run] [-y]
 
-  Reads an exported retention CSV and applies the file_date and retention you
+  Reads an exported CSV and applies the file_date, retention and tags you
   changed. retention is a period counted from file_date (7y, 18m, 6w, 30d),
   forever, or a date (YYYY-MM-DD); file_date is a date. keep_until is worked out
   by filo: leave it alone. Dates in the past are fine: the file is then past its
   retention (see filo delete). Rows can be sorted, filtered or deleted, but not
-  added. A blank retention clears a stored one; filo lists those files and asks
-  first, and without a terminal leaves them alone. A row is refused, with one
-  line saying why, if a value does not parse, a period has no file_date, the
-  file changed since the export, or its retention was changed from a later
-  export. The other rows are still applied.
+  added. Each tags cell replaces its file's tags, so an untouched cell changes
+  nothing and an emptied one removes them all. A row is refused, with one line
+  saying why, if a value does not parse, a period has no file_date, the file
+  changed since the export, its retention or tags were changed after the export,
+  or a tag breaks the spelling rules (see filo help tag). The other rows are
+  still applied.
 
-  A tags CSV (from export tags) is told by its header: each tags cell replaces
-  its file's tags, so an untouched cell changes nothing and an emptied one
-  removes them all. Before removing any tag, filo lists those rows and asks (-y
-  answers yes); without a terminal, and without -y, it leaves them alone. A row
-  is refused, with one line saying why, if for example a tag breaks the spelling
-  rules (see filo help tag), the file's tags changed since the export (by tag,
-  untag or tags rename), or the file is listed twice.
+  A changed name cell renames the file, and a changed directory cell (the full
+  path of a directory in the file's root) moves it there, making the directories
+  it needs; never a hidden file or one in a hidden directory, never hiding one,
+  leaving its root, or replacing another file, and only if the file is still the
+  one the last scan saw; otherwise the row is refused or the rename or move not
+  made, with why (run filo scan and export again). The directories the moves
+  empty stay.
+
+  If any row clears a retention, removes a tag, names a policy that does not
+  exist yet or renames a file or moves one, filo lists them first and asks once
+  (-y answers yes); no, or no terminal without -y, records nothing at all (exit
+  1 when there was no terminal to ask in).
 
   A duplicates CSV (from export duplicates) is refused: its decisions are not
   recorded, but carried out by filo delete FILE.
 
 Flags
   --dry-run                check everything and write nothing
-  -y                       a tags CSV: remove the tags its cells no longer hold
-                           without asking
+  -y                       apply without asking

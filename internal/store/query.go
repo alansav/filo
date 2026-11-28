@@ -51,3 +51,58 @@ func inBatches[T any](values []T, fn func(placeholders string, args []any) error
 	}
 	return nil
 }
+
+// execer is a querier that also writes: a *sql.Tx, or a *stmtCache over one.
+type execer interface {
+	querier
+	ExecContext(ctx context.Context, q string, args ...any) (sql.Result, error)
+}
+
+// stmtCache runs queries in a transaction, preparing each distinct query once. A run that repeats the same few
+// queries for each of thousands of rows (a combined CSV) otherwise has SQLite compile them again for every row, a third
+// of its time. The statements belong to the transaction and are closed with it.
+type stmtCache struct {
+	tx    *sql.Tx
+	stmts map[string]*sql.Stmt
+}
+
+func newStmtCache(tx *sql.Tx) *stmtCache { return &stmtCache{tx: tx, stmts: map[string]*sql.Stmt{}} }
+
+func (c *stmtCache) prepare(ctx context.Context, q string) (*sql.Stmt, error) {
+	if st, ok := c.stmts[q]; ok {
+		return st, nil
+	}
+	st, err := c.tx.PrepareContext(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	c.stmts[q] = st
+	return st, nil
+}
+
+func (c *stmtCache) QueryContext(ctx context.Context, q string, args ...any) (*sql.Rows, error) {
+	st, err := c.prepare(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	return st.QueryContext(ctx, args...)
+}
+
+// QueryRowContext reports a query that cannot be prepared through the row, as the transaction's own would: there is
+// no other way to make a *sql.Row carry an error, so the query is run on the transaction, uncached. A query that is
+// wrong fails there the same way; one whose prepare failed for a passing reason may succeed there.
+func (c *stmtCache) QueryRowContext(ctx context.Context, q string, args ...any) *sql.Row {
+	st, err := c.prepare(ctx, q)
+	if err != nil {
+		return c.tx.QueryRowContext(ctx, q, args...)
+	}
+	return st.QueryRowContext(ctx, args...)
+}
+
+func (c *stmtCache) ExecContext(ctx context.Context, q string, args ...any) (sql.Result, error) {
+	st, err := c.prepare(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	return st.ExecContext(ctx, args...)
+}

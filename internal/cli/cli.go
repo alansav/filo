@@ -190,12 +190,20 @@ func (e *env) run(ctx context.Context, args []string) error {
 		return e.tags(ctx, *db, rest)
 	case "indexes":
 		return e.indexes(ctx, *db, rest)
+	case "completion":
+		return e.completion(rest)
+	case "__complete": // run by the completion script on Tab; not in the help
+		return e.completeCmd(ctx, rest)
 	case "review":
-		return usageError{"review was replaced by export retention and update; see filo help"}
+		return usageError{"review was replaced by export and update; see filo help"}
 	default:
 		return usageError{fmt.Sprintf("unknown command %q", cmd)}
 	}
 }
+
+// flagSetMade, if set by a test, is told of every flag set a command makes, once its flags are defined (when it is
+// parsed): TestHelpListsTheRealFlags compares them with the help.
+var flagSetMade func(*flag.FlagSet)
 
 // flags makes a FlagSet that reports problems as usage errors instead of printing.
 func (e *env) flags(name string) *flag.FlagSet {
@@ -206,6 +214,9 @@ func (e *env) flags(name string) *flag.FlagSet {
 
 // parseLeading parses flags that come before the command, leaving the command and everything after it.
 func parseLeading(fs *flag.FlagSet, args []string) ([]string, error) {
+	if flagSetMade != nil {
+		flagSetMade(fs)
+	}
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil, err
@@ -218,6 +229,9 @@ func parseLeading(fs *flag.FlagSet, args []string) ([]string, error) {
 // parseInterspersed parses flags anywhere among the positional arguments, so `filo scan PATH --include-hidden`
 // works. Everything after "--" is positional.
 func parseInterspersed(fs *flag.FlagSet, args []string) ([]string, error) {
+	if flagSetMade != nil {
+		flagSetMade(fs)
+	}
 	var pos []string
 	for {
 		if err := fs.Parse(args); err != nil {

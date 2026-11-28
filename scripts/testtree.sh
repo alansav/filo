@@ -9,7 +9,7 @@
 #   T=$(mktemp -d)
 #   testtree.sh init $T/FiloTest
 #   filo --db $T/f.db roots add $T/FiloTest
-#   filo --db $T/f.db scan      # first scan: 15 new; bin/ and .hiddendir are skipped
+#   filo --db $T/f.db scan      # first scan: 16 new; .hiddendir is skipped
 #   testtree.sh mutate $T/FiloTest
 #   filo --db $T/f.db scan      # expect the results printed by mutate
 #   filo --db $T/f.db report    # docs/private.txt is listed under "Unreadable files"
@@ -41,7 +41,7 @@ case "$cmd" in
 
     printf '<Project/>\n'              > "$dir/projects/app/app.csproj"
     printf 'class A {}\n'              > "$dir/projects/app/src/main.cs"
-    printf 'binary\n'                  > "$dir/projects/app/bin/out.dll"   # skipped: bin beside a .csproj
+    printf 'binary\n'                  > "$dir/projects/app/bin/out.dll"   # scanned like any file (no bin/obj case)
 
     printf 'hidden\n'                  > "$dir/.hiddendir/secret.txt"      # skipped unless --include-hidden
     : > "$dir/empty.txt"
