@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/alansav/filo/internal/tags"
 )
 
 // ErrNoRegister means there is no register at the path OpenReadOnly was given: it never creates one.
@@ -153,4 +155,21 @@ func (s *Store) EntriesIn(ctx context.Context, rootID int64, dir, prefix string,
 		add(p)
 	}
 	return out, rows.Err()
+}
+
+// TagsInUse are the tags in use, each in the spelling filo tags shows (TagSummary's: the first given, of files not
+// deleted by filo), ordered by key and value, without TagSummary's counts, which read every file: for completion,
+// on every Tab.
+func (s *Store) TagsInUse(ctx context.Context) ([]tags.Tag, error) {
+	out, err := queryAll(ctx, s.db, func(rows *sql.Rows) (tags.Tag, error) {
+		var t tags.Tag
+		return t, rows.Scan(&t.Key, &t.Value)
+	}, `SELECT t.key, t.value FROM tags t WHERE t.rowid IN (
+			SELECT min(s.rowid) FROM tags s JOIN files f ON f.id = s.file_id WHERE f.deleted_utc IS NULL
+			GROUP BY s.key, s.folded)
+		ORDER BY t.key, t.folded`)
+	if err != nil {
+		return nil, fmt.Errorf("read tags: %w", err)
+	}
+	return out, nil
 }
