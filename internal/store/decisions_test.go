@@ -117,11 +117,11 @@ func TestPublishMovesTheCursorsOnce(t *testing.T) {
 	err := s.Publish(ctx, []SyncedChange{{SyncedID: id, Journals: []JournalUpdate{{Dev: "me",
 		Lines: []JournalLine{{1, []byte("l1")}}, Seq: 1, Offset: 3}}, Decisions: []Decision{{Dev: "me", Seq: 1, FID: "f",
 		Key: "date", Value: "2026-01-01", Applied: true}}, Replaces: [][]LineRef{nil}, Shared: map[string]int64{"f": 0}}},
-		PublishCursors{Reviews: 7, TagChanges: 3})
+		PublishCursors{Reviews: 7, TagChanges: 3, PolicyChanges: 2})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cur, _ := s.Cursors(ctx); cur != (PublishCursors{7, 3}) {
+	if cur, _ := s.Cursors(ctx); cur != (PublishCursors{7, 3, 2}) {
 		t.Fatalf("cursors = %+v", cur)
 	}
 	if _, known, _ := s.SharedFile(ctx, id, "f"); !known {
@@ -269,5 +269,45 @@ func TestConflictKeepsAFileFromDeletion(t *testing.T) {
 	}
 	if c, _ := e.s.ConflictedFiles(ctx); len(c[id]) != 2 {
 		t.Fatalf("a tag spelled in two cases is a conflict: %v", c[id])
+	}
+}
+
+func TestPolicyChangesForPublishing(t *testing.T) {
+	ctx := context.Background()
+	s := mustOpen(t, Options{DBPath: tempDB(t)})
+	defer mustClose(t, s)
+	now := time.Date(2026, 11, 28, 0, 0, 0, 0, time.UTC)
+	cur, _ := s.Cursors(ctx)
+	if err := s.AddPolicy(ctx, "bills", "7y", now); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := s.Latest(ctx)
+	if _, err := s.SetPolicy(ctx, "bills", "10y", now); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.MarkPolicyChangesJournal(ctx, before.PolicyChanges); err != nil {
+		t.Fatal(err)
+	}
+	evs, err := s.PolicyChangesSince(ctx, cur.PolicyChanges)
+	if err != nil || len(evs) != 1 || evs[0].Kind != "add" || evs[0].Policy != "bills" || evs[0].New != "7y" {
+		t.Fatalf("policy changes = %+v, %v (the journal's set left out)", evs, err)
+	}
+}
+
+func TestIndexWriter(t *testing.T) {
+	ctx := context.Background()
+	s, root := syncedTestStore(t)
+	ix, err := s.AddTagIndex(ctx, root.ID, "", "index", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ix.Writer != "" {
+		t.Fatalf("a new index's writer = %q, want this device", ix.Writer)
+	}
+	if err := s.SetIndexWriter(ctx, ix.ID, "laptop-id"); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.TagIndex(ctx, ix.ID); got.Writer != "laptop-id" {
+		t.Fatalf("writer = %q", got.Writer)
 	}
 }

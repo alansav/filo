@@ -234,6 +234,7 @@ func insertCursors(ctx context.Context, tx *sql.Tx) error {
 	for _, q := range []struct{ key, max string }{
 		{metaPublishReviews, `SELECT coalesce(max(id), 0) FROM reviews`},
 		{metaPublishTags, `SELECT coalesce(max(id), 0) FROM tag_changes`},
+		{metaPublishPolicies, `SELECT coalesce(max(id), 0) FROM policy_changes`},
 	} {
 		var n int64
 		if err := tx.QueryRowContext(ctx, q.max).Scan(&n); err != nil {
@@ -288,7 +289,10 @@ func (s *Store) Latest(ctx context.Context) (PublishCursors, error) {
 	if err := s.db.QueryRowContext(ctx, `SELECT coalesce(max(id), 0) FROM reviews`).Scan(&c.Reviews); err != nil {
 		return c, err
 	}
-	err := s.db.QueryRowContext(ctx, `SELECT coalesce(max(id), 0) FROM tag_changes`).Scan(&c.TagChanges)
+	if err := s.db.QueryRowContext(ctx, `SELECT coalesce(max(id), 0) FROM tag_changes`).Scan(&c.TagChanges); err != nil {
+		return c, err
+	}
+	err := s.db.QueryRowContext(ctx, `SELECT coalesce(max(id), 0) FROM policy_changes`).Scan(&c.PolicyChanges)
 	return c, err
 }
 
@@ -479,4 +483,40 @@ func (s *Store) Values(ctx context.Context, fileID int64) (FileValues, bool, err
 		v.Retention, v.Policy = policy.String, true
 	}
 	return v, true, nil
+}
+
+// PolicyEvent is a change of policy made on this device, from the policy history: kind 'add', 'set', 'rename',
+// 'move' or 'remove', the policy's name, its old value and its new one (for rename and move, the policy moved to).
+type PolicyEvent struct {
+	ID       int64
+	Kind     string
+	Policy   string
+	Old, New string
+}
+
+// PolicyChangesSince returns the policy changes after after, but those that applied a journal's, in order.
+func (s *Store) PolicyChangesSince(ctx context.Context, after int64) ([]PolicyEvent, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id, kind, policy, coalesce(old_value, ''), coalesce(new_value, '')
+		FROM policy_changes WHERE id > ? AND coalesce(command, '') != ? ORDER BY id`, after, CommandJournal)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []PolicyEvent
+	for rows.Next() {
+		var e PolicyEvent
+		if err := rows.Scan(&e.ID, &e.Kind, &e.Policy, &e.Old, &e.New); err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+// MarkPolicyChangesJournal records that the policy changes after after applied another device's decisions: they are
+// never written to this device's journal again.
+func (s *Store) MarkPolicyChangesJournal(ctx context.Context, after int64) error {
+	_, err := s.exec(ctx, `UPDATE policy_changes SET command = ? WHERE id > ? AND command IS NULL`, CommandJournal,
+		after)
+	return err
 }

@@ -145,12 +145,13 @@ func (s *Store) ApplySynced(ctx context.Context, c SyncedChange) (int64, error) 
 
 // PublishCursors are how far this device has written its own decisions to its journals: the last review and the
 // last tag change looked at (docs/design.md, Sharing decisions between devices).
-type PublishCursors struct{ Reviews, TagChanges int64 }
+type PublishCursors struct{ Reviews, TagChanges, PolicyChanges int64 }
 
-// Meta keys of the publish cursors (schema 16).
+// Meta keys of the publish cursors (schema 16; policy changes schema 17).
 const (
-	metaPublishReviews = "publish_reviews_id"
-	metaPublishTags    = "publish_tag_changes_id"
+	metaPublishReviews  = "publish_reviews_id"
+	metaPublishTags     = "publish_tag_changes_id"
+	metaPublishPolicies = "publish_policy_changes_id"
 )
 
 // Cursors returns the publish cursors.
@@ -159,7 +160,7 @@ func (s *Store) Cursors(ctx context.Context) (PublishCursors, error) {
 	for _, kv := range []struct {
 		key string
 		to  *int64
-	}{{metaPublishReviews, &c.Reviews}, {metaPublishTags, &c.TagChanges}} {
+	}{{metaPublishReviews, &c.Reviews}, {metaPublishTags, &c.TagChanges}, {metaPublishPolicies, &c.PolicyChanges}} {
 		v, err := metaValue(ctx, s.db, kv.key)
 		if err != nil {
 			return c, err
@@ -202,7 +203,7 @@ func (s *Store) Publish(ctx context.Context, cs []SyncedChange, cur PublishCurso
 	for _, kv := range []struct {
 		key string
 		v   int64
-	}{{metaPublishReviews, cur.Reviews}, {metaPublishTags, cur.TagChanges}} {
+	}{{metaPublishReviews, cur.Reviews}, {metaPublishTags, cur.TagChanges}, {metaPublishPolicies, cur.PolicyChanges}} {
 		if _, err := tx.ExecContext(ctx, `UPDATE meta SET value = ? WHERE key = ?`, fmt.Sprint(kv.v), kv.key); err != nil {
 			return err
 		}

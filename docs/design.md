@@ -3,7 +3,7 @@
 **The present.** Of three documents, this is the present: `design.md` (what Filo is), `roadmap.md` (the future:
 what it is not yet) and `history.md` (the past: how it got here).
 
-Filo as built: schema version 16. Last updated: 2026-11-28.
+Filo as built: schema version 17. Last updated: 2026-11-28.
 
 This file records what Filo does and why, as built. Work not done yet, ideas, open questions and ideas rejected are
 in `roadmap.md`, where designs are worked out; a design moves here, in its own commit, when work on it starts (see
@@ -71,7 +71,7 @@ Principles. These are not negotiable:
   2026-11-28 there was no device column, because nothing left the device).
 - Driver: `modernc.org/sqlite` (pure Go, no CGO, plain `database/sql`), chosen 2026-11-11 at v1.62.0.
 - `meta.schema_version` must equal the build's version. An older database is upgraded when it is opened, one version
-  at a time, each step in its own transaction with the version bump (from any version from 1 to 15); a newer version, or an older
+  at a time, each step in its own transaction with the version bump (from any version from 1 to 16); a newer version, or an older
   one with no migration, is refused, as is a SQLite file without Filo's `meta` keys. WAL mode is set only after those checks pass, so
   a foreign database is never modified.
 - One writer at a time: an `flock` on `<db>.lock`, taken before the database is opened. The kernel drops it if Filo
@@ -2774,7 +2774,7 @@ $ filo roots add
 filo: roots add takes exactly one DIR (see filo help roots)
 ```
 
-## 3. Data model (schema version 16)
+## 3. Data model (schema version 17)
 
 The register as `internal/store/schema.go` creates it (`schemaSQL`), with the meaning of each column. Keep the
 interval history and the partial unique index.
@@ -2785,7 +2785,8 @@ CREATE TABLE meta  (key TEXT PRIMARY KEY, value TEXT NOT NULL);
     -- device_id, device_name, device_key (schema 14: this device's ID, name and ed25519 key seed, base64; made
     -- with the database or by the upgrade, and checked whenever read: see Sharing decisions between devices);
     -- publish_reviews_id, publish_tag_changes_id (schema 16: the last review and tag change written to the journals,
-    -- or looked at and not for them; the upgrade sets them past every one made before)
+    -- or looked at and not for them; the upgrade sets them past every one made before), publish_policy_changes_id
+    -- (schema 17, the same for the policy history)
 
 CREATE TABLE roots (
     id INTEGER PRIMARY KEY,
@@ -2904,7 +2905,8 @@ CREATE TABLE policy_changes (           -- the history of policies
     policy TEXT NOT NULL,               -- its name at the time
     old_value TEXT, new_value TEXT,     -- for 'rename' and 'move', new_value is the policy moved to
     files INTEGER NOT NULL DEFAULT 0,   -- how many files the change touched
-    changed_utc TEXT NOT NULL);
+    changed_utc TEXT NOT NULL,
+    command TEXT);                      -- 'journal': another device's change applied here (schema 17); NULL = here
 
 -- directory rules (see Lifespan, Directory rules)
 CREATE TABLE rules (
@@ -2948,6 +2950,7 @@ CREATE TABLE tag_indexes (
     data_hash TEXT,                     -- the data of the last full write; NULL = never written in full
     written_utc TEXT,                   -- when its pages were last brought up to date
     problem TEXT,                       -- why the last writing failed; NULL = it did not
+    writer TEXT,                        -- the device that writes its pages (schema 17); NULL = this one
     UNIQUE (root_id, dir, name));
 CREATE TABLE tag_index_files (          -- every file and directory Filo wrote in an index
     index_id INTEGER NOT NULL REFERENCES tag_indexes(id),

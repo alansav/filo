@@ -3,7 +3,7 @@ package store
 // SchemaVersion is the schema this build reads and writes. It is stored in meta.schema_version when a database is
 // created. An older database with a migration in migrations is upgraded when it is opened; any other version is
 // refused.
-const SchemaVersion = 16
+const SchemaVersion = 17
 
 // Meta keys.
 const (
@@ -90,7 +90,7 @@ CREATE TABLE events (
     other_path TEXT,
     detail TEXT
 );
-` + reviewSQL + duplicatesSQL + policiesSQL + rulesSQL + tagsSQL + tagIndexSQL + syncedSQL + decisionsSQL
+` + reviewSQL + duplicatesSQL + policiesSQL + rulesSQL + tagsSQL + tagIndexSQL + syncedSQL + decisionsSQL + writersSQL
 
 // reviewSQL is the export and review tables, as of schema version 13.
 const reviewSQL = `
@@ -251,7 +251,19 @@ ALTER TABLE export_rows ADD COLUMN name TEXT;
 	// publish cursors, set past every decision made so far (migrate): only decisions made from now on are written to
 	// the journals as they are made; the ones before are seeded when a directory is marked or joined.
 	15: decisionsSQL,
+	// 16 -> 17: sharing policies and tag indexes (docs/design.md, Sharing decisions between devices): which device
+	// writes an index's pages (NULL: this one), the command a policy change came from (NULL: a command here; 'journal':
+	// another device's, applied), and the publish cursor for policy changes, set past every one made so far.
+	16: writersSQL,
 }
+
+// writersSQL is what schema version 17 adds to tables made by earlier versions: tag_indexes.writer, the device
+// that writes an index's pages (NULL: this one), and policy_changes.command ('journal': another device's change,
+// applied here; NULL: a command here).
+const writersSQL = `
+ALTER TABLE tag_indexes ADD COLUMN writer TEXT;
+ALTER TABLE policy_changes ADD COLUMN command TEXT;
+`
 
 // syncedSQL is the synced directories, added in schema version 15. A synced directory is known by the ID in its mark
 // (sync_id); on this device it is a directory of a root, joined, or a mark the person chose to ignore (root_id and dir
