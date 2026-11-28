@@ -348,3 +348,23 @@ func TestAlwaysAndRecordMembers(t *testing.T) {
 		t.Fatalf("RecordMembers = %+v, %v", ms, err)
 	}
 }
+
+func TestSeen(t *testing.T) {
+	ctx := context.Background()
+	s := mustOpen(t, Options{DBPath: tempDB(t)})
+	defer mustClose(t, s)
+	if err := s.SetSeen(ctx, 0, "policy:bills", "7y"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetSeen(ctx, 3, "rule:x", "keep *"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetSeen(ctx, 0, "policy:bills", "10y"); err != nil {
+		t.Fatal(err)
+	}
+	p, _ := s.Seen(ctx, 0)
+	r, _ := s.Seen(ctx, 3)
+	if p["policy:bills"] != "10y" || len(p) != 1 || r["rule:x"] != "keep *" {
+		t.Fatalf("Seen = %v, %v", p, r)
+	}
+}

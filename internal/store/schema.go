@@ -3,7 +3,7 @@ package store
 // SchemaVersion is the schema this build reads and writes. It is stored in meta.schema_version when a database is
 // created. An older database with a migration in migrations is upgraded when it is opened; any other version is
 // refused.
-const SchemaVersion = 17
+const SchemaVersion = 18
 
 // Meta keys.
 const (
@@ -90,7 +90,7 @@ CREATE TABLE events (
     other_path TEXT,
     detail TEXT
 );
-` + reviewSQL + duplicatesSQL + policiesSQL + rulesSQL + tagsSQL + tagIndexSQL + syncedSQL + decisionsSQL + writersSQL
+` + reviewSQL + duplicatesSQL + policiesSQL + rulesSQL + tagsSQL + tagIndexSQL + syncedSQL + decisionsSQL + writersSQL + seenSQL
 
 // reviewSQL is the export and review tables, as of schema version 13.
 const reviewSQL = `
@@ -255,7 +255,23 @@ ALTER TABLE export_rows ADD COLUMN name TEXT;
 	// writes an index's pages (NULL: this one), the command a policy change came from (NULL: a command here; 'journal':
 	// another device's, applied), and the publish cursor for policy changes, set past every one made so far.
 	16: writersSQL,
+	// 17 -> 18: the settings values this device last wrote or applied (docs/design.md, Sharing decisions between
+	// devices). A new table only.
+	17: seenSQL,
 }
+
+// seenSQL is the settings seen, added in schema version 18: for each setting (a policy: synced_id 0, as a policy is
+// global; the others by synced directory), the value this device last wrote to a journal or applied from one. Only a
+// value here that differs from it is a change of this device's to write: a value taken in (the safe side of a
+// conflict, a policy from another synced directory) is never written back as one.
+const seenSQL = `
+CREATE TABLE settings_seen (
+    synced_id INTEGER NOT NULL,
+    key TEXT NOT NULL,
+    value TEXT NOT NULL,
+    PRIMARY KEY (synced_id, key)
+);
+`
 
 // writersSQL is what schema version 17 adds to tables made by earlier versions: tag_indexes.writer, the device
 // that writes an index's pages (NULL: this one), and policy_changes.command ('journal': another device's change,

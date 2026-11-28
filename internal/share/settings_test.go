@@ -2,9 +2,13 @@ package share
 
 import (
 	"context"
+	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/alansav/filo/internal/journal"
 	"github.com/alansav/filo/internal/store"
 )
 
@@ -138,4 +142,114 @@ func TestPolicyConflictKeepsTheLonger(t *testing.T) {
 	if pa.Value != "10y" || pb.Value != "10y" {
 		t.Fatalf("policy in conflict: a %q, b %q", pa.Value, pb.Value)
 	}
+}
+
+// churn runs a change on both devices (so each publishes its settings) and syncs both ways, a few times.
+func churn(t *testing.T, a, b *node, rounds int) {
+	t.Helper()
+	ctx := context.Background()
+	for i := range rounds {
+		at := t0.Add(time.Duration(10+i) * time.Minute)
+		for _, n := range []*node{a, b} {
+			n.s.AddPolicy(ctx, fmt.Sprintf("churn%s%d", n.name, at.Unix()), "1y", at) // a change: the run publishes
+			n.publish(at)
+		}
+		syncFilo(t, a, b)
+		syncFilo(t, b, a)
+		a.imp(at)
+		b.imp(at)
+	}
+}
+
+func TestRuleConflictStaysUntilDecided(t *testing.T) {
+	ctx := context.Background()
+	a, b := pair(t, map[string]string{"x.pdf": "x"})
+	a.s.AddRule(ctx, a.rootID(), "Sync", "*.pdf", "keep", "2026-11-28", t0)
+	b.s.AddRule(ctx, b.rootID(), "Sync", "*.pdf", "short", "2026-11-28", t0)
+	a.publish(t0)
+	b.publish(t0)
+	syncFilo(t, a, b)
+	syncFilo(t, b, a)
+	a.imp(t0.Add(time.Minute))
+	b.imp(t0.Add(time.Minute))
+	churn(t, a, b, 2)
+	// The rule's conflict stays (and so does the one on the file it dated otherwise on each device).
+	keys, _ := a.s.Conflicts(ctx, mustDir(t, a).ID)
+	found := false
+	for _, k := range keys {
+		found = found || k[1] == "rule://*.pdf"
+	}
+	if !found {
+		t.Fatalf("a rule conflict ended by itself: conflicts %v", keys)
+	}
+	if rs, _ := a.s.Rules(ctx, a.rootID(), "Sync"); len(rs) != 0 {
+		t.Fatalf("the safe side of a rule conflict is no rule: %+v", rs)
+	}
+}
+
+func TestRulePatternCaseDoesNotChurn(t *testing.T) {
+	ctx := context.Background()
+	a, b := pair(t, map[string]string{"x.pdf": "x"})
+	a.s.AddRule(ctx, a.rootID(), "Sync", "*.pdf", "keep", "2026-11-28", t0)
+	a.publish(t0)
+	syncFilo(t, a, b)
+	b.imp(t0)
+	b.s.RemoveRule(ctx, b.rootID(), "Sync", "*.pdf")
+	b.s.AddRule(ctx, b.rootID(), "Sync", "*.PDF", "keep", "2026-11-28", t0)
+	b.publish(t0)
+	syncFilo(t, b, a)
+	a.imp(t0)
+	churn(t, a, b, 1)
+	la, lb := a.lines(a.dev().ID), b.lines(b.dev().ID)
+	churn(t, a, b, 3)
+	// Each round adds at most one policy line per device (the churn itself), nothing more.
+	if a.lines(a.dev().ID) > la+3 || b.lines(b.dev().ID) > lb+3 {
+		t.Fatalf("lines grew: a %d -> %d, b %d -> %d", la, a.lines(a.dev().ID), lb, b.lines(b.dev().ID))
+	}
+}
+
+func TestForgettingAnIndexStaysHere(t *testing.T) {
+	ctx := context.Background()
+	a, b := pair(t, map[string]string{"x.pdf": "x"})
+	a.s.AddTagIndex(ctx, a.rootID(), "Sync", "index", t0)
+	a.publish(t0)
+	syncFilo(t, a, b)
+	b.imp(t0)
+	ixs, _ := b.s.TagIndexes(ctx)
+	if len(ixs) != 1 {
+		t.Fatalf("b's indexes: %+v", ixs)
+	}
+	b.s.RemoveTagIndex(ctx, ixs[0].ID)
+	churn(t, a, b, 2)
+	if ixs, _ := b.s.TagIndexes(ctx); len(ixs) != 0 {
+		t.Fatalf("a forgotten index came back on b: %+v", ixs)
+	}
+	if ixs, _ := a.s.TagIndexes(ctx); len(ixs) != 1 {
+		t.Fatalf("a lost the index b forgot: %+v", ixs)
+	}
+}
+
+func TestABadPolicyValueIsAProblem(t *testing.T) {
+	a, b := pair(t, map[string]string{"x.pdf": "x"})
+	kept := mustLines(t, a, a.dev().ID)
+	appendLine(t, a, kept, KindSetting, SettingBody{Key: "policy:odd", Value: "6q"})
+	syncFilo(t, a, b)
+	dr := b.imp(t0)
+	if len(dr.Problems) != 1 {
+		t.Fatalf("a bad policy value: %+v", dr.Problems)
+	}
+}
+
+// appendLine writes one line after kept to n's journal on the disk, as n would.
+func appendLine(t *testing.T, n *node, kept []store.JournalLine, kind string, body any) {
+	t.Helper()
+	last, _ := journal.Parse(kept[len(kept)-1].Raw)
+	w, _ := journal.Resume(n.dev().Key, last)
+	raw, err := w.Add(kind, body, t0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, _ := os.OpenFile(filepath.Join(n.sync, journal.FiloDir, journal.JournalName(n.dev().ID)), os.O_APPEND|os.O_WRONLY, 0)
+	f.Write(append(raw, '\n'))
+	f.Close()
 }

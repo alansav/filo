@@ -568,3 +568,39 @@ func (s *Store) RecordMembers(ctx context.Context) ([]RecordMember, error) {
 	}, `SELECT r.set_id, r.file_id, r.hash FROM duplicate_records r JOIN files f ON f.id = r.file_id
 		WHERE f.hash = r.hash AND f.deleted_utc IS NULL ORDER BY r.set_id, r.file_id`)
 }
+
+// Seen returns the setting values this device last wrote or applied for synced directory id (0: the policies), by
+// key.
+func (s *Store) Seen(ctx context.Context, id int64) (map[string]string, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT key, value FROM settings_seen WHERE synced_id = ?`, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]string{}
+	for rows.Next() {
+		var k, v string
+		if err := rows.Scan(&k, &v); err != nil {
+			return nil, err
+		}
+		out[k] = v
+	}
+	return out, rows.Err()
+}
+
+// SetSeen records the value this device wrote or applied for a setting of synced directory id (0: a policy). It
+// writes only when the value changes.
+func (s *Store) SetSeen(ctx context.Context, id int64, key, value string) error {
+	var have string
+	err := s.db.QueryRowContext(ctx, `SELECT value FROM settings_seen WHERE synced_id = ? AND key = ?`, id,
+		key).Scan(&have)
+	if err == nil && have == value {
+		return nil
+	}
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	_, err = s.exec(ctx, `INSERT INTO settings_seen (synced_id, key, value) VALUES (?, ?, ?)
+		ON CONFLICT (synced_id, key) DO UPDATE SET value = excluded.value`, id, key, value)
+	return err
+}

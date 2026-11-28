@@ -461,7 +461,7 @@ func Join(ctx context.Context, s *store.Store, t Target, now time.Time) (store.S
 		ch.Journals = append(ch.Journals, r.update(store.JournalState{Dev: r.dev}, retired[r.dev]))
 		if r.dev != me.ID {
 			notes = append(notes, fileDecisions(r.lines, 0, name, &ch)...)
-			ps, err := settingDecisions(ctx, s, r.lines, name, &ch, now)
+			ps, err := settingDecisions(ctx, s, r.lines, name, &ch, now, false)
 			if err != nil {
 				return store.SyncedDir{}, notes, err
 			}

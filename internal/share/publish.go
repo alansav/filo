@@ -134,16 +134,13 @@ func Publish(ctx context.Context, s *store.Store, now time.Time) ([]string, erro
 		}
 	}
 	for _, sd := range dirs {
-		pb, seen := pubs[sd.ID]
-		if !seen {
-			var problem string
-			pb, problem, err = startPub(ctx, s, me, sd)
-			if err != nil {
-				problems = append(problems, sd.Abs()+": "+err.Error()+" (tried again on the next run)")
-				failed = true
-			} else if problem != "" {
-				problems = append(problems, sd.Abs()+": "+problem)
-			}
+		if !s.Changed() && len(moves) == 0 {
+			break // a run that changed nothing has no setting of its own to write
+		}
+		pb, started := pubs[sd.ID]
+		if !started {
+			// Settings only: a directory not reachable now is left quietly; what differs is written when it is.
+			pb, _, _ = startPub(ctx, s, me, sd)
 			pubs[sd.ID] = pb
 			if pb != nil {
 				order = append(order, pb)
@@ -168,6 +165,13 @@ func Publish(ctx context.Context, s *store.Store, now time.Time) ([]string, erro
 	}
 	if err := s.Publish(ctx, changes, latest); err != nil {
 		return problems, err
+	}
+	for _, pb := range order {
+		for _, sv := range pb.seen {
+			if err := s.SetSeen(ctx, sv.id, sv.key, sv.value); err != nil {
+				return problems, err
+			}
+		}
 	}
 	for _, pb := range order {
 		if err := pb.write(); err != nil {
@@ -202,6 +206,7 @@ type pub struct {
 	mine  map[[2]string]store.LineRef // the line this run wrote for a (fid, key), which the next one replaces
 	value map[[2]string]string        // and its value
 	fids  map[int64]string
+	seen  []seenValue // setting values written, recorded as seen once committed
 }
 
 // startPub checks this device's journal in sd (written back if it fell short) and starts writing after its last

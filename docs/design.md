@@ -3,7 +3,7 @@
 **The present.** Of three documents, this is the present: `design.md` (what Filo is), `roadmap.md` (the future:
 what it is not yet) and `history.md` (the past: how it got here).
 
-Filo as built: schema version 17. Last updated: 2026-11-28.
+Filo as built: schema version 18. Last updated: 2026-11-28.
 
 This file records what Filo does and why, as built. Work not done yet, ideas, open questions and ideas rejected are
 in `roadmap.md`, where designs are worked out; a design moves here, in its own commit, when work on it starts (see
@@ -71,7 +71,7 @@ Principles. These are not negotiable:
   2026-11-28 there was no device column, because nothing left the device).
 - Driver: `modernc.org/sqlite` (pure Go, no CGO, plain `database/sql`), chosen 2026-11-11 at v1.62.0.
 - `meta.schema_version` must equal the build's version. An older database is upgraded when it is opened, one version
-  at a time, each step in its own transaction with the version bump (from any version from 1 to 16); a newer version, or an older
+  at a time, each step in its own transaction with the version bump (from any version from 1 to 17); a newer version, or an older
   one with no migration, is refused, as is a SQLite file without Filo's `meta` keys. WAL mode is set only after those checks pass, so
   a foreign database is never modified.
 - One writer at a time: an `flock` on `<db>.lock`, taken before the database is opened. The kernel drops it if Filo
@@ -2135,6 +2135,13 @@ the desktop, kept its retention on the laptop's next scan, because the move was 
     listed as written by that device, `refresh` refuses it and `remove` only forgets it; pages the taking device did
     not write are left alone and reported, as for any index. Two devices that each added it: neither writes it until
     one takes it.
+  - Only a change made on this device is written: each setting's value this device last wrote or took in is kept
+    (a policy once for all synced directories), so the safe side of a conflict, or a policy taken in from one
+    synced directory, is never written back as a decision of its own (it would end the conflict, or carry one
+    directory's value into another). Rule patterns compare in any case. At a join, a journal's old policy moves are
+    history and are not replayed: what is in effect comes as settings. A device that is not an index's writer
+    forgets it only for itself. An exclusion above a synced directory that another device's include cannot undo
+    here is reported.
   - Facts, which never conflict: **identity** (the first decision about a file gives it a shared file ID, made from
     the synced directory's ID, the file's content and its path, so two devices deciding about the same file before
     either has read the other give it the same ID; a random one if that ID is another file's already;
@@ -2777,7 +2784,7 @@ $ filo roots add
 filo: roots add takes exactly one DIR (see filo help roots)
 ```
 
-## 3. Data model (schema version 17)
+## 3. Data model (schema version 18)
 
 The register as `internal/store/schema.go` creates it (`schemaSQL`), with the meaning of each column. Keep the
 interval history and the partial unique index.
@@ -3016,6 +3023,11 @@ CREATE TABLE decisions (                -- every file decision line, read or wri
 CREATE TABLE replaced (                 -- lines named as replaced by a line read before they were read themselves
     synced_id INTEGER NOT NULL REFERENCES synced_dirs(id), dev TEXT NOT NULL, seq INTEGER NOT NULL,
     PRIMARY KEY (synced_id, dev, seq));
+
+CREATE TABLE settings_seen (            -- schema 18: each setting's value this device last wrote or applied; only a
+    synced_id INTEGER NOT NULL,         -- value here that differs is a change of its own to write (0: a policy,
+    key TEXT NOT NULL, value TEXT NOT NULL,  -- which is global)
+    PRIMARY KEY (synced_id, key));
 ```
 
 "Present" means a file has a path interval with `valid_to_scan IS NULL`; there is no status column. "New" means

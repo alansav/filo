@@ -59,10 +59,11 @@ func relIn(sd store.SyncedDir, rootID int64, p string) (string, bool) {
 	return strings.TrimPrefix(strings.TrimPrefix(p, sd.Dir), "/"), true
 }
 
-// localSettings is what this device holds for synced directory sd, by key. holds lists keys this device would
-// write a removal for if they are not in local (a content always kept with no copy inside sd is not "gone").
+// localSettings is what this device holds for synced directory sd, by key. holds says, for a key not in local,
+// whether that is a removal of this device's to write (a content always kept with no copy inside sd is not gone, nor
+// an index another device writes that this one forgot).
 func localSettings(ctx context.Context, s *store.Store, me store.Device, sd store.SyncedDir) (map[string]string,
-	func(key string) bool, error) {
+	func(key, seen string, me store.Device) bool, error) {
 	local := map[string]string{}
 	pols, err := s.Policies(ctx)
 	if err != nil {
@@ -150,12 +151,14 @@ func localSettings(ctx context.Context, s *store.Store, me store.Device, sd stor
 			local[keyIndex+r+"//"+ix.Name] = w
 		}
 	}
-	holds := func(key string) bool {
+	holds := func(key, seen string, me store.Device) bool {
 		switch {
 		case strings.HasPrefix(key, keyAlways):
 			return !alwaysAll[strings.TrimPrefix(key, keyAlways)]
 		case strings.HasPrefix(key, keyRecords):
 			return !recordHashes[strings.TrimPrefix(key, keyRecords)]
+		case strings.HasPrefix(key, keyIndex):
+			return seen == me.ID // only the device that writes an index removes it; forgetting one stays here
 		}
 		return true
 	}
@@ -186,22 +189,41 @@ func (pb *pub) publishSettings(ctx context.Context, s *store.Store, me store.Dev
 		sorted = append(sorted, k)
 	}
 	sort.Strings(sorted)
+	seenDir, err := s.Seen(ctx, pb.sd.ID)
+	if err != nil {
+		return err
+	}
+	seenPolicies, err := s.Seen(ctx, 0)
+	if err != nil {
+		return err
+	}
 	for _, k := range sorted {
 		value, have := local[k]
 		ds := cur[k]
-		if !have && !holds(k) {
+		seenAll := seenDir
+		if strings.HasPrefix(k, keyPolicy) {
+			seenAll = seenPolicies // a policy is global: what was seen in any synced directory
+		}
+		seen, wasSeen := seenAll[k]
+		if !have && !holds(k, seen, me) {
 			continue
 		}
-		same, waiting := len(ds) > 0, false
+		waiting := false
 		var refs []Ref
 		var replaces []store.LineRef
+		same := len(ds) > 0
 		for _, d := range ds {
-			same = same && d.Value == value
+			same = same && sameSetting(k, d.Value, value)
 			waiting = waiting || !d.Applied
 			refs = append(refs, Ref{Dev: d.Dev, Seq: d.Seq})
 			replaces = append(replaces, store.LineRef{Dev: d.Dev, Seq: d.Seq})
 		}
-		if same || waiting || (len(ds) == 0 && value == "") {
+		switch {
+		case waiting:
+			continue // another device's decision, not applied here yet
+		case wasSeen && sameSetting(k, seen, value):
+			continue // what this device last wrote or took in: no change of its own (a conflict's safe side too)
+		case !wasSeen && (same || (len(ds) == 0 && value == "")):
 			continue
 		}
 		raw, err := pb.w.Add(KindSetting, SettingBody{Key: k, Value: value, Replaces: refs}, now)
@@ -213,8 +235,27 @@ func (pb *pub) publishSettings(ctx context.Context, s *store.Store, me store.Dev
 		pb.ch.Decisions = append(pb.ch.Decisions, store.Decision{Dev: l.Dev, Seq: l.Seq, FID: store.SettingsFID,
 			Key: k, Value: value, Decided: l.Time, Current: true, Applied: true})
 		pb.ch.Replaces = append(pb.ch.Replaces, replaces)
+		id := pb.sd.ID
+		if strings.HasPrefix(k, keyPolicy) {
+			id = 0
+		}
+		pb.seen = append(pb.seen, seenValue{id, k, value})
 	}
 	return nil
+}
+
+// seenValue is a setting value to record as seen once what pb writes is committed.
+type seenValue struct {
+	id         int64
+	key, value string
+}
+
+// sameSetting reports whether two values of setting key are one: a rule's pattern in any case.
+func sameSetting(key, a, b string) bool {
+	if strings.HasPrefix(key, keyRule) {
+		return strings.EqualFold(a, b)
+	}
+	return a == b
 }
 
 // publishMoves adds a policy-move line to pb for each policy moved on this device.
@@ -232,7 +273,7 @@ func (pb *pub) publishMoves(moves []store.PolicyEvent, now time.Time) error {
 // settingDecisions reads the setting lines among lines (of trusted devices) into ch, and applies the policy-move
 // lines at once (a move is a fact, in the order it was made). It returns the problems met.
 func settingDecisions(ctx context.Context, s *store.Store, lines []journal.Line, name func(string) string,
-	ch *store.SyncedChange, now time.Time) ([]string, error) {
+	ch *store.SyncedChange, now time.Time, applyMoves bool) ([]string, error) {
 	var problems []string
 	for _, l := range lines {
 		switch l.Kind {
@@ -252,8 +293,8 @@ func settingDecisions(ctx context.Context, s *store.Store, lines []journal.Line,
 			ch.Replaces = append(ch.Replaces, refs)
 		case KindPolicyMove:
 			var b PolicyMoveBody
-			if l.Body(&b) != nil {
-				continue
+			if !applyMoves || l.Body(&b) != nil {
+				continue // at a join, a journal's old moves are history: what is in effect comes as settings
 			}
 			from, err1 := store.PolicyName(b.From)
 			to, err2 := store.PolicyName(b.To)
@@ -283,10 +324,25 @@ func settingDecisions(ctx context.Context, s *store.Store, lines []journal.Line,
 }
 
 func validSettingKey(k string) bool {
-	for _, p := range []string{keyPolicy, keyRule, keyExcluded, keyAlways, keyRecords, keyIndex} {
-		if strings.HasPrefix(k, p) {
-			return len(k) <= journal.MaxPath
-		}
+	if len(k) > journal.MaxPath {
+		return false
+	}
+	// A directory in a key is relative to the synced directory's top: checked as a line's path ("" for the top).
+	dirOK := func(rel string) bool { return rel == "" || journal.CheckPath(rel) == nil }
+	switch {
+	case strings.HasPrefix(k, keyPolicy):
+		_, err := store.PolicyName(strings.TrimPrefix(k, keyPolicy))
+		return err == nil
+	case strings.HasPrefix(k, keyRule):
+		rel, pattern, ok := strings.Cut(strings.TrimPrefix(k, keyRule), "//")
+		return ok && pattern != "" && dirOK(rel)
+	case strings.HasPrefix(k, keyExcluded):
+		return dirOK(strings.TrimPrefix(k, keyExcluded))
+	case strings.HasPrefix(k, keyIndex):
+		rel, name, ok := strings.Cut(strings.TrimPrefix(k, keyIndex), "//")
+		return ok && store.ValidIndexName(name) && dirOK(rel)
+	case strings.HasPrefix(k, keyAlways), strings.HasPrefix(k, keyRecords):
+		return true
 	}
 	return false
 }
@@ -344,6 +400,27 @@ func settingEffective(key string, ds []store.Decision) (string, bool) {
 // applied (false: it waits, as records whose files are not all here yet), and a problem for the person.
 func applySetting(ctx context.Context, s *store.Store, me store.Device, sd store.SyncedDir, key string,
 	ds []store.Decision, now time.Time, today string) (bool, string, error) {
+	done, problem, err := applySettingValue(ctx, s, me, sd, key, ds, now, today)
+	if err != nil || !done {
+		return done, problem, err
+	}
+	// What is applied is seen: the value this device holds now, unless it holds another for a reason of its own
+	// (excluded above), which is then what it last took in.
+	value, _ := settingEffective(key, ds)
+	if local, _, err := localSettings(ctx, s, me, sd); err == nil {
+		if v, ok := local[key]; ok && strings.HasPrefix(key, keyExcluded) {
+			value = v
+		}
+	}
+	id := sd.ID
+	if strings.HasPrefix(key, keyPolicy) {
+		id = 0
+	}
+	return true, problem, s.SetSeen(ctx, id, key, value)
+}
+
+func applySettingValue(ctx context.Context, s *store.Store, me store.Device, sd store.SyncedDir, key string,
+	ds []store.Decision, now time.Time, today string) (bool, string, error) {
 	value, conflict := settingEffective(key, ds)
 	switch {
 	case strings.HasPrefix(key, keyPolicy):
@@ -373,6 +450,12 @@ func applySetting(ctx context.Context, s *store.Store, me store.Device, sd store
 	case strings.HasPrefix(key, keyExcluded):
 		dir := joinDir(sd.Dir, strings.TrimPrefix(key, keyExcluded))
 		if value == "" {
+			if at, ok, err := s.Exclusion(ctx, sd.RootID, dir); err != nil {
+				return false, "", err
+			} else if ok && at != dir {
+				return true, fmt.Sprintf("%s was included on another device, and stays excluded here: %s is "+
+					"excluded (filo duplicates include it to share that)", dir, at), nil
+			}
 			_, err := s.Include(ctx, sd.RootID, dir)
 			return err == nil, "", err
 		}
@@ -443,7 +526,7 @@ func applyPolicy(ctx context.Context, s *store.Store, name, value string, now ti
 	case value == "":
 	case !exists:
 		if err := s.AddPolicy(ctx, n, v, now); err != nil && !errors.Is(err, store.ErrPolicyExists) {
-			return false, "", err
+			return true, fmt.Sprintf("policy %s not added here with %s: %v", n, v, err), nil
 		}
 	case p.Value != v:
 		if _, err := s.SetPolicy(ctx, n, v, now); err != nil {
