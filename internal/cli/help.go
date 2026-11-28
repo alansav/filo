@@ -78,6 +78,7 @@ var commandHelps = map[string]commandHelp{
 		usage: []string{
 			"filo roots",
 			"filo roots add DIR [--include-hidden] [--ignore NAME]... [--no-scan]",
+			"          [--workers N]",
 			"filo roots set DIR [--include-hidden | --skip-hidden] [--ignore NAME]...",
 		},
 		before: []string{"A root's settings apply to every scan of it, whole or partial."},
@@ -87,6 +88,8 @@ var commandHelps = map[string]commandHelp{
 			{Name: "--ignore NAME", Text: "skip entries with this name, at any depth (repeatable); node_modules, " +
 				"__pycache__ and .filo are always skipped"},
 			{Name: "--no-scan", Text: "roots add only: register the root without scanning it"},
+			{Name: "--workers N", Text: "roots add only, for its scan: files hashed in parallel, 1-64 (default 4; " +
+				"use 1 on a spinning disk)"},
 		},
 		after: []string{
 			"roots add scans the new root straight away; --no-scan only registers it. roots set replaces the whole " +

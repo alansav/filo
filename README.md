@@ -673,6 +673,7 @@ Options for `filo roots add` and `filo roots set`, which every scan of the root 
 | `--skip-hidden` | Skip them again (`roots set` only). |
 | `--ignore NAME` | Skip entries with this name, at any depth. Repeatable. `roots set` replaces the whole list. |
 | `--no-scan` | Register the root without scanning it now (`roots add` only). |
+| `--workers N` | For its scan: files hashed in parallel, 1–64 (default 4; use 1 on a spinning disk) (`roots add` only). |
 
 Options for `filo scan`:
 

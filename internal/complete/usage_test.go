@@ -48,10 +48,13 @@ func TestUsagesJoinsContinuations(t *testing.T) {
 }
 
 func TestParseFlag(t *testing.T) {
-	if got := ParseFlag("--file-date DATE"); got != (Flag{"--file-date", "DATE"}) {
-		t.Errorf("ParseFlag = %+v", got)
-	}
-	if got := ParseFlag("-y"); got != (Flag{"-y", ""}) {
-		t.Errorf("ParseFlag = %+v", got)
+	for term, want := range map[string][]Flag{
+		"--file-date DATE": {{"--file-date", "DATE"}},
+		"-y":               {{"-y", ""}},
+		"-r, --recursive":  {{"-r", ""}, {"--recursive", ""}},
+	} {
+		if got := ParseFlag(term); !reflect.DeepEqual(got, want) {
+			t.Errorf("ParseFlag(%q) = %+v, want %+v", term, got, want)
+		}
 	}
 }

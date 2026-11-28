@@ -2146,8 +2146,11 @@ Agreed 2026-11-20, designed 2026-11-28 (roadmap 36). Tab completes Filo's comman
 - **The help is the list of flags.** Completion reads `internal/cli/help.go`: each usage line says which subcommand
   takes which flags and arguments (`set FILE... [flags]` and `get FILE... --FIELD...` take their command's whole flag
   list), and the placeholder words say what to complete. `TestHelpListsTheRealFlags` captures the flags each command
-  really defines (a hook where commands make their flag set) and fails if the help and the real flags differ either
-  way, so neither completion nor the help can drift from the code.
+  really defines (a hook where commands parse their flag set) and fails if a usage line names a flag its command does
+  not define, or if a command's flag list is not exactly the flags it defines, so neither completion nor the help can
+  drift from the code. (A usage line may name fewer flags than its set holds: `policies`, `rules` and `indexes` share
+  one set between subcommands and refuse a flag given to the wrong one with their own message, `-y is for indexes
+  remove`.) It found `roots add --workers` missing from the help, now listed.
 - **What each argument completes.** Each placeholder word has a default source, with overrides for the subcommands
   that act on something registered; a test checks every placeholder of every usage line has one. Defaults: `DIR`
   directories inside the roots, from disk (and the directories on the way to a root); `FILE` of `set` and `get`, and

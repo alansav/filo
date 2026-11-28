@@ -106,10 +106,23 @@ func (u *Usage) addGroup(group []string, optional, repeat bool) {
 	}
 }
 
-// ParseFlag reads an entry of a command's flag list: "--file-date DATE", "-y".
-func ParseFlag(term string) Flag {
-	name, value, _ := strings.Cut(term, " ")
-	return Flag{Name: name, Value: value}
+// ParseFlag reads an entry of a command's flag list: "--file-date DATE", "-y", or one flag by two names, "-r,
+// --recursive": a Flag for each name.
+func ParseFlag(term string) []Flag {
+	var names []string
+	value := ""
+	for _, t := range strings.Fields(term) {
+		if strings.HasPrefix(t, "-") {
+			names = append(names, strings.TrimSuffix(t, ","))
+		} else {
+			value = t
+		}
+	}
+	out := make([]Flag, len(names))
+	for i, n := range names {
+		out[i] = Flag{Name: n, Value: value}
+	}
+	return out
 }
 
 // isLiteral reports a command or subcommand word: lower-case letters only.
