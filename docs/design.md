@@ -2133,8 +2133,9 @@ Agreed 2026-11-20, designed 2026-11-28 (roadmap 36). Tab completes Filo's comman
   (written again after an upgrade that changes commands). Filo never edits `.bashrc` itself (hard rules). Bash only
   (zsh can load bash completions); no framework (Cobra would be a dependency and a rewrite of every command's
   parsing).
-- **The script stays a few lines.** On Tab it runs a hidden `filo __complete POINT LINE WORD` with bash's
-  `COMP_POINT`, `COMP_LINE` and the word bash will replace (`$2`), reads the answer with `mapfile` (never through
+- **The script stays a few lines.** On Tab it runs a hidden `filo __complete LINE WORD` with the command line up to
+  the cursor (`${COMP_LINE:0:COMP_POINT}`, so Filo never has to know whether bash counts the cursor in characters or
+  bytes) and the word bash will replace (`$2`), reads the answer with `mapfile` (never through
   word splitting or globbing), and sets `COMPREPLY`. Filo works out the arguments itself, quotes and backslashes
   included, so bash's split of words at `:` and `=` never mangles `sender:Bri`, and the `bash-completion` package is
   not needed. The answer's first line is how bash should treat it: `files` (bash quotes the candidates itself, shows
