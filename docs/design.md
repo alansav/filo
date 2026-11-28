@@ -2065,8 +2065,7 @@ on the person's phone opens the file).
 
 ### Sharing decisions between devices
 Roadmap item 9, designed with the person on 2026-11-28, topic by topic, merging the former 9a (marking synced
-directories), 9b (a device ID) and 9c (sharing decisions). Being built in slices on branch `sync`; until it is
-merged, this section is the design being built, not yet all of it in the code.
+directories), 9b (a device ID) and 9c (sharing decisions), and built the same day in seven slices (`history.md`).
 
 A synced directory is on several devices, each with its own register; a decision made on one (a retention, a tag,
 a rule) should be known on the others. Sharing the database file itself is rejected: a sync service copies

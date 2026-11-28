@@ -33,7 +33,7 @@ than by a directory tree, from the command line or through a list piped to stand
 Filo can write a markdown note linking to its files. Tagging happens on any device: after a first pass that tags
 everything, the routine is to drop a file in the inbox, tag it, and move it to `received/YYYY/MM/`. **Everything
 about a file that is not in the file itself is shared between devices** (tags, retentions, file dates, rules,
-policies, deletes by Filo) **for files in synced directories** (9), the only files that are on several devices;
+policies, deletes by Filo) **for files in synced directories** (built: `design.md`, Sharing decisions between devices), the only files that are on several devices;
 what each device observes (roots, inodes, scan history) stays its own. Tags and retentions are matched differently
 on the other device: a retention by content hash (an edited file needs a new decision), a tag by hash and then path
 (an edit keeps it; see 9, and `design.md`, Tags).
@@ -41,7 +41,7 @@ on the other device: a retention by content hash (an edited file needs a new dec
 The pieces, in the order agreed: finding files (`filo find`, item 19, built 2026-11-21), 18a tags (built
 2026-11-22), 38 the tag index
 pages (built 2026-11-22), 36 bash completion (built 2026-11-28), then sharing decisions between devices (9, which
-merged the former 9a, 9b and 9c on 2026-11-28), then 20 the Filo directory and 18b project notes and packages. 36
+merged the former 9a, 9b and 9c, built 2026-11-28), then 20 the Filo directory and 18b project notes and packages. 36
 comes after tags so that its completion covers tag names from the start (reordered 2026-11-20).
 Tags come before sync because the journal must start from the decisions that already exist in any case ("seeding": a
 directory can be tagged before it is marked synced, a device can join late), so tags made earlier cost the journal
@@ -58,7 +58,7 @@ Next, agreed 2026-11-27 (friction week, on the `improvements` branch, after the 
 exports, all built that day, and 44 the tag index's find page, built the same evening; 36 bash completion built on
 2026-11-28): the list below.
 
-1. 9 sharing decisions between devices (designed 2026-11-28)
+1. 9 sharing decisions between devices (built 2026-11-28, on branch `sync` until merged)
 2. 20 the Filo directory, 18b project notes and packages
 3. 5a progress line, 5b `--needing-retention`
 4. 13 removing empty directories
@@ -114,10 +114,6 @@ in a backup" date. It may only ever add warnings to `filo delete` ("in no backup
 Open: reading Borg directly or through Vorta's settings, the cost of listing a large archive, the repository
 passphrase, and that Borg runs on another machine.
 
-### 9. Sharing decisions between devices (V9, C9)
-Designed with the person on 2026-11-28 (merging the former 9a, 9b and 9c); being built in slices on branch `sync`.
-Its design is in `design.md` (Sharing decisions between devices).
-
 ### 9d. Snapshots to the backup machine (V4, C3)
 Getting the register snapshots off the machine, so a lost disk does not take the register with it. A snapshot is a
 finished file that nothing opens for writing, so unlike the live database it is safe to sync, for example by a
@@ -165,7 +161,7 @@ its tag page lists its files; to settle when 18b is picked.
 
 ### 20. The Filo directory (V6, C4)
 One directory per device, chosen by the person (for example `~/Sync/Filo`), shared across devices by any sync service,
-which Filo is allowed to write into. It carries snapshots (9d) and project notes (18b). The decision journals (9) moved
+which Filo is allowed to write into. It carries snapshots (9d) and project notes (18b). The decision journals moved
 out on 2026-11-19: they live in `.filo/` of each synced directory. Filo never scans it, even inside a root. Each
 device writes only its own files there. Needs a change to the hard rule that Filo writes nothing outside its data
 directory, `--db` and `-o` files: one more place, chosen by the person.
@@ -256,7 +252,7 @@ history, events, review and export rows, and its tags. Snapshots hold copies for
 copies kept before a schema upgrade are never rotated. So a bill deleted because its seven years were up is still
 named in the register, which outlives the retention that deleted it.
 - What the history is used for: the report's "deleted by filo" counts and sizes, the "same content as a file
-  deleted on …" hint, and (9) telling another device that a missing file was deleted by Filo. None of these needs
+  deleted on …" hint, and telling another device that a missing file was deleted by Filo. None of these needs
   names or paths for long.
 - Idea: after a grace period (long enough for every device to sync the delete, for example 90 days), forget a
   deleted file entirely (its rows, paths, events, tags, review and export rows), keeping only counts and sizes for
@@ -336,7 +332,11 @@ one watch per directory and drops events when its queue fills.
 
 Smaller improvements to what exists, noted while it was built. Not prioritised.
 
-- **Sharing decisions (9):** compacting a journal (a device dropping its own lines that a later line of its own
+- **Sharing decisions (from 9):** devices on different Filo versions sharing a synced directory (raised by the
+  person, 2026-11-28): a line of a kind an older build does not know is kept but skipped, and nothing applies it
+  once that device is upgraded, while its own decisions meanwhile may overwrite what it said unseen. Replay the
+  kept lines a newer build understands, after an upgrade, in order; meanwhile report "N decisions from a newer Filo
+  not applied: upgrade", and do not write a decision over something those lines touch. Also: compacting a journal (a device dropping its own lines that a later line of its own
   replaces; every device keeps every line, so it needs its own signed "compacted to line N" line); handing a synced
   tag index to another device beyond the one command; offering a tag index at the top of a directory when it is
   marked synced (noted with 44).

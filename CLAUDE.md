@@ -26,8 +26,9 @@ set`, `filo get`); finding files (`filo find`); tags (`filo tag`, `untag`, `tags
 (`filo indexes`), whose `NAME.html` is a find page with a script (tested with Node from `go test`); the combined CSV (`filo export [DIR] -o FILE`, the one CSV for retentions and tags since the
 retention and tags exports were removed), renaming by its `name` cell and moving by its `directory` cell (never a
 hidden file; a move leaves the directories it empties); bash completion (`filo completion bash`, tested with bash
-from `go test`) (all on branch `improvements` until merged). What is next is in `docs/roadmap.md`, Priority
-(2026-11-28: item 9, sharing decisions between devices, which merged 9a, 9b and 9c; being built on branch `sync`).
+from `go test`); sharing decisions between devices through synced directories (`filo device`, `filo synced`,
+`filo devices`, `filo indexes take`; item 9, on branch `sync` until merged). What is next is in `docs/roadmap.md`,
+Priority.
 **`internal/dispose` is the only code allowed to change the user's files**: deleting them only from `filo delete`,
 renaming or moving them within their root only from `filo update` (a changed `name` or `directory` cell in the
 combined CSV, making the directories a move needs; `TestOnlyDisposeChangesUserFiles` guards it); everything else stays
