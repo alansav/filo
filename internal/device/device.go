@@ -79,7 +79,7 @@ func DecodePublic(s string) (ed25519.PublicKey, error) {
 }
 
 // Fingerprint is what a person compares to check a device's key: the first 80 bits of the SHA-256 of the public
-// key, in lower-case base32, in four groups of four ("k3j7-2mqd-8x4p-wv9a").
+// key, in lower-case base32, in four groups of four ("k3j7-2mqd-6x4p-wv5a").
 func Fingerprint(pub ed25519.PublicKey) string {
 	sum := sha256.Sum256(pub)
 	s := encoding.EncodeToString(sum[:10])
