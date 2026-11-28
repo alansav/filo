@@ -219,15 +219,22 @@ func (pb *pub) publishSettings(ctx context.Context, s *store.Store, me store.Dev
 			replaces = append(replaces, store.LineRef{Dev: d.Dev, Seq: d.Seq})
 		}
 		switch {
-		case waiting:
-			continue // another device's decision, not applied here yet
+		case waiting && !pb.seeding:
+			continue // another device's decision, not applied here yet (seeding compares with it all the same)
 		case wasSeen && sameSetting(k, seen, value):
 			continue // what this device last wrote or took in: no change of its own (a conflict's safe side too)
 		case !wasSeen && (same || (len(ds) == 0 && value == "")):
 			continue
 		}
 		if pb.seeding {
-			refs, replaces = nil, nil // held before sharing: a difference is a conflict
+			if value == "" {
+				continue // nothing held is not a decision
+			}
+			replaces = ownRefs(replaces, pb.ju.Dev) // held before sharing: against another device's, a conflict
+			refs = refs[:0]
+			for _, r := range replaces {
+				refs = append(refs, Ref{Dev: r.Dev, Seq: r.Seq})
+			}
 		}
 		raw, err := pb.w.Add(KindSetting, SettingBody{Key: k, Value: value, Replaces: refs}, now)
 		if err != nil {

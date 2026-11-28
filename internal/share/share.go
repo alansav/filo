@@ -370,54 +370,56 @@ func knownDevices(ctx context.Context, s *store.Store) (map[string]store.KnownDe
 }
 
 // Mark makes directory t (from Inspect, with neither Plan nor Moved) a new synced directory: its mark, this
-// device's journal and status file, in the register first, then on the disk.
-func Mark(ctx context.Context, s *store.Store, t Target, now time.Time) (store.SyncedDir, error) {
+// device's journal and status file, in the register first, then on the disk; then it seeds the decisions this device
+// holds about what is there. It returns the problems met seeding.
+func Mark(ctx context.Context, s *store.Store, t Target, now time.Time) (store.SyncedDir, []string, error) {
 	if t.Plan != nil || t.Moved != nil {
-		return store.SyncedDir{}, errors.New("not a directory to mark")
+		return store.SyncedDir{}, nil, errors.New("not a directory to mark")
 	}
 	me, err := s.Device(ctx)
 	if err != nil {
-		return store.SyncedDir{}, err
+		return store.SyncedDir{}, nil, err
 	}
 	id, err := device.NewID()
 	if err != nil {
-		return store.SyncedDir{}, err
+		return store.SyncedDir{}, nil, err
 	}
 	markRaw, err := journal.NewMark(me.Key, me.ID, id, now)
 	if err != nil {
-		return store.SyncedDir{}, err
+		return store.SyncedDir{}, nil, err
 	}
 	_, first, err := journal.Start(me.Key, me.ID, me.Name, now)
 	if err != nil {
-		return store.SyncedDir{}, err
+		return store.SyncedDir{}, nil, err
 	}
 	sd := store.SyncedDir{SyncID: id, RootID: t.Root.ID, RootPath: t.Root.Path, Dir: t.Rel,
 		State: store.SyncedJoined, Mark: markRaw, AddedUTC: timeText(now)}
 	known, err := knownDevices(ctx, s)
 	if err != nil {
-		return store.SyncedDir{}, err
+		return store.SyncedDir{}, nil, err
 	}
 	sd.ID, err = s.ApplySynced(ctx, store.SyncedChange{Add: &sd, Devices: []store.KnownDevice{selfFrom(known, me, now)},
 		Journals: []store.JournalUpdate{{Dev: me.ID, Lines: []store.JournalLine{{Seq: 1, Raw: first}}, Seq: 1,
 			Offset: int64(len(first) + 1)}}})
 	if err != nil {
-		return store.SyncedDir{}, err
+		return store.SyncedDir{}, nil, err
 	}
 	d, err := journal.Make(t.Abs)
 	if err != nil {
-		return sd, err
+		return sd, nil, err
 	}
 	defer d.Close()
 	if err := d.Create(journal.MarkName, [][]byte{markRaw}); err != nil {
-		return sd, err
+		return sd, nil, err
 	}
 	if err := d.Create(journal.JournalName(me.ID), [][]byte{first}); err != nil {
-		return sd, err
+		return sd, nil, err
 	}
-	if _, err := Seed(ctx, s, sd, now); err != nil {
-		return sd, err
+	problems, err := Seed(ctx, s, sd, now)
+	if err != nil {
+		return sd, problems, err
 	}
-	return sd, writeStatus(ctx, s, d, sd.ID, me, now)
+	return sd, problems, writeStatus(ctx, s, d, sd.ID, me, now)
 }
 
 // Join joins the marked directory t (from Inspect, with a Plan): every device whose journal is there is trusted
@@ -504,7 +506,11 @@ func Join(ctx context.Context, s *store.Store, t Target, now time.Time) (store.S
 		}
 	}
 	// Seeding comes before applying: what this device decided before it joined is written while it still holds
-	// it, and where it differs from what is in effect it is a conflict (the safe side then applies), not lost.
+	// it, and where it differs from what is in effect it is a conflict (the safe side then applies), not lost. The
+	// other devices' files are matched first, so a file seeded goes by the shared ID they gave it.
+	if err := matchAll(ctx, s, sd); err != nil {
+		return sd, notes, err
+	}
 	if retired[me.ID] == 0 {
 		problems, err := Seed(ctx, s, sd, now)
 		if err != nil {
@@ -713,4 +719,24 @@ func ownBytes(lines []store.JournalLine) []byte {
 func dirExists(abs string) bool {
 	fi, err := os.Stat(abs)
 	return err == nil && fi.IsDir()
+}
+
+// matchAll matches the files the other devices' decisions in sd are about to the files here (by shared ID, or the
+// first time by content and path), without applying anything: so seeding gives a file the shared ID it has already.
+func matchAll(ctx context.Context, s *store.Store, sd store.SyncedDir) error {
+	un, err := s.Unapplied(ctx, sd.ID)
+	if err != nil {
+		return err
+	}
+	done := map[string]bool{}
+	for _, d := range un {
+		if d.FID == store.SettingsFID || done[d.FID] || strings.HasPrefix(d.Key, "fact:") {
+			continue
+		}
+		done[d.FID] = true
+		if _, _, err := matchShared(ctx, s, sd, d.FID, d); err != nil {
+			return err
+		}
+	}
+	return nil
 }

@@ -68,8 +68,8 @@ func (n *node) mark() store.SyncedDir {
 	if err != nil {
 		n.t.Fatal(err)
 	}
-	sd, err := Mark(context.Background(), n.s, tg, t0)
-	if err != nil {
+	sd, problems, err := Mark(context.Background(), n.s, tg, t0)
+	if err != nil || len(problems) > 0 {
 		n.t.Fatal(err)
 	}
 	return sd

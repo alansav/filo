@@ -14,45 +14,45 @@ import (
 // TakeOwn takes in the lines this device's journal in sd holds past what the register does: the register was
 // restored from a snapshot or a backup, and those are decisions this device made after it (docs/design.md, Identity
 // cases). They are kept, and applied here like another device's, so the register catches up. It returns how many
-// lines it took in.
-func TakeOwn(ctx context.Context, s *store.Store, sd store.SyncedDir, now time.Time) (int, error) {
+// lines it took in, and the problems met (a line not applied).
+func TakeOwn(ctx context.Context, s *store.Store, sd store.SyncedDir, now time.Time) (int, []string, error) {
 	me, err := s.Device(ctx)
 	if err != nil {
-		return 0, err
+		return 0, nil, err
 	}
 	d, err := journal.Open(sd.Abs())
 	if err != nil {
-		return 0, err
+		return 0, nil, err
 	}
 	defer d.Close()
 	data, err := d.Read(journal.JournalName(me.ID), 0)
 	if err != nil {
-		return 0, err
+		return 0, nil, err
 	}
 	res := journal.Check(data, me.ID)
 	if len(res.Lines) == 0 || !res.Key.Equal(me.Public()) {
-		return 0, errors.New("this device's journal there is not signed with its key")
+		return 0, nil, errors.New("this device's journal there is not signed with its key")
 	}
 	kept, err := s.JournalLines(ctx, sd.ID, me.ID)
 	if err != nil {
-		return 0, err
+		return 0, nil, err
 	}
 	if len(res.Lines) <= len(kept) {
-		return 0, nil
+		return 0, nil, nil
 	}
 	for i, k := range kept {
 		if !bytes.Equal(res.Lines[i].Raw, k.Raw) {
-			return 0, fmt.Errorf("line %d of this device's journal is not the register's: two machines write as "+
+			return 0, nil, fmt.Errorf("line %d of this device's journal is not the register's: two machines write as "+
 				"this device (filo device new gives this one a new ID)", k.Seq)
 		}
 	}
 	known, err := knownDevices(ctx, s)
 	if err != nil {
-		return 0, err
+		return 0, nil, err
 	}
 	states, err := s.Journals(ctx, sd.ID)
 	if err != nil {
-		return 0, err
+		return 0, nil, err
 	}
 	state := map[string]store.JournalState{}
 	for _, j := range states {
@@ -77,22 +77,22 @@ func TakeOwn(ctx context.Context, s *store.Store, sd store.SyncedDir, now time.T
 		}
 	}
 	name := func(dev string) string { return nameOf(devs, dev) }
-	fileDecisions(r.lines, sd.ID, name, &ch) // this device's own, not applied here yet: applied below
-	if _, err := settingDecisions(ctx, s, r.lines, name, &ch, now, true); err != nil {
-		return 0, err
+	problems := fileDecisions(r.lines, sd.ID, name, &ch) // this device's own, not applied here yet: applied below
+	ps, err := settingDecisions(ctx, s, r.lines, name, &ch, now, true)
+	if err != nil {
+		return 0, problems, err
 	}
+	problems = append(problems, ps...)
 	for dev, kd := range devs {
 		if old, ok := known[dev]; !ok || old != kd {
 			ch.Devices = append(ch.Devices, kd)
 		}
 	}
 	if _, err := s.ApplySynced(ctx, ch); err != nil {
-		return 0, err
+		return 0, problems, err
 	}
-	if _, _, err := applyDecisions(ctx, s, sd, now); err != nil {
-		return 0, err
-	}
-	return len(r.lines), nil
+	_, ps, err = applyDecisions(ctx, s, sd, now)
+	return len(r.lines), append(problems, ps...), err
 }
 
 // Restore writes back the journal of device kd (not this one) in each synced directory in where it is missing, or

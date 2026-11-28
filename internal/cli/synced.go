@@ -247,9 +247,12 @@ func (e *env) syncedAdd(ctx context.Context, s *store.Store, abs string, yes boo
 	case t.Plan != nil:
 		return e.syncedJoin(ctx, s, t, yes)
 	}
-	sd, err := share.Mark(ctx, s, t, now())
+	sd, problems, err := share.Mark(ctx, s, t, now())
 	if err != nil {
 		return err
+	}
+	for _, p := range problems {
+		e.errorLine("warning: " + p)
 	}
 	r.Heading("Synced directory marked", view.Where{}, r.Tilde(sd.Abs()))
 	r.Count(view.Neutral, "its decisions are shared through "+r.Tilde(filepath.Join(sd.Abs(), journal.FiloDir))+
@@ -815,9 +818,12 @@ func (e *env) askAhead(ctx context.Context, s *store.Store, rep share.Report) (s
 		}
 		switch choice {
 		case "r":
-			n, err := share.TakeOwn(ctx, s, dr.Dir, now())
+			n, problems, err := share.TakeOwn(ctx, s, dr.Dir, now())
 			if err != nil {
 				return rep, err
+			}
+			for _, p := range problems {
+				r.Count(view.Attention, p)
 			}
 			r.Count(view.Done, report.Plural(int64(n), "line", "lines")+" of this device's taken in")
 		case "c":

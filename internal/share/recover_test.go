@@ -61,8 +61,8 @@ func TestRestoredRegisterTakesItsOwnLinesIn(t *testing.T) {
 	if !dr.Ahead || dr.Writing {
 		t.Fatalf("a restored register's journal is not found ahead: %+v", dr)
 	}
-	n, err := TakeOwn(ctx, a.s, dr.Dir, t0.Add(time.Minute))
-	if err != nil || n != 1 {
+	n, problems, err := TakeOwn(ctx, a.s, dr.Dir, t0.Add(time.Minute))
+	if err != nil || n != 1 || len(problems) != 0 {
 		t.Fatalf("TakeOwn = %d, %v", n, err)
 	}
 	if got := a.tags("x.pdf"); len(got) != 1 {
@@ -119,5 +119,31 @@ func TestRestoreWritesBackALostJournal(t *testing.T) {
 	}
 	if _, err := Restore(ctx, b.s, store.KnownDevice{Dev: b.dev().ID}, in); err == nil {
 		t.Fatal("restoring this device's own journal")
+	}
+}
+
+// A decision made while this device's journal is ahead (blocked) is written once that is settled.
+func TestDecisionMadeWhileBlockedIsWrittenLater(t *testing.T) {
+	ctx := context.Background()
+	a, _ := pair(t, map[string]string{"x.pdf": "x"})
+	kept := mustLines(t, a, a.dev().ID)
+	appendLine(t, a, kept, KindName, NameBody{Name: "laptop"}) // a line the register does not have: ahead
+	if dr := a.imp(t0); !dr.Ahead {
+		t.Fatal("not ahead")
+	}
+	if _, err := a.s.SetFiles(ctx, []int64{a.file("x.pdf")}, store.SetValues{Retention: "forever", SetRetention: true},
+		t0, "2026-11-28", store.SetOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if problems, err := Publish(ctx, a.s, t0); err != nil || len(problems) == 0 {
+		t.Fatalf("publishing while blocked: %v, %q", err, problems)
+	}
+	if _, _, err := TakeOwn(ctx, a.s, mustDir(t, a), t0); err != nil {
+		t.Fatal(err)
+	}
+	before := a.lines(a.dev().ID)
+	a.publish(t0.Add(time.Minute))
+	if a.lines(a.dev().ID) == before {
+		t.Fatal("the decision made while blocked was never written")
 	}
 }

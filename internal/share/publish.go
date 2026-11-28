@@ -87,6 +87,7 @@ func Publish(ctx context.Context, s *store.Store, now time.Time) ([]string, erro
 				failed = true
 			} else if problem != "" {
 				problems = append(problems, sd.Abs()+": "+problem)
+				failed = true // its journal ahead or forked: written once that is settled
 			}
 			pubs[sd.ID] = pb // nil: this device does not write there
 			if pb != nil {
@@ -136,6 +137,7 @@ func Publish(ctx context.Context, s *store.Store, now time.Time) ([]string, erro
 			failed = true
 		} else if problem != "" {
 			problems = append(problems, sd.Abs()+": "+problem)
+			failed = true
 		}
 		pubs[sd.ID] = pb
 		if pb != nil {
@@ -306,7 +308,10 @@ func (pb *pub) decide(ctx context.Context, s *store.Store, fileID int64, p store
 			return nil // already in effect here; or nothing decided, and nothing to say
 		}
 		if pb.seeding {
-			replaces = nil
+			if value == "" {
+				return nil // seeding writes what this device decided; nothing decided is not a decision
+			}
+			replaces = ownRefs(replaces, pb.ju.Dev) // another device's: a conflict; this one's own: replaced
 		}
 	}
 	refs := make([]Ref, len(replaces))
@@ -329,6 +334,17 @@ func (pb *pub) decide(ctx context.Context, s *store.Store, fileID int64, p store
 		delete(pb.fresh, fid)
 	}
 	return nil
+}
+
+// ownRefs keeps of refs those of device me.
+func ownRefs(refs []store.LineRef, me string) []store.LineRef {
+	var out []store.LineRef
+	for _, r := range refs {
+		if r.Dev == me {
+			out = append(out, r)
+		}
+	}
+	return out
 }
 
 // addLine adds a line just made to what pb writes.

@@ -81,3 +81,43 @@ func mustParse(t *testing.T, raw []byte) journal.Line {
 	}
 	return l
 }
+
+// Joining with no decision about a file another device decided does not erase that device's decision.
+func TestSeedingNothingDecidedErasesNothing(t *testing.T) {
+	ctx := context.Background()
+	a, b := newNode(t, "laptop"), newNode(t, "desktop")
+	for _, n := range []*node{a, b} {
+		n.write("x.pdf", "x")
+		n.scan()
+	}
+	if _, err := a.s.SetFiles(ctx, []int64{a.file("x.pdf")}, store.SetValues{Retention: "forever", SetRetention: true},
+		t0, "2026-11-28", store.SetOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	a.mark()
+	syncFilo(t, a, b)
+	b.join()
+	if v := b.values("x.pdf"); v.Retention != "forever" {
+		t.Fatalf("b's file after joining: %+v", v)
+	}
+	if dr := b.imp(t0); dr.Conflicts != 0 {
+		t.Fatalf("a conflict from b's nothing: %d", dr.Conflicts)
+	}
+}
+
+// A policy this device had before joining, otherwise than the other devices, is a conflict, not lost.
+func TestSeedingAPolicyThatDiffers(t *testing.T) {
+	ctx := context.Background()
+	a, b := newNode(t, "laptop"), newNode(t, "desktop")
+	a.s.AddPolicy(ctx, "bills", "7y", t0)
+	b.s.AddPolicy(ctx, "bills", "10y", t0)
+	a.mark()
+	syncFilo(t, a, b)
+	b.join()
+	if p, _ := b.policy("bills"); p.Value != "10y" {
+		t.Fatalf("b's policy after joining: %+v (the longer of a conflict)", p)
+	}
+	if dr := b.imp(t0); dr.Conflicts != 1 {
+		t.Fatalf("conflicts on b: %d, want the policy's", dr.Conflicts)
+	}
+}
