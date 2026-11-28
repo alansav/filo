@@ -2131,7 +2131,10 @@ the desktop, kept its retention on the laptop's next scan, because the move was 
     sets of records inside; excluded directories inside, and one above it as "the whole synced directory is
     excluded".
   - A tag index inside the synced directory: shared, and written by one device only (the one that added it, until
-    handed over), so two devices never rewrite the same pages.
+    another takes it with `filo indexes take`), so two devices never rewrite the same pages. On the others it is
+    listed as written by that device, `refresh` refuses it and `remove` only forgets it; pages the taking device did
+    not write are left alone and reported, as for any index. Two devices that each added it: neither writes it until
+    one takes it.
   - Facts, which never conflict: **identity** (the first decision about a file gives it a shared file ID, made from
     the synced directory's ID, the file's content and its path, so two devices deciding about the same file before
     either has read the other give it the same ID; a random one if that ID is another file's already;

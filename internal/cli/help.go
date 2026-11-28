@@ -60,6 +60,7 @@ var overview = struct {
 		{Name: "indexes add [DIR] [--name NAME]", Text: "write a directory's tag index, kept up to date from then on"},
 		{Name: "indexes remove [DIR] [--name NAME]", Text: "stop keeping an index, and remove its pages"},
 		{Name: "indexes refresh [DIR] [--name NAME]", Text: "write an index's pages again"},
+		{Name: "indexes take [DIR] [--name NAME] [-y]", Text: "write a synced directory's index from this device"},
 		{Name: "device", Text: "this device's name, ID and key fingerprint, for sharing decisions between devices"},
 		{Name: "device name NAME", Text: "rename this device"},
 		{Name: "device new [-y]", Text: "give a register copied from another machine a new device ID and key"},
@@ -335,7 +336,8 @@ var commandHelps = map[string]commandHelp{
 	},
 	"indexes": {
 		usage: []string{"filo indexes", "filo indexes add [DIR] [--name NAME]",
-			"filo indexes remove [DIR] [--name NAME] [-y]", "filo indexes refresh [DIR] [--name NAME]"},
+			"filo indexes remove [DIR] [--name NAME] [-y]", "filo indexes refresh [DIR] [--name NAME]",
+			"filo indexes take [DIR] [--name NAME] [-y]"},
 		before: []string{
 			"A tag index is a set of HTML pages that list the files under a directory, at any depth, by tag. " +
 				"NAME.html is the find page: pick several tags (two values of one key match either, different " +
@@ -355,11 +357,15 @@ var commandHelps = map[string]commandHelp{
 				"directory holding it; remove then exits 1. An index on a drive that cannot be reached (not " +
 				"mounted, lost) cannot have its files removed: remove says so and asks whether to remove the " +
 				"index anyway; its files, should they come back, are then registered by the next scan.",
+			"An index in a synced directory is written by one device only, so two never rewrite each other's " +
+				"pages: the one that added it, until take makes this one write it (after asking; pages it did not " +
+				"write are left alone and reported). On the others it is listed as written by that device, refresh " +
+				"refuses it, and remove only forgets it.",
 		},
 		flags: []view.Term{
 			{Name: "--name NAME", Text: "add: the pages' name (letters, digits, - and _); remove and refresh: " +
 				"which index of DIR, when it has several"},
-			{Name: "-y", Text: "remove: remove without asking"},
+			{Name: "-y", Text: "remove, take: without asking"},
 		},
 	},
 	"device": {

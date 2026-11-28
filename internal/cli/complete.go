@@ -424,7 +424,7 @@ func argSource(cmd, sub, name string) srcKind {
 		return srcRoots
 	case "update  FILE", "delete  FILE":
 		return srcCSVPaths
-	case "indexes remove DIR", "indexes refresh DIR":
+	case "indexes remove DIR", "indexes refresh DIR", "indexes take DIR":
 		return srcIndexDirs
 	case "rules set DIR", "rules remove DIR", "rules move OLD", "rules copy OLD":
 		return srcRuleDirs

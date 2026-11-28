@@ -22,7 +22,7 @@ import (
 // one and removes its files (asking first), refresh writes the pages again.
 
 const indexesUsage = "filo indexes | add [DIR] [--name NAME] | remove [DIR] [--name NAME] [-y] | " +
-	"refresh [DIR] [--name NAME]"
+	"refresh [DIR] [--name NAME] | take [DIR] [--name NAME] [-y]"
 
 // defaultIndexName is the name of an index given none: index.html and .index/.
 const defaultIndexName = "index"
@@ -37,7 +37,7 @@ func (e *env) indexes(ctx context.Context, dbBefore string, args []string) error
 	if err != nil {
 		return err
 	}
-	want := map[string]int{"": 0, "add": 1, "remove": 1, "refresh": 1}
+	want := map[string]int{"": 0, "add": 1, "remove": 1, "refresh": 1, "take": 1}
 	if _, known := want[sub]; !known {
 		return usageError{fmt.Sprintf("unknown indexes command %q; see filo help indexes", sub)}
 	}
@@ -46,8 +46,8 @@ func (e *env) indexes(ctx context.Context, dbBefore string, args []string) error
 		return usageError{"wrong number of arguments: " + indexesUsage}
 	case sub == "" && *name != "":
 		return usageError{"--name is for indexes add, remove and refresh"}
-	case *yes && sub != "remove":
-		return usageError{"-y is for indexes remove"}
+	case *yes && sub != "remove" && sub != "take":
+		return usageError{"-y is for indexes remove and indexes take"}
 	}
 	if len(pos) > 0 {
 		if err := checkTilde("DIR", pos[0]); err != nil {
@@ -75,6 +75,8 @@ func (e *env) indexes(ctx context.Context, dbBefore string, args []string) error
 		return e.indexRemove(ctx, s, arg, *name, *yes)
 	case "refresh":
 		return e.indexRefresh(ctx, s, pos, *name)
+	case "take":
+		return e.indexTake(ctx, s, arg, *name, *yes)
 	}
 	return e.indexList(ctx, s)
 }
@@ -194,6 +196,9 @@ func (e *env) indexList(ctx context.Context, s *store.Store) error {
 		if ix.WrittenUTC != "" {
 			written = "written " + report.Time(ix.WrittenUTC)
 		}
+		if ix.Writer != "" {
+			written = "written by " + deviceName(ctx, s, ix.Writer)
+		}
 		problem := ix.Problem
 		tagCount := ""
 		// An index whose data cannot be built (two tags with one page) is listed all the same, with why: this is the
@@ -280,6 +285,15 @@ func (e *env) indexRemove(ctx context.Context, s *store.Store, arg, name string,
 	ix, err := findIndex(ctx, s, arg, name, true)
 	if err != nil {
 		return err
+	}
+	if ix.Writer != "" {
+		// Another device writes its pages: this one only forgets it, and touches none of them.
+		if err := s.RemoveTagIndex(ctx, ix.ID); err != nil {
+			return err
+		}
+		e.view.Heading("Index forgotten", view.Where{Roots: []string{ix.RootPath}}, ix.Rel(ix.Page()))
+		e.view.Count(view.Neutral, "its pages are written by "+deviceName(ctx, s, ix.Writer)+": left as they are")
+		return nil
 	}
 	if done, err := e.indexRemoveAway(ctx, s, ix, yes); done || err != nil {
 		return err
@@ -425,6 +439,10 @@ func (e *env) indexRefresh(ctx context.Context, s *store.Store, pos []string, na
 		if err != nil {
 			return err
 		}
+		if ix.Writer != "" {
+			return fmt.Errorf("%s is written by %s, not this device (filo indexes take makes this device write it)",
+				e.indexPath(ix.RootPath, ix.Rel(ix.Page())), deviceName(ctx, s, ix.Writer))
+		}
 		o, err := tagindex.Update(ctx, s, ix, true, now())
 		if err != nil {
 			return err
@@ -495,4 +513,62 @@ func (e *env) refreshIndexes(ctx context.Context, s *store.Store) {
 			e.indexFailed = true
 		}
 	}
+}
+
+// indexTake makes this device the one that writes an index in a synced directory, after asking: the other devices
+// stop writing it once they read this device's journal.
+func (e *env) indexTake(ctx context.Context, s *store.Store, arg, name string, yes bool) error {
+	ix, err := findIndex(ctx, s, arg, name, false)
+	if err != nil {
+		return err
+	}
+	r := e.view
+	if ix.Writer == "" {
+		r.Heading("Index unchanged", view.Where{Roots: []string{ix.RootPath}}, ix.Rel(ix.Page()),
+			"this device writes it already")
+		return nil
+	}
+	r.Heading("Take index", view.Where{Roots: []string{ix.RootPath}}, ix.Rel(ix.Page()))
+	r.Count(view.Neutral, "written by "+deviceName(ctx, s, ix.Writer)+" until now; from now on by this device")
+	r.Count(view.Neutral, "pages this device did not write are left alone and reported: move them aside, then "+
+		"filo indexes refresh")
+	if err := e.outputErr(); err != nil {
+		return err
+	}
+	ok, err := e.confirmChange(ctx, "Write this index from this device?", yes, nil)
+	if err != nil || !ok {
+		return err
+	}
+	if err := s.SetIndexWriter(ctx, ix.ID, ""); err != nil {
+		return err
+	}
+	ix.Writer = ""
+	o, err := tagindex.Update(ctx, s, ix, true, now())
+	if err != nil {
+		return err
+	}
+	if !yes {
+		r.Blank()
+	}
+	r.Outcome("Taken", ix.Rel(ix.Page()))
+	if o.Failed() {
+		e.indexProblems(o.Result.Problems, ix)
+		return errReported
+	}
+	return nil
+}
+
+// deviceName is a device's name as this register knows it, or its ID; "-" (no device, in a conflict) says so.
+func deviceName(ctx context.Context, s *store.Store, dev string) string {
+	if dev == "-" {
+		return "no device (two took it: filo indexes take on one)"
+	}
+	if devs, err := s.KnownDevices(ctx); err == nil {
+		for _, d := range devs {
+			if d.Dev == dev {
+				return d.Name
+			}
+		}
+	}
+	return dev
 }

@@ -65,6 +65,9 @@ func UpdateAll(ctx context.Context, s *store.Store, force bool, now time.Time) (
 	}
 	var out []Outcome
 	for _, ix := range all {
+		if ix.Writer != "" {
+			continue // another device writes its pages (docs/design.md, Sharing decisions between devices)
+		}
 		o, err := Update(ctx, s, ix, force, now)
 		if err != nil {
 			return out, err

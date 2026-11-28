@@ -191,3 +191,30 @@ func TestDecisionsAreSharedThroughTheCommands(t *testing.T) {
 	b.contains("b after resolving", out, "3y")
 	b.lacks("b after resolving", out, "in conflict")
 }
+
+func TestSyncedIndexIsWrittenByOneDevice(t *testing.T) {
+	a, b := syncedPair(t, map[string]string{"bills/gas.pdf": "gas"})
+	a.filo(0, "", false, "tag", a.in("Sync/bills/gas.pdf"), "type:bill")
+	a.filo(0, "", false, "indexes", "add", a.in("Sync"))
+	if !a.exists("Sync/index.html") {
+		t.Fatal("a did not write its index")
+	}
+	copyFilo(t, a, b, "Sync")
+	b.filo(0, "", false, "scan")
+	out := b.filo(0, "", false, "indexes").stdout
+	b.contains("b's indexes", out, "written by laptop")
+	b.filo(0, "", false, "tag", b.in("Sync/bills/gas.pdf"), "urgent") // a change: b's indexes are brought up to date
+	if b.exists("Sync/index.html") {
+		t.Fatal("b wrote the pages of an index another device writes")
+	}
+	b.filo(1, "", false, "indexes", "refresh", b.in("Sync"))
+	out = b.filo(0, "", false, "indexes", "take", b.in("Sync"), "-y").stdout
+	b.contains("take", out, "Taken")
+	if !b.exists("Sync/index.html") {
+		t.Fatal("b did not write the index it took")
+	}
+	// a learns that b writes it now, and stops.
+	copyFilo(t, b, a, "Sync")
+	out = a.filo(0, "", false, "indexes").stdout
+	a.contains("a's indexes after b took it", out, "written by desktop")
+}

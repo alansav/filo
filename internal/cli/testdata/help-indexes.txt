@@ -2,6 +2,7 @@ filo indexes
 filo indexes add [DIR] [--name NAME]
 filo indexes remove [DIR] [--name NAME] [-y]
 filo indexes refresh [DIR] [--name NAME]
+filo indexes take [DIR] [--name NAME] [-y]
 
   A tag index is a set of HTML pages that list the files under a directory, at
   any depth, by tag. NAME.html is the find page: pick several tags (two values
@@ -29,8 +30,14 @@ filo indexes refresh [DIR] [--name NAME]
   removed: remove says so and asks whether to remove the index anyway; its
   files, should they come back, are then registered by the next scan.
 
+  An index in a synced directory is written by one device only, so two never
+  rewrite each other's pages: the one that added it, until take makes this one
+  write it (after asking; pages it did not write are left alone and reported).
+  On the others it is listed as written by that device, refresh refuses it, and
+  remove only forgets it.
+
 Flags
   --name NAME              add: the pages' name (letters, digits, - and _);
                            remove and refresh: which index of DIR, when it has
                            several
-  -y                       remove: remove without asking
+  -y                       remove, take: without asking
