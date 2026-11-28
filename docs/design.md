@@ -2969,7 +2969,7 @@ CREATE TABLE devices (                  -- every device met in a journal: key an
     dev TEXT PRIMARY KEY, key TEXT NOT NULL, name TEXT NOT NULL, created_utc TEXT,
     trusted_utc TEXT,                   -- NULL = not trusted: its lines are not accepted
     vouched_by TEXT,                    -- the device whose trust line made it trusted; NULL = at a join
-    retired_seq INTEGER, retired_by TEXT,  -- retired: its lines after retired_seq are refused
+    retired_utc TEXT, retired_by TEXT,  -- retired by a trusted device (journals.retired_seq says where)
     snoozed_until TEXT);                -- the question whether to retire it waits until then
 
 CREATE TABLE journals (                 -- what this device has read of each journal (its own too)
@@ -2978,6 +2978,7 @@ CREATE TABLE journals (                 -- what this device has read of each jou
     byte_offset INTEGER NOT NULL DEFAULT 0,  -- just after it in the file
     problem TEXT,                       -- why reading stopped, if it did
     seen_utc TEXT, applied TEXT,        -- from its status file: last ran there; highest line applied per journal (JSON)
+    retired_seq INTEGER,                -- its device retired: its lines after this one are refused here
     PRIMARY KEY (synced_id, dev));
 
 CREATE TABLE journal_lines (            -- every line accepted, byte for byte, so a lost journal can be written back

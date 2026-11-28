@@ -90,14 +90,18 @@ func TestApplySynced(t *testing.T) {
 	if err == nil {
 		t.Fatal("a line kept with other bytes was accepted")
 	}
-	// A device updated: retired.
-	devs[1].RetiredSeq, devs[1].RetiredBy = 3, "dev2"
-	if _, err := s.ApplySynced(ctx, SyncedChange{SyncedID: id, Devices: []KnownDevice{devs[1]}}); err != nil {
+	// A device updated: retired, at its line 3 here.
+	devs[1].RetiredUTC, devs[1].RetiredBy = "t", "dev2"
+	if _, err := s.ApplySynced(ctx, SyncedChange{SyncedID: id, Devices: []KnownDevice{devs[1]},
+		Journals: []JournalUpdate{{Dev: "dev1", Seq: 3, Offset: 9, RetiredSeq: 3}}}); err != nil {
 		t.Fatal(err)
 	}
 	devs, _ = s.KnownDevices(ctx)
-	if devs[1].RetiredSeq != 3 || devs[1].RetiredBy != "dev2" {
+	if !devs[1].Retired() || devs[1].RetiredBy != "dev2" {
 		t.Errorf("after retiring: %+v", devs[1])
+	}
+	if js, _ := s.Journals(ctx, id); js[0].RetiredSeq != 3 {
+		t.Errorf("the journal's retired line = %d, want 3", js[0].RetiredSeq)
 	}
 	// Moving and leaving.
 	if err := s.MoveSynced(ctx, id, root.ID, "Files"); err != nil {

@@ -255,9 +255,10 @@ ALTER TABLE export_rows ADD COLUMN name TEXT;
 // found_marks are the marks the scans have seen that are neither joined nor ignored (sync_id NULL: a .filo with no
 // readable mark, problem says why). devices are every device met in a journal, by ID, with its key and name from its
 // line 1; trusted_utc is set when the person trusted it at a join, or a trusted device vouched for it (vouched_by);
-// retired_seq, when a trusted device retired it: its lines after that one are refused. journals is what this device
-// has read of each journal of each synced directory (its own too): up to which line, at which byte, why reading
-// stopped if it did, when its status file says it last ran there. journal_lines are those lines, byte for byte as
+// retired_utc when a trusted device retired it (retired_by). journals is what this device has read of each journal
+// of each synced directory (its own too): up to which line, at which byte, why reading stopped if it did, when its
+// status file says it last ran there, and, for a retired device, the last of its lines a retire line kept there
+// (each synced directory's journal of a device has its own numbering). journal_lines are those lines, byte for byte as
 // read (or written), so a journal lost or damaged can be written back.
 const syncedSQL = `
 CREATE TABLE synced_dirs (
@@ -286,7 +287,7 @@ CREATE TABLE devices (
     created_utc TEXT,
     trusted_utc TEXT,
     vouched_by TEXT,
-    retired_seq INTEGER,
+    retired_utc TEXT,
     retired_by TEXT,
     snoozed_until TEXT
 );
@@ -299,6 +300,7 @@ CREATE TABLE journals (
     problem TEXT,
     seen_utc TEXT,
     applied TEXT,                           -- its status file's highest line applied per journal, JSON
+    retired_seq INTEGER,                    -- the device retired: its lines after this one are refused
     PRIMARY KEY (synced_id, dev)
 );
 

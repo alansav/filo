@@ -65,13 +65,16 @@ type KnownDevice struct {
 	CreatedUTC   string
 	TrustedUTC   string // "" = not trusted
 	VouchedBy    string // the device whose trust line made it trusted; "" = trusted at a join, or not trusted
-	RetiredSeq   int64  // > 0: retired; its lines after this one are refused
+	RetiredUTC   string // "" = not retired (a journal's RetiredSeq says up to which line its lines count)
 	RetiredBy    string
 	SnoozedUntil string // the question whether to retire it is not asked again before this time
 }
 
 // Trusted reports whether its lines are accepted.
 func (d KnownDevice) Trusted() bool { return d.TrustedUTC != "" }
+
+// Retired reports whether a trusted device retired it.
+func (d KnownDevice) Retired() bool { return d.RetiredUTC != "" }
 
 // JournalState is what this register has read of one device's journal in one synced directory (its own too).
 type JournalState struct {
@@ -82,6 +85,8 @@ type JournalState struct {
 	Problem string // why reading stopped, if it did
 	SeenUTC string // when its status file says that device last ran there
 	Applied map[string]int64
+	// RetiredSeq > 0: the device was retired, and its lines after this one are refused here.
+	RetiredSeq int64
 }
 
 // JournalUpdate is what reading a journal (or writing this device's) added: the new lines, in order, and the state
@@ -92,8 +97,9 @@ type JournalUpdate struct {
 	Seq     int64
 	Offset  int64
 	Problem string
-	SeenUTC string
-	Applied map[string]int64
+	SeenUTC    string
+	Applied    map[string]int64
+	RetiredSeq int64
 }
 
 // JournalLine is one line as the register keeps it.
@@ -152,13 +158,13 @@ func (s *Store) ApplySynced(ctx context.Context, c SyncedChange) (int64, error) 
 	}
 	for _, d := range c.Devices {
 		if _, err := tx.ExecContext(ctx, `INSERT INTO devices (dev, key, name, created_utc, trusted_utc, vouched_by,
-			retired_seq, retired_by, snoozed_until) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+			retired_utc, retired_by, snoozed_until) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT (dev) DO UPDATE SET key = excluded.key, name = excluded.name,
 			created_utc = excluded.created_utc, trusted_utc = excluded.trusted_utc, vouched_by = excluded.vouched_by,
-			retired_seq = excluded.retired_seq, retired_by = excluded.retired_by,
+			retired_utc = excluded.retired_utc, retired_by = excluded.retired_by,
 			snoozed_until = excluded.snoozed_until`,
 			d.Dev, d.Key, d.Name, nullString(d.CreatedUTC), nullString(d.TrustedUTC), nullString(d.VouchedBy),
-			nullInt(d.RetiredSeq), nullString(d.RetiredBy), nullString(d.SnoozedUntil)); err != nil {
+			nullString(d.RetiredUTC), nullString(d.RetiredBy), nullString(d.SnoozedUntil)); err != nil {
 			return 0, fmt.Errorf("write device %s: %w", d.Dev, err)
 		}
 	}
@@ -184,10 +190,11 @@ func (s *Store) ApplySynced(ctx context.Context, c SyncedChange) (int64, error) 
 			return 0, err
 		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO journals (synced_id, dev, seq, byte_offset, problem, seen_utc,
-			applied) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT (synced_id, dev) DO UPDATE SET seq = excluded.seq,
-			byte_offset = excluded.byte_offset, problem = excluded.problem, seen_utc = excluded.seen_utc,
-			applied = excluded.applied`, id, j.Dev, j.Seq, j.Offset, nullString(j.Problem), nullString(j.SeenUTC),
-			string(applied)); err != nil {
+			applied, retired_seq) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (synced_id, dev) DO UPDATE SET
+			seq = excluded.seq, byte_offset = excluded.byte_offset, problem = excluded.problem,
+			seen_utc = excluded.seen_utc, applied = excluded.applied, retired_seq = excluded.retired_seq`,
+			id, j.Dev, j.Seq, j.Offset, nullString(j.Problem), nullString(j.SeenUTC), string(applied),
+			nullInt(j.RetiredSeq)); err != nil {
 			return 0, err
 		}
 	}
@@ -325,7 +332,7 @@ func (s *Store) SetFoundMarks(ctx context.Context, rootID int64, scope string, m
 // KnownDevices returns every device met in a journal, by name.
 func (s *Store) KnownDevices(ctx context.Context) ([]KnownDevice, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT dev, key, name, coalesce(created_utc, ''), coalesce(trusted_utc, ''),
-		coalesce(vouched_by, ''), coalesce(retired_seq, 0), coalesce(retired_by, ''), coalesce(snoozed_until, '')
+		coalesce(vouched_by, ''), coalesce(retired_utc, ''), coalesce(retired_by, ''), coalesce(snoozed_until, '')
 		FROM devices ORDER BY name, dev`)
 	if err != nil {
 		return nil, err
@@ -334,7 +341,7 @@ func (s *Store) KnownDevices(ctx context.Context) ([]KnownDevice, error) {
 	var out []KnownDevice
 	for rows.Next() {
 		var d KnownDevice
-		if err := rows.Scan(&d.Dev, &d.Key, &d.Name, &d.CreatedUTC, &d.TrustedUTC, &d.VouchedBy, &d.RetiredSeq,
+		if err := rows.Scan(&d.Dev, &d.Key, &d.Name, &d.CreatedUTC, &d.TrustedUTC, &d.VouchedBy, &d.RetiredUTC,
 			&d.RetiredBy, &d.SnoozedUntil); err != nil {
 			return nil, err
 		}
@@ -346,7 +353,7 @@ func (s *Store) KnownDevices(ctx context.Context) ([]KnownDevice, error) {
 // Journals returns what this register has read of each journal of synced directory id, by device.
 func (s *Store) Journals(ctx context.Context, id int64) ([]JournalState, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT j.dev, j.seq, j.byte_offset, coalesce(j.problem, ''),
-		coalesce(j.seen_utc, ''), coalesce(j.applied, ''), l.raw
+		coalesce(j.seen_utc, ''), coalesce(j.applied, ''), coalesce(j.retired_seq, 0), l.raw
 		FROM journals j LEFT JOIN journal_lines l ON l.synced_id = j.synced_id AND l.dev = j.dev AND l.seq = j.seq
 		WHERE j.synced_id = ? ORDER BY j.dev`, id)
 	if err != nil {
@@ -357,7 +364,8 @@ func (s *Store) Journals(ctx context.Context, id int64) ([]JournalState, error) 
 	for rows.Next() {
 		var j JournalState
 		var applied string
-		if err := rows.Scan(&j.Dev, &j.Seq, &j.Offset, &j.Problem, &j.SeenUTC, &applied, &j.Last); err != nil {
+		if err := rows.Scan(&j.Dev, &j.Seq, &j.Offset, &j.Problem, &j.SeenUTC, &applied, &j.RetiredSeq,
+			&j.Last); err != nil {
 			return nil, err
 		}
 		if applied != "" && applied != "null" {
