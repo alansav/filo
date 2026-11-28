@@ -285,8 +285,11 @@ func (e *env) open(ctx context.Context, db string) (*store.Store, error) {
 	// what the other devices decided (docs/design.md, Sharing decisions between devices, Timing). What it finds is
 	// reported by filo synced, filo report and the scans; a failure here never stops the command.
 	if e.cmd != "device" {
-		if _, err := e.importAll(ctx, s); err != nil {
+		rep, err := e.importAll(ctx, s)
+		if err != nil {
 			e.errorLine("warning: reading the synced directories' journals: " + err.Error())
+		} else if err := e.warnNotSeen(ctx, s, rep); err != nil {
+			e.errorLine("warning: " + err.Error())
 		}
 	}
 	return s, nil
@@ -299,7 +302,7 @@ func (e *env) closeStore(s *store.Store) {
 	if e.cmd != "device" {
 		// The decisions this run made, and any an earlier run could not write, go to the journals of the synced
 		// directories holding their files (a run that decided nothing finds nothing to write, and writes nothing).
-		problems, err := share.Publish(context.Background(), s, timeNow())
+		problems, err := share.Publish(context.Background(), s, now())
 		if err != nil {
 			problems = append(problems, err.Error())
 		}

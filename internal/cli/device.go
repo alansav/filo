@@ -79,7 +79,7 @@ func (e *env) deviceName(ctx context.Context, s *store.Store, d store.Device, na
 		return err
 	}
 	r.Heading("Device renamed", view.Where{}, d.Name+" → "+name)
-	if err := share.Rename(ctx, s, timeNow()); err != nil {
+	if err := share.Rename(ctx, s, now()); err != nil {
 		return fmt.Errorf("the new name is not in every synced directory's journal yet: %w", err)
 	}
 	return nil

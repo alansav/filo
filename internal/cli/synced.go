@@ -24,9 +24,6 @@ const syncedUsage = "filo synced | add DIR [-y] | remove DIR [-y] | ignore DIR"
 
 const devicesUsage = "filo devices [DIR] | trust DEVICE [-y] | retire DEVICE [-y]"
 
-// timeNow is the time a run acts at; tests replace it.
-var timeNow = time.Now
-
 func (e *env) synced(ctx context.Context, dbBefore string, args []string) error {
 	sub, rest := rootsSub(args)
 	fl := e.flags("synced")
@@ -92,7 +89,7 @@ func syncedDirArg(arg string, onDisk bool) (string, error) {
 
 // importAll reads every joined synced directory's journals before the command goes on (docs/design.md, Timing).
 func (e *env) importAll(ctx context.Context, s *store.Store) (share.Report, error) {
-	return share.Import(ctx, s, timeNow())
+	return share.Import(ctx, s, now())
 }
 
 func (e *env) syncedList(ctx context.Context, s *store.Store) error {
@@ -250,7 +247,7 @@ func (e *env) syncedAdd(ctx context.Context, s *store.Store, abs string, yes boo
 	case t.Plan != nil:
 		return e.syncedJoin(ctx, s, t, yes)
 	}
-	sd, err := share.Mark(ctx, s, t, timeNow())
+	sd, err := share.Mark(ctx, s, t, now())
 	if err != nil {
 		return err
 	}
@@ -311,7 +308,7 @@ func (e *env) syncedJoin(ctx context.Context, s *store.Store, t share.Target, ye
 	if err != nil || !ok {
 		return err
 	}
-	sd, notes, err := share.Join(ctx, s, t, timeNow())
+	sd, notes, err := share.Join(ctx, s, t, now())
 	if err != nil {
 		return err
 	}
@@ -371,7 +368,7 @@ func (e *env) syncedRemove(ctx context.Context, s *store.Store, abs string, yes 
 }
 
 func (e *env) syncedIgnore(ctx context.Context, s *store.Store, abs string) error {
-	if err := share.Ignore(ctx, s, abs, timeNow()); err != nil {
+	if err := share.Ignore(ctx, s, abs, now()); err != nil {
 		return err
 	}
 	r := e.view
@@ -558,7 +555,7 @@ func (e *env) devicesTrust(ctx context.Context, s *store.Store, arg string, yes 
 	if err != nil || !ok {
 		return err
 	}
-	terr := share.Trust(ctx, s, kd, in, timeNow())
+	terr := share.Trust(ctx, s, kd, in, now())
 	if _, err := e.importAll(ctx, s); err != nil {
 		return err
 	}
@@ -604,7 +601,7 @@ func (e *env) devicesRetire(ctx context.Context, s *store.Store, arg string, yes
 	if err != nil || !ok {
 		return err
 	}
-	if err := share.Retire(ctx, s, kd, in, timeNow()); err != nil {
+	if err := share.Retire(ctx, s, kd, in, now()); err != nil {
 		return err
 	}
 	if !yes {
@@ -617,7 +614,7 @@ func (e *env) devicesRetire(ctx context.Context, s *store.Store, arg string, yes
 // syncedAfterScan notes the marks the scans found and reads the journals, then says in one line what needs the
 // person, if anything (filo synced has the rest). A problem here never fails the scan.
 func (e *env) syncedAfterScan(ctx context.Context, s *store.Store, sums []scannedRoot) {
-	now := timeNow()
+	now := now()
 	for _, sr := range sums {
 		root, err := s.RootAt(ctx, sr.root)
 		if err != nil {
@@ -698,3 +695,81 @@ func (e *env) syncedReport(ctx context.Context, s *store.Store) error {
 
 // decodeKey is a device's key fingerprint from its stored public key.
 func decodeKey(key string) (string, error) { return share.FingerprintOf(key) }
+
+// notSeenAfter is how long a trusted device may go unseen in its synced directories before every command warns
+// about it, and how long a "no" to retiring it lasts (docs/design.md, Sharing decisions between devices, Timing).
+const notSeenAfter = 30 * 24 * time.Hour
+
+// warnNotSeen warns about each trusted device (not this one, not retired) not seen for notSeenAfter in any synced
+// directory it shares, unless the question was put off; in a terminal it asks whether to retire it, saying what that
+// means. A no, or no terminal, puts the question off for notSeenAfter on this device; -y never answers it.
+func (e *env) warnNotSeen(ctx context.Context, s *store.Store, rep share.Report) error {
+	if len(rep.Dirs) == 0 {
+		return nil
+	}
+	me, err := s.Device(ctx)
+	if err != nil {
+		return err
+	}
+	now := now()
+	last := map[string]time.Time{} // each device's latest sign of life, in any synced directory
+	for _, dr := range rep.Dirs {
+		for _, j := range dr.Journals {
+			if j.Dev == me.ID || j.RetiredSeq > 0 {
+				continue
+			}
+			var t time.Time
+			if st, ok := dr.Status[j.Dev]; ok {
+				t, _ = time.Parse(time.RFC3339, st.Seen)
+			} else if l, err := journal.Parse(j.Last); err == nil {
+				t, _ = time.Parse(time.RFC3339, l.Time)
+			}
+			if t.After(last[j.Dev]) {
+				last[j.Dev] = t
+			} else if _, ok := last[j.Dev]; !ok {
+				last[j.Dev] = t
+			}
+		}
+	}
+	devs, err := s.KnownDevices(ctx)
+	if err != nil {
+		return err
+	}
+	for _, kd := range devs {
+		seen, ok := last[kd.Dev]
+		if !ok || !kd.Trusted() || kd.Retired() || now.Sub(seen) < notSeenAfter {
+			continue
+		}
+		if until, err := time.Parse(time.RFC3339, kd.SnoozedUntil); err == nil && now.Before(until) {
+			continue
+		}
+		e.errorLine(fmt.Sprintf("%s has not been seen in its synced directories for %s: if it is gone, filo "+
+			"devices retire %s", kd.Name, howLong(now.Sub(seen)), kd.Name))
+		retire := false
+		if e.canPrompt() {
+			r := e.view
+			r.Paragraph(0, fmt.Sprintf("Retiring %s keeps every decision it made; anything it writes from now on "+
+				"is refused, here and on every device that trusts this one. If it is still in use, it then has to "+
+				"join again as a new device.", kd.Name))
+			if retire, err = e.askOne(ctx, "Retire "+kd.Name+"?", nil); err != nil {
+				return err
+			}
+		}
+		if retire {
+			in, err := share.Where(ctx, s, kd.Dev)
+			if err != nil {
+				return err
+			}
+			if err := share.Retire(ctx, s, kd, in, now); err != nil {
+				return err
+			}
+			e.view.Next(kd.Name + " retired.")
+			continue
+		}
+		kd.SnoozedUntil = now.Add(notSeenAfter).UTC().Format(time.RFC3339)
+		if _, err := s.ApplySynced(ctx, store.SyncedChange{Devices: []store.KnownDevice{kd}}); err != nil {
+			return err
+		}
+	}
+	return nil
+}

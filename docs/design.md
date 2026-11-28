@@ -2178,7 +2178,9 @@ the desktop, kept its retention on the laptop's next scan, because the move was 
   waiting, usually a sync problem (a rule excluding the file, a stopped service). A trusted device not seen for 30
   days is warned about by every command that imports; in a terminal Filo asks whether to retire it, saying what
   that means; no, or no terminal, snoozes the question for 30 days on this device; `-y` does not answer it.
-  `filo delete` in a synced directory shows each retention's origin and when the other devices were last seen.
+  `filo delete` in a synced directory notes, against each file whose retention another device decided, which device
+  and when, and says when each other device was last seen in the synced directories the files are in (what it
+  decided since is not known here). The warning about a device not seen is on stderr, so a timer's log keeps it.
   Accepted risks: a delete made on a decision another device has changed but not yet synced; a delete on one
   device racing an edit on another (the sync service's choice).
 - **Identity cases.** After a reinstall the device is new: it joins (offered to retire devices not seen for a

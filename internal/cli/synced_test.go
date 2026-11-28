@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // copyFilo is the sync service between two test trees: every file of from's DIR/.filo copied into to's, unless what
@@ -236,4 +237,40 @@ func TestRulesAboveASyncedDirectory(t *testing.T) {
 	a.filo(0, "", false, "policies", "add", "short", "1y")
 	out = a.filo(0, "", false, "rules", "add", a.root, "*.txt", "short").stdout
 	a.contains("rules add above", out, "Rules above", "*.txt", "Left as they are")
+}
+
+func TestDeleteSaysWhereARetentionCameFromAndClosesTheFileElsewhere(t *testing.T) {
+	a, b := syncedPair(t, map[string]string{"old.pdf": "old"})
+	a.filo(0, "", false, "set", a.in("Sync/old.pdf"), "--retention", "2020-01-01")
+	copyFilo(t, a, b, "Sync")
+	b.filo(0, "", false, "scan")
+	out := b.filo(0, "", false, "delete", "-y").stdout
+	b.contains("b's delete", out, "retention from laptop", "laptop last seen there", "in ")
+	if b.exists("Sync/old.pdf") {
+		t.Fatal("b did not delete it")
+	}
+	// The sync carries the delete to a; a's scan finds it missing, and b's fact closes it as deleted by Filo.
+	copyFilo(t, b, a, "Sync")
+	if err := os.Remove(a.in("Sync/old.pdf")); err != nil {
+		t.Fatal(err)
+	}
+	a.filo(0, "", false, "scan")
+	out = a.filo(0, "", false, "show", a.in("Sync/old.pdf")).stdout
+	a.contains("a's show", out, "deleted")
+	a.lacks("a's show", out, "missing since")
+}
+
+func TestNotSeenDeviceIsWarnedAboutOnce(t *testing.T) {
+	a, _ := syncedPair(t, map[string]string{"x.pdf": "x"})
+	setNow(t, time.Now().Add(40*24*time.Hour))
+	r := a.filo(0, "n\n", true, "report")
+	a.contains("warning", r.stderr, "desktop has not been seen in its synced directories for", "filo devices retire desktop")
+	a.contains("question", r.stdout, "Retire desktop?")
+	r = a.filo(0, "", false, "report")
+	a.lacks("after no", r.stderr, "has not been seen")
+	// Thirty days on, asked again; this time retired.
+	setNow(t, time.Now().Add(80*24*time.Hour))
+	r = a.filo(0, "y\n", true, "report")
+	a.contains("retired", r.stdout, "desktop retired.")
+	a.contains("devices", a.filo(0, "", false, "devices").stdout, "retired by laptop")
 }
