@@ -375,6 +375,16 @@ Agreed with the person on 2026-11-20. Tab completes Filo's commands, flags and a
   directories with rules, then their patterns; `rules move` and `copy` OLD directories with rules, NEW any directory
   in a root; `duplicates include PATH` what `filo duplicates` lists; `policies move` policy names for both; `tags
   rename` OLD tags and `key:` in use, NEW tags in use (to merge).
+- **Speed, decided 2026-11-28.** Every Tab runs `filo __complete`, so it must feel instant (aim: under about 50 ms on
+  a large register). (1) Its own read-only open: never upgrades the schema, never creates a database, takes no lock,
+  gives up at once rather than wait (WAL lets it read beside a running scan); a register that cannot be read, or has
+  another schema version, falls back to the disk alone, never an error. (2) Paths one level at a time, as bash
+  completes file names, by a range query on the `(root_id, path)` index (not `LIKE`: names hold `%` and `_`); files
+  Filo deleted still complete, capped at the most recent hundred in that directory, since that index covers only
+  current paths and a new one would be a schema change for this alone. (3) Tags and policies read whole: small.
+  (4) No cap on matches: bash asks before showing thousands. (5) No timing test: a test that the path lookups use the
+  index (`EXPLAIN QUERY PLAN`), a benchmark on a 100,000-file register, and one timing by hand on a large throwaway
+  tree before it is called done.
 - Bash only at first (zsh can load bash completions). No framework: Cobra would be a new dependency and a rewrite of
   every command's parsing.
 
