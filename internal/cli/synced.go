@@ -195,12 +195,17 @@ func (e *env) renderFound(found []share.Found) {
 			r.Count(view.Attention, p+" holds the mark of "+r.Tilde(f.Of.Abs())+", which is gone from there: "+
 				"if it moved, filo synced add "+shellQuote(f.Abs())+" says so")
 		case share.FoundCopy:
+			if f.Problem != "" {
+				r.Count(view.Attention, p+" holds the mark of "+r.Tilde(f.Of.Abs())+": "+f.Problem)
+				continue
+			}
 			r.Count(view.Attention, p+" is a copy of "+r.Tilde(f.Of.Abs())+" (its mark): not joined")
 		case share.FoundNested:
 			r.Count(view.Attention, p+" holds a mark, inside or around "+r.Tilde(f.Of.Abs())+": a synced "+
 				"directory cannot hold another")
 		default:
-			r.Count(view.Attention, p+": "+f.Problem)
+			r.Count(view.Attention, p+": "+f.Problem+"; look inside its "+journal.FiloDir+", and remove it if it "+
+				"is not a synced directory's")
 		}
 	}
 }

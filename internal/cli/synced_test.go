@@ -118,3 +118,13 @@ func TestSyncedIgnoreAndRefusals(t *testing.T) {
 	a.filo(2, "", false, "synced", "frobnicate", "x")
 	a.filo(2, "", false, "devices", "trust")
 }
+
+func TestSyncedFoundProblemSaysWhatToDo(t *testing.T) {
+	a := newCLITest(t)
+	a.write("Old/.filo/notes.txt", "from an old tool")
+	a.write("Old/x.txt", "x")
+	a.filo(0, "", false, "roots", "add", a.root)
+	out := a.filo(0, "", false, "synced").stdout
+	a.contains("found problem", out, "no mark Filo can read", "remove it if it is not a synced directory's")
+	a.filo(1, "", false, "synced", "ignore", a.in("Old"))
+}
