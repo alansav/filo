@@ -24,7 +24,7 @@ const (
 // publishFacts adds the facts of this device's events after the events cursor to the pubs of the synced directories
 // holding their files; it returns the last event dealt with: an edit not yet seen on two scans in a row stops it
 // there (the file may still be arriving or being written), to be looked at again on a later run.
-func publishFacts(ctx context.Context, s *store.Store, after int64, dirs []store.SyncedDir,
+func publishFacts(ctx context.Context, s *store.Store, me string, after int64, dirs []store.SyncedDir,
 	at func(store.SyncedDir) *pub, now time.Time) (int64, error) {
 	evs, err := s.FileEventsSince(ctx, after)
 	if err != nil {
@@ -49,6 +49,7 @@ func publishFacts(ctx context.Context, s *store.Store, after int64, dirs []store
 				return upto, err
 			}
 			key, value := factPlace, v.Hash+" "+rel
+			skip := false
 			switch e.Kind {
 			case store.EventDeleted:
 				key, value = factDeleted, "1"
@@ -56,16 +57,16 @@ func publishFacts(ctx context.Context, s *store.Store, after int64, dirs []store
 				if seen, err := s.SeenSince(ctx, e.FileID, e.ScanID); err != nil || !seen {
 					return upto, err // seen once only: maybe still being written; looked at again later
 				}
-				if arriving, err := expected(ctx, s, sd.ID, fid, v.Hash); err != nil || arriving {
-					break // a content another device decided about: the sync bringing it, not an edit here
+				arriving, err := expected(ctx, s, sd.ID, fid, v.Hash, me)
+				if err != nil {
+					return upto, err
 				}
+				skip = arriving // a content another device decided about: the sync bringing it, not an edit here
 			}
-			pb := at(sd)
-			if pb == nil {
-				break
-			}
-			if err := pb.fact(ctx, s, fid, key, value, v.Hash, rel, now); err != nil {
-				return upto, err
+			if pb := at(sd); pb != nil && !skip {
+				if err := pb.fact(ctx, s, fid, key, value, v.Hash, rel, now); err != nil {
+					return upto, err
+				}
 			}
 			break
 		}
@@ -74,19 +75,16 @@ func publishFacts(ctx context.Context, s *store.Store, after int64, dirs []store
 	return upto, nil
 }
 
-// expected reports whether another device's current decision about fid names content hash: an expectation, so that
-// content here is the sync bringing it.
-func expected(ctx context.Context, s *store.Store, syncedID int64, fid, hash string) (bool, error) {
+// expected reports whether another device's current decision about fid names content hash (applied here or not):
+// that content here is the sync bringing it, not an edit of this device's.
+func expected(ctx context.Context, s *store.Store, syncedID int64, fid, hash, me string) (bool, error) {
 	for _, key := range []string{keyDate, keyRetention, factPlace} {
 		ds, err := s.CurrentDecisions(ctx, syncedID, fid, key)
 		if err != nil {
 			return false, err
 		}
 		for _, d := range ds {
-			if d.Hash == hash && !d.Applied {
-				return true, nil
-			}
-			if key == factPlace && strings.HasPrefix(d.Value, hash+" ") {
+			if d.Dev != me && (d.Hash == hash || (key == factPlace && strings.HasPrefix(d.Value, hash+" "))) {
 				return true, nil
 			}
 		}

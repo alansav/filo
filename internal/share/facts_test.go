@@ -67,3 +67,22 @@ func TestAnEditIsAFactOnlyOnceSettled(t *testing.T) {
 		t.Fatalf("a settled edit was not written as a fact: %d lines, had %d", b.lines(b.dev().ID), before)
 	}
 }
+
+// A content arriving by sync, which another device decided about, is not written back as an edit.
+func TestArrivingContentIsNotAnEdit(t *testing.T) {
+	a, b := pair(t, map[string]string{"x.pdf": "old"})
+	a.write("x.pdf", "new")
+	a.scan()
+	a.set("x.pdf", "2026-01-01", "7y", t0) // a's decision names the new content
+	syncFilo(t, a, b)
+	b.imp(t0)
+	before := b.lines(b.dev().ID)
+	b.write("x.pdf", "new") // the sync brings it
+	b.scan()
+	b.imp(t0.Add(time.Minute))
+	b.scan()
+	b.publish(t0.Add(2 * time.Minute))
+	if b.lines(b.dev().ID) != before {
+		t.Fatalf("b wrote an edit fact for a content arriving by sync: %d lines, had %d", b.lines(b.dev().ID), before)
+	}
+}

@@ -143,7 +143,7 @@ func Publish(ctx context.Context, s *store.Store, now time.Time) ([]string, erro
 		}
 		return pb
 	}
-	upto, err := publishFacts(ctx, s, cur.Events, dirs, pubFor, now)
+	upto, err := publishFacts(ctx, s, me.ID, cur.Events, dirs, pubFor, now)
 	if err != nil {
 		return problems, err
 	}
