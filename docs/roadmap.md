@@ -342,9 +342,14 @@ Agreed with the person on 2026-11-20. Tab completes Filo's commands, flags and a
   <(filo completion bash)` in `.bashrc` (always current, run at each shell start), or the output saved once to
   `~/.local/share/bash-completion/completions/filo`, which the `bash-completion` package loads on the first Tab
   (rewritten after an upgrade that changes commands). Filo never edits `.bashrc` itself (hard rules).
-- **Static:** commands, subcommands and flags. Commands are a `switch` in `internal/cli` and each command's flags are
-  known only inside it, so the list is written down once or the flags move into a table; a test checks that every
-  command and flag the CLI accepts is completed, so the two cannot drift apart.
+- **Static:** commands, subcommands and flags. **Decided 2026-11-28: the help is the list.** Completion reads
+  `internal/cli/help.go`: the usage lines say which flags and arguments each subcommand takes, and their placeholder
+  words what to complete (`DIR` a directory, `FILE` a file, `TAG` a tag, `NAME` after `--name` an index name). A test
+  captures the flags each command really defines (a hook where commands make their flag set) and fails if the help
+  and the real flags differ either way, so the help cannot drift either (it may find mismatches today). Usage lines
+  to tidy first: `set FILE... [flags]` gets its flags written out, `get FILE... --FIELD...` its field flags listed.
+  Not taken: one flag table every command parses from (rewrites about 20 commands' parsing for a V5 feature), and a
+  separate completion list (a third copy).
 - **Dynamic:** a hidden `filo __complete WORDS...` the script calls on Tab. Strictly read-only: no snapshot, never
   creates a database, prints nothing on failure, and honours a `--db` typed on the line. It completes file paths
   from the register merged with the disk (so missing files, and files deleted by Filo, complete; the typed word,

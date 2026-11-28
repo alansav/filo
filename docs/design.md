@@ -2472,6 +2472,10 @@ Nothing exported.
   well). Commands and flags keep two columns, a description that does not fit wrapping under its own column. The words
   stay as they are, regrouped under `Commands` and `Flags` with a usage line per command (the long report paragraph
   split into sentences). The overview ends with `Next: filo help COMMAND for a command's flags and rules`.
+  The help (`internal/cli/help.go`) is the one written list of every command's usage lines and flags: a flag added,
+  changed or removed in a command is changed in its help, in the same commit (its usage lines and its flag list, with
+  the placeholder word for a flag's value), as are the overview's lines when a command or subcommand changes.
+  Nothing checks this yet: it is kept by hand.
 - **Errors and warnings** stay on stderr, plain (no colour, symbols or `~`: they end up in logs and get copied, and a
   full path is unambiguous there), one line each, `filo: <message>` and `filo: warning: <message>`. A usage error is
   one line too, pointing at the command's own help, `filo: roots add takes exactly one DIR (see filo help roots)`;
