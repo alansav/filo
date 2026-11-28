@@ -170,22 +170,19 @@ func Rename(ctx context.Context, s *store.Store, now time.Time) error {
 	}
 	var errs []error
 	for _, sd := range dirs {
-		if sd.State != store.SyncedJoined {
-			continue
+		if sd.State != store.SyncedJoined || !dirExists(sd.Abs()) {
+			continue // not reachable now: Import reports it; the name follows in the next line written there
 		}
-		if err := AppendOwn(ctx, s, me, sd, KindName, NameBody{Name: me.Name}, now); err != nil {
+		err := AppendOwn(ctx, s, me, sd, KindName, NameBody{Name: me.Name}, now)
+		if err != nil && !errors.Is(err, ErrRetiredHere) {
 			errs = append(errs, err)
 		}
 	}
-	kd := self(me, now)
-	if list, err := s.KnownDevices(ctx); err == nil {
-		for _, d := range list {
-			if d.Dev == me.ID {
-				kd.TrustedUTC = d.TrustedUTC
-			}
-		}
+	known, err := knownDevices(ctx, s)
+	if err != nil {
+		return errors.Join(append(errs, err)...)
 	}
-	if _, err := s.ApplySynced(ctx, store.SyncedChange{Devices: []store.KnownDevice{kd}}); err != nil {
+	if _, err := s.ApplySynced(ctx, store.SyncedChange{Devices: []store.KnownDevice{selfFrom(known, me, now)}}); err != nil {
 		errs = append(errs, err)
 	}
 	return errors.Join(errs...)

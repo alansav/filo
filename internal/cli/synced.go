@@ -347,14 +347,7 @@ func (e *env) syncedRemove(ctx context.Context, s *store.Store, abs string, yes 
 }
 
 func (e *env) syncedIgnore(ctx context.Context, s *store.Store, abs string) error {
-	t, err := share.Inspect(ctx, s, abs)
-	if err != nil {
-		return err
-	}
-	if t.Plan == nil {
-		return fmt.Errorf("%s holds no mark to ignore", abs)
-	}
-	if err := share.Ignore(ctx, s, t, timeNow()); err != nil {
+	if err := share.Ignore(ctx, s, abs, timeNow()); err != nil {
 		return err
 	}
 	r := e.view

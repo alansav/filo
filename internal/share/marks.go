@@ -3,6 +3,7 @@ package share
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/alansav/filo/internal/journal"
@@ -98,7 +99,11 @@ func FoundMarks(ctx context.Context, s *store.Store) ([]Found, error) {
 			switch {
 			case m.SyncID != "" && sd.SyncID == m.SyncID:
 				f.Kind, f.Of = FoundCopy, &dirs[i]
-				if !holdsMark(sd.Abs(), sd.SyncID) {
+				there, err := markAt(ctx, s, sd)
+				switch {
+				case err != nil:
+					f.Problem = "whether it moved cannot be told: " + err.Error()
+				case !there:
 					f.Kind = FoundMoved
 				}
 			case f.Kind == FoundNew && (sd.Contains(m.RootID, m.Dir) ||
@@ -111,13 +116,32 @@ func FoundMarks(ctx context.Context, s *store.Store) ([]Found, error) {
 	return out, nil
 }
 
-// Ignore records that the person chose not to join the mark at t (from Inspect, with a Plan): it is not reported
-// again, here or wherever a copy of it turns up.
-func Ignore(ctx context.Context, s *store.Store, t Target, now time.Time) error {
-	if t.Plan == nil {
-		return errors.New("no mark to ignore there")
+// ErrNoMarkID is a .filo with no mark Filo can read the ID of: it cannot be ignored, since ignoring is by the ID.
+var ErrNoMarkID = errors.New("no mark Filo can read")
+
+// Ignore records that the person chose not to join the mark in directory abs: it is not reported again, here or
+// wherever a copy of it turns up. Only the mark's ID is read, so a mark that cannot be joined (its device's journal
+// missing, say) can be ignored too.
+func Ignore(ctx context.Context, s *store.Store, abs string, now time.Time) error {
+	root, rel, err := s.Resolve(ctx, abs)
+	if err != nil {
+		return err
 	}
-	_, err := s.ApplySynced(ctx, store.SyncedChange{Add: &store.SyncedDir{SyncID: t.Plan.SyncID, RootID: t.Root.ID,
-		Dir: t.Rel, State: store.SyncedIgnored, Mark: t.Plan.markRaw, AddedUTC: timeText(now)}})
+	id, problem := readMarkID(abs)
+	if id == "" {
+		return fmt.Errorf("%s: %w (%s): look inside %s, and remove it if it is not a synced directory's", abs,
+			ErrNoMarkID, problem, journal.FiloDir)
+	}
+	dirs, err := s.SyncedDirs(ctx)
+	if err != nil {
+		return err
+	}
+	for _, sd := range dirs {
+		if sd.SyncID == id {
+			return fmt.Errorf("%s holds the mark of %s, which this device knows (%s)", abs, sd.Abs(), sd.State)
+		}
+	}
+	_, err = s.ApplySynced(ctx, store.SyncedChange{Add: &store.SyncedDir{SyncID: id, RootID: root.ID, Dir: rel,
+		State: store.SyncedIgnored, AddedUTC: timeText(now)}})
 	return err
 }

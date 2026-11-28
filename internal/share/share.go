@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"slices"
 	"strings"
@@ -120,9 +121,20 @@ func Inspect(ctx context.Context, s *store.Store, abs string) (Target, error) {
 			return Target{}, fmt.Errorf("%s was ignored: filo synced remove %s forgets that, then it can be "+
 				"joined", t.Abs, t.Abs)
 		}
-		if sd.State == store.SyncedJoined && !holdsMark(sd.Abs(), mark.ID) {
-			t.Moved = &dirs[i]
-			return t, nil
+		if sd.State == store.SyncedJoined {
+			there, err := markAt(ctx, s, sd)
+			if err != nil {
+				return Target{}, fmt.Errorf("%s holds the mark of %s, which cannot be looked at (%v): whether it "+
+					"moved cannot be told", t.Abs, sd.Abs(), err)
+			}
+			if !there {
+				others := slices.Delete(slices.Clone(dirs), i, i+1)
+				if err := checkNesting(ctx, s, others, root.ID, rel); err != nil {
+					return Target{}, err
+				}
+				t.Moved = &dirs[i]
+				return t, nil
+			}
 		}
 		return Target{}, fmt.Errorf("%s holds the mark of %s, which is still there: a copy of it, not joined",
 			t.Abs, sd.Abs())
@@ -136,6 +148,46 @@ func Inspect(ctx context.Context, s *store.Store, abs string) (Target, error) {
 	}
 	t.Plan = p
 	return t, nil
+}
+
+// markAt reports whether synced directory sd's place holds its mark: false when the place, its .filo or the mark is
+// gone, or the mark is another's; an error when that cannot be told (its root's disk is not mounted, or the place
+// cannot be read), which is never taken for a move.
+func markAt(ctx context.Context, s *store.Store, sd store.SyncedDir) (bool, error) {
+	root, err := s.RootAt(ctx, sd.RootPath)
+	if err != nil {
+		return false, err
+	}
+	if err := store.CheckRoot(root); err != nil {
+		return false, err
+	}
+	abs := sd.Abs()
+	if _, err := os.Lstat(abs); errors.Is(err, fs.ErrNotExist) {
+		return false, nil
+	} else if err != nil {
+		return false, err
+	}
+	d, err := journal.Open(abs)
+	if errors.Is(err, journal.ErrNoFiloDir) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	defer d.Close()
+	if ok, err := d.Exists(journal.MarkName); err != nil || !ok {
+		return false, err
+	}
+	raw, err := d.Read(journal.MarkName, 0)
+	if err != nil {
+		return false, err
+	}
+	l, err := journal.ReadRecord(raw, journal.KindMark)
+	if err != nil {
+		return false, nil
+	}
+	m, err := l.Mark()
+	return err == nil && m.ID == sd.SyncID, nil
 }
 
 // holdsMark reports whether the directory abs holds the mark of synced directory id.
@@ -341,7 +393,11 @@ func Mark(ctx context.Context, s *store.Store, t Target, now time.Time) (store.S
 	}
 	sd := store.SyncedDir{SyncID: id, RootID: t.Root.ID, RootPath: t.Root.Path, Dir: t.Rel,
 		State: store.SyncedJoined, Mark: markRaw, AddedUTC: timeText(now)}
-	sd.ID, err = s.ApplySynced(ctx, store.SyncedChange{Add: &sd, Devices: []store.KnownDevice{self(me, now)},
+	known, err := knownDevices(ctx, s)
+	if err != nil {
+		return store.SyncedDir{}, err
+	}
+	sd.ID, err = s.ApplySynced(ctx, store.SyncedChange{Add: &sd, Devices: []store.KnownDevice{selfFrom(known, me, now)},
 		Journals: []store.JournalUpdate{{Dev: me.ID, Lines: []store.JournalLine{{Seq: 1, Raw: first}}, Seq: 1,
 			Offset: int64(len(first) + 1)}}})
 	if err != nil {
@@ -382,19 +438,26 @@ func Join(ctx context.Context, s *store.Store, t Target, now time.Time) (store.S
 		State: store.SyncedJoined, Mark: p.markRaw, AddedUTC: timeText(now)}
 	ch := store.SyncedChange{Add: &sd}
 	devs := map[string]store.KnownDevice{}
+	var reads []*read
 	for _, pd := range p.Devices {
 		res := p.results[pd.Dev]
 		kd := known[pd.Dev]
-		kd.Dev, kd.Key, kd.Name, kd.CreatedUTC = pd.Dev, device.EncodePublic(res.Key), pd.Name, pd.Created
+		key := device.EncodePublic(res.Key)
+		if kd.Trusted() && kd.Key != key {
+			return store.SyncedDir{}, nil, fmt.Errorf("%s's journal in %s is signed with another key than the one "+
+				"this device trusts for it: not joined (another device may be using its ID)", kd.Name, t.Abs)
+		}
+		kd.Dev, kd.Key, kd.Name, kd.CreatedUTC = pd.Dev, key, pd.Name, pd.Created
 		if kd.TrustedUTC == "" {
 			kd.TrustedUTC = timeText(now)
 		}
 		devs[pd.Dev] = kd
-		ju := store.JournalUpdate{Dev: pd.Dev, Seq: res.End.Last.Seq, Offset: res.End.Offset, Problem: pd.Problem}
-		for _, l := range res.Lines {
-			ju.Lines = append(ju.Lines, store.JournalLine{Seq: l.Seq, Raw: l.Raw})
-		}
-		ch.Journals = append(ch.Journals, ju)
+		reads = append(reads, &read{dev: pd.Dev, lines: res.Lines, problem: pd.Problem})
+	}
+	devs[me.ID] = selfFrom(known, me, now)
+	retired, notes := settle(reads, map[string]store.JournalState{}, me.ID, devs, now)
+	for _, r := range reads {
+		ch.Journals = append(ch.Journals, r.update(store.JournalState{Dev: r.dev}, retired[r.dev]))
 	}
 	var first []byte
 	if _, here := p.results[me.ID]; !here {
@@ -403,18 +466,13 @@ func Join(ctx context.Context, s *store.Store, t Target, now time.Time) (store.S
 			return store.SyncedDir{}, nil, err
 		}
 		ch.Journals = append(ch.Journals, store.JournalUpdate{Dev: me.ID,
-			Lines: []store.JournalLine{{Seq: 1, Raw: first}}, Seq: 1, Offset: int64(len(first) + 1)})
+			Lines: []store.JournalLine{{Seq: 1, Raw: first}}, Seq: 1, Offset: int64(len(first) + 1),
+			RetiredSeq: retired[me.ID]})
 	}
-	devs[me.ID] = self(me, now)
-	var notes []string
-	for _, pd := range p.Devices {
-		if pd.Dev == me.ID {
-			continue
+	for dev, seq := range retired {
+		if _, ok := p.results[dev]; !ok && dev != me.ID {
+			ch.Journals = append(ch.Journals, store.JournalUpdate{Dev: dev, RetiredSeq: seq})
 		}
-		notes = append(notes, applyLines(p.results[pd.Dev].Lines, me.ID, devs, &ch, now)...)
-	}
-	for i := range ch.Journals {
-		cutRetired(&ch.Journals[i])
 	}
 	for _, kd := range devs {
 		ch.Devices = append(ch.Devices, kd)
@@ -433,49 +491,111 @@ func Join(ctx context.Context, s *store.Store, t Target, now time.Time) (store.S
 			return sd, notes, err
 		}
 	}
-	if retiredHere(ch, me.ID) {
+	if retired[me.ID] > 0 {
 		return sd, notes, nil
 	}
 	return sd, notes, writeStatus(ctx, s, d, sd.ID, me, now)
 }
 
-// cutRetired drops from ju the lines after its retirement line (a retired device's later lines are refused),
-// moving its state back to the last line kept.
-func cutRetired(ju *store.JournalUpdate) {
-	if ju.RetiredSeq == 0 || ju.Seq <= ju.RetiredSeq || len(ju.Lines) == 0 {
-		return
+// read is one trusted device's journal as read this run: the lines new to the register (from offset base), and
+// why reading stopped, if it did.
+type read struct {
+	dev     string
+	base    int64
+	lines   []journal.Line
+	problem string
+}
+
+// update is the register's change for r, from the journal's stored state st, with r's lines cut at retiredSeq (> 0:
+// the device is retired there, and its lines after that one are refused).
+func (r *read) update(st store.JournalState, retiredSeq int64) store.JournalUpdate {
+	ju := store.JournalUpdate{Dev: r.dev, Seq: st.Seq, Offset: r.base, Problem: r.problem, RetiredSeq: retiredSeq}
+	if len(r.lines) == 0 {
+		ju.Offset = st.Offset
 	}
-	off := ju.Offset
-	keep := ju.Lines[:0]
-	for _, l := range ju.Lines {
-		if l.Seq <= ju.RetiredSeq {
+	for _, l := range r.lines {
+		ju.Lines = append(ju.Lines, store.JournalLine{Seq: l.Seq, Raw: l.Raw})
+		ju.Seq, ju.Offset = l.Seq, ju.Offset+int64(len(l.Raw)+1)
+	}
+	return ju
+}
+
+// cut drops r's lines after seq (0: none dropped); it reports whether it dropped any.
+func (r *read) cut(seq int64) bool {
+	if seq == 0 {
+		return false
+	}
+	keep := r.lines[:0:0]
+	for _, l := range r.lines {
+		if l.Seq <= seq {
 			keep = append(keep, l)
-		} else {
-			off -= int64(len(l.Raw) + 1)
 		}
 	}
-	ju.Lines, ju.Offset = keep, off
-	ju.Seq = 0
-	if len(keep) > 0 {
-		ju.Seq = keep[len(keep)-1].Seq
+	dropped := len(keep) < len(r.lines)
+	r.lines = keep
+	if dropped {
+		r.problem = "" // what follows the retirement is refused, not a problem
 	}
+	return dropped
 }
 
-// retiredHere reports whether ch retires this device.
-func retiredHere(ch store.SyncedChange, me string) bool {
-	for _, j := range ch.Journals {
-		if j.Dev == me && j.RetiredSeq > 0 {
-			return true
+// settle works out the retirements among the lines read this run, whichever journal holds them: a retire line counts
+// only while its own device's lines still count there, so it starts from the retirements kept (state) and cuts and
+// looks again until nothing changes. Then it applies the name, trust and retire lines left to devs. It returns each
+// retired device's last line that counts (the kept ones and the new), and what the person should hear.
+func settle(reads []*read, state map[string]store.JournalState, me string, devs map[string]store.KnownDevice,
+	now time.Time) (map[string]int64, []string) {
+	retired := map[string]int64{}
+	by := map[string]string{}
+	for dev, st := range state {
+		if st.RetiredSeq > 0 {
+			retired[dev] = st.RetiredSeq
 		}
 	}
-	return false
+	for range len(reads) + 2 {
+		changed := false
+		for _, r := range reads {
+			r.cut(retired[r.dev])
+		}
+		for _, r := range reads {
+			for _, l := range r.lines {
+				var b RetireBody
+				if l.Kind != KindRetire || l.Body(&b) != nil || !device.ValidID(b.Device) || b.Last < 0 {
+					continue
+				}
+				if retired[b.Device] == 0 {
+					retired[b.Device], by[b.Device], changed = max(b.Last, 1), l.Dev, true
+				}
+			}
+		}
+		if !changed {
+			break
+		}
+	}
+	var notes []string
+	for _, r := range reads {
+		notes = append(notes, applyLines(r.lines, devs, now)...)
+	}
+	for dev, who := range by {
+		kd, ok := devs[dev]
+		if !ok {
+			kd = store.KnownDevice{Dev: dev, Name: dev}
+		}
+		if !kd.Retired() {
+			kd.RetiredUTC, kd.RetiredBy = timeText(now), who
+			devs[dev] = kd
+		}
+		if dev == me {
+			notes = append(notes, fmt.Sprintf("%s retired this device: it writes nothing more there; to share "+
+				"decisions again, filo device new, then join again", nameOf(devs, who)))
+		}
+	}
+	return retired, notes
 }
 
-// applyLines applies the trust, retire and name lines among lines (of a trusted device in the synced directory
-// ch is about) to devs, and to ch's journal states for a retirement; it returns what the person should hear (this
-// device retired, a vouch with another key).
-func applyLines(lines []journal.Line, me string, devs map[string]store.KnownDevice, ch *store.SyncedChange,
-	now time.Time) []string {
+// applyLines applies the name and trust lines among lines (of trusted devices, cut at any retirement) to devs; it
+// returns what the person should hear (a vouch with another key).
+func applyLines(lines []journal.Line, devs map[string]store.KnownDevice, now time.Time) []string {
 	var notes []string
 	for _, l := range lines {
 		by := l.Dev
@@ -498,7 +618,7 @@ func applyLines(lines []journal.Line, me string, devs map[string]store.KnownDevi
 			}
 			kd, ok := devs[b.Device]
 			switch {
-			case ok && kd.Key != b.Key:
+			case ok && kd.Key != "" && kd.Key != b.Key:
 				notes = append(notes, fmt.Sprintf("%s vouched for %s with another key than its journal's: not "+
 					"trusted by that", nameOf(devs, by), b.Name))
 			case ok && kd.Trusted():
@@ -506,36 +626,23 @@ func applyLines(lines []journal.Line, me string, devs map[string]store.KnownDevi
 				kd.Dev, kd.Key, kd.Name, kd.TrustedUTC, kd.VouchedBy = b.Device, b.Key, b.Name, timeText(now), by
 				devs[b.Device] = kd
 			}
-		case KindRetire:
-			var b RetireBody
-			if l.Body(&b) != nil || !device.ValidID(b.Device) || b.Last < 0 {
-				continue
-			}
-			kd, ok := devs[b.Device]
-			if !ok {
-				kd = store.KnownDevice{Dev: b.Device, Name: b.Device}
-			}
-			if !kd.Retired() {
-				kd.RetiredUTC, kd.RetiredBy = timeText(now), by
-			}
-			devs[b.Device] = kd
-			found := false
-			for i := range ch.Journals {
-				if ch.Journals[i].Dev == b.Device {
-					ch.Journals[i].RetiredSeq = max(b.Last, 1)
-					found = true
-				}
-			}
-			if !found {
-				ch.Journals = append(ch.Journals, store.JournalUpdate{Dev: b.Device, RetiredSeq: max(b.Last, 1)})
-			}
-			if b.Device == me {
-				notes = append(notes, fmt.Sprintf("%s retired this device: it writes nothing more there; to "+
-					"share decisions again, filo device new, then join again", nameOf(devs, by)))
-			}
 		}
 	}
 	return notes
+}
+
+// selfFrom is this device's row in the devices table: as kept (its first trust time, a retirement), with its key
+// and name now.
+func selfFrom(known map[string]store.KnownDevice, me store.Device, now time.Time) store.KnownDevice {
+	kd, ok := known[me.ID]
+	if !ok {
+		return self(me, now)
+	}
+	kd.Key, kd.Name = device.EncodePublic(me.Public()), me.Name
+	if kd.TrustedUTC == "" {
+		kd.TrustedUTC = timeText(now)
+	}
+	return kd
 }
 
 func nameOf(devs map[string]store.KnownDevice, dev string) string {

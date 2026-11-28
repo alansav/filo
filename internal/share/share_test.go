@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alansav/filo/internal/device"
 	"github.com/alansav/filo/internal/journal"
 	"github.com/alansav/filo/internal/store"
 )
@@ -118,7 +119,8 @@ func (n *node) lines(dev string) int {
 	return len(ls)
 }
 
-// syncFilo is the sync service: every file of from's .filo/ copied into to's, over what is there.
+// syncFilo is the sync service: every file of from's .filo/ copied into to's, over what is there, unless what is
+// there is newer (the same journal with more lines).
 func syncFilo(t *testing.T, from, to *node) {
 	t.Helper()
 	src := filepath.Join(from.sync, journal.FiloDir)
@@ -134,6 +136,11 @@ func syncFilo(t *testing.T, from, to *node) {
 		b, err := os.ReadFile(filepath.Join(src, de.Name()))
 		if err != nil {
 			t.Fatal(err)
+		}
+		// A journal the destination has more of (its device wrote on there) is newer: the sync keeps it.
+		if have, err := os.ReadFile(filepath.Join(dst, de.Name())); err == nil && len(have) > len(b) &&
+			bytes.HasPrefix(have, b) {
+			continue
 		}
 		if err := os.WriteFile(filepath.Join(dst, de.Name()), b, 0o600); err != nil {
 			t.Fatal(err)
@@ -473,3 +480,192 @@ func TestImportWithNothingNewWritesNothing(t *testing.T) {
 		t.Fatal("the other device's status file was not read")
 	}
 }
+
+// trio is three devices that all trust each other in one synced directory.
+func trio(t *testing.T) (a, b, c *node) {
+	t.Helper()
+	ctx := context.Background()
+	a, b, c = newNode(t, "laptop"), newNode(t, "desktop"), newNode(t, "tablet")
+	a.mark()
+	syncFilo(t, a, b)
+	b.join()
+	syncFilo(t, b, c)
+	c.join()
+	for _, n := range []*node{a, b} {
+		syncFilo(t, c, n)
+		n.imp(t0)
+		for _, other := range []string{"desktop", "tablet"} {
+			if kd, err := FindDevice(ctx, n.s, other); err == nil && !kd.Trusted() {
+				in, _ := Where(ctx, n.s, kd.Dev)
+				if err := Trust(ctx, n.s, kd, in, t0); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+		n.imp(t0)
+	}
+	syncFilo(t, a, c)
+	syncFilo(t, b, c)
+	c.imp(t0)
+	c.imp(t0)
+	return a, b, c
+}
+
+// A retire line read while the retired device wrote nothing new keeps what was read of its journal.
+func TestRetireKeepsTheReadPosition(t *testing.T) {
+	ctx := context.Background()
+	a, b, c := trio(t)
+	c.imp(t0)
+	before := c.lines(b.dev().ID)
+	kd, _ := FindDevice(ctx, a.s, "desktop")
+	in, _ := Where(ctx, a.s, kd.Dev)
+	if err := Retire(ctx, a.s, kd, in, t0); err != nil {
+		t.Fatal(err)
+	}
+	syncFilo(t, a, c)
+	c.imp(t0)
+	js, _ := c.s.Journals(ctx, mustDir(t, c).ID)
+	for _, j := range js {
+		if j.Dev == b.dev().ID && (j.Seq == 0 || j.RetiredSeq == 0 || int(j.Seq) != before) {
+			t.Fatalf("b's journal on c after its retirement: %+v (had %d lines)", j, before)
+		}
+	}
+}
+
+// A retire line and the retired device's later lines read in one import: the later lines are refused, whichever
+// journal is listed first.
+func TestRetireInOneImportRefusesLaterLines(t *testing.T) {
+	ctx := context.Background()
+	a, b, c := trio(t)
+	kd, _ := FindDevice(ctx, a.s, "desktop")
+	in, _ := Where(ctx, a.s, kd.Dev)
+	keep := c.lines(b.dev().ID)
+	if err := Retire(ctx, a.s, kd, in, t0); err != nil {
+		t.Fatal(err)
+	}
+	// b, not yet knowing, vouches for an intruder.
+	x := newNode(t, "intruder")
+	kx := store.KnownDevice{Dev: x.dev().ID, Name: "intruder", Key: deviceKey(x)}
+	if err := AppendOwn(ctx, b.s, b.dev(), mustDir(t, b), KindTrust, TrustBody{Device: kx.Dev, Key: kx.Key,
+		Name: kx.Name}, t0); err != nil {
+		t.Fatal(err)
+	}
+	syncFilo(t, a, c)
+	syncFilo(t, b, c)
+	c.imp(t0)
+	if c.lines(b.dev().ID) != keep {
+		t.Fatalf("c kept %d of b's lines, want the %d before its retirement", c.lines(b.dev().ID), keep)
+	}
+	if c.known(x.dev().ID).Trusted() {
+		t.Fatal("a line written after the retirement made a device trusted")
+	}
+}
+
+// Joining refuses a journal signed with another key than the one trusted for its device.
+func TestJoinRefusesAnotherKey(t *testing.T) {
+	ctx := context.Background()
+	a, b := newNode(t, "laptop"), newNode(t, "desktop")
+	a.mark()
+	syncFilo(t, a, b)
+	b.join()
+	// Elsewhere, a directory holding a journal under a's ID, signed with an intruder's key.
+	x := newNode(t, "intruder")
+	other := filepath.Join(b.root, "Other")
+	os.MkdirAll(filepath.Join(other, journal.FiloDir), 0o700)
+	_, first, err := journal.Start(x.dev().Key, a.dev().ID, "laptop", t0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, _ := device.NewID()
+	mark, err := journal.NewMark(x.dev().Key, a.dev().ID, id, t0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(filepath.Join(other, journal.FiloDir, journal.MarkName), append(mark, '\n'), 0o600)
+	os.WriteFile(filepath.Join(other, journal.FiloDir, journal.JournalName(a.dev().ID)), append(first, '\n'), 0o600)
+	tg, err := Inspect(ctx, b.s, other)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := Join(ctx, b.s, tg, t0); err == nil {
+		t.Fatal("joined a directory holding a journal under a trusted device's ID with another key")
+	}
+	if k := b.known(a.dev().ID); k.Key != deviceKey(a) {
+		t.Fatal("a's trusted key was replaced")
+	}
+}
+
+// A synced directory moved: its old place, left empty, gets no mark written back while the scan found it elsewhere.
+func TestMovedDirectoryIsNotWrittenBack(t *testing.T) {
+	ctx := context.Background()
+	a := newNode(t, "laptop")
+	a.mark()
+	moved := filepath.Join(a.root, "Files")
+	if err := os.Rename(a.sync, moved); err != nil {
+		t.Fatal(err)
+	}
+	os.Mkdir(a.sync, 0o755) // the sync service left the old directory, empty
+	root, _ := a.s.RootAt(ctx, a.root)
+	NoteMarks(ctx, a.s, root, "", []string{"Files"}, t0)
+	dr := a.imp(t0)
+	if len(dr.Problems) != 1 || !strings.Contains(dr.Problems[0], "was found at") {
+		t.Fatalf("import of a moved directory: %+v", dr)
+	}
+	if _, err := os.Stat(filepath.Join(a.sync, journal.FiloDir)); err == nil {
+		t.Fatal("the old place got a .filo")
+	}
+	found, _ := FoundMarks(ctx, a.s)
+	if len(found) != 1 || found[0].Kind != FoundMoved {
+		t.Fatalf("found = %+v", found)
+	}
+}
+
+// Renaming a device retired in one synced directory does not fail, and keeps its row.
+func TestRenameWhereRetired(t *testing.T) {
+	ctx := context.Background()
+	a, b, _ := trio(t)
+	kd, _ := FindDevice(ctx, a.s, "desktop")
+	in, _ := Where(ctx, a.s, kd.Dev)
+	Retire(ctx, a.s, kd, in, t0)
+	syncFilo(t, a, b)
+	b.imp(t0)
+	created := b.known(b.dev().ID).TrustedUTC
+	if err := b.s.SetDeviceName(ctx, "desk2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := Rename(ctx, b.s, t0.Add(time.Hour)); err != nil {
+		t.Fatalf("renaming where retired: %v", err)
+	}
+	if k := b.known(b.dev().ID); k.Name != "desk2" || k.TrustedUTC != created {
+		t.Fatalf("this device's row after renaming: %+v", k)
+	}
+}
+
+// A mark that cannot be joined (its device's journal not there) can still be ignored.
+func TestIgnoreAMarkThatCannotBeJoined(t *testing.T) {
+	ctx := context.Background()
+	a, b := newNode(t, "laptop"), newNode(t, "desktop")
+	a.mark()
+	os.MkdirAll(filepath.Join(b.sync, journal.FiloDir), 0o700)
+	data, _ := os.ReadFile(filepath.Join(a.sync, journal.FiloDir, journal.MarkName))
+	os.WriteFile(filepath.Join(b.sync, journal.FiloDir, journal.MarkName), data, 0o600)
+	if _, err := Inspect(ctx, b.s, b.sync); err == nil {
+		t.Fatal("a mark without its device's journal was offered for joining")
+	}
+	if err := Ignore(ctx, b.s, b.sync, t0); err != nil {
+		t.Fatal(err)
+	}
+	root, _ := b.s.RootAt(ctx, b.root)
+	NoteMarks(ctx, b.s, root, "", []string{"Sync"}, t0)
+	if found, _ := FoundMarks(ctx, b.s); len(found) != 0 {
+		t.Fatalf("an ignored mark is still found: %+v", found)
+	}
+}
+
+func deviceKey(n *node) string {
+	k, _ := n.s.Device(context.Background())
+	return deviceEncode(k)
+}
+
+func deviceEncode(d store.Device) string { return selfFrom(nil, d, t0).Key }
+

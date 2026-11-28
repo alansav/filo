@@ -75,10 +75,30 @@ func importDir(ctx context.Context, s *store.Store, me store.Device, sd store.Sy
 	error) {
 	dr := DirReport{Dir: sd, Status: map[string]journal.StatusBody{}}
 	abs := sd.Abs()
+	if root, err := s.RootAt(ctx, sd.RootPath); err != nil {
+		return dr, err
+	} else if err := store.CheckRoot(root); err != nil {
+		dr.Problems = append(dr.Problems, "not read: "+err.Error())
+		return dr, nil
+	}
 	if !dirExists(abs) {
 		dr.Problems = append(dr.Problems, "not found at "+abs+": moved, or not synced here yet (a scan that finds it "+
 			"elsewhere says so)")
 		return dr, nil
+	}
+	// Its mark (or all of .filo) gone from its place, while a scan found it elsewhere: it may have moved, so nothing
+	// is written here until the person says.
+	if there, err := markAt(ctx, s, sd); err != nil {
+		dr.Problems = append(dr.Problems, "not read: "+err.Error())
+		return dr, nil
+	} else if !there {
+		if elsewhere, err := foundElsewhere(ctx, s, sd); err != nil {
+			return dr, err
+		} else if elsewhere != "" {
+			dr.Problems = append(dr.Problems, "its mark is gone from here and was found at "+elsewhere+": if it "+
+				"moved, filo synced add "+elsewhere+" says so; nothing is written here meanwhile")
+			return dr, nil
+		}
 	}
 	d, err := journal.Make(abs) // a .filo lost as a whole is made again: the mark and this device's journal follow
 	if err != nil {
@@ -121,6 +141,7 @@ func importDir(ctx context.Context, s *store.Store, me store.Device, sd store.Sy
 		return dr, nil
 	}
 	ch := store.SyncedChange{SyncedID: sd.ID}
+	var reads []*read
 	devs := map[string]store.KnownDevice{}
 	for k, v := range known {
 		devs[k] = v
@@ -170,14 +191,32 @@ func importDir(ctx context.Context, s *store.Store, me store.Device, sd store.Sy
 			}
 			continue
 		}
-		ju, lines, problem := readJournal(ctx, s, d, sd.ID, e, kd, state[e.Dev])
-		if problem != "" {
+		if r, problem := readJournal(ctx, s, d, sd.ID, e, kd, state[e.Dev]); r != nil {
+			reads = append(reads, r)
+		} else if problem != "" {
 			dr.Problems = append(dr.Problems, nameOf(devs, e.Dev)+"'s journal: "+problem)
 		}
-		if ju != nil {
-			ch.Journals = append(ch.Journals, *ju)
+	}
+	// The retirements among what was read, whichever journal holds them; each journal cut at its own; then the
+	// register's change for each journal read, and for each device newly retired here, from its stored state.
+	retired, notes := settle(reads, state, me.ID, devs, now)
+	dr.Problems = append(dr.Problems, notes...)
+	updated := map[string]bool{}
+	for _, r := range reads {
+		if r.problem != "" {
+			dr.Problems = append(dr.Problems, nameOf(devs, r.dev)+"'s journal: "+r.problem)
 		}
-		dr.Problems = append(dr.Problems, applyLines(lines, me.ID, devs, &ch, now)...)
+		st := state[r.dev]
+		if len(r.lines) > 0 || r.problem != st.Problem || retired[r.dev] != st.RetiredSeq {
+			ch.Journals = append(ch.Journals, r.update(st, retired[r.dev]))
+			updated[r.dev] = true
+		}
+	}
+	for dev, seq := range retired {
+		if st := state[dev]; !updated[dev] && seq != st.RetiredSeq {
+			ch.Journals = append(ch.Journals, store.JournalUpdate{Dev: dev, Seq: st.Seq, Offset: st.Offset,
+				Problem: st.Problem, RetiredSeq: seq})
+		}
 	}
 	// A trusted device's journal kept but gone from the directory.
 	for dev, j := range state {
@@ -207,7 +246,7 @@ func importDir(ctx context.Context, s *store.Store, me store.Device, sd store.Sy
 	if _, err := s.ApplySynced(ctx, ch); err != nil {
 		return dr, err
 	}
-	if retiredHere(ch, me.ID) {
+	if retired[me.ID] > 0 {
 		dr.Writing = false
 	}
 	if dr.Writing && (len(ch.Journals) > 0 || statusDue(dr.Status[me.ID].Seen, now)) {
@@ -218,6 +257,20 @@ func importDir(ctx context.Context, s *store.Store, me store.Device, sd store.Sy
 		}
 	}
 	return dr, nil
+}
+
+// foundElsewhere returns where a scan found sd's mark other than at its place ("" if nowhere).
+func foundElsewhere(ctx context.Context, s *store.Store, sd store.SyncedDir) (string, error) {
+	found, err := s.FoundMarks(ctx)
+	if err != nil {
+		return "", err
+	}
+	for _, m := range found {
+		if m.SyncID == sd.SyncID && !(m.RootID == sd.RootID && m.Dir == sd.Dir) {
+			return m.Abs(), nil
+		}
+	}
+	return "", nil
 }
 
 // statusDue reports whether this device's status file is to be written when nothing new was read: never written,
@@ -245,94 +298,70 @@ func firstLine(d *journal.Dir, e journal.Entry) (store.KnownDevice, bool) {
 }
 
 // readJournal reads the new lines of trusted device kd's journal: from where reading stopped, or from the start if
-// the journal changed under it (then every line kept must still be there as it was). It returns the update to the
-// register (nil: nothing new), the new lines, and a problem for the person.
+// the journal changed under it (then every line kept must still be there as it was). It returns what was read (nil:
+// nothing new, and the same problem as before, which it returns), with any problem in it.
 func readJournal(ctx context.Context, s *store.Store, d *journal.Dir, syncedID int64, e journal.Entry,
-	kd store.KnownDevice, st store.JournalState) (*store.JournalUpdate, []journal.Line, string) {
+	kd store.KnownDevice, st store.JournalState) (*read, string) {
 	key, err := device.DecodePublic(kd.Key)
 	if err != nil {
-		return nil, nil, "its trusted key cannot be read"
+		return problemRead(st, e.Dev, "its trusted key cannot be read")
 	}
-	var res journal.Result
-	fromStart := true
 	if st.Seq > 0 && len(st.Last) > 0 {
-		last, err := journal.Parse(st.Last)
-		if err == nil {
-			start := st.Offset - int64(len(st.Last)) - 1
-			tail, err := d.Read(e.Name, max(start, 0))
-			if err == nil && start >= 0 {
-				r, err := journal.CheckFrom(tail, journal.Point{Offset: st.Offset, Last: last, Key: key})
-				if err == nil {
-					res, fromStart = r, false
+		if last, err := journal.Parse(st.Last); err == nil {
+			if start := st.Offset - int64(len(st.Last)) - 1; start >= 0 {
+				if tail, err := d.Read(e.Name, start); err == nil {
+					res, err := journal.CheckFrom(tail, journal.Point{Offset: st.Offset, Last: last, Key: key})
+					if err == nil {
+						return newRead(st, e.Dev, st.Offset, res.Lines, stopText(res))
+					}
 				}
 			}
 		}
 	}
-	if fromStart {
-		data, err := d.Read(e.Name, 0)
-		if err != nil {
-			return nil, nil, err.Error()
-		}
-		res = journal.Check(data, e.Dev)
-		if len(res.Lines) > 0 && !res.Key.Equal(key) {
-			return nil, nil, "it is signed with another key than the one trusted: not read"
-		}
-		kept, err := s.JournalLines(ctx, syncedID, e.Dev)
-		if err != nil {
-			return nil, nil, err.Error()
-		}
-		if len(res.Lines) < len(kept) {
-			return problemOnly(st, fmt.Sprintf("it holds %d lines, fewer than the %d read before: its device "+
-				"writes it back when it next runs", len(res.Lines), len(kept)))
-		}
-		for i, k := range kept {
-			if !bytes.Equal(res.Lines[i].Raw, k.Raw) {
-				return problemOnly(st, fmt.Sprintf("line %d is not the one read before: nothing more read", k.Seq))
-			}
-		}
-		res.Lines = res.Lines[len(kept):]
+	data, err := d.Read(e.Name, 0)
+	if err != nil {
+		return problemRead(st, e.Dev, err.Error())
 	}
-	problem := stopText(res)
-	if st.RetiredSeq > 0 {
-		cut := res.Lines[:0]
-		for _, l := range res.Lines {
-			if l.Seq <= st.RetiredSeq {
-				cut = append(cut, l)
-			}
+	res := journal.Check(data, e.Dev)
+	if len(res.Lines) > 0 && !res.Key.Equal(key) {
+		return problemRead(st, e.Dev, "it is signed with another key than the one trusted: not read")
+	}
+	kept, err := s.JournalLines(ctx, syncedID, e.Dev)
+	if err != nil {
+		return problemRead(st, e.Dev, err.Error())
+	}
+	if len(res.Lines) < len(kept) {
+		return problemRead(st, e.Dev, fmt.Sprintf("it holds %d lines, fewer than the %d read before: its device "+
+			"writes it back when it next runs", len(res.Lines), len(kept)))
+	}
+	base := int64(0)
+	for i, k := range kept {
+		if !bytes.Equal(res.Lines[i].Raw, k.Raw) {
+			return problemRead(st, e.Dev, fmt.Sprintf("line %d is not the one read before: nothing more read", k.Seq))
 		}
-		if len(cut) < len(res.Lines) {
-			problem = ""
-		}
-		res.Lines = cut
+		base += int64(len(k.Raw) + 1)
 	}
-	if len(res.Lines) == 0 && problem == st.Problem {
-		return nil, nil, problem
-	}
-	ju := &store.JournalUpdate{Dev: e.Dev, Seq: st.Seq, Offset: st.Offset, Problem: problem,
-		RetiredSeq: st.RetiredSeq}
-	off := st.Offset
-	for _, l := range res.Lines {
-		off += int64(len(l.Raw) + 1)
-		ju.Lines = append(ju.Lines, store.JournalLine{Seq: l.Seq, Raw: l.Raw})
-		ju.Seq = l.Seq
-	}
-	if !fromStart || len(res.Lines) > 0 {
-		ju.Offset = off
-	}
-	if fromStart && len(res.Lines) == 0 {
-		ju.Offset = res.End.Offset
-	}
-	return ju, res.Lines, problem
+	return newRead(st, e.Dev, base, res.Lines[len(kept):], stopText(res))
 }
 
-// problemOnly is a journal that could not be read on: only its problem is recorded.
-func problemOnly(st store.JournalState, problem string) (*store.JournalUpdate, []journal.Line, string) {
-	if problem == st.Problem {
-		return nil, nil, problem
+// newRead is what a read found: nil when it found nothing new and the problem is the one kept.
+func newRead(st store.JournalState, dev string, base int64, lines []journal.Line, problem string) (*read, string) {
+	if len(lines) == 0 && problem == st.Problem && st.RetiredSeq == 0 {
+		return nil, problem
 	}
-	return &store.JournalUpdate{Dev: st.Dev, Seq: st.Seq, Offset: st.Offset, Problem: problem,
-		RetiredSeq: st.RetiredSeq}, nil, problem
+	return &read{dev: dev, base: base, lines: lines, problem: problem}, problem
 }
+
+// problemRead is a journal that could not be read on: nothing read, only its problem.
+func problemRead(st store.JournalState, dev, problem string) (*read, string) {
+	if problem == st.Problem {
+		return nil, problem
+	}
+	return &read{dev: dev, base: st.Offset, problem: problem}, problem
+}
+
+// ErrRetiredHere is a synced directory where this device was retired: it writes nothing more there.
+var ErrRetiredHere = errors.New("this device was retired there")
 
 // ErrAhead is this device's journal holding lines its register does not: the register was restored from a
 // snapshot or a backup, or copied from another machine (docs/design.md, Identity cases).
@@ -392,6 +421,19 @@ func toLines(kept []store.JournalLine) [][]byte {
 // alone, with nothing added, if it holds lines the register does not (ErrAhead) or another line under a number.
 func AppendOwn(ctx context.Context, s *store.Store, me store.Device, sd store.SyncedDir, kind string, body any,
 	now time.Time) error {
+	js, err := s.Journals(ctx, sd.ID)
+	if err != nil {
+		return err
+	}
+	var mine store.JournalState
+	for _, j := range js {
+		if j.Dev == me.ID {
+			mine = j
+		}
+	}
+	if mine.RetiredSeq > 0 {
+		return fmt.Errorf("%s: %w", sd.Abs(), ErrRetiredHere)
+	}
 	d, err := journal.Open(sd.Abs())
 	if err != nil {
 		return err
@@ -422,19 +464,6 @@ func AppendOwn(ctx context.Context, s *store.Store, me store.Device, sd store.Sy
 		return err
 	}
 	size := int64(len(ownBytes(kept)))
-	js, err := s.Journals(ctx, sd.ID)
-	if err != nil {
-		return err
-	}
-	var mine store.JournalState
-	for _, j := range js {
-		if j.Dev == me.ID {
-			mine = j
-		}
-	}
-	if mine.RetiredSeq > 0 {
-		return fmt.Errorf("%s: this device was retired there", sd.Abs())
-	}
 	if _, err := s.ApplySynced(ctx, store.SyncedChange{SyncedID: sd.ID, Journals: []store.JournalUpdate{{
 		Dev: me.ID, Lines: []store.JournalLine{{Seq: last.Seq + 1, Raw: raw}}, Seq: last.Seq + 1,
 		Offset: size + int64(len(raw)+1), Problem: mine.Problem}}}); err != nil {
