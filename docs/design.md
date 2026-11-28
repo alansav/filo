@@ -2072,7 +2072,8 @@ on the person's phone opens the file).
   and then adds only its own colour codes; it is the only way to stdout, and stderr has one too, `errorLine` (each line
   escaped, `filo: ` before it), besides the progress line's own control codes. The one exception is `filo find -0`,
   a NUL-separated list of names for a tool, written as they are by the Renderer's raw path writer and refused when
-  stdout is a terminal (see Finding files). A test
+  stdout is a terminal (see Finding files); and the candidates of `filo __complete`, for bash, also written raw by the
+  Renderer and never to a terminal, each without a control character (see Bash completion). A test
   (`TestOutputGoesThroughTheRenderer`) fails on any other write in the CLI (see Help and errors). Trailing alignment is
   dropped from a line, but a space that ends a file name is shown as `\x20` (2026-11-16, from the code review), so
   `report ` and `report` never read the same; and a relative path that starts with `~` (a directory named `~` inside a
@@ -2121,6 +2122,58 @@ on the person's phone opens the file).
   so timer and cron logs stay clean. Ctrl-C or SIGTERM cancels a scan; nothing is written and the lock is released.
 - Scheduling is left to the system: a systemd user timer running `filo scan` is enough (the README has an example,
   not yet tested). No daemon.
+
+### Bash completion
+
+Agreed 2026-11-20, designed 2026-11-28 (roadmap 36). Tab completes Filo's commands, flags and arguments in bash.
+
+- **Loading it.** `filo completion bash` prints the script and writes nothing. The README shows two ways: `source
+  <(filo completion bash)` in `.bashrc` (always current, run at each shell start), or the output saved once to
+  `~/.local/share/bash-completion/completions/filo`, which the `bash-completion` package loads on the first Tab
+  (written again after an upgrade that changes commands). Filo never edits `.bashrc` itself (hard rules). Bash only
+  (zsh can load bash completions); no framework (Cobra would be a dependency and a rewrite of every command's
+  parsing).
+- **The script stays a few lines.** On Tab it runs a hidden `filo __complete POINT LINE WORD` with bash's
+  `COMP_POINT`, `COMP_LINE` and the word bash will replace (`$2`), reads the answer with `mapfile` (never through
+  word splitting or globbing), and sets `COMPREPLY`. Filo works out the arguments itself, quotes and backslashes
+  included, so bash's split of words at `:` and `=` never mangles `sender:Bri`, and the `bash-completion` package is
+  not needed. The answer's first line is how bash should treat it: `files` (bash quotes the candidates itself, shows
+  only their last part in a list, adds `/` after a directory and a space after a file) or `words` (Filo has quoted
+  them, `sender:British\ Gas`, or inside a quote already opened, and ends a finished word with a space; a key,
+  `sender:`, and a directory, `bills/`, end without one, so typing goes on). A candidate holding a control character
+  is left out: it cannot be typed, and would break the line protocol.
+- **The help is the list of flags.** Completion reads `internal/cli/help.go`: each usage line says which subcommand
+  takes which flags and arguments (`set FILE... [flags]` and `get FILE... --FIELD...` take their command's whole flag
+  list), and the placeholder words say what to complete. `TestHelpListsTheRealFlags` captures the flags each command
+  really defines (a hook where commands make their flag set) and fails if the help and the real flags differ either
+  way, so neither completion nor the help can drift from the code.
+- **What each argument completes.** Each placeholder word has a default source, with overrides for the subcommands
+  that act on something registered; a test checks every placeholder of every usage line has one. Defaults: `DIR`
+  directories inside the roots, from disk (and the directories on the way to a root); `FILE` of `set` and `get`, and
+  `PATH` of `show`, files from the register merged with the disk; `TAG` tags; `POLICY`, `--retention` and the `NAME`
+  of `policies set`, `move`, `remove` and `show` policy names; `-o FILE` and `--db PATH` plain file names; nothing for
+  `N`, `VALUE`, `DATE`, `rules add`'s `PATTERN`, `find --name`, `--ignore NAME` and `policies add NAME` (a new value).
+  Overrides: `roots add DIR` any directory; `roots set DIR` the roots; `update FILE` `.csv` files; `delete`
+  directories and `.csv` files; `indexes remove` and `refresh` directories with an index, and their `--name` that
+  directory's index names; `rules set` and `remove` directories with rules, then their patterns; `rules move` and
+  `copy` OLD directories with rules, NEW directories inside the roots; `duplicates include PATH` what `filo
+  duplicates` lists; `policies move` policy names for both; `tags rename` OLD tags and `key:` in use, NEW tags in use
+  (to merge); `--duplicates` always, records or counted; `help` the commands. Hidden entries are offered only once
+  the typed name starts with `.`, as bash does.
+- **Tags.** Matching ignores case, and offers the spelling in use. In two steps: a key completes to `key:`, then that
+  key's values in use; bare tags beside the keys; all from the register. `filo tag FILE... TAG...` follows the
+  command's rule (a word on disk is a file, the first that is not starts the tags): files on disk and tags while every
+  earlier word is a file, only tags after the first tag; files on disk only, since a file not on disk would be read
+  as a tag. `untag` offers only the tags the files named have, and `key:` for each of their keys.
+- **Read only, and fast.** Every Tab runs `filo __complete`, so it must feel instant (under about 50 ms on a large
+  register). It opens the register read only: never upgrades the schema, never creates a database or a directory,
+  takes no lock, waits for nothing (WAL lets it read beside a running scan), writes no snapshot; a register that
+  cannot be read, or has another schema version, gives completion from the disk alone, never an error. It prints
+  nothing on stderr and honours a `--db` typed on the line, then `FILO_DB`. Paths complete one level at a time, as
+  bash completes file names, by range queries on the `(root_id, path)` index of current paths, one per entry (not
+  `LIKE`: names hold `%` and `_`). Files not present (missing, or deleted by Filo) complete too, the most recent
+  hundred in that directory, since that index covers current paths only. Tags and policies are read whole. No cap on
+  matches: bash asks before showing thousands.
 
 ### Terminal output
 The terminal is treated as a UI: output is built from components, so files, groups, problems and prompts look the

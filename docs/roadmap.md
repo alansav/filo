@@ -337,56 +337,7 @@ named in the register, which outlives the retention that deleted it.
   records, which other devices read.
 
 ### 36. Bash completion (V5, C4)
-Agreed with the person on 2026-11-20. Tab completes Filo's commands, flags and arguments in bash.
-- **Loading it.** `filo completion bash` prints the script and writes nothing. The README shows two ways: `source
-  <(filo completion bash)` in `.bashrc` (always current, run at each shell start), or the output saved once to
-  `~/.local/share/bash-completion/completions/filo`, which the `bash-completion` package loads on the first Tab
-  (rewritten after an upgrade that changes commands). Filo never edits `.bashrc` itself (hard rules).
-- **Static:** commands, subcommands and flags. **Decided 2026-11-28: the help is the list.** Completion reads
-  `internal/cli/help.go`: the usage lines say which flags and arguments each subcommand takes, and their placeholder
-  words what to complete (`DIR` a directory, `FILE` a file, `TAG` a tag, `NAME` after `--name` an index name). A test
-  captures the flags each command really defines (a hook where commands make their flag set) and fails if the help
-  and the real flags differ either way, so the help cannot drift either (it may find mismatches today). Usage lines
-  to tidy first: `set FILE... [flags]` gets its flags written out, `get FILE... --FIELD...` its field flags listed.
-  Not taken: one flag table every command parses from (rewrites about 20 commands' parsing for a V5 feature), and a
-  separate completion list (a third copy).
-- **Dynamic:** a hidden `filo __complete WORDS...` the script calls on Tab. Strictly read-only: no snapshot, never
-  creates a database, prints nothing on failure, and honours a `--db` typed on the line. It completes file paths
-  from the register merged with the disk (so missing files, and files deleted by Filo, complete; the typed word,
-  relative or starting with `~`, is turned into a root and a path in it, as `filo show` does), policy names, rule patterns,
-  and tag names (tags are built).
-- **Tags, decided 2026-11-28.** (1) The script stays a few lines: it hands `filo __complete` the whole line and the
-  cursor position, and Filo works out the current word (colons and quotes included, so bash's split at `:` never
-  mangles `sender:Bri`) and returns only what bash should insert; no need for the `bash-completion` package.
-  (2) Filo escapes the candidates itself (`sender:British\ Gas`), or completes inside a quote already opened;
-  matching ignores case and offers the spelling in use. (3) In two steps: a key completes to `key:` with no space
-  after it, then that key's values in use; bare tags beside the keys; all from the register. (4) `filo tag
-  FILE... TAG...` follows the command's rule (a word on disk is a file, the first that is not starts the tags):
-  files and tags while every earlier word is a file, only tags after the first tag; `untag` offers only the tags the
-  files named have, and `key:` for each of their keys.
-- **What each argument completes, decided 2026-11-28.** Each placeholder word has a default source, with overrides
-  for the subcommands that act on something registered; a test checks every placeholder of every usage line has one.
-  Defaults: `DIR` directories inside the roots, from disk; `FILE` of `set`, `get`, `tag`, `untag` and `PATH` of
-  `show`, files from the register merged with the disk; `update FILE` `.csv` files; `-o FILE` and `--db PATH` plain
-  file names; `TAG` tags; `POLICY` and the `NAME` of `policies set`, `move`, `remove`, `show` policy names; nothing for
-  `N`, `VALUE`, `rules add`'s `PATTERN`, `--ignore NAME` and `policies add NAME` (a new value). Overrides: `roots add
-  DIR` any directory; `roots set DIR` the roots; `delete` directories and `.csv` files; `indexes remove` and
-  `refresh` directories with an index, and their `--name` that directory's index names; `rules set` and `remove`
-  directories with rules, then their patterns; `rules move` and `copy` OLD directories with rules, NEW any directory
-  in a root; `duplicates include PATH` what `filo duplicates` lists; `policies move` policy names for both; `tags
-  rename` OLD tags and `key:` in use, NEW tags in use (to merge).
-- **Speed, decided 2026-11-28.** Every Tab runs `filo __complete`, so it must feel instant (aim: under about 50 ms on
-  a large register). (1) Its own read-only open: never upgrades the schema, never creates a database, takes no lock,
-  gives up at once rather than wait (WAL lets it read beside a running scan); a register that cannot be read, or has
-  another schema version, falls back to the disk alone, never an error. (2) Paths one level at a time, as bash
-  completes file names, by a range query on the `(root_id, path)` index (not `LIKE`: names hold `%` and `_`); files
-  Filo deleted still complete, capped at the most recent hundred in that directory, since that index covers only
-  current paths and a new one would be a schema change for this alone. (3) Tags and policies read whole: small.
-  (4) No cap on matches: bash asks before showing thousands. (5) No timing test: a test that the path lookups use the
-  index (`EXPLAIN QUERY PLAN`), a benchmark on a 100,000-file register, and one timing by hand on a large throwaway
-  tree before it is called done.
-- Bash only at first (zsh can load bash completions). No framework: Cobra would be a new dependency and a rewrite of
-  every command's parsing.
+Being built on branch `improvements` (2026-11-28); the design is in `design.md`, Bash completion.
 
 ### 43. Restoring a register snapshot (V5, C3)
 Agreed as wanted on 2026-11-27, design not started; promoted from the deferred improvements, where it was one line.
