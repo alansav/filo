@@ -71,6 +71,7 @@ var overview = struct {
 		{Name: "devices [DIR]", Text: "list the devices sharing decisions in each synced directory"},
 		{Name: "devices trust DEVICE [-y]", Text: "trust a device met in a journal, and vouch for it"},
 		{Name: "devices retire DEVICE [-y]", Text: "retire a device that is gone: its later decisions are refused"},
+		{Name: "devices restore DEVICE [-y]", Text: "write back a lost journal of a device, from this register"},
 		{Name: "completion bash", Text: "print the script that makes Tab complete filo's commands, files and tags"},
 		{Name: "help [COMMAND]", Text: "this overview, or a command's flags and rules"},
 	},
@@ -407,7 +408,8 @@ var commandHelps = map[string]commandHelp{
 		},
 	},
 	"devices": {
-		usage: []string{"filo devices [DIR]", "filo devices trust DEVICE [-y]", "filo devices retire DEVICE [-y]"},
+		usage: []string{"filo devices [DIR]", "filo devices trust DEVICE [-y]", "filo devices retire DEVICE [-y]",
+			"filo devices restore DEVICE [-y]"},
 		before: []string{
 			"Lists the devices sharing decisions in each synced directory, or in DIR: each one's name, key " +
 				"fingerprint, whether it is trusted (and who vouched for it), when it last ran there, and whether " +
@@ -418,9 +420,13 @@ var commandHelps = map[string]commandHelp{
 			"retire is for a device that is gone (reinstalled, lost, broken): Filo cannot tell by itself. Its " +
 				"decisions so far stay, and its journal is never deleted, but anything it writes from then on is " +
 				"refused, here and on every device that trusts this one.",
+			"restore writes back a device's journal where it is lost or cut short, from the lines this register " +
+				"keeps of it (the same lines, so their signatures still check), after asking: for a device that is " +
+				"gone, whose journal nobody else would write back. A device's own journal is written back by every " +
+				"run.",
 		},
 		flags: []view.Term{
-			{Name: "-y", Text: "trust and retire: without asking"},
+			{Name: "-y", Text: "trust, retire and restore: without asking"},
 		},
 	},
 	"get": {

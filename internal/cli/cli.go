@@ -294,6 +294,8 @@ func (e *env) open(ctx context.Context, db string) (*store.Store, error) {
 			e.errorLine("warning: reading the synced directories' journals: " + err.Error())
 		} else if err := e.warnNotSeen(ctx, s, rep); err != nil {
 			e.errorLine("warning: " + err.Error())
+		} else if rep, err = e.askAhead(ctx, s, rep); err != nil {
+			e.errorLine("warning: " + err.Error())
 		}
 		e.imported = rep
 		for _, dr := range rep.Dirs {

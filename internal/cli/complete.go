@@ -409,6 +409,7 @@ const (
 	srcRulePatterns                   // the patterns of a directory's rules
 	srcNotCounted                     // what filo duplicates lists (duplicates include)
 	srcPolicies                       // policy names
+	srcDevices                        // the names of the devices met in a journal
 	srcTags                           // tags in use
 	srcTagsAndKeys                    // tags in use, and key: for each key (tags rename OLD)
 	srcDecisions                      // always, records, counted (set --duplicates)
@@ -436,8 +437,9 @@ func argSource(cmd, sub, name string) srcKind {
 		return srcNothing
 	case "duplicates include PATH":
 		return srcNotCounted
-	case "policies add NAME", "policies add VALUE", "policies set VALUE", "device name NAME", "devices trust DEVICE",
-		"devices retire DEVICE":
+	case "devices trust DEVICE", "devices retire DEVICE", "devices restore DEVICE":
+		return srcDevices
+	case "policies add NAME", "policies add VALUE", "policies set VALUE", "device name NAME":
 		return srcNothing
 	case "policies set NAME", "policies move OLD", "policies move NEW", "policies remove NAME", "policies show NAME":
 		return srcPolicies
@@ -507,6 +509,8 @@ func (c *completer) fetch(k srcKind, typed string, args []string) (string, []can
 		return wordsMode, c.rulePatterns(args)
 	case srcPolicies:
 		return wordsMode, c.policyCands()
+	case srcDevices:
+		return wordsMode, c.deviceCands()
 	case srcTags:
 		return wordsMode, c.tagCandsFor(typed, false)
 	case srcTagsAndKeys:
@@ -984,4 +988,27 @@ func pathJoin(dir, name string) string {
 		return name
 	}
 	return dir + "/" + name
+}
+
+// deviceCands are the names of the devices met in a journal, but this one's: filo devices trust, retire, restore.
+func (c *completer) deviceCands() []cand {
+	s := c.store()
+	if s == nil {
+		return nil
+	}
+	me, err := s.Device(c.ctx)
+	if err != nil {
+		return nil
+	}
+	devs, err := s.KnownDevices(c.ctx)
+	if err != nil {
+		return nil
+	}
+	var out []cand
+	for _, d := range devs {
+		if d.Dev != me.ID {
+			out = append(out, cand{text: d.Name, done: true})
+		}
+	}
+	return out
 }

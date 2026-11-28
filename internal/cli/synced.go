@@ -22,7 +22,7 @@ import (
 
 const syncedUsage = "filo synced | add DIR [-y] | remove DIR [-y] | ignore DIR"
 
-const devicesUsage = "filo devices [DIR] | trust DEVICE [-y] | retire DEVICE [-y]"
+const devicesUsage = "filo devices [DIR] | trust DEVICE [-y] | retire DEVICE [-y] | restore DEVICE [-y]"
 
 func (e *env) synced(ctx context.Context, dbBefore string, args []string) error {
 	sub, rest := rootsSub(args)
@@ -389,7 +389,7 @@ func shortTime(s string) string {
 
 func (e *env) devices(ctx context.Context, dbBefore string, args []string) error {
 	sub, rest := rootsSub(args)
-	if sub != "" && sub != "trust" && sub != "retire" {
+	if sub != "" && sub != "trust" && sub != "retire" && sub != "restore" {
 		sub, rest = "", args // filo devices DIR
 	}
 	fl := e.flags("devices")
@@ -403,7 +403,7 @@ func (e *env) devices(ctx context.Context, dbBefore string, args []string) error
 	case sub == "" && len(pos) > 1, sub != "" && len(pos) != 1:
 		return usageError{"wrong number of arguments: " + devicesUsage}
 	case *yes && sub == "":
-		return usageError{"-y is for devices trust and devices retire"}
+		return usageError{"-y is for devices trust, retire and restore"}
 	}
 	var dir string
 	if sub == "" && len(pos) == 1 {
@@ -428,6 +428,8 @@ func (e *env) devices(ctx context.Context, dbBefore string, args []string) error
 		return e.devicesTrust(ctx, s, pos[0], *yes)
 	case "retire":
 		return e.devicesRetire(ctx, s, pos[0], *yes)
+	case "restore":
+		return e.devicesRestore(ctx, s, pos[0], *yes)
 	}
 	return e.devicesList(ctx, s, rep, dir)
 }
@@ -780,4 +782,103 @@ func lastSign(dr share.DirReport, j store.JournalState) (time.Time, bool) {
 		}
 	}
 	return time.Time{}, false
+}
+
+// askAhead asks, for each synced directory where this device's journal holds lines its register does not, which it
+// is (docs/design.md, Identity cases): the register was restored from a snapshot or a backup (those lines are this
+// device's decisions made after it: taken in), or it was copied from another machine (this register needs a new
+// device ID, and to be trusted again). Later, or no terminal, leaves it: nothing is written there meanwhile, and
+// filo synced says so. It returns the report as it is after.
+func (e *env) askAhead(ctx context.Context, s *store.Store, rep share.Report) (share.Report, error) {
+	if !e.canPrompt() || e.cmd == "__complete" {
+		return rep, nil
+	}
+	r := e.view
+	for _, dr := range rep.Dirs {
+		if !dr.Ahead {
+			continue
+		}
+		r.Note(view.Attention, "this device's journal in "+r.Tilde(dr.Dir.Abs())+" holds lines this register does not")
+		r.Paragraph(0, "Either the register was restored from a snapshot or a backup, and those lines are "+
+			"decisions this device made since (take them in), or it was copied from another machine, which "+
+			"writes as this device (give this register a new device ID; the other devices then trust it again).")
+		if err := e.outputErr(); err != nil {
+			return rep, err
+		}
+		pr := newPrompter(e.stdin)
+		pr.end, pr.check = r.Blank, e.outputErr
+		choice, err := e.askChoice(ctx, pr, "Was this register restored, or copied?", []view.Choice{
+			{Key: "r", Word: "restored"}, {Key: "c", Word: "copied"}, {Key: "l", Word: "later"}}, "l")
+		pr.close()
+		if err != nil {
+			return rep, err
+		}
+		switch choice {
+		case "r":
+			n, err := share.TakeOwn(ctx, s, dr.Dir, now())
+			if err != nil {
+				return rep, err
+			}
+			r.Count(view.Done, report.Plural(int64(n), "line", "lines")+" of this device's taken in")
+		case "c":
+			d, err := s.NewDeviceIdentity(ctx)
+			if err != nil {
+				return rep, err
+			}
+			r.Count(view.Done, "this register is now a new device ("+d.ID[:8]+"); on another device, filo "+
+				"devices trust "+d.Name+" once its journal is there")
+		default:
+			continue
+		}
+		return e.importAll(ctx, s)
+	}
+	return rep, nil
+}
+
+// devicesRestore writes back device DEVICE's journal where it is lost or cut short, from the lines this register keeps
+// of it, after showing where and asking (or -y).
+func (e *env) devicesRestore(ctx context.Context, s *store.Store, arg string, yes bool) error {
+	kd, err := share.FindDevice(ctx, s, arg)
+	if err != nil {
+		return err
+	}
+	in, err := share.Where(ctx, s, kd.Dev)
+	if err != nil {
+		return err
+	}
+	var need []store.SyncedDir
+	for _, sd := range in {
+		ok, err := share.NeedsRestore(ctx, s, sd, kd.Dev)
+		if err != nil {
+			return err
+		}
+		if ok {
+			need = append(need, sd)
+		}
+	}
+	r := e.view
+	if len(need) == 0 {
+		r.Heading("Nothing to restore", view.Where{}, kd.Name, "its journal is whole in every synced directory")
+		return nil
+	}
+	r.Heading("Restore", view.Where{}, kd.Name, report.Plural(int64(len(need)), "journal", "journals"))
+	for _, sd := range need {
+		r.Count(view.Neutral, "write back its journal in "+r.Tilde(sd.Abs())+", from this register's copy")
+	}
+	if err := e.outputErr(); err != nil {
+		return err
+	}
+	ok, err := e.confirmChange(ctx, "Write back "+kd.Name+"'s journal?", yes, nil)
+	if err != nil || !ok {
+		return err
+	}
+	done, err := share.Restore(ctx, s, kd, need)
+	if err != nil {
+		return err
+	}
+	if !yes {
+		r.Blank()
+	}
+	r.Outcome("Restored", kd.Name, report.Plural(int64(len(done)), "journal", "journals"))
+	return nil
 }

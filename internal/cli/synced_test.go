@@ -292,3 +292,46 @@ func TestUpdateSaysAMoveOutOfASyncedDirectoryIsADelete(t *testing.T) {
 	out := a.filo(0, "", false, "update", csv, "--dry-run").stdout
 	a.contains("update", out, "1 file moves out of synced directory", "on the other devices that is a delete")
 }
+
+func TestDevicesRestoreAndCompletion(t *testing.T) {
+	a, b := syncedPair(t, map[string]string{"x.pdf": "x"})
+	_, cands := completeIn(b, "filo devices retire ", "")
+	if len(cands) != 1 || strings.TrimSpace(cands[0]) != "laptop" {
+		t.Fatalf("device names completed: %q", cands)
+	}
+	out := b.filo(0, "", false, "devices", "restore", "laptop").stdout
+	b.contains("nothing to restore", out, "Nothing to restore")
+	id := deviceLine(t, a.filo(0, "", false, "device").stdout, "ID")
+	p := b.in("Sync/.filo/journal." + id)
+	want := mustRead(t, p)
+	if err := os.Remove(p); err != nil {
+		t.Fatal(err)
+	}
+	out = b.filo(0, "", false, "devices", "restore", "laptop", "-y").stdout
+	b.contains("restore", out, "Restored   laptop . 1 journal")
+	if got := mustRead(t, p); !bytes.Equal(got, want) {
+		t.Fatal("the journal written back is not the one lost")
+	}
+}
+
+func TestRestoredRegisterIsAskedAbout(t *testing.T) {
+	a, _ := syncedPair(t, map[string]string{"x.pdf": "x"})
+	saved := mustRead(t, a.db)
+	a.filo(0, "", false, "set", a.in("Sync/x.pdf"), "--retention", "forever")
+	// The register is restored from the copy taken before the set: its journal is ahead of it.
+	for _, p := range []string{a.db + "-wal", a.db + "-shm"} {
+		os.Remove(p)
+	}
+	if err := os.WriteFile(a.db, saved, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSpace(a.filo(0, "", false, "get", a.in("Sync/x.pdf"), "--retention").stdout); got != "" {
+		t.Fatalf("the restored register already has the retention: %q", got)
+	}
+	out := a.filo(0, "r\n", true, "report").stdout
+	a.contains("question", out, "holds lines this register does not", "Was this register restored, or copied?",
+		"taken in")
+	if got := strings.TrimSpace(a.filo(0, "", false, "get", a.in("Sync/x.pdf"), "--retention").stdout); got != "forever" {
+		t.Fatalf("after taking its lines in: retention %q", got)
+	}
+}

@@ -81,6 +81,9 @@ Commands
   devices retire DEVICE [-y]
                            retire a device that is gone: its later decisions are
                            refused
+  devices restore DEVICE [-y]
+                           write back a lost journal of a device, from this
+                           register
   completion bash          print the script that makes Tab complete filo's
                            commands, files and tags
   help [COMMAND]           this overview, or a command's flags and rules
