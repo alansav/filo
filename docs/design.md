@@ -2178,7 +2178,9 @@ Agreed 2026-11-20, designed 2026-11-28 (roadmap 36). Tab completes Filo's comman
   `LIKE`: names hold `%` and `_`). Files not present (missing, or deleted by Filo) complete too, from the hundred
   such paths in that directory registered last: no index covers them, so the table is read from its newest row back
   and the read stops there (a benchmark, 120,000 files, 20,000 not present: about 11 ms at the top of the root, 14
-  ms deep in it, 1.5 ms of it for the current paths). Tags and policies are read whole. No cap on
+  ms deep in it, 1.5 ms of it for the current paths; timed by hand on a throwaway tree of 100,000 files, a whole
+  `filo __complete` run, start-up included, takes about 18 ms for a path and 3 ms for a tag). Tags and policies are
+  read whole, the tags without the counts `filo tags` shows (`TagsInUse`: those read every file, 95 ms on that tree). No cap on
   matches: bash asks before showing thousands.
 
 ### Terminal output

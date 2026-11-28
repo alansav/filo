@@ -830,13 +830,9 @@ func (c *completer) tagCandsFor(typed string, keys bool) []cand {
 	if s == nil {
 		return nil
 	}
-	sum, err := s.TagSummary(c.ctx)
+	in, err := s.TagsInUse(c.ctx)
 	if err != nil {
 		return nil
-	}
-	var in []tags.Tag
-	for _, t := range sum.Tags {
-		in = append(in, t.Tag)
 	}
 	return tagCands(in, typed, keys)
 }
