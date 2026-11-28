@@ -520,3 +520,27 @@ func (s *Store) MarkPolicyChangesJournal(ctx context.Context, after int64) error
 		after)
 	return err
 }
+
+// SettingsFID is the file ID the decisions that are not about one file are kept under: policies, rules, directories
+// excluded from duplicates, contents always kept, sets of records, tag indexes (docs/design.md, Sharing decisions
+// between devices). It is no file's: a file's shared ID is 26 characters.
+const SettingsFID = "-"
+
+// CurrentByKey returns the current decisions of synced directory id kept under fid, by key.
+func (s *Store) CurrentByKey(ctx context.Context, id int64, fid string) (map[string][]Decision, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT `+decisionCols+` FROM decisions WHERE synced_id = ? AND fid = ? AND
+		current = 1 ORDER BY key, dev, seq`, id, fid)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string][]Decision{}
+	for rows.Next() {
+		d, err := scanDecision(rows)
+		if err != nil {
+			return nil, err
+		}
+		out[d.Key] = append(out[d.Key], d)
+	}
+	return out, rows.Err()
+}

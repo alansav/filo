@@ -311,3 +311,18 @@ func TestIndexWriter(t *testing.T) {
 		t.Fatalf("writer = %q", got.Writer)
 	}
 }
+
+func TestCurrentByKey(t *testing.T) {
+	ctx := context.Background()
+	s, root := syncedTestStore(t)
+	id, _ := s.ApplySynced(ctx, SyncedChange{Add: &SyncedDir{SyncID: "s", RootID: root.ID, State: SyncedJoined,
+		AddedUTC: "t"}, Decisions: []Decision{
+		{Dev: "a", Seq: 1, FID: SettingsFID, Key: "policy:bills", Value: "7y"},
+		{Dev: "b", Seq: 1, FID: SettingsFID, Key: "policy:bills", Value: "10y"},
+		{Dev: "a", Seq: 2, FID: SettingsFID, Key: "always:h", Value: "1"},
+		{Dev: "a", Seq: 3, FID: "other", Key: "date", Value: "2026-01-01"}}, Replaces: [][]LineRef{nil, nil, nil, nil}})
+	got, err := s.CurrentByKey(ctx, id, SettingsFID)
+	if err != nil || len(got) != 2 || len(got["policy:bills"]) != 2 || len(got["always:h"]) != 1 {
+		t.Fatalf("CurrentByKey = %+v, %v", got, err)
+	}
+}
