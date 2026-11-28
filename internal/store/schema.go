@@ -3,7 +3,7 @@ package store
 // SchemaVersion is the schema this build reads and writes. It is stored in meta.schema_version when a database is
 // created. An older database with a migration in migrations is upgraded when it is opened; any other version is
 // refused.
-const SchemaVersion = 15
+const SchemaVersion = 16
 
 // Meta keys.
 const (
@@ -90,7 +90,7 @@ CREATE TABLE events (
     other_path TEXT,
     detail TEXT
 );
-` + reviewSQL + duplicatesSQL + policiesSQL + rulesSQL + tagsSQL + tagIndexSQL + syncedSQL
+` + reviewSQL + duplicatesSQL + policiesSQL + rulesSQL + tagsSQL + tagIndexSQL + syncedSQL + decisionsSQL
 
 // reviewSQL is the export and review tables, as of schema version 13.
 const reviewSQL = `
@@ -247,6 +247,10 @@ ALTER TABLE export_rows ADD COLUMN name TEXT;
 	// 14 -> 15: synced directories, the devices sharing them, and their journals (docs/design.md, Sharing decisions
 	// between devices). Only new tables: no directory is synced yet.
 	14: syncedSQL,
+	// 15 -> 16: shared file decisions (docs/design.md, Sharing decisions between devices). New tables, and the
+	// publish cursors, set past every decision made so far (migrate): only decisions made from now on are written to
+	// the journals as they are made; the ones before are seeded when a directory is marked or joined.
+	15: decisionsSQL,
 }
 
 // syncedSQL is the synced directories, added in schema version 15. A synced directory is known by the ID in its mark

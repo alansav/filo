@@ -325,6 +325,9 @@ func create(ctx context.Context, db *sql.DB) error {
 	if err := insertDevice(ctx, tx); err != nil {
 		return err
 	}
+	if err := insertCursors(ctx, tx); err != nil {
+		return err
+	}
 	return tx.Commit()
 }
 
@@ -411,6 +414,11 @@ func migrate(ctx context.Context, db *sql.DB, v int) (string, error) {
 	}
 	if v == 13 {
 		if err := insertDevice(ctx, tx); err != nil {
+			return fail(err)
+		}
+	}
+	if v == 15 {
+		if err := insertCursors(ctx, tx); err != nil {
 			return fail(err)
 		}
 	}

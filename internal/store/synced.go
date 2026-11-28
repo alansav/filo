@@ -110,11 +110,16 @@ type SyncedChange struct {
 	SyncedID int64
 	Devices  []KnownDevice
 	Journals []JournalUpdate
+	// Decisions are file decision lines among the lines, each with the lines it replaces (Replaces[i]); Shared maps
+	// files' shared IDs to the files they are here (0: not matched yet).
+	Decisions []Decision
+	Replaces  [][]LineRef
+	Shared    map[string]int64
 }
 
 // Empty reports whether the change writes nothing.
 func (c SyncedChange) Empty() bool {
-	return c.Add == nil && len(c.Devices) == 0 && len(c.Journals) == 0
+	return c.Add == nil && len(c.Devices) == 0 && len(c.Journals) == 0 && len(c.Decisions) == 0 && len(c.Shared) == 0
 }
 
 // ApplySynced writes c and returns the synced directory's ID. Lines already kept are not written again; a line
@@ -128,6 +133,85 @@ func (s *Store) ApplySynced(ctx context.Context, c SyncedChange) (int64, error) 
 		return 0, err
 	}
 	defer tx.Rollback()
+	id, err := applySynced(ctx, tx, c)
+	if err != nil {
+		return 0, err
+	}
+	if err := s.commit(tx); err != nil {
+		return 0, err
+	}
+	return id, nil
+}
+
+// PublishCursors are how far this device has written its own decisions to its journals: the last review and the
+// last tag change looked at (docs/design.md, Sharing decisions between devices).
+type PublishCursors struct{ Reviews, TagChanges int64 }
+
+// Meta keys of the publish cursors (schema 16).
+const (
+	metaPublishReviews = "publish_reviews_id"
+	metaPublishTags    = "publish_tag_changes_id"
+)
+
+// Cursors returns the publish cursors.
+func (s *Store) Cursors(ctx context.Context) (PublishCursors, error) {
+	var c PublishCursors
+	for _, kv := range []struct {
+		key string
+		to  *int64
+	}{{metaPublishReviews, &c.Reviews}, {metaPublishTags, &c.TagChanges}} {
+		v, err := metaValue(ctx, s.db, kv.key)
+		if err != nil {
+			return c, err
+		}
+		if _, err := fmt.Sscan(v, kv.to); err != nil {
+			return c, fmt.Errorf("meta %s: %w", kv.key, err)
+		}
+	}
+	return c, nil
+}
+
+// Publish writes this device's new decisions, one SyncedChange per synced directory, and moves the cursors on, all
+// in one transaction: a decision is written to the journals once, or not at all. Cursors that do not move write
+// nothing, so a run that decided nothing changes nothing.
+func (s *Store) Publish(ctx context.Context, cs []SyncedChange, cur PublishCursors) error {
+	old, err := s.Cursors(ctx)
+	if err != nil {
+		return err
+	}
+	work := old != cur
+	for _, c := range cs {
+		work = work || !c.Empty()
+	}
+	if !work {
+		return nil
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, c := range cs {
+		if c.Empty() {
+			continue
+		}
+		if _, err := applySynced(ctx, tx, c); err != nil {
+			return err
+		}
+	}
+	for _, kv := range []struct {
+		key string
+		v   int64
+	}{{metaPublishReviews, cur.Reviews}, {metaPublishTags, cur.TagChanges}} {
+		if _, err := tx.ExecContext(ctx, `UPDATE meta SET value = ? WHERE key = ?`, fmt.Sprint(kv.v), kv.key); err != nil {
+			return err
+		}
+	}
+	return s.commit(tx)
+}
+
+// applySynced writes c in tx and returns the synced directory's ID.
+func applySynced(ctx context.Context, tx *sql.Tx, c SyncedChange) (int64, error) {
 	id := c.SyncedID
 	if c.Add != nil {
 		var n int
@@ -187,7 +271,17 @@ func (s *Store) ApplySynced(ctx context.Context, c SyncedChange) (int64, error) 
 			return 0, err
 		}
 	}
-	if err := s.commit(tx); err != nil {
+	for fid, file := range c.Shared {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO shared_files (synced_id, fid, file_id) VALUES (?, ?, ?)
+			ON CONFLICT (synced_id, fid) DO UPDATE SET file_id = excluded.file_id WHERE shared_files.file_id IS NULL`,
+			id, fid, nullInt(file)); err != nil {
+			return 0, fmt.Errorf("record a shared file: %w", err)
+		}
+	}
+	for i := range c.Decisions {
+		c.Decisions[i].SyncedID = id
+	}
+	if err := addDecisions(ctx, tx, c.Decisions, c.Replaces); err != nil {
 		return 0, err
 	}
 	return id, nil

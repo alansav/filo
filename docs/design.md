@@ -3,7 +3,7 @@
 **The present.** Of three documents, this is the present: `design.md` (what Filo is), `roadmap.md` (the future:
 what it is not yet) and `history.md` (the past: how it got here).
 
-Filo as built: schema version 15. Last updated: 2026-11-28.
+Filo as built: schema version 16. Last updated: 2026-11-28.
 
 This file records what Filo does and why, as built. Work not done yet, ideas, open questions and ideas rejected are
 in `roadmap.md`, where designs are worked out; a design moves here, in its own commit, when work on it starts (see
@@ -71,7 +71,7 @@ Principles. These are not negotiable:
   2026-11-28 there was no device column, because nothing left the device).
 - Driver: `modernc.org/sqlite` (pure Go, no CGO, plain `database/sql`), chosen 2026-11-11 at v1.62.0.
 - `meta.schema_version` must equal the build's version. An older database is upgraded when it is opened, one version
-  at a time, each step in its own transaction with the version bump (from any version from 1 to 14); a newer version, or an older
+  at a time, each step in its own transaction with the version bump (from any version from 1 to 15); a newer version, or an older
   one with no migration, is refused, as is a SQLite file without Filo's `meta` keys. WAL mode is set only after those checks pass, so
   a foreign database is never modified.
 - One writer at a time: an `flock` on `<db>.lock`, taken before the database is opened. The kernel drops it if Filo
@@ -2771,7 +2771,7 @@ $ filo roots add
 filo: roots add takes exactly one DIR (see filo help roots)
 ```
 
-## 3. Data model (schema version 15)
+## 3. Data model (schema version 16)
 
 The register as `internal/store/schema.go` creates it (`schemaSQL`), with the meaning of each column. Keep the
 interval history and the partial unique index.
@@ -2780,7 +2780,9 @@ interval history and the partial unique index.
 CREATE TABLE meta  (key TEXT PRIMARY KEY, value TEXT NOT NULL);
     -- schema_version, created_utc, hash_algorithm (sha256: a database with another is refused), last_write_utc;
     -- device_id, device_name, device_key (schema 14: this device's ID, name and ed25519 key seed, base64; made
-    -- with the database or by the upgrade, and checked whenever read: see Sharing decisions between devices)
+    -- with the database or by the upgrade, and checked whenever read: see Sharing decisions between devices);
+    -- publish_reviews_id, publish_tag_changes_id (schema 16: the last review and tag change written to the journals,
+    -- or looked at and not for them; the upgrade sets them past every one made before)
 
 CREATE TABLE roots (
     id INTEGER PRIMARY KEY,
@@ -2983,6 +2985,27 @@ CREATE TABLE journals (                 -- what this device has read of each jou
 CREATE TABLE journal_lines (            -- every line accepted, byte for byte, so a lost journal can be written back
     synced_id INTEGER NOT NULL REFERENCES synced_dirs(id), dev TEXT NOT NULL, seq INTEGER NOT NULL,
     raw BLOB NOT NULL,
+    PRIMARY KEY (synced_id, dev, seq));
+
+-- Shared file decisions (schema 16).
+CREATE TABLE shared_files (             -- a file's shared ID in a synced directory, and the file it is here
+    synced_id INTEGER NOT NULL REFERENCES synced_dirs(id), fid TEXT NOT NULL,
+    file_id INTEGER REFERENCES files(id),  -- NULL = not matched here yet
+    PRIMARY KEY (synced_id, fid));      -- and unique (synced_id, file_id) where file_id is set
+
+CREATE TABLE decisions (                -- every file decision line, read or written, by what it decides
+    synced_id INTEGER NOT NULL REFERENCES synced_dirs(id), dev TEXT NOT NULL, seq INTEGER NOT NULL,
+    fid TEXT NOT NULL,
+    key TEXT NOT NULL,                  -- 'date', 'retention', or 'tag:' with the tag's key and folded value
+    hash TEXT, path TEXT,               -- the file's content and path (relative to the synced directory) then
+    value TEXT NOT NULL DEFAULT '',     -- '' = cleared, or a tag removed
+    decided_utc TEXT,                   -- the line's time: shown, never used to decide
+    current INTEGER NOT NULL DEFAULT 1, -- 0 once a line read replaces it; two current of different values: a conflict
+    applied INTEGER NOT NULL DEFAULT 0, -- 1 once applied to the file here, or this device's own
+    PRIMARY KEY (synced_id, dev, seq));
+
+CREATE TABLE replaced (                 -- lines named as replaced by a line read before they were read themselves
+    synced_id INTEGER NOT NULL REFERENCES synced_dirs(id), dev TEXT NOT NULL, seq INTEGER NOT NULL,
     PRIMARY KEY (synced_id, dev, seq));
 ```
 

@@ -285,3 +285,41 @@ func uniq(args []any) map[any]bool {
 	}
 	return m
 }
+
+// JournalTag gives a file a tag, or removes it, as another device decided: recorded with command CommandJournal, so
+// it is never written to this device's journal again. A file deleted by Filo is left alone. It reports whether the
+// file changed.
+func (s *Store) JournalTag(ctx context.Context, fileID int64, t tags.Tag, add bool, now time.Time) (bool, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+	var deleted sql.NullString
+	if err := tx.QueryRowContext(ctx, `SELECT deleted_utc FROM files WHERE id = ?`, fileID).Scan(&deleted); err != nil {
+		return false, err
+	}
+	if deleted.Valid {
+		return false, nil
+	}
+	changed := false
+	if add {
+		sp, err := spelling(ctx, tx, t)
+		if err != nil {
+			return false, err
+		}
+		if changed, err = addTag(ctx, tx, fileID, sp, CommandJournal, now); err != nil {
+			return false, err
+		}
+	} else {
+		n, err := removeTags(ctx, tx, fileID, tags.Search{Key: t.Key, Value: t.Value}, CommandJournal, now)
+		if err != nil {
+			return false, err
+		}
+		changed = n > 0
+	}
+	if !changed {
+		return false, nil
+	}
+	return true, s.commit(tx)
+}
