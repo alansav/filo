@@ -984,6 +984,50 @@ reported on every run; a design clause and `extension()`'s case for a hidden nam
 renamed; a garbled README sentence. Not fixed: every opened key directory stays open until the end of the run, one
 descriptor each; an index has a few keys, and Go raises the soft limit on open files to the hard one.
 
+## Bash completion: how item 36 was built
+
+Roadmap 36, agreed 2026-11-20 and designed with the person on 2026-11-28, one open point at a time (where the flag
+list lives, tags, what each argument completes, speed), then built the same day on branch `improvements` (the
+person's choice: with the week's fixes, not on a branch of its own).
+
+Commits: the design (`5ebcd43`); the store's read-only open and the entries of a directory (`c999eb8`); package
+`complete`, the text side (`8828336`); the Renderer's raw answer (`054cb2d`); the help test (`367a58b`); a leading
+`~/` left unescaped (`3da6722`); the CLI, `filo completion bash` and `filo __complete` (`bb57787`); the tags in use
+without their counts (`6bf8945`, `0b3d47d`); CLAUDE.md's hard rule naming the second raw output (`79e7572`).
+
+- **Decided in the design session**: the help as the list of flags (one flag table every command parses from was
+  not taken: it rewrites about 20 commands' parsing for a V5 feature; nor a separate completion list, a third copy);
+  Filo working out the word itself from the line, so bash's split at `:` never matters and the `bash-completion`
+  package is not needed; tags in two steps, matched in any case; `untag` offering only the files' own tags; `tags
+  rename NEW` offering the tags in use; files not present still completing, capped.
+- **Changed while building**: the script passes the line cut at the cursor (`${COMP_LINE:0:COMP_POINT}`), not the
+  cursor's position, so Filo never has to know whether bash counts it in characters or bytes. `set` and `get` take
+  their command's flag list, so no usage line was rewritten. `tag` and `untag` complete files on disk only (a file not
+  on disk would be read as a tag). The cap on files not present takes the paths registered last, not those gone
+  last, so SQLite reads the table from its newest row and stops: 11 ms at the top of a 120,000-file root, against
+  44 ms sorting by the closing scan. A read-only open of a database in WAL mode made the WAL and shared-memory files
+  and left them, so with no WAL file it opens immutable as well. Completing a tag first read `filo tags`' summary,
+  whose counts read every file: 95 ms on 100,000 files, 3 ms with `TagsInUse`.
+- **The help test** checks each usage line one way only (the flags it names exist): `policies`, `rules` and
+  `indexes` share one flag set between subcommands and refuse a flag given to the wrong one with their own, tested,
+  messages. It found `roots add --workers` missing from the help and the README.
+- **Review** (medium, one round): ten findings, all fixed. Important: registered paths in the `~/` and relative forms
+  found nothing with a symlinked home or current directory (the register keeps paths resolved); a deleted directory
+  under a symlinked path never completed (resolving failed on the missing part); a directory only the register knows
+  got a space, not its `/`, from bash in files mode. Nits: `untag` of a symlink looked up its target; file names
+  matched in any case among tags; `--db=~/x` expanded `~`, which the shell does not; `completion` offered `--db`;
+  `~` with no home directory read the current directory; `!` inside an open double quote (history expansion); an
+  unreachable `-h` arm.
+- **Tests**: `TestOpenReadOnly`, `TestEntriesIn`, `TestEntriesInUsesTheIndex` and `BenchmarkEntriesIn` (store);
+  `TestParse`, `TestInsert`, `TestRest`, `TestParseUsage` and friends (complete); `TestCompletions` (view);
+  `TestHelpListsTheRealFlags`; `TestCompleteCommandsAndFlags`, `TestCompletePaths`, `TestCompleteTags`,
+  `TestCompleteRegistered`, `TestCompleteWithoutARegister`, `TestCompleteThroughSymlinks`, `TestCompleteEdges`,
+  `TestEveryPlaceholderHasASource`, `TestSlots`; and `TestCompletionScriptInBash`, the script in a real bash with a
+  `filo` built from the tree. Checked by hand, not by a test: in an interactive bash under a pseudo-terminal, Tab
+  gave lines whose arguments came out whole (`~/` expanded; `bills 2026/gas.pdf`, `a:b.txt` and `sender:British
+  Gas` one argument each), since readline's quoting runs only in an interactive terminal; and the timing on a
+  throwaway tree of 100,000 files: about 18 ms for a path and 3 ms for a tag, start-up included.
+
 ## Notes on decisions
 
 Short notes taken out of `design.md` on 2026-11-17, by the section they were in.

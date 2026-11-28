@@ -40,7 +40,7 @@ on the other device: a retention by content hash (an edited file needs a new dec
 
 The pieces, in the order agreed: finding files (`filo find`, item 19, built 2026-11-21), 18a tags (built
 2026-11-22), 38 the tag index
-pages (built 2026-11-22), 36 bash completion, then the sync items
+pages (built 2026-11-22), 36 bash completion (built 2026-11-28), then the sync items
 (9b device ID, 9a synced directories, 9c the journal, which also carries tags), then 20 the Filo directory and 18b
 project notes and packages. 36 comes after tags so that its completion covers tag names from the start (reordered
 2026-11-20).
@@ -56,20 +56,20 @@ complexity scores (1 to 10, Claude's estimates) are still to be settled with the
 
 Next, agreed 2026-11-27 (friction week, on the `improvements` branch, after the combined CSV, 39 renaming by the
 `name` cell, 41 no `bin`/`obj` special case, 42 moving by the `directory` cell and 40 removing the retention and tags
-exports, all built that day, and 44 the tag index's find page, built the same evening): the list below.
+exports, all built that day, and 44 the tag index's find page, built the same evening; 36 bash completion built on
+2026-11-28): the list below.
 
-1. 36 bash completion
-2. 9b device ID, 9a marking synced directories, 9c sharing decisions
-3. 20 the Filo directory, 18b project notes and packages
-4. 5a progress line, 5b `--needing-retention`
-5. 13 removing empty directories
-6. 21 script mode, 34 received documents (needs 21 and 9a)
-7. 6 one decision for all copies
-8. 16 undoing an update batch, 17 suggested rules
-9. 15 where the space goes
-10. 7a–7c verifying content, 8 backup awareness, 9d snapshots to the backup machine
-11. 10 a summary for scheduled scans
-12. Later a and c–e
+1. 9b device ID, 9a marking synced directories, 9c sharing decisions
+2. 20 the Filo directory, 18b project notes and packages
+3. 5a progress line, 5b `--needing-retention`
+4. 13 removing empty directories
+5. 21 script mode, 34 received documents (needs 21 and 9a)
+6. 6 one decision for all copies
+7. 16 undoing an update batch, 17 suggested rules
+8. 15 where the space goes
+9. 7a–7c verifying content, 8 backup awareness, 9d snapshots to the backup machine
+10. 10 a summary for scheduled scans
+11. Later a and c–e
 
 ## Items
 
@@ -335,9 +335,6 @@ named in the register, which outlives the retention that deleted it.
 - Open: the period, and whether it is a setting; what happens to snapshots and the pre-upgrade copies; whether the
   register's `freelist` needs a `VACUUM` so forgotten names are really gone from the file; how it fits 9c's delete
   records, which other devices read.
-
-### 36. Bash completion (V5, C4)
-Being built on branch `improvements` (2026-11-28); the design is in `design.md`, Bash completion.
 
 ### 43. Restoring a register snapshot (V5, C3)
 Agreed as wanted on 2026-11-27, design not started; promoted from the deferred improvements, where it was one line.
