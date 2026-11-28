@@ -94,6 +94,9 @@ func (e *env) export(ctx context.Context, dbBefore string, args []string) error 
 		return err
 	}
 	defer e.closeStore(s)
+	if err := e.checkJoinedPlace(csvPath, *inSynced); err != nil {
+		return err
+	}
 	f, where, err := filterFor(ctx, s, pos)
 	if err != nil {
 		return err
@@ -391,7 +394,7 @@ func (e *env) checkOutPlace(csvPath string, inGit, inSynced bool) error {
 		}
 		if repo != "" {
 			return fmt.Errorf("%s is inside a git repository (%s): a CSV there could be committed by mistake; "+
-				"write it outside, or pass --in-git", csvPath, e.view.Tilde(repo))
+				"write it outside, or pass --in-git", csvPath, repo)
 		}
 	}
 	if !inSynced {
@@ -400,8 +403,30 @@ func (e *env) checkOutPlace(csvPath string, inGit, inSynced bool) error {
 			return err
 		}
 		if top != "" {
-			return fmt.Errorf("%s is inside a synced directory (%s): a CSV there is copied to every device that "+
-				"shares it; write it outside, or pass --in-synced", csvPath, e.view.Tilde(top))
+			return syncedRefusal(csvPath, top)
+		}
+	}
+	return nil
+}
+
+func syncedRefusal(csvPath, top string) error {
+	return fmt.Errorf("%s is inside a synced directory (%s): a CSV there is copied to every device that shares it; "+
+		"write it outside, or pass --in-synced", csvPath, top)
+}
+
+// checkJoinedPlace refuses, unless --in-synced, a CSV inside a synced directory this device has joined even when its
+// mark is missing from the disk (lost, and not written back yet): the register knows it.
+func (e *env) checkJoinedPlace(csvPath string, inSynced bool) error {
+	if inSynced {
+		return nil
+	}
+	dir := filepath.Dir(csvPath)
+	if r, err := filepath.EvalSymlinks(dir); err == nil {
+		dir = r
+	}
+	for _, sd := range e.syncedDirs {
+		if top := sd.Abs(); dir == top || strings.HasPrefix(dir, top+string(filepath.Separator)) {
+			return syncedRefusal(csvPath, top)
 		}
 	}
 	return nil

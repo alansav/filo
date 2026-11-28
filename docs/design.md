@@ -383,16 +383,17 @@ never touch the files, except for the renames and moves an edited `name` or `dir
   pushed by mistake (a `git add .`); one in a synced directory is copied to every device the sync service shares it
   with, and to its cloud. An export refuses `-o FILE` when FILE's directory, or any directory above it, holds `.git`
   (a directory, or a file, as a worktree or a submodule has), or a synced directory's mark (`.filo/mark`, joined here
-  or not), before the scan and before the replace question below, so a refusal costs nothing:
+  or not; or it is inside a synced directory this device has joined, its mark lost meanwhile), before the scan and before the replace question below, so a refusal costs nothing:
   `filo: /home/u/code/proj/files.csv is inside a git repository (/home/u/code/proj): a CSV there could be committed
   by mistake; write it outside, or pass --in-git` (for a synced directory: `... is inside a synced directory
-  (~/Sync): a CSV there is copied to every device that shares it; write it outside, or pass --in-synced`). Nothing is
+  (/home/u/Sync): a CSV there is copied to every device that shares it; write it outside, or pass --in-synced`). Nothing is
   written or recorded, exit 1. `--in-git` and `--in-synced` each allow their own place, one at a time, so writing
   there is a deliberate step, as moving the CSV there afterwards is. The directory is resolved first (symlinks
   followed), so a symlink into either is no way round it; a part of the path that cannot be resolved, or a `.git` or
   mark that cannot be looked at, refuses too (fail safe). Filo reads no `git` and no `.gitignore`: an ignored path is
   refused all the same. Accepted: a home directory that is itself a repository (`~/.git`) refuses every export
-  under `~` without `--in-git`. Tag index pages are not covered: they belong in the person's directories, and are
+  under `~` without `--in-git`; and a directory a sync service shares that nobody marked for Filo is not known as a
+  synced directory (Filo reads nothing of a sync service's own). Tag index pages are not covered: they belong in the person's directories, and are
   Filo's own files.
 - **An existing FILE is replaced only after asking**. Refusing would make people delete the old CSV or invent
   `files2.csv`. Filo asks `Replace files.csv? [y/N]`; with no terminal it refuses. `-y` does not answer it: a

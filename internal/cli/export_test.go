@@ -406,6 +406,9 @@ func TestExportRefusesAGitRepositoryOrASyncedDirectory(t *testing.T) {
 			}
 			return filepath.Join(base, "odd", "files.csv")
 		}, nil, true},
+		{"a joined synced directory whose mark is lost", func(t *testing.T, base string) string {
+			return "" // made in the test body: it needs this register's own synced directory
+		}, nil, false},
 		{"outside any repository", func(t *testing.T, base string) string {
 			mkdir(t, filepath.Join(base, "plain"))
 			return filepath.Join(base, "plain", "files.csv")
@@ -418,6 +421,16 @@ func TestExportRefusesAGitRepositoryOrASyncedDirectory(t *testing.T) {
 			ct.filo(ExitOK, "", false, "roots", "add", ct.root)
 			base := canonicalTemp(t)
 			csv := tt.setup(t, base)
+			if csv == "" { // a joined synced directory whose mark is then lost
+				ct.write("Sync/x.txt", "x")
+				ct.filo(ExitOK, "", false, "scan")
+				ct.filo(ExitOK, "", false, "synced", "add", ct.in("Sync"))
+				if err := os.Remove(ct.in("Sync/.filo/mark")); err != nil {
+					t.Fatal(err)
+				}
+				csv = ct.in("Sync/files.csv")
+				tt.name = "a synced directory: " + tt.name
+			}
 			args := append([]string{"export"}, tt.kind...)
 			args = append(args, "-o", csv)
 			if tt.ok {
@@ -428,9 +441,14 @@ func TestExportRefusesAGitRepositoryOrASyncedDirectory(t *testing.T) {
 				return
 			}
 			r := ct.filo(ExitError, "", false, args...)
-			if !strings.Contains(r.stderr, "cannot tell whether") {
-				ct.contains("refusal", r.stderr, "is inside a ", "write it outside, or pass --in-")
+			want := "is inside a git repository"
+			switch {
+			case strings.Contains(tt.name, "cannot be looked into"):
+				want = "cannot tell whether"
+			case strings.HasPrefix(tt.name, "a synced") || strings.Contains(tt.name, "--in-git alone"):
+				want = "is inside a synced directory"
 			}
+			ct.contains("refusal", r.stderr, want)
 			if _, err := os.Lstat(csv); err == nil {
 				t.Fatal("a CSV was written inside a git repository")
 			}

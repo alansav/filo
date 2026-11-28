@@ -154,8 +154,9 @@ var commandHelps = map[string]commandHelp{
 				"If FILE " +
 				"exists, filo asks before replacing it (only a regular file, and only at a terminal). FILE is not " +
 				"written inside a git repository (a directory holding .git, there or above it), where it could be " +
-				"committed by mistake, or inside a synced directory, where it is copied to every device that shares " +
-				"it, unless --in-git or --in-synced allows that place. Columns: id, export, directory, name, size, modified, file_date, retention, " +
+				"committed by mistake, or inside a synced directory (one marked for Filo: filo help synced), where " +
+				"it is copied to every device that shares it, unless --in-git or --in-synced allows that place. A " +
+				"directory a sync service shares but nobody marked for Filo is not known as one. Columns: id, export, directory, name, size, modified, file_date, retention, " +
 				"keep_until, tags, conflict. " +
 				"Fill in retention in a spreadsheet (a period such as 7y counted from file_date, a date, forever, or " +
 				"a policy name: filo help policies) and tags (separated by ;, see filo help tag), correct a " +

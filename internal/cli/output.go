@@ -9,13 +9,10 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"syscall"
+	"strings"
 
 	"github.com/alansav/filo/internal/journal"
 )
-
-// syscallNotDir is a path whose parent is a file, not a directory (a file named .filo): not the marker.
-var syscallNotDir = syscall.ENOTDIR
 
 // askReplace decides whether an export may write csvPath (docs/design.md, Lifespan, "An existing FILE is replaced
 // only after asking"). A path that does not exist: go ahead, with asked nil. A regular file: go ahead only if the
@@ -181,12 +178,12 @@ func markedAbove(csvPath, marker, what string) (string, error) {
 		dir = parent
 	}
 	for {
-		_, err := os.Lstat(filepath.Join(dir, marker))
-		if err == nil {
-			return dir, nil
-		}
-		if !errors.Is(err, fs.ErrNotExist) && !errors.Is(err, syscallNotDir) {
+		found, err := holds(dir, marker)
+		if err != nil {
 			return "", cannot(err)
+		}
+		if found {
+			return dir, nil
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
@@ -194,4 +191,26 @@ func markedAbove(csvPath, marker, what string) (string, error) {
 		}
 		dir = parent
 	}
+}
+
+// holds reports whether dir holds marker, a path relative to it: each part before the last a directory (a file
+// named .filo is no synced directory's mark), the last there as anything. An error is a part that cannot be looked
+// at.
+func holds(dir, marker string) (bool, error) {
+	p := dir
+	parts := strings.Split(filepath.ToSlash(marker), "/")
+	for i, part := range parts {
+		p = filepath.Join(p, part)
+		fi, err := os.Lstat(p)
+		if errors.Is(err, fs.ErrNotExist) {
+			return false, nil
+		}
+		if err != nil {
+			return false, err
+		}
+		if i < len(parts)-1 && !fi.IsDir() {
+			return false, nil
+		}
+	}
+	return true, nil
 }
