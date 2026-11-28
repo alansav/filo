@@ -310,8 +310,8 @@ func (s *Store) SyncedDirs(ctx context.Context) ([]SyncedDir, error) {
 	return out, rows.Err()
 }
 
-// RemoveSynced forgets a synced directory: this device leaves it (or no longer ignores its mark). Its journals and
-// the lines kept from them go with it; nothing on the disk changes.
+// RemoveSynced forgets a synced directory: this device leaves it (or no longer ignores its mark). Its journals, the
+// lines kept from them, its decisions, shared file IDs and settings seen go with it; nothing on the disk changes.
 func (s *Store) RemoveSynced(ctx context.Context, id int64) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -319,6 +319,8 @@ func (s *Store) RemoveSynced(ctx context.Context, id int64) error {
 	}
 	defer tx.Rollback()
 	for _, q := range []string{`DELETE FROM journal_lines WHERE synced_id = ?`, `DELETE FROM journals WHERE synced_id = ?`,
+		`DELETE FROM decisions WHERE synced_id = ?`, `DELETE FROM replaced WHERE synced_id = ?`,
+		`DELETE FROM shared_files WHERE synced_id = ?`, `DELETE FROM settings_seen WHERE synced_id = ?`,
 		`DELETE FROM synced_dirs WHERE id = ?`} {
 		if _, err := tx.ExecContext(ctx, q, id); err != nil {
 			return err

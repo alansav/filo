@@ -175,3 +175,28 @@ func TestAbsorbCarriesSyncedDirs(t *testing.T) {
 		t.Fatalf("found marks after absorbing: %+v", found)
 	}
 }
+
+func TestRemoveSyncedAfterDecisions(t *testing.T) {
+	ctx := context.Background()
+	s, root := syncedTestStore(t)
+	id, err := s.ApplySynced(ctx, SyncedChange{Add: &SyncedDir{SyncID: "s", RootID: root.ID, State: SyncedJoined,
+		AddedUTC: "t"}, Shared: map[string]int64{"f": 0}, Decisions: []Decision{
+		{Dev: "a", Seq: 1, FID: SettingsFID, Key: "policy:keep", Value: "1y"},
+		{Dev: "a", Seq: 2, FID: "f", Key: "fact:place", Value: "h x"},
+		{Dev: "b", Seq: 1, FID: "f", Key: "fact:place", Value: "h y"}}, Replaces: [][]LineRef{nil, {{"z", 9}}, nil}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetSeen(ctx, id, "rule:x", "v"); err != nil {
+		t.Fatal(err)
+	}
+	if c, _ := s.Conflicts(ctx, id); len(c) != 0 {
+		t.Fatalf("facts that disagree counted as a conflict: %v", c)
+	}
+	if err := s.RemoveSynced(ctx, id); err != nil {
+		t.Fatalf("leaving a synced directory with decisions: %v", err)
+	}
+	if d, _ := s.SyncedDirs(ctx); len(d) != 0 {
+		t.Fatalf("still known: %+v", d)
+	}
+}

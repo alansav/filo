@@ -192,7 +192,7 @@ const conflictValue = `CASE WHEN key LIKE 'tag:%' THEN value != '' ELSE value EN
 // Conflicts returns the (fid, key) of synced directory id with current decisions of different values.
 func (s *Store) Conflicts(ctx context.Context, id int64) ([][2]string, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT fid, key FROM decisions WHERE synced_id = ? AND current = 1
-		GROUP BY fid, key HAVING count(DISTINCT `+conflictValue+`) > 1 ORDER BY fid, key`, id)
+		AND key NOT LIKE 'fact:%' GROUP BY fid, key HAVING count(DISTINCT `+conflictValue+`) > 1 ORDER BY fid, key`, id)
 	if err != nil {
 		return nil, err
 	}
@@ -421,7 +421,8 @@ func first(ids []int64) int64 {
 
 // FileDecisions returns the current decisions about a file, in every synced directory it has a shared ID in.
 func (s *Store) FileDecisions(ctx context.Context, fileID int64) ([]Decision, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT `+decisionCols+` FROM decisions d WHERE current = 1 AND EXISTS (
+	rows, err := s.db.QueryContext(ctx, `SELECT `+decisionCols+` FROM decisions d WHERE current = 1
+		AND key NOT LIKE 'fact:%' AND EXISTS (
 		SELECT 1 FROM shared_files sf WHERE sf.synced_id = d.synced_id AND sf.fid = d.fid AND sf.file_id = ?)
 		ORDER BY key, dev, seq`, fileID)
 	if err != nil {
@@ -444,7 +445,7 @@ func (s *Store) FileDecisions(ctx context.Context, fileID int64) ([]Decision, er
 func (s *Store) ConflictedFiles(ctx context.Context) (map[int64][]string, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT sf.file_id, d.key FROM decisions d JOIN shared_files sf
 		ON sf.synced_id = d.synced_id AND sf.fid = d.fid WHERE d.current = 1 AND sf.file_id IS NOT NULL
-		GROUP BY sf.file_id, d.key HAVING count(DISTINCT `+conflictValue+`) > 1 ORDER BY sf.file_id, d.key`)
+		AND d.key NOT LIKE 'fact:%' GROUP BY sf.file_id, d.key HAVING count(DISTINCT `+conflictValue+`) > 1 ORDER BY sf.file_id, d.key`)
 	if err != nil {
 		return nil, err
 	}
