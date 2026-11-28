@@ -95,6 +95,22 @@ func applyDecisions(ctx context.Context, s *store.Store, sd store.SyncedDir, now
 			}
 			continue
 		}
+		if strings.HasPrefix(g.key, "fact:") {
+			cur, err := s.CurrentDecisions(ctx, sd.ID, g.fid, g.key)
+			if err != nil {
+				return waiting, problems, err
+			}
+			done, err := applyFact(ctx, s, sd, g.fid, g.key, cur, now)
+			if err != nil {
+				return waiting, problems, err
+			}
+			if done {
+				if err := s.MarkApplied(ctx, sd.ID, g.refs); err != nil {
+					return waiting, problems, err
+				}
+			}
+			continue // a fact waiting is not a decision waiting
+		}
 		fileID, other, err := matchShared(ctx, s, sd, g.fid, g.last)
 		if err != nil {
 			return waiting, problems, err

@@ -125,6 +125,29 @@ func Publish(ctx context.Context, s *store.Store, now time.Time) ([]string, erro
 			return problems, err
 		}
 	}
+	// Identity facts: what this device's scans paired, and its deletes by Filo, for files with a shared ID.
+	pubFor := func(sd store.SyncedDir) *pub {
+		if pb, ok := pubs[sd.ID]; ok {
+			return pb
+		}
+		pb, problem, err := startPub(ctx, s, me, sd)
+		if err != nil {
+			problems = append(problems, sd.Abs()+": "+err.Error()+" (tried again on the next run)")
+			failed = true
+		} else if problem != "" {
+			problems = append(problems, sd.Abs()+": "+problem)
+		}
+		pubs[sd.ID] = pb
+		if pb != nil {
+			order = append(order, pb)
+		}
+		return pb
+	}
+	upto, err := publishFacts(ctx, s, cur.Events, dirs, pubFor, now)
+	if err != nil {
+		return problems, err
+	}
+	latest.Events = upto
 	// Settings (policies, rules, duplicates decisions, tag indexes): what each synced directory's journal has in
 	// effect, against what this device holds; and the policies moved, in every one.
 	var moves []store.PolicyEvent

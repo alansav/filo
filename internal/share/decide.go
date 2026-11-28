@@ -44,11 +44,12 @@ type FileBody struct {
 	Replaces []Ref  `json:"replaces"`
 	Value    string `json:"value"`
 	Tag      string `json:"tag,omitempty"`
+	What     string `json:"what,omitempty"` // a fact line: place or deleted
 }
 
 // IsFileKind reports whether a line of kind is a file decision.
 func IsFileKind(kind string) bool {
-	return kind == KindDate || kind == KindRetention || kind == KindTag
+	return kind == KindDate || kind == KindRetention || kind == KindTag || kind == KindFact
 }
 
 // tagKey is the key a tag's decisions share: its key and folded value, so one tag in any case is one thing decided.
@@ -91,6 +92,13 @@ func readDecision(id int64, l journal.Line) (store.Decision, []store.LineRef, er
 			if _, err := store.PolicyName(b.Value); err != nil {
 				return store.Decision{}, nil, err
 			}
+		}
+	case KindFact:
+		switch b.What {
+		case "place", "deleted":
+			d.Key = "fact:" + b.What
+		default:
+			return store.Decision{}, nil, errors.New("not a fact")
 		}
 	case KindTag:
 		t, err := tags.Parse(b.Tag)
