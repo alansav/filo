@@ -253,3 +253,51 @@ func TestSlots(t *testing.T) {
 		}
 	}
 }
+
+// TestCompleteThroughSymlinks: the register keeps paths with their symlinks resolved; completion still finds them
+// when the home or current directory, or a directory typed, is reached through a symlink, a directory deleted since
+// too, and writes them as typed. A directory only the register knows ends with its /, with no space after.
+func TestCompleteThroughSymlinks(t *testing.T) {
+	ct := completionTree(t)
+	ct.write("docs/old/x.txt", "x")
+	ct.filo(ExitOK, "", false, "scan")
+	if err := os.RemoveAll(ct.in("docs/old")); err != nil {
+		t.Fatal(err)
+	}
+	ct.filo(ExitOK, "", false, "scan")
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(ct.work, link); err != nil {
+		t.Fatal(err)
+	}
+	ct.env["HOME"] = link
+	wantCompletion(t, ct, "filo roots set ~/", "files", "~/home")
+	wantCompletion(t, ct, "filo show ~/home/docs/o", "words", "~/home/docs/old/")
+	wantCompletion(t, ct, "filo show ~/home/docs/old/", "files", "~/home/docs/old/x.txt") // a file: bash adds the space
+	t.Chdir(link)
+	wantCompletion(t, ct, "filo roots set h", "files", "home")
+}
+
+// TestCompleteEdges: file names matched in their case even among tags, untag of a symlink offering its own tags,
+// --db=~ taken as the shell passes it, completion taking no --db, and ~ with no home directory.
+func TestCompleteEdges(t *testing.T) {
+	ct := completionTree(t)
+	ct.write("notes/Report.pdf", "r")
+	if err := os.Symlink("ideas.txt", ct.in("notes/link.txt")); err != nil {
+		t.Fatal(err)
+	}
+	ct.filo(ExitOK, "", false, "scan")
+	t.Chdir(ct.in("notes"))
+	wantCompletion(t, ct, "filo tag ideas.txt rep", "words")
+	wantCompletion(t, ct, "filo tag ideas.txt Rep", "words", "Report.pdf ")
+	// link.txt has no tags of its own (ideas.txt's sender: is not offered); ideas.html is the index's page.
+	wantCompletion(t, ct, "filo untag link.txt ", "words", "ideas.html ", "ideas.txt ", "link.txt ", "Report.pdf ")
+	ct.env["HOME"] = ct.root
+	wantCompletion(t, ct, "filo --db=~/x.db roots set ", "files")
+	wantCompletion(t, ct, "filo --db=~/", "files")
+	wantCompletion(t, ct, "filo export -o ~/no", "files", "~/notes/")
+	wantCompletion(t, ct, "filo export --o=~/no", "files")
+	wantCompletion(t, ct, "filo completion -", "words")
+	ct.env["HOME"] = ""
+	wantCompletion(t, ct, "filo show ~/", "files")
+	wantCompletion(t, ct, "filo show ~", "files")
+}

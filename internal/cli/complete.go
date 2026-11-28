@@ -56,9 +56,18 @@ func (e *env) completeCmd(ctx context.Context, args []string) error {
 	c := &completer{e: e, ctx: ctx, l: complete.Parse(args[0], args[1])}
 	c.home = e.getenv("HOME")
 	c.cwd, _ = os.Getwd()
+	if c.home != "" {
+		c.realHome = real(c.home)
+	}
+	c.realCwd = real(c.cwd)
 	mode, cands := "words", []cand(nil)
 	if c.l.OK && len(c.l.Args) > 0 {
 		mode, cands = c.answer()
+	}
+	if mode == filesMode && slices.ContainsFunc(cands, func(k cand) bool { return k.absent }) {
+		// bash, quoting file names, ends a directory it cannot find on disk with a space, not its /: Filo quotes and
+		// ends this answer itself.
+		mode = wordsMode
 	}
 	if c.s != nil {
 		c.s.Close()
@@ -68,10 +77,13 @@ func (e *env) completeCmd(ctx context.Context, args []string) error {
 }
 
 // cand is a candidate: the whole argument it completes to, and whether it is finished (a space follows), not a key
-// or a directory to go on typing from.
+// or a directory to go on typing from. A path is matched in its case, as file names are (only tags ignore case); an
+// absent directory is one only the register knows (missing or deleted), which bash cannot see on disk.
 type cand struct {
-	text string
-	done bool
+	text   string
+	done   bool
+	path   bool
+	absent bool
 }
 
 // The modes of an answer: files, which bash quotes itself (file names: a list shows only their last part, a
@@ -85,11 +97,14 @@ type completer struct {
 	e         *env
 	ctx       context.Context
 	l         complete.Line
-	home, cwd string
-	db        string // --db typed on the line
-	s         *store.Store
-	opened    bool
-	roots     []store.Root
+	home, cwd string // as given ($HOME, the current directory), to write candidates as typed
+	// realHome and realCwd are home and cwd with their symlinks resolved, as the register keeps paths.
+	realHome, realCwd string
+	db                string // --db typed on the line
+	dbAsIs            bool   // given as --db=PATH, which the shell passes as it is: no ~ expanded
+	s                 *store.Store
+	opened            bool
+	roots             []store.Root
 }
 
 // store opens the register read only, once; nil if it cannot be read (completion then works from the disk alone).
@@ -99,10 +114,13 @@ func (c *completer) store() *store.Store {
 	}
 	c.opened = true
 	db := c.db
-	if db == "" {
+	switch {
+	case db == "":
 		db = c.e.getenv("FILO_DB")
-	} else {
-		db = c.expand(db)
+	case !c.dbAsIs:
+		if db = c.expand(db); db == "" {
+			return nil // ~ with no home directory
+		}
 	}
 	s, err := store.OpenReadOnly(c.ctx, db)
 	if err != nil {
@@ -115,8 +133,8 @@ func (c *completer) store() *store.Store {
 	return s
 }
 
-// format keeps the candidates that start with what is typed (in any case for words, as tags match), each as what
-// replaces bash's word, and leaves out what cannot be typed.
+// format keeps the candidates that start with what is typed (a path in its case, the rest in any case, as tags
+// match), each as what replaces bash's word, and leaves out what cannot be typed.
 func (c *completer) format(mode string, cands []cand) []string {
 	var out []string
 	seen := map[string]bool{}
@@ -127,15 +145,13 @@ func (c *completer) format(mode string, cands []cand) []string {
 		seen[k.text] = true
 		var s string
 		var ok bool
-		if mode == filesMode {
-			if !strings.HasPrefix(k.text, c.l.Current) {
-				continue
-			}
+		switch {
+		case k.path && !strings.HasPrefix(k.text, c.l.Current),
+			len(k.text) < len(c.l.Current) || !strings.EqualFold(k.text[:len(c.l.Current)], c.l.Current):
+			continue
+		case mode == filesMode:
 			s, ok = c.l.Rest(k.text)
-		} else {
-			if len(k.text) < len(c.l.Current) || !strings.EqualFold(k.text[:len(c.l.Current)], c.l.Current) {
-				continue
-			}
+		default:
 			s, ok = c.l.Insert(k.text, k.done)
 		}
 		if ok {
@@ -153,12 +169,12 @@ func (c *completer) answer() (string, []cand) {
 	i := 0
 	for i < len(words) && strings.HasPrefix(words[i], "-") {
 		if v, ok := flagValue(words[i], "db"); ok {
-			c.db = v
+			c.db, c.dbAsIs = v, true
 		} else if isFlag(words[i], "db") {
 			if i+1 == len(words) {
 				return filesMode, c.pathsOf(cur, plainPaths)
 			}
-			c.db = words[i+1]
+			c.db, c.dbAsIs = words[i+1], false
 			i++
 		}
 		i++
@@ -166,15 +182,15 @@ func (c *completer) answer() (string, []cand) {
 	if i == len(words) {
 		switch {
 		case strings.HasPrefix(cur, "--db="):
-			return filesMode, prefixed("--db=", c.pathsOf(strings.TrimPrefix(cur, "--db="), plainPaths))
+			return filesMode, prefixed("--db=", c.pathsAsIs(strings.TrimPrefix(cur, "--db=")))
 		case strings.HasPrefix(cur, "-"):
-			return wordsMode, []cand{{"--db", true}}
+			return wordsMode, []cand{{text: "--db", done: true}}
 		}
 		return wordsMode, commandCands()
 	}
 	cmd, rest := words[i], words[i+1:]
 	switch cmd {
-	case "help", "-h", "--help":
+	case "help":
 		if len(rest) == 0 {
 			return wordsMode, commandCands()
 		}
@@ -189,9 +205,9 @@ func (c *completer) answer() (string, []cand) {
 
 // commandCands are the commands, for the word after filo (or after filo help).
 func commandCands() []cand {
-	out := []cand{{"help", true}}
+	out := []cand{{text: "help", done: true}}
 	for name := range commandHelps {
-		out = append(out, cand{name, true})
+		out = append(out, cand{text: name, done: true})
 	}
 	return out
 }
@@ -227,12 +243,12 @@ func (c *completer) command(cmd string, h commandHelp, rest []string) (string, [
 			f, takes := valued[name]
 			switch {
 			case name == "db" && inline:
-				c.db = value
+				c.db, c.dbAsIs = value, true
 			case takes && !inline && j+1 == len(rest):
 				pending = &f
 			case takes && !inline:
 				if name == "db" {
-					c.db = rest[j+1]
+					c.db, c.dbAsIs = rest[j+1], false
 				}
 				j++
 			}
@@ -264,19 +280,24 @@ func (c *completer) command(cmd string, h commandHelp, rest []string) (string, [
 	case !ended && strings.HasPrefix(cur, "-"):
 		if name, value, ok := strings.Cut(strings.TrimLeft(cur, "-"), "="); ok {
 			if f, takes := valued[name]; takes {
-				mode, cands := c.fetch(flagSource(cmd, sub, f), value, args)
+				k := flagSource(cmd, sub, f)
+				if k == srcPlainPaths {
+					// --o=PATH: the shell passes it as it is, so no ~ is offered.
+					return filesMode, prefixed(cur[:len(cur)-len(value)], c.pathsAsIs(value))
+				}
+				mode, cands := c.fetch(k, value, args)
 				return mode, prefixed(cur[:len(cur)-len(value)], cands)
 			}
 			return wordsMode, nil
 		}
-		return wordsMode, flagCands(apply, h)
+		return wordsMode, flagCands(cmd, apply, h)
 	case cmd == "tag" || cmd == "untag":
 		return c.tagArgs(cmd == "untag", pos)
 	}
 	mode, cands := "", []cand(nil)
 	if len(pos) == 0 {
 		for s := range subs {
-			cands = append(cands, cand{s, true})
+			cands = append(cands, cand{text: s, done: true})
 		}
 		mode = wordsMode
 	}
@@ -309,9 +330,12 @@ func flagList(h commandHelp) []complete.Flag {
 }
 
 // flagCands are the flags the usage lines that apply name (their command's whole list for "[flags]"), each by every
-// name the flag list gives it (-r and --recursive), and --db.
-func flagCands(apply []complete.Usage, h commandHelp) []cand {
-	out := []cand{{"--db", true}}
+// name the flag list gives it (-r and --recursive), and --db, which every command but completion takes.
+func flagCands(cmd string, apply []complete.Usage, h commandHelp) []cand {
+	var out []cand
+	if cmd != "completion" {
+		out = append(out, cand{text: "--db", done: true})
+	}
 	names := map[string][]complete.Flag{} // a flag's name -> every name of it
 	for _, t := range h.flags {
 		fs := complete.ParseFlag(t.Name)
@@ -327,10 +351,10 @@ func flagCands(apply []complete.Usage, h commandHelp) []cand {
 		for _, f := range fs {
 			if all, ok := names[f.Name]; ok {
 				for _, a := range all {
-					out = append(out, cand{a.Name, true})
+					out = append(out, cand{text: a.Name, done: true})
 				}
 			} else {
-				out = append(out, cand{f.Name, true})
+				out = append(out, cand{text: f.Name, done: true})
 			}
 		}
 	}
@@ -487,7 +511,7 @@ func (c *completer) fetch(k srcKind, typed string, args []string) (string, []can
 	case srcTagsAndKeys:
 		return wordsMode, c.tagCandsFor(typed, true)
 	case srcDecisions:
-		return wordsMode, []cand{{"always", true}, {"records", true}, {"counted", true}}
+		return wordsMode, []cand{{text: "always", done: true}, {text: "records", done: true}, {text: "counted", done: true}}
 	}
 	return wordsMode, nil
 }
@@ -496,7 +520,8 @@ func (c *completer) fetch(k srcKind, typed string, args []string) (string, []can
 func prefixed(before string, cands []cand) []cand {
 	out := make([]cand, len(cands))
 	for i, k := range cands {
-		out[i] = cand{before + k.text, k.done}
+		k.text = before + k.text
+		out[i] = k
 	}
 	return out
 }
@@ -525,8 +550,11 @@ const (
 // pathsOf completes typed as a path, one level at a time as bash does: the entries of the directory typed so far
 // whose names start with the rest. A hidden entry only once the name typed starts with '.'.
 func (c *completer) pathsOf(typed string, kind pathKind) []cand {
+	if strings.HasPrefix(typed, "~") && c.home == "" {
+		return nil // no home directory to expand ~ to
+	}
 	if typed == "~" {
-		return []cand{{"~/", false}}
+		return []cand{{text: "~/", path: true}}
 	}
 	if strings.HasPrefix(typed, "~") && !strings.HasPrefix(typed, "~/") {
 		return nil // ~user: not Filo's to expand
@@ -536,17 +564,20 @@ func (c *completer) pathsOf(typed string, kind pathKind) []cand {
 		dirPart, prefix = typed[:k+1], typed[k+1:]
 	}
 	dir := c.abs(dirPart)
+	if dir == "" {
+		return nil
+	}
 	var out []cand
 	seen := map[string]bool{}
-	add := func(name string, isDir bool) {
+	add := func(name string, isDir, absent bool) {
 		if seen[name] || !strings.HasPrefix(name, prefix) || (strings.HasPrefix(name, ".") && !strings.HasPrefix(prefix, ".")) {
 			return
 		}
 		seen[name] = true
 		if isDir {
-			out = append(out, cand{dirPart + name + "/", false})
+			out = append(out, cand{text: dirPart + name + "/", path: true, absent: absent})
 		} else {
-			out = append(out, cand{dirPart + name, true})
+			out = append(out, cand{text: dirPart + name, done: true, path: true})
 		}
 	}
 	entries, _ := os.ReadDir(dir)
@@ -572,18 +603,27 @@ func (c *completer) pathsOf(typed string, kind pathKind) []cand {
 				continue
 			}
 		}
-		add(name, isDir)
+		add(name, isDir, false)
 	}
 	if kind == registeredPaths {
 		if root, rel, ok := c.locate(dir); ok {
 			if es, err := c.store().EntriesIn(c.ctx, root.ID, rel, prefix, 100); err == nil {
 				for _, e := range es {
-					add(e.Name, e.Dir)
+					add(e.Name, e.Dir, e.Dir) // a directory not on disk: the disk's entries came first
 				}
 			}
 		}
 	}
 	return out
+}
+
+// pathsAsIs completes typed as a plain path the shell passes as it is (after --db= or --o=): no ~ expanded, so
+// none is offered.
+func (c *completer) pathsAsIs(typed string) []cand {
+	if strings.HasPrefix(typed, "~") {
+		return nil
+	}
+	return c.pathsOf(typed, plainPaths)
 }
 
 // abs is the directory a typed directory part names: the current directory for "", the home directory for ~/.
@@ -592,6 +632,9 @@ func (c *completer) abs(dirPart string) string {
 	case dirPart == "":
 		return c.cwd
 	case strings.HasPrefix(dirPart, "~/"):
+		if c.home == "" {
+			return ""
+		}
 		return filepath.Join(c.home, dirPart[2:])
 	case filepath.IsAbs(dirPart):
 		return filepath.Clean(dirPart)
@@ -607,13 +650,22 @@ func (c *completer) expand(p string) string {
 	return c.abs(p)
 }
 
-// real is p with its symlinks resolved, as the register keeps roots; p as it is, cleaned, if it cannot be (a
-// directory no longer on disk).
+// real is p with its symlinks resolved, as the register keeps roots: for a path no longer on disk (a directory
+// deleted since), the longest part of it still there, resolved, and the rest after it as it is.
 func real(p string) string {
-	if r, err := filepath.EvalSymlinks(p); err == nil {
-		return r
+	p = filepath.Clean(p)
+	rest := ""
+	for {
+		if r, err := filepath.EvalSymlinks(p); err == nil {
+			return filepath.Join(r, rest)
+		}
+		parent := filepath.Dir(p)
+		if parent == p {
+			return filepath.Join(p, rest)
+		}
+		rest = filepath.Join(filepath.Base(p), rest)
+		p = parent
 	}
-	return filepath.Clean(p)
 }
 
 // locate finds the root holding the directory dir and dir's path in it ('/'-separated, "" for the root).
@@ -667,25 +719,27 @@ func (c *completer) registered(cur string, paths []string) []cand {
 	var out []cand
 	for _, p := range paths {
 		var form string
+		// The register's paths have their symlinks resolved: compared with the home and current directories
+		// resolved too, and written from them as given.
 		switch {
 		case strings.HasPrefix(cur, "~"):
-			if c.home == "" || (p != c.home && !within(p, c.home)) {
+			if c.home == "" || (p != c.realHome && !within(p, c.realHome)) {
 				continue
 			}
-			form = "~" + strings.TrimPrefix(p, c.home)
+			form = "~" + strings.TrimPrefix(p, c.realHome)
 			if form == "~" {
 				form = "~/"
 			}
 		case cur == "" || filepath.IsAbs(cur):
 			form = p
 		default:
-			rel, err := filepath.Rel(c.cwd, p)
+			rel, err := filepath.Rel(c.realCwd, p)
 			if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 				continue
 			}
 			form = rel
 		}
-		out = append(out, cand{form, true})
+		out = append(out, cand{text: form, done: true, path: true})
 	}
 	return out
 }
@@ -735,7 +789,7 @@ func (c *completer) indexNames(args []string) []cand {
 	var out []cand
 	for _, ix := range ixs {
 		if ix.DirAbs() == dir {
-			out = append(out, cand{ix.Name, true})
+			out = append(out, cand{text: ix.Name, done: true})
 		}
 	}
 	return out
@@ -773,7 +827,7 @@ func (c *completer) rulePatterns(args []string) []cand {
 	var out []cand
 	for _, r := range rs {
 		if r.Dir == rel {
-			out = append(out, cand{r.Pattern, true})
+			out = append(out, cand{text: r.Pattern, done: true})
 		}
 	}
 	return out
@@ -818,7 +872,7 @@ func (c *completer) policyCands() []cand {
 	}
 	var out []cand
 	for _, p := range ps {
-		out = append(out, cand{p.Name, true})
+		out = append(out, cand{text: p.Name, done: true})
 	}
 	return out
 }
@@ -846,11 +900,11 @@ func tagCands(ts []tags.Tag, typed string, keys bool) []cand {
 	if hasKey && tags.ValidKey(strings.ToLower(key)) {
 		k := strings.ToLower(key)
 		if keys {
-			out = append(out, cand{k + ":", true})
+			out = append(out, cand{text: k + ":", done: true})
 		}
 		for _, t := range ts {
 			if t.Key == k {
-				out = append(out, cand{t.String(), true})
+				out = append(out, cand{text: t.String(), done: true})
 			}
 		}
 		return out
@@ -858,10 +912,10 @@ func tagCands(ts []tags.Tag, typed string, keys bool) []cand {
 	seen := map[string]bool{}
 	for _, t := range ts {
 		if t.Key == "" {
-			out = append(out, cand{t.Value, true})
+			out = append(out, cand{text: t.Value, done: true})
 		} else if !seen[t.Key] {
 			seen[t.Key] = true
-			out = append(out, cand{t.Key + ":", keys})
+			out = append(out, cand{text: t.Key + ":", done: keys})
 		}
 	}
 	return out
@@ -898,7 +952,7 @@ func (c *completer) tagsOf(paths []string) []tags.Tag {
 	}
 	var ids []int64
 	for _, p := range paths {
-		abs := real(c.expand(p))
+		abs := c.expand(p) // its directory is resolved (locate), the file itself not: a symlink is its own file
 		root, rel, ok := c.locate(filepath.Dir(abs))
 		if !ok {
 			continue

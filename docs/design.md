@@ -2142,7 +2142,14 @@ Agreed 2026-11-20, designed 2026-11-28 (roadmap 36). Tab completes Filo's comman
   only their last part in a list, adds `/` after a directory and a space after a file) or `words` (Filo has quoted
   them, `sender:British\ Gas`, or inside a quote already opened, and ends a finished word with a space; a key,
   `sender:`, and a directory, `bills/`, end without one, so typing goes on). A candidate holding a control character
-  is left out: it cannot be typed, and would break the line protocol.
+  is left out: it cannot be typed, and would break the line protocol; so is one holding `!` inside an open double
+  quote, where an interactive bash expands it as history and no backslash stops it. An answer with a directory only
+  the register knows (missing, or deleted) is in words mode: in files mode bash, not finding it on disk, would end
+  it with a space, not its `/`. File names are matched in their case, tags in any case. A path is read with its
+  symlinks resolved, as the register keeps paths (a directory deleted since: the part still on disk resolved), and
+  written as typed, from `~/` or the current directory even when those are reached through a symlink. `--db=PATH`
+  and `-o=PATH` are taken as the shell passes them, with no `~` expanded (none is offered there); `~` offers nothing
+  when there is no home directory.
 - **The help is the list of flags.** Completion reads `internal/cli/help.go`: each usage line says which subcommand
   takes which flags and arguments (`set FILE... [flags]` and `get FILE... --FIELD...` take their command's whole flag
   list), and the placeholder words say what to complete. `TestHelpListsTheRealFlags` captures the flags each command
