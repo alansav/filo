@@ -355,6 +355,15 @@ Agreed with the person on 2026-11-20. Tab completes Filo's commands, flags and a
   from the register merged with the disk (so missing files, and files deleted by Filo, complete; the typed word,
   relative or starting with `~`, is turned into a root and a path in it, as `filo show` does), policy names, rule patterns,
   and tag names (tags are built).
+- **Tags, decided 2026-11-28.** (1) The script stays a few lines: it hands `filo __complete` the whole line and the
+  cursor position, and Filo works out the current word (colons and quotes included, so bash's split at `:` never
+  mangles `sender:Bri`) and returns only what bash should insert; no need for the `bash-completion` package.
+  (2) Filo escapes the candidates itself (`sender:British\ Gas`), or completes inside a quote already opened;
+  matching ignores case and offers the spelling in use. (3) In two steps: a key completes to `key:` with no space
+  after it, then that key's values in use; bare tags beside the keys; all from the register. (4) `filo tag
+  FILE... TAG...` follows the command's rule (a word on disk is a file, the first that is not starts the tags):
+  files and tags while every earlier word is a file, only tags after the first tag; `untag` offers only the tags the
+  files named have, and `key:` for each of their keys.
 - Bash only at first (zsh can load bash completions). No framework: Cobra would be a new dependency and a rewrite of
   every command's parsing.
 
