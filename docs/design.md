@@ -3,7 +3,7 @@
 **The present.** Of three documents, this is the present: `design.md` (what Filo is), `roadmap.md` (the future:
 what it is not yet) and `history.md` (the past: how it got here).
 
-Filo as built: schema version 14. Last updated: 2026-11-28.
+Filo as built: schema version 15. Last updated: 2026-11-28.
 
 This file records what Filo does and why, as built. Work not done yet, ideas, open questions and ideas rejected are
 in `roadmap.md`, where designs are worked out; a design moves here, in its own commit, when work on it starts (see
@@ -71,7 +71,7 @@ Principles. These are not negotiable:
   2026-11-28 there was no device column, because nothing left the device).
 - Driver: `modernc.org/sqlite` (pure Go, no CGO, plain `database/sql`), chosen 2026-11-11 at v1.62.0.
 - `meta.schema_version` must equal the build's version. An older database is upgraded when it is opened, one version
-  at a time, each step in its own transaction with the version bump (from any version from 1 to 13); a newer version, or an older
+  at a time, each step in its own transaction with the version bump (from any version from 1 to 14); a newer version, or an older
   one with no migration, is refused, as is a SQLite file without Filo's `meta` keys. WAL mode is set only after those checks pass, so
   a foreign database is never modified.
 - One writer at a time: an `flock` on `<db>.lock`, taken before the database is opened. The kernel drops it if Filo
@@ -2771,7 +2771,7 @@ $ filo roots add
 filo: roots add takes exactly one DIR (see filo help roots)
 ```
 
-## 3. Data model (schema version 14)
+## 3. Data model (schema version 15)
 
 The register as `internal/store/schema.go` creates it (`schemaSQL`), with the meaning of each column. Keep the
 interval history and the partial unique index.
@@ -2949,6 +2949,41 @@ CREATE TABLE tag_index_files (          -- every file and directory Filo wrote i
     path TEXT NOT NULL,                 -- relative to the index's directory: 'index.html', '.index/_/index.html'
     hash TEXT,                          -- the file's SHA-256 as written; NULL = a directory
     PRIMARY KEY (index_id, path));
+
+-- Sharing decisions between devices (schema 15).
+CREATE TABLE synced_dirs (              -- the synced directories this device knows, by the ID in their mark
+    id INTEGER PRIMARY KEY,
+    sync_id TEXT NOT NULL UNIQUE,
+    root_id INTEGER NOT NULL REFERENCES roots(id), dir TEXT NOT NULL,  -- where it is here ('' = the root)
+    state TEXT NOT NULL,                -- 'joined', or 'ignored' (a mark the person chose not to join)
+    mark BLOB,                          -- the mark's line, to write back if it is lost
+    added_utc TEXT NOT NULL);
+
+CREATE TABLE found_marks (              -- marks the scans saw, neither joined nor ignored; written only when they change
+    root_id INTEGER NOT NULL REFERENCES roots(id), dir TEXT NOT NULL,
+    sync_id TEXT,                       -- NULL: a .filo with no readable mark (problem says why)
+    problem TEXT, found_utc TEXT NOT NULL,
+    PRIMARY KEY (root_id, dir));
+
+CREATE TABLE devices (                  -- every device met in a journal: key and name from its line 1
+    dev TEXT PRIMARY KEY, key TEXT NOT NULL, name TEXT NOT NULL, created_utc TEXT,
+    trusted_utc TEXT,                   -- NULL = not trusted: its lines are not accepted
+    vouched_by TEXT,                    -- the device whose trust line made it trusted; NULL = at a join
+    retired_seq INTEGER, retired_by TEXT,  -- retired: its lines after retired_seq are refused
+    snoozed_until TEXT);                -- the question whether to retire it waits until then
+
+CREATE TABLE journals (                 -- what this device has read of each journal (its own too)
+    synced_id INTEGER NOT NULL REFERENCES synced_dirs(id), dev TEXT NOT NULL,
+    seq INTEGER NOT NULL DEFAULT 0,     -- the last line accepted
+    byte_offset INTEGER NOT NULL DEFAULT 0,  -- just after it in the file
+    problem TEXT,                       -- why reading stopped, if it did
+    seen_utc TEXT, applied TEXT,        -- from its status file: last ran there; highest line applied per journal (JSON)
+    PRIMARY KEY (synced_id, dev));
+
+CREATE TABLE journal_lines (            -- every line accepted, byte for byte, so a lost journal can be written back
+    synced_id INTEGER NOT NULL REFERENCES synced_dirs(id), dev TEXT NOT NULL, seq INTEGER NOT NULL,
+    raw BLOB NOT NULL,
+    PRIMARY KEY (synced_id, dev, seq));
 ```
 
 "Present" means a file has a path interval with `valid_to_scan IS NULL`; there is no status column. "New" means

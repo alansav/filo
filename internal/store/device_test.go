@@ -53,7 +53,7 @@ func TestMigrateFromV13MakesADevice(t *testing.T) {
 	ctx := context.Background()
 	db := tempDB(t)
 	mustClose(t, mustOpen(t, Options{DBPath: db}))
-	rawExec(t, db, `DELETE FROM meta WHERE key IN ('device_id', 'device_name', 'device_key')`,
+	rawExec(t, db, dropSynced, `DELETE FROM meta WHERE key IN ('device_id', 'device_name', 'device_key')`,
 		`UPDATE meta SET value = '13' WHERE key = 'schema_version'`)
 	s := mustOpen(t, Options{DBPath: db})
 	defer mustClose(t, s)
@@ -134,7 +134,8 @@ func TestNewDeviceIdentity(t *testing.T) {
 func TestMigrateRefusesAPartialDevice(t *testing.T) {
 	db := tempDB(t)
 	mustClose(t, mustOpen(t, Options{DBPath: db}))
-	rawExec(t, db, `DELETE FROM meta WHERE key = 'device_key'`, `UPDATE meta SET value = '13' WHERE key = 'schema_version'`)
+	rawExec(t, db, dropSynced, `DELETE FROM meta WHERE key = 'device_key'`,
+		`UPDATE meta SET value = '13' WHERE key = 'schema_version'`)
 	if _, err := Open(context.Background(), Options{DBPath: db}); !errors.Is(err, ErrDevice) {
 		t.Fatalf("Open with part of a device identity = %v, want ErrDevice", err)
 	}
@@ -146,7 +147,7 @@ func TestMigrateKeepsAWholeDevice(t *testing.T) {
 	s := mustOpen(t, Options{DBPath: db})
 	before, _ := s.Device(ctx)
 	mustClose(t, s)
-	rawExec(t, db, `UPDATE meta SET value = '13' WHERE key = 'schema_version'`)
+	rawExec(t, db, dropSynced, `UPDATE meta SET value = '13' WHERE key = 'schema_version'`)
 	s = mustOpen(t, Options{DBPath: db})
 	defer mustClose(t, s)
 	after, err := s.Device(ctx)

@@ -3,7 +3,7 @@ package store
 // SchemaVersion is the schema this build reads and writes. It is stored in meta.schema_version when a database is
 // created. An older database with a migration in migrations is upgraded when it is opened; any other version is
 // refused.
-const SchemaVersion = 14
+const SchemaVersion = 15
 
 // Meta keys.
 const (
@@ -90,7 +90,7 @@ CREATE TABLE events (
     other_path TEXT,
     detail TEXT
 );
-` + reviewSQL + duplicatesSQL + policiesSQL + rulesSQL + tagsSQL + tagIndexSQL
+` + reviewSQL + duplicatesSQL + policiesSQL + rulesSQL + tagsSQL + tagIndexSQL + syncedSQL
 
 // reviewSQL is the export and review tables, as of schema version 13.
 const reviewSQL = `
@@ -244,7 +244,72 @@ ALTER TABLE export_rows ADD COLUMN name TEXT;
 	// 13 -> 14: the device's identity in meta (docs/design.md, Sharing decisions between devices). No SQL: migrate
 	// makes the random ID and key (insertDevice).
 	13: ``,
+	// 14 -> 15: synced directories, the devices sharing them, and their journals (docs/design.md, Sharing decisions
+	// between devices). Only new tables: no directory is synced yet.
+	14: syncedSQL,
 }
+
+// syncedSQL is the synced directories, added in schema version 15. A synced directory is known by the ID in its mark
+// (sync_id); on this device it is a directory of a root, joined, or a mark the person chose to ignore (root_id and dir
+// then say where it was found). mark is the mark's line as read or written, to write back if it is lost.
+// found_marks are the marks the scans have seen that are neither joined nor ignored (sync_id NULL: a .filo with no
+// readable mark, problem says why). devices are every device met in a journal, by ID, with its key and name from its
+// line 1; trusted_utc is set when the person trusted it at a join, or a trusted device vouched for it (vouched_by);
+// retired_seq, when a trusted device retired it: its lines after that one are refused. journals is what this device
+// has read of each journal of each synced directory (its own too): up to which line, at which byte, why reading
+// stopped if it did, when its status file says it last ran there. journal_lines are those lines, byte for byte as
+// read (or written), so a journal lost or damaged can be written back.
+const syncedSQL = `
+CREATE TABLE synced_dirs (
+    id INTEGER PRIMARY KEY,
+    sync_id TEXT NOT NULL UNIQUE,
+    root_id INTEGER NOT NULL REFERENCES roots(id),
+    dir TEXT NOT NULL,
+    state TEXT NOT NULL,                    -- 'joined' or 'ignored'
+    mark BLOB,
+    added_utc TEXT NOT NULL
+);
+
+CREATE TABLE found_marks (
+    root_id INTEGER NOT NULL REFERENCES roots(id),
+    dir TEXT NOT NULL,
+    sync_id TEXT,
+    problem TEXT,
+    found_utc TEXT NOT NULL,
+    PRIMARY KEY (root_id, dir)
+);
+
+CREATE TABLE devices (
+    dev TEXT PRIMARY KEY,
+    key TEXT NOT NULL,
+    name TEXT NOT NULL,
+    created_utc TEXT,
+    trusted_utc TEXT,
+    vouched_by TEXT,
+    retired_seq INTEGER,
+    retired_by TEXT,
+    snoozed_until TEXT
+);
+
+CREATE TABLE journals (
+    synced_id INTEGER NOT NULL REFERENCES synced_dirs(id),
+    dev TEXT NOT NULL,
+    seq INTEGER NOT NULL DEFAULT 0,
+    byte_offset INTEGER NOT NULL DEFAULT 0,
+    problem TEXT,
+    seen_utc TEXT,
+    applied TEXT,                           -- its status file's highest line applied per journal, JSON
+    PRIMARY KEY (synced_id, dev)
+);
+
+CREATE TABLE journal_lines (
+    synced_id INTEGER NOT NULL REFERENCES synced_dirs(id),
+    dev TEXT NOT NULL,
+    seq INTEGER NOT NULL,
+    raw BLOB NOT NULL,
+    PRIMARY KEY (synced_id, dev, seq)
+);
+`
 
 // tagIndexSQL is the tag index pages, added in schema version 12. An index is declared on a directory of a root
 // ('/'-separated, relative to the root, the empty path for the root itself) and named: its pages are NAME.html and
