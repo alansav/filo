@@ -117,11 +117,11 @@ func TestPublishMovesTheCursorsOnce(t *testing.T) {
 	err := s.Publish(ctx, []SyncedChange{{SyncedID: id, Journals: []JournalUpdate{{Dev: "me",
 		Lines: []JournalLine{{1, []byte("l1")}}, Seq: 1, Offset: 3}}, Decisions: []Decision{{Dev: "me", Seq: 1, FID: "f",
 		Key: "date", Value: "2026-01-01", Applied: true}}, Replaces: [][]LineRef{nil}, Shared: map[string]int64{"f": 0}}},
-		PublishCursors{Reviews: 7, TagChanges: 3, PolicyChanges: 2})
+		PublishCursors{Reviews: 7, TagChanges: 3, PolicyChanges: 2, Events: 5})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cur, _ := s.Cursors(ctx); cur != (PublishCursors{7, 3, 2}) {
+	if cur, _ := s.Cursors(ctx); cur != (PublishCursors{7, 3, 2, 5}) {
 		t.Fatalf("cursors = %+v", cur)
 	}
 	if _, known, _ := s.SharedFile(ctx, id, "f"); !known {
@@ -366,5 +366,55 @@ func TestSeen(t *testing.T) {
 	r, _ := s.Seen(ctx, 3)
 	if p["policy:bills"] != "10y" || len(p) != 1 || r["rule:x"] != "keep *" {
 		t.Fatalf("Seen = %v, %v", p, r)
+	}
+}
+
+func TestFileEventsAndFacts(t *testing.T) {
+	ctx := context.Background()
+	e := newReviewEnv(t)
+	e.apply(Changes{New: []NewFile{f("Sync/a.pdf", "ha"), f("Sync/b.pdf", "hb")}})
+	k := e.known()
+	cur, _ := e.s.Cursors(ctx)
+	// a moves, b is edited: events recorded by the scan.
+	scan := e.apply(Changes{Close: []int64{k["Sync/a.pdf"].PathID},
+		Open:    []OpenPath{{FileID: k["Sync/a.pdf"].FileID, Path: "Sync/x/a.pdf"}},
+		Updates: []FileUpdate{{FileID: k["Sync/b.pdf"].FileID, Size: 2, MtimeNS: 2, Hash: "hb2"}},
+		Events: []Event{{Kind: "moved", FileID: k["Sync/a.pdf"].FileID, Path: "Sync/x/a.pdf", OtherPath: "Sync/a.pdf"},
+			{Kind: "changed", FileID: k["Sync/b.pdf"].FileID, Path: "Sync/b.pdf"}}})
+	evs, err := e.s.FileEventsSince(ctx, cur.Events)
+	if err != nil || len(evs) != 2 || evs[0].Kind != "moved" || evs[0].Path != "Sync/x/a.pdf" || evs[1].Kind != "changed" {
+		t.Fatalf("FileEventsSince = %+v, %v", evs, err)
+	}
+	if ok, _ := e.s.SeenSince(ctx, k["Sync/b.pdf"].FileID, scan); ok {
+		t.Fatal("an edit seen on one scan counts as seen twice")
+	}
+	e.apply(Changes{})
+	if ok, _ := e.s.SeenSince(ctx, k["Sync/b.pdf"].FileID, scan); !ok {
+		t.Fatal("an edit seen unchanged by the next scan is not")
+	}
+	// A shared ID moved onto a new file, its decisions to apply again.
+	sid, _ := e.s.ApplySynced(ctx, SyncedChange{Add: &SyncedDir{SyncID: "s", RootID: e.root.ID, Dir: "Sync",
+		State: SyncedJoined, AddedUTC: "t"}, Shared: map[string]int64{"f": k["Sync/a.pdf"].FileID},
+		Decisions: []Decision{{Dev: "x", Seq: 1, FID: "f", Key: "retention", Value: "7y", Applied: true}},
+		Replaces:  [][]LineRef{nil}})
+	if ok, err := e.s.RemapShared(ctx, sid, "f", k["Sync/b.pdf"].FileID); err != nil || !ok {
+		t.Fatalf("RemapShared = %v, %v", ok, err)
+	}
+	if got, _, _ := e.s.SharedFile(ctx, sid, "f"); got != k["Sync/b.pdf"].FileID {
+		t.Fatal("the shared ID was not moved")
+	}
+	if un, _ := e.s.Unapplied(ctx, sid); len(un) != 1 {
+		t.Fatalf("decisions to apply again: %+v", un)
+	}
+	if ok, _ := e.s.RemapShared(ctx, sid, "g", k["Sync/b.pdf"].FileID); ok {
+		t.Fatal("a file given a second shared ID")
+	}
+	// Deleted elsewhere: only a file missing here.
+	if ok, _ := e.s.MarkDeletedElsewhere(ctx, k["Sync/b.pdf"].FileID, time.Now()); ok {
+		t.Fatal("a present file was marked deleted")
+	}
+	e.apply(Changes{Close: []int64{e.known()["Sync/b.pdf"].PathID}})
+	if ok, err := e.s.MarkDeletedElsewhere(ctx, k["Sync/b.pdf"].FileID, time.Now()); err != nil || !ok {
+		t.Fatalf("MarkDeletedElsewhere = %v, %v", ok, err)
 	}
 }

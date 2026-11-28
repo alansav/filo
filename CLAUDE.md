@@ -16,7 +16,7 @@ done, and `design.md` only what exists.
 
 ## Current state
 
-Everything `docs/design.md` describes is built (schema 18 on branch `sync`: item 9's device identity, synced directories and shared decisions; schema 13
+Everything `docs/design.md` describes is built (schema 19 on branch `sync`: item 9's device identity, synced directories and shared decisions; schema 13
 on `main`): scan,
 register and report; retention through the CSV (`filo export`, `filo update`); `filo delete [DIR]
 [-y]`, which deletes a file only after it is re-read and found unchanged; register snapshots; duplicates (`filo delete

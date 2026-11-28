@@ -3,7 +3,7 @@ package store
 // SchemaVersion is the schema this build reads and writes. It is stored in meta.schema_version when a database is
 // created. An older database with a migration in migrations is upgraded when it is opened; any other version is
 // refused.
-const SchemaVersion = 18
+const SchemaVersion = 19
 
 // Meta keys.
 const (
@@ -258,6 +258,9 @@ ALTER TABLE export_rows ADD COLUMN name TEXT;
 	// 17 -> 18: the settings values this device last wrote or applied (docs/design.md, Sharing decisions between
 	// devices). A new table only.
 	17: seenSQL,
+	// 18 -> 19: the publish cursor for scan and delete events (docs/design.md, Sharing decisions between devices,
+	// identity facts), set past every event so far by migrate. No SQL.
+	18: ``,
 }
 
 // seenSQL is the settings seen, added in schema version 18: for each setting (a policy: synced_id 0, as a policy is

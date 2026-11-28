@@ -417,8 +417,8 @@ func migrate(ctx context.Context, db *sql.DB, v int) (string, error) {
 			return fail(err)
 		}
 	}
-	if v == 15 || v == 16 {
-		if err := insertCursors(ctx, tx); err != nil { // INSERT OR IGNORE: 16 adds only the policy cursor
+	if v == 15 || v == 16 || v == 18 {
+		if err := insertCursors(ctx, tx); err != nil { // INSERT OR IGNORE: 16 and 18 add only their cursor
 			return fail(err)
 		}
 	}

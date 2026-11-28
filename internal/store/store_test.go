@@ -661,7 +661,7 @@ DROP TABLE found_marks; DROP TABLE synced_dirs;`
 
 // dropWriters removes what schema 17 added, for a test that rebuilds an older one.
 const dropWriters = `DROP TABLE settings_seen; ALTER TABLE tag_indexes DROP COLUMN writer; ALTER TABLE policy_changes DROP COLUMN command;
-DELETE FROM meta WHERE key = 'publish_policy_changes_id';`
+DELETE FROM meta WHERE key IN ('publish_policy_changes_id', 'publish_events_id');`
 
 // dropDecisions removes the shared file decisions of schema 16 (and what came after), for a test that rebuilds an
 // older one.

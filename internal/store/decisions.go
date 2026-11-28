@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"time"
 )
 
 // File decisions shared between devices (docs/design.md, Sharing decisions between devices): every file decision
@@ -235,6 +236,7 @@ func insertCursors(ctx context.Context, tx *sql.Tx) error {
 		{metaPublishReviews, `SELECT coalesce(max(id), 0) FROM reviews`},
 		{metaPublishTags, `SELECT coalesce(max(id), 0) FROM tag_changes`},
 		{metaPublishPolicies, `SELECT coalesce(max(id), 0) FROM policy_changes`},
+		{metaPublishEvents, `SELECT coalesce(max(id), 0) FROM events`},
 	} {
 		var n int64
 		if err := tx.QueryRowContext(ctx, q.max).Scan(&n); err != nil {
@@ -292,7 +294,10 @@ func (s *Store) Latest(ctx context.Context) (PublishCursors, error) {
 	if err := s.db.QueryRowContext(ctx, `SELECT coalesce(max(id), 0) FROM tag_changes`).Scan(&c.TagChanges); err != nil {
 		return c, err
 	}
-	err := s.db.QueryRowContext(ctx, `SELECT coalesce(max(id), 0) FROM policy_changes`).Scan(&c.PolicyChanges)
+	if err := s.db.QueryRowContext(ctx, `SELECT coalesce(max(id), 0) FROM policy_changes`).Scan(&c.PolicyChanges); err != nil {
+		return c, err
+	}
+	err := s.db.QueryRowContext(ctx, `SELECT coalesce(max(id), 0) FROM events`).Scan(&c.Events)
 	return c, err
 }
 
@@ -603,4 +608,74 @@ func (s *Store) SetSeen(ctx context.Context, id int64, key, value string) error 
 	_, err = s.exec(ctx, `INSERT INTO settings_seen (synced_id, key, value) VALUES (?, ?, ?)
 		ON CONFLICT (synced_id, key) DO UPDATE SET value = excluded.value`, id, key, value)
 	return err
+}
+
+// FileEvent is a scan's or a delete run's event about one file: moved (renamed, moved, returned), changed (its
+// content edited), or deleted by Filo.
+type FileEvent struct {
+	ID     int64
+	ScanID int64
+	Kind   string
+	FileID int64
+	Path   string // where it is (moved: to), relative to its root
+}
+
+// FileEventsSince returns the moved, changed and deleted events after event after, in order.
+func (s *Store) FileEventsSince(ctx context.Context, after int64) ([]FileEvent, error) {
+	return queryAll(ctx, s.db, func(rows *sql.Rows) (FileEvent, error) {
+		var e FileEvent
+		return e, rows.Scan(&e.ID, &e.ScanID, &e.Kind, &e.FileID, &e.Path)
+	}, `SELECT id, scan_id, kind, file_id, coalesce(path, '') FROM events WHERE id > ? AND file_id IS NOT NULL
+		AND kind IN ('moved', 'changed', ?) ORDER BY id`, after, EventDeleted)
+}
+
+// SeenSince reports whether a scan finished after scan scanID covered the file's root and found it unchanged: an
+// edit seen on two scans in a row, so not a file still being written.
+func (s *Store) SeenSince(ctx context.Context, fileID, scanID int64) (bool, error) {
+	var n int
+	err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM scans sc JOIN paths p ON p.file_id = ? AND
+		p.valid_to_scan IS NULL AND p.root_id = sc.root_id
+		WHERE sc.id > ? AND sc.kind = 'scan' AND sc.finished_utc IS NOT NULL
+		AND (sc.scope = '' OR p.path = sc.scope OR substr(p.path, 1, length(sc.scope) + 1) = sc.scope || '/')
+		AND NOT EXISTS (SELECT 1 FROM events e WHERE e.scan_id = sc.id AND e.file_id = ? AND e.kind = 'changed')`,
+		fileID, scanID, fileID).Scan(&n)
+	return n > 0, err
+}
+
+// RemapShared makes shared ID fid of synced directory id the file fileID, which has none (another device's scan
+// found the file moved or edited where this one saw a missing file and a new one), and makes its current decisions
+// apply again, to it. It reports whether it did.
+func (s *Store) RemapShared(ctx context.Context, id int64, fid string, fileID int64) (bool, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+	var other int
+	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM shared_files WHERE synced_id = ? AND file_id = ?`, id,
+		fileID).Scan(&other); err != nil || other > 0 {
+		return false, err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO shared_files (synced_id, fid, file_id) VALUES (?, ?, ?)
+		ON CONFLICT (synced_id, fid) DO UPDATE SET file_id = excluded.file_id`, id, fid, fileID); err != nil {
+		return false, err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE decisions SET applied = 0 WHERE synced_id = ? AND fid = ? AND
+		current = 1 AND key NOT LIKE 'fact:%'`, id, fid); err != nil {
+		return false, err
+	}
+	return true, s.commit(tx)
+}
+
+// MarkDeletedElsewhere records that a file missing here was deleted by Filo on another device (named in detail):
+// its row is closed as deleted, so it is never "missing", and a copy restored later is a new file. A file present,
+// or deleted already, is left alone; it reports whether it marked it.
+func (s *Store) MarkDeletedElsewhere(ctx context.Context, fileID int64, now time.Time) (bool, error) {
+	res, err := s.exec(ctx, `UPDATE files SET deleted_utc = ? WHERE id = ? AND deleted_utc IS NULL AND NOT EXISTS (
+		SELECT 1 FROM paths WHERE file_id = ? AND valid_to_scan IS NULL)`, utc(now), fileID, fileID)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n == 1, err
 }
