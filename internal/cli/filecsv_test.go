@@ -285,8 +285,6 @@ func TestRenameRowNotes(t *testing.T) {
 		{"d/Britsh.pdf", "British.pdf", ""},
 		{"d/notes.txt ", "notes.txt", "only spaces changed"},
 		{"tax/2023 return.pdf", "2023 return.pd", "extension changed"},
-		{".bashrc", ".bashrc_old", ""}, // a hidden name's dot is not an extension
-		{".notes.txt", ".notes.md", "extension changed"},
 		{"top.txt", "top.md", "extension changed"},
 		{"d/0012", "12", "looks reformatted by a spreadsheet"},
 		{"d/1E5", "100000", "looks reformatted by a spreadsheet"},

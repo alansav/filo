@@ -402,8 +402,8 @@ func dirOf(rel string) string {
 // file by its name cell"): all digits (0012 becomes 12), a number (1E5, 1.50), or a short date (1-2, 3.4.25).
 var reformattable = regexp.MustCompile(`^(\d+|\d*\.\d+|\d+(\.\d+)?[eE][+-]?\d+|\d{1,4}[-.]\d{1,2}([-.]\d{1,4})?)$`)
 
-// extension is a name's extension, a hidden name's leading dot not counted as one (.bashrc has none).
-func extension(name string) string { return pathpkg.Ext(strings.TrimPrefix(name, ".")) }
+// extension is a name's extension (a renamed name is never hidden, so a leading dot never counts as one).
+func extension(name string) string { return pathpkg.Ext(name) }
 
 // renameResult is what making an update's renames did: how many were made, those not made with why (skipped: the
 // disk changed, so a scan and a new export put it right; failed: something a scan does not change), and, if the run

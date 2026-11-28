@@ -175,9 +175,9 @@ filo delete                           # list the files past their retention, ask
 The CSV has one row per file: `id, export, directory, name, size, modified, file_date, retention, keep_until, tags`.
 Sort and filter it however you like. The same CSV sets tags (see [Tags](#tags)), and renames or moves files: a
 changed `name` cell renames the file in its directory, and a changed `directory` cell (the full path of a directory
-in the same root) moves it there, making the directories it needs. Filo never replaces another file, never renames,
-moves or hides a hidden file (or one in a hidden directory) and never hides one, and renames or moves a file only if
-it is still the one the last scan saw.
+in the same root) moves it there, making the directories it needs. Filo never replaces another file, never renames
+or moves a hidden file (or one in a hidden directory), never hides one, and renames or moves a file only if it is
+still the one the last scan saw.
 
 - **`retention`** is how long to keep the file:
   - a period counted from `file_date`: `7y`, `18m`, `6w` or `30d`;
