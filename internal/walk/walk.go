@@ -63,6 +63,10 @@ type Result struct {
 	Problems   []Problem
 	FailedDirs []string // directories that could not be listed, or only partly
 	OtherFS    []string // directories skipped because they are on another filesystem
+	// FiloDirs are the directories walked that hold a .filo directory ('/'-separated, relative to the root; "" for
+	// the root itself): where a synced directory's mark may be (docs/design.md, Sharing decisions between devices).
+	// The .filo directory itself is never walked.
+	FiloDirs []string
 
 	scope   string
 	listed  map[string]bool // directories listed completely
@@ -79,8 +83,12 @@ const DeletingPrefix = ".filo-delete-"
 var errDeleting = errors.New("left behind by filo delete: it holds a file filo was deleting; look inside, then " +
 	"move the file back or delete it yourself")
 
+// filoDir is the directory at the top of a synced directory that holds Filo's own files (package journal): skipped
+// everywhere, and noted (Result.FiloDirs).
+const filoDir = ".filo"
+
 // Names skipped everywhere, whatever the options.
-var noise = map[string]bool{".filo": true, "node_modules": true, "__pycache__": true}
+var noise = map[string]bool{filoDir: true, "node_modules": true, "__pycache__": true}
 
 // statID is fsid.Stat, swappable in tests to simulate other filesystems and bind mounts.
 var statID = fsid.Stat
@@ -261,6 +269,9 @@ func (w *walker) dir(ctx context.Context, rel, abs string, d *os.Root) error {
 			w.res.skipped[childRel] = true
 			w.problem(childRel, errDeleting)
 			continue
+		}
+		if name == filoDir && de.IsDir() && !w.exclude[childAbs] {
+			w.res.FiloDirs = append(w.res.FiloDirs, rel)
 		}
 		if w.skipName(name) || w.exclude[childAbs] {
 			w.res.skipped[childRel] = true
