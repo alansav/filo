@@ -106,6 +106,7 @@ type Summary struct {
 	OtherFS       []string
 	FailedDirs    []string
 	Rules         store.RuleRun // what the directory rules did: the policies they set, and the ties
+	FiloDirs      []string      // the directories walked that hold .filo: where a synced directory's mark may be
 }
 
 type newItem struct {
@@ -177,7 +178,8 @@ func Scan(ctx context.Context, s *store.Store, opt Options) (Summary, error) {
 
 	var ch store.Changes
 	event := func(e store.Event) { ch.Events = append(ch.Events, e) }
-	sum := Summary{Root: root.Path, Scope: scope, Seen: len(res.Entries), OtherFS: res.OtherFS, FailedDirs: res.FailedDirs}
+	sum := Summary{Root: root.Path, Scope: scope, Seen: len(res.Entries), OtherFS: res.OtherFS, FailedDirs: res.FailedDirs,
+		FiloDirs: res.FiloDirs}
 
 	// Classify by path.
 	var news []newItem

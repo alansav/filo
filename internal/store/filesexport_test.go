@@ -2,6 +2,7 @@ package store
 
 import (
 	"maps"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -85,8 +86,8 @@ func TestMigrateFromV12(t *testing.T) {
 	rawExec(t, db, dropExportNames, `UPDATE meta SET value = '12' WHERE key = 'schema_version'`)
 	s := mustOpen(t, Options{DBPath: db})
 	defer mustClose(t, s)
-	if v := readMeta(t, s)[metaSchemaVersion]; v != "13" {
-		t.Fatalf("schema_version = %s after upgrade, want 13", v)
+	if v := readMeta(t, s)[metaSchemaVersion]; v != strconv.Itoa(SchemaVersion) {
+		t.Fatalf("schema_version = %s after upgrade, want %d", v, SchemaVersion)
 	}
 	if _, err := s.db.Exec(`SELECT name FROM export_rows`); err != nil {
 		t.Errorf("export_rows.name after the upgrade: %v", err)

@@ -60,6 +60,18 @@ var overview = struct {
 		{Name: "indexes add [DIR] [--name NAME]", Text: "write a directory's tag index, kept up to date from then on"},
 		{Name: "indexes remove [DIR] [--name NAME]", Text: "stop keeping an index, and remove its pages"},
 		{Name: "indexes refresh [DIR] [--name NAME]", Text: "write an index's pages again"},
+		{Name: "indexes take [DIR] [--name NAME] [-y]", Text: "write a synced directory's index from this device"},
+		{Name: "device", Text: "this device's name, ID and key fingerprint, for sharing decisions between devices"},
+		{Name: "device name NAME", Text: "rename this device"},
+		{Name: "device new [-y]", Text: "give a register copied from another machine a new device ID and key"},
+		{Name: "synced", Text: "list the synced directories, and the marks of others found by the scans"},
+		{Name: "synced add DIR [-y]", Text: "mark DIR as a synced directory, or join one marked on another device"},
+		{Name: "synced remove DIR [-y]", Text: "stop sharing decisions in a synced directory"},
+		{Name: "synced ignore DIR", Text: "stop reporting a synced directory found at DIR"},
+		{Name: "devices [DIR]", Text: "list the devices sharing decisions in each synced directory"},
+		{Name: "devices trust DEVICE [-y]", Text: "trust a device met in a journal, and vouch for it"},
+		{Name: "devices retire DEVICE [-y]", Text: "retire a device that is gone: its later decisions are refused"},
+		{Name: "devices restore DEVICE [-y]", Text: "write back a lost journal of a device, from this register"},
 		{Name: "completion bash", Text: "print the script that makes Tab complete filo's commands, files and tags"},
 		{Name: "help [COMMAND]", Text: "this overview, or a command's flags and rules"},
 	},
@@ -325,7 +337,8 @@ var commandHelps = map[string]commandHelp{
 	},
 	"indexes": {
 		usage: []string{"filo indexes", "filo indexes add [DIR] [--name NAME]",
-			"filo indexes remove [DIR] [--name NAME] [-y]", "filo indexes refresh [DIR] [--name NAME]"},
+			"filo indexes remove [DIR] [--name NAME] [-y]", "filo indexes refresh [DIR] [--name NAME]",
+			"filo indexes take [DIR] [--name NAME] [-y]"},
 		before: []string{
 			"A tag index is a set of HTML pages that list the files under a directory, at any depth, by tag. " +
 				"NAME.html is the find page: pick several tags (two values of one key match either, different " +
@@ -345,11 +358,75 @@ var commandHelps = map[string]commandHelp{
 				"directory holding it; remove then exits 1. An index on a drive that cannot be reached (not " +
 				"mounted, lost) cannot have its files removed: remove says so and asks whether to remove the " +
 				"index anyway; its files, should they come back, are then registered by the next scan.",
+			"An index in a synced directory is written by one device only, so two never rewrite each other's " +
+				"pages: the one that added it, until take makes this one write it (after asking; pages it did not " +
+				"write are left alone and reported). On the others it is listed as written by that device, refresh " +
+				"refuses it, and remove only forgets it.",
 		},
 		flags: []view.Term{
 			{Name: "--name NAME", Text: "add: the pages' name (letters, digits, - and _); remove and refresh: " +
 				"which index of DIR, when it has several"},
-			{Name: "-y", Text: "remove: remove without asking"},
+			{Name: "-y", Text: "remove, take: without asking"},
+		},
+	},
+	"device": {
+		usage: []string{"filo device", "filo device name NAME", "filo device new [-y]"},
+		before: []string{
+			"Every register is a device, with a random ID, a signing key and a name (the host name when it was " +
+				"made). Decisions shared through a synced directory are signed with the key, and another device " +
+				"asks you to compare the key's fingerprint before it trusts this one. filo device shows them.",
+			"name renames the device: letters, digits, '.', '-' and '_', starting with a letter or digit.",
+			"new gives the register a new ID and key, keeping its name, after asking. It is for a register copied " +
+				"from another machine: two machines must never share one device. A register restored on the " +
+				"same machine stays the same device and needs nothing.",
+		},
+		flags: []view.Term{
+			{Name: "-y", Text: "new: without asking"},
+		},
+	},
+	"synced": {
+		usage: []string{"filo synced", "filo synced add DIR [-y]", "filo synced remove DIR [-y]",
+			"filo synced ignore DIR"},
+		before: []string{
+			"A synced directory is one a sync service (any of them) shares between devices. Marking it lets the " +
+				"devices that run Filo share their decisions about its files: each keeps its own register, and " +
+				"writes the decisions it makes there to its own signed journal in DIR/.filo/, which the sync " +
+				"service copies and the other devices read. A journal only records decisions: it never deletes, " +
+				"renames or moves a file.",
+			"add marks DIR, a directory in a root, when it has no mark. When it has one (the sync service brought " +
+				"it from another device), add shows the devices whose journals are there, with their key " +
+				"fingerprints to compare with filo device on each, and asks before trusting them and joining. " +
+				"When it holds the mark of a synced directory this device joined elsewhere, which is gone from " +
+				"there, add asks whether it moved. One synced directory cannot hold another.",
+			"Every scan notes the marks it finds; a mark this device has not joined is reported until it is " +
+				"joined, or ignored with ignore. remove stops this device sharing decisions in DIR (its files and " +
+				"the journals stay), or forgets that a mark was ignored. filo synced lists the synced " +
+				"directories, what is wrong in each, and the marks found.",
+		},
+		flags: []view.Term{
+			{Name: "-y", Text: "add and remove: without asking"},
+		},
+	},
+	"devices": {
+		usage: []string{"filo devices [DIR]", "filo devices trust DEVICE [-y]", "filo devices retire DEVICE [-y]",
+			"filo devices restore DEVICE [-y]"},
+		before: []string{
+			"Lists the devices sharing decisions in each synced directory, or in DIR: each one's name, key " +
+				"fingerprint, whether it is trusted (and who vouched for it), when it last ran there, and whether " +
+				"it has this device's latest decisions. DEVICE is a device's name, or the start of its ID.",
+			"trust trusts a device met in a journal that this device does not trust yet, after showing its " +
+				"fingerprint and asking: its decisions are then taken in, and a line in this device's journal " +
+				"vouches for it, so the devices that trust this one trust it too.",
+			"retire is for a device that is gone (reinstalled, lost, broken): Filo cannot tell by itself. Its " +
+				"decisions so far stay, and its journal is never deleted, but anything it writes from then on is " +
+				"refused, here and on every device that trusts this one.",
+			"restore writes back a device's journal where it is lost or cut short, from the lines this register " +
+				"keeps of it (the same lines, so their signatures still check), after asking: for a device that is " +
+				"gone, whose journal nobody else would write back. A device's own journal is written back by every " +
+				"run.",
+		},
+		flags: []view.Term{
+			{Name: "-y", Text: "trust, retire and restore: without asking"},
 		},
 	},
 	"get": {

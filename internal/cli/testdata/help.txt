@@ -61,6 +61,29 @@ Commands
                            stop keeping an index, and remove its pages
   indexes refresh [DIR] [--name NAME]
                            write an index's pages again
+  indexes take [DIR] [--name NAME] [-y]
+                           write a synced directory's index from this device
+  device                   this device's name, ID and key fingerprint, for
+                           sharing decisions between devices
+  device name NAME         rename this device
+  device new [-y]          give a register copied from another machine a new
+                           device ID and key
+  synced                   list the synced directories, and the marks of others
+                           found by the scans
+  synced add DIR [-y]      mark DIR as a synced directory, or join one marked on
+                           another device
+  synced remove DIR [-y]   stop sharing decisions in a synced directory
+  synced ignore DIR        stop reporting a synced directory found at DIR
+  devices [DIR]            list the devices sharing decisions in each synced
+                           directory
+  devices trust DEVICE [-y]
+                           trust a device met in a journal, and vouch for it
+  devices retire DEVICE [-y]
+                           retire a device that is gone: its later decisions are
+                           refused
+  devices restore DEVICE [-y]
+                           write back a lost journal of a device, from this
+                           register
   completion bash          print the script that makes Tab complete filo's
                            commands, files and tags
   help [COMMAND]           this overview, or a command's flags and rules

@@ -25,14 +25,15 @@ func TestWriteAndParse(t *testing.T) {
 		item(8, "=odd.txt", "!2023-07-14", "", "", tags.Tag{Value: "-draft"}),
 		item(9, "top.txt", "", "forever", "forever"),
 	}
+	items[2].Conflict = "retention" // devices sharing it disagree: shown, never read back
 	var b bytes.Buffer
 	if err := WriteCSV(&b, 3, items, time.UTC); err != nil {
 		t.Fatal(err)
 	}
-	want := "\ufeffid,export,directory,name,size,modified,file_date,retention,keep_until,tags\n" +
-		"7,3,/home/u/Documents/received,bill.pdf,12,2026-10-03 09:30,2026-10-01,7y,2033-10-01,sender:British Gas; type:bill\n" +
-		"8,3,/home/u/Documents,'=odd.txt,12,2026-10-03 09:30,!2023-07-14,,,'-draft\n" +
-		"9,3,/home/u/Documents,top.txt,12,2026-10-03 09:30,,forever,forever,\n"
+	want := "\ufeffid,export,directory,name,size,modified,file_date,retention,keep_until,tags,conflict\n" +
+		"7,3,/home/u/Documents/received,bill.pdf,12,2026-10-03 09:30,2026-10-01,7y,2033-10-01,sender:British Gas; type:bill,\n" +
+		"8,3,/home/u/Documents,'=odd.txt,12,2026-10-03 09:30,!2023-07-14,,,'-draft,\n" +
+		"9,3,/home/u/Documents,top.txt,12,2026-10-03 09:30,,forever,forever,,retention\n"
 	if b.String() != want {
 		t.Errorf("CSV:\n%s\nwant:\n%s", b.String(), want)
 	}

@@ -1,0 +1,19 @@
+filo device
+filo device name NAME
+filo device new [-y]
+
+  Every register is a device, with a random ID, a signing key and a name (the
+  host name when it was made). Decisions shared through a synced directory are
+  signed with the key, and another device asks you to compare the key's
+  fingerprint before it trusts this one. filo device shows them.
+
+  name renames the device: letters, digits, '.', '-' and '_', starting with a
+  letter or digit.
+
+  new gives the register a new ID and key, keeping its name, after asking. It is
+  for a register copied from another machine: two machines must never share one
+  device. A register restored on the same machine stays the same device and
+  needs nothing.
+
+Flags
+  -y                       new: without asking

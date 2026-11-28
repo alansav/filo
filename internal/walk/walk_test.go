@@ -716,3 +716,41 @@ func TestDeletingDirReported(t *testing.T) {
 		})
 	}
 }
+
+// TestFiloDirsNoted checks that the directories holding a .filo directory are noted, whatever the hidden setting,
+// while .filo itself is never walked; a file named .filo and a .filo under a hidden directory not walked are not.
+func TestFiloDirsNoted(t *testing.T) {
+	base := canonicalTemp(t)
+	build(t, base, map[string]string{
+		".filo/journal.x":       "j",
+		"Sync/.filo/mark":       "m",
+		"Sync/docs/a.txt":       "a",
+		"other/.filo":           "a file, not the directory",
+		".hidden/deep/.filo/x":  "x",
+		"skip/.filo/mark":       "m",
+		"Sync/docs/.filo/mark2": "m",
+	})
+	for _, hidden := range []bool{false, true} {
+		t.Run(fmt.Sprintf("include hidden %v", hidden), func(t *testing.T) {
+			res, err := Walk(context.Background(), Options{Root: base, IncludeHidden: hidden,
+				Exclude: []string{filepath.Join(base, "skip")}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := slices.Clone(res.FiloDirs)
+			sort.Strings(got)
+			want := []string{"", "Sync", "Sync/docs"}
+			if hidden {
+				want = []string{"", ".hidden/deep", "Sync", "Sync/docs"}
+			}
+			if !slices.Equal(got, want) {
+				t.Errorf("FiloDirs = %q, want %q", got, want)
+			}
+			for p := range summary(res.Entries) {
+				if strings.Contains(p, ".filo/") {
+					t.Errorf("%s inside a .filo directory was recorded", p)
+				}
+			}
+		})
+	}
+}

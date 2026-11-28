@@ -1023,3 +1023,14 @@ func TestScanSummaryRules(t *testing.T) {
 		t.Errorf("summary rules = %+v, want bank/a.pdf on bills", sum.Rules)
 	}
 }
+
+// TestScanPassesOnFiloDirs: the directories holding .filo are in the summary, and .filo's files are not registered.
+func TestScanPassesOnFiloDirs(t *testing.T) {
+	e := newEnv(t, nil)
+	e.write("Sync/.filo/mark", "m")
+	e.write("Sync/a.txt", "a")
+	sum := e.scan()
+	if len(sum.FiloDirs) != 1 || sum.FiloDirs[0] != "Sync" || sum.New != 1 {
+		t.Fatalf("FiloDirs = %q, new %d", sum.FiloDirs, sum.New)
+	}
+}

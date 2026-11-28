@@ -7,6 +7,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"strings"
 
 	"github.com/alansav/filo/internal/show"
 	"github.com/alansav/filo/internal/store"
@@ -145,6 +146,9 @@ func (e *env) lookUp(ctx context.Context, s *store.Store, arg string, o showOpti
 		return nil, 0, err
 	}
 	f := show.Look(ctx, sh, root, o.verify)
+	if f.Shared, err = sharedOf(ctx, s, sh.FileID); err != nil {
+		return nil, 0, err
+	}
 	kind := shownGone // a missing or deleted file: filo set does not take it
 	if sh.Present {
 		kind = shownFile
@@ -203,3 +207,51 @@ func locateGone(ctx context.Context, s *store.Store, p string) (store.Root, stri
 type outsideError struct{ path string }
 
 func (e outsideError) Error() string { return e.path + " is not in the register (outside every root)" }
+
+// sharedOf is what the devices sharing a file's synced directory decided about it, in effect now, for filo show.
+func sharedOf(ctx context.Context, s *store.Store, fileID int64) ([]show.Shared, error) {
+	ds, err := s.FileDecisions(ctx, fileID)
+	if err != nil || len(ds) == 0 {
+		return nil, err
+	}
+	devs, err := s.KnownDevices(ctx)
+	if err != nil {
+		return nil, err
+	}
+	names := map[string]string{}
+	for _, d := range devs {
+		names[d.Dev] = d.Name
+	}
+	values := map[string]map[string]bool{}
+	for _, d := range ds {
+		if values[d.Key] == nil {
+			values[d.Key] = map[string]bool{}
+		}
+		v := d.Value
+		if strings.HasPrefix(d.Key, "tag:") && v != "" {
+			v = "added" // two spellings of one tag agree: only added against removed is a conflict
+		}
+		values[d.Key][v] = true
+	}
+	out := make([]show.Shared, 0, len(ds))
+	for _, d := range ds {
+		what := d.Key
+		switch {
+		case d.Key == "date":
+			what = "file_date"
+		case strings.HasPrefix(d.Key, "tag:"):
+			what = "tag"
+		}
+		value := d.Value
+		if what == "tag" && value == "" {
+			value = strings.TrimPrefix(d.Key, "tag:") + " removed"
+		}
+		name := names[d.Dev]
+		if name == "" {
+			name = d.Dev
+		}
+		out = append(out, show.Shared{What: what, Value: value, Device: name, Decided: d.Decided,
+			Conflict: len(values[d.Key]) > 1})
+	}
+	return out, nil
+}

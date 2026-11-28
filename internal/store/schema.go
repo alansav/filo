@@ -3,7 +3,7 @@ package store
 // SchemaVersion is the schema this build reads and writes. It is stored in meta.schema_version when a database is
 // created. An older database with a migration in migrations is upgraded when it is opened; any other version is
 // refused.
-const SchemaVersion = 13
+const SchemaVersion = 20
 
 // Meta keys.
 const (
@@ -90,7 +90,7 @@ CREATE TABLE events (
     other_path TEXT,
     detail TEXT
 );
-` + reviewSQL + duplicatesSQL + policiesSQL + rulesSQL + tagsSQL + tagIndexSQL
+` + reviewSQL + duplicatesSQL + policiesSQL + rulesSQL + tagsSQL + tagIndexSQL + syncedSQL + decisionsSQL + writersSQL + seenSQL + dirCursorsSQL
 
 // reviewSQL is the export and review tables, as of schema version 13.
 const reviewSQL = `
@@ -241,7 +241,128 @@ ALTER TABLE export_rows ADD COLUMN tags TEXT;
 	12: `
 ALTER TABLE export_rows ADD COLUMN name TEXT;
 `,
+	// 13 -> 14: the device's identity in meta (docs/design.md, Sharing decisions between devices). No SQL: migrate
+	// makes the random ID and key (insertDevice).
+	13: ``,
+	// 14 -> 15: synced directories, the devices sharing them, and their journals (docs/design.md, Sharing decisions
+	// between devices). Only new tables: no directory is synced yet.
+	14: syncedSQL,
+	// 15 -> 16: shared file decisions (docs/design.md, Sharing decisions between devices). New tables, and the
+	// publish cursors, set past every decision made so far (migrate): only decisions made from now on are written to
+	// the journals as they are made; the ones before are seeded when a directory is marked or joined.
+	15: decisionsSQL,
+	// 16 -> 17: sharing policies and tag indexes (docs/design.md, Sharing decisions between devices): which device
+	// writes an index's pages (NULL: this one), the command a policy change came from (NULL: a command here; 'journal':
+	// another device's, applied), and the publish cursor for policy changes, set past every one made so far.
+	16: writersSQL,
+	// 17 -> 18: the settings values this device last wrote or applied (docs/design.md, Sharing decisions between
+	// devices). A new table only.
+	17: seenSQL,
+	// 18 -> 19: the publish cursor for scan and delete events (docs/design.md, Sharing decisions between devices,
+	// identity facts), set past every event so far by migrate. No SQL.
+	18: ``,
+	// 19 -> 20: the publish cursors of each synced directory. A new table only: a directory with none starts from the
+	// register's cursors.
+	19: dirCursorsSQL,
 }
+
+// dirCursorsSQL is the publish cursors of each synced directory, added in schema version 20: how far this device has
+// written its decisions and facts to its journal there, so a directory that could not be written (its journal ahead,
+// left for later) is caught up on its own, and the others are never written again what they have already. A
+// directory with no row starts from the register's cursors (meta), which move on with every run.
+const dirCursorsSQL = `
+CREATE TABLE dir_cursors (
+    synced_id INTEGER PRIMARY KEY,
+    reviews INTEGER NOT NULL,
+    tag_changes INTEGER NOT NULL,
+    policy_changes INTEGER NOT NULL,
+    events INTEGER NOT NULL
+);
+`
+
+// seenSQL is the settings seen, added in schema version 18: for each setting (a policy: synced_id 0, as a policy is
+// global; the others by synced directory), the value this device last wrote to a journal or applied from one. Only a
+// value here that differs from it is a change of this device's to write: a value taken in (the safe side of a
+// conflict, a policy from another synced directory) is never written back as one.
+const seenSQL = `
+CREATE TABLE settings_seen (
+    synced_id INTEGER NOT NULL,
+    key TEXT NOT NULL,
+    value TEXT NOT NULL,
+    PRIMARY KEY (synced_id, key)
+);
+`
+
+// writersSQL is what schema version 17 adds to tables made by earlier versions: tag_indexes.writer, the device
+// that writes an index's pages (NULL: this one), and policy_changes.command ('journal': another device's change,
+// applied here; NULL: a command here).
+const writersSQL = `
+ALTER TABLE tag_indexes ADD COLUMN writer TEXT;
+ALTER TABLE policy_changes ADD COLUMN command TEXT;
+`
+
+// syncedSQL is the synced directories, added in schema version 15. A synced directory is known by the ID in its mark
+// (sync_id); on this device it is a directory of a root, joined, or a mark the person chose to ignore (root_id and dir
+// then say where it was found). mark is the mark's line as read or written, to write back if it is lost.
+// found_marks are the marks the scans have seen that are neither joined nor ignored (sync_id NULL: a .filo with no
+// readable mark, problem says why). devices are every device met in a journal, by ID, with its key and name from its
+// line 1; trusted_utc is set when the person trusted it at a join, or a trusted device vouched for it (vouched_by);
+// retired_utc when a trusted device retired it (retired_by). journals is what this device has read of each journal
+// of each synced directory (its own too): up to which line, at which byte, why reading stopped if it did, and, for a
+// retired device, the last of its lines a retire line kept there (each synced directory's journal of a device has its
+// own numbering). Status files are not kept: they are read from .filo/ on every run, so a device's hourly status
+// writes nothing to the register (and takes no snapshot). journal_lines are those lines, byte for byte as
+// read (or written), so a journal lost or damaged can be written back.
+const syncedSQL = `
+CREATE TABLE synced_dirs (
+    id INTEGER PRIMARY KEY,
+    sync_id TEXT NOT NULL UNIQUE,
+    root_id INTEGER NOT NULL REFERENCES roots(id),
+    dir TEXT NOT NULL,
+    state TEXT NOT NULL,                    -- 'joined' or 'ignored'
+    mark BLOB,
+    added_utc TEXT NOT NULL
+);
+
+CREATE TABLE found_marks (
+    root_id INTEGER NOT NULL REFERENCES roots(id),
+    dir TEXT NOT NULL,
+    sync_id TEXT,
+    problem TEXT,
+    found_utc TEXT NOT NULL,
+    PRIMARY KEY (root_id, dir)
+);
+
+CREATE TABLE devices (
+    dev TEXT PRIMARY KEY,
+    key TEXT NOT NULL,
+    name TEXT NOT NULL,
+    created_utc TEXT,
+    trusted_utc TEXT,
+    vouched_by TEXT,
+    retired_utc TEXT,
+    retired_by TEXT,
+    snoozed_until TEXT
+);
+
+CREATE TABLE journals (
+    synced_id INTEGER NOT NULL REFERENCES synced_dirs(id),
+    dev TEXT NOT NULL,
+    seq INTEGER NOT NULL DEFAULT 0,
+    byte_offset INTEGER NOT NULL DEFAULT 0,
+    problem TEXT,
+    retired_seq INTEGER,                    -- the device retired: its lines after this one are refused
+    PRIMARY KEY (synced_id, dev)
+);
+
+CREATE TABLE journal_lines (
+    synced_id INTEGER NOT NULL REFERENCES synced_dirs(id),
+    dev TEXT NOT NULL,
+    seq INTEGER NOT NULL,
+    raw BLOB NOT NULL,
+    PRIMARY KEY (synced_id, dev, seq)
+);
+`
 
 // tagIndexSQL is the tag index pages, added in schema version 12. An index is declared on a directory of a root
 // ('/'-separated, relative to the root, the empty path for the root itself) and named: its pages are NAME.html and

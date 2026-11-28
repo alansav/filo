@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/alansav/filo/internal/report"
+	"github.com/alansav/filo/internal/share"
 	"github.com/alansav/filo/internal/store"
 	"github.com/alansav/filo/internal/view"
 )
@@ -33,6 +34,10 @@ type env struct {
 	// indexesDone: the command wrote or reported the tag index pages itself (filo indexes), so the end of the run
 	// does not; indexFailed: an index was not brought up to date at the end of the run, which then exits 1.
 	indexesDone, indexFailed bool
+	// syncedDirs are the joined synced directories, and imported what reading their journals found, when the
+	// register was opened.
+	syncedDirs []store.SyncedDir
+	imported   share.Report
 }
 
 // usageError is reported with exit code 2.
@@ -190,6 +195,12 @@ func (e *env) run(ctx context.Context, args []string) error {
 		return e.tags(ctx, *db, rest)
 	case "indexes":
 		return e.indexes(ctx, *db, rest)
+	case "device":
+		return e.device(ctx, *db, rest)
+	case "synced":
+		return e.synced(ctx, *db, rest)
+	case "devices":
+		return e.devices(ctx, *db, rest)
 	case "completion":
 		return e.completion(rest)
 	case "__complete": // run by the completion script on Tab; not in the help
@@ -274,6 +285,23 @@ func (e *env) open(ctx context.Context, db string) (*store.Store, error) {
 	for _, note := range s.UpgradeNotes() {
 		e.errorLine("warning: " + note)
 	}
+	// Every run reads the synced directories' journals before it changes anything, so what it decides is decided on
+	// what the other devices decided (docs/design.md, Sharing decisions between devices, Timing). What it finds is
+	// reported by filo synced, filo report and the scans; a failure here never stops the command.
+	if e.cmd != "device" {
+		rep, err := e.importAll(ctx, s)
+		if err != nil {
+			e.errorLine("warning: reading the synced directories' journals: " + err.Error())
+		} else if err := e.warnNotSeen(ctx, s, rep); err != nil {
+			e.errorLine("warning: " + err.Error())
+		} else if rep, err = e.askAhead(ctx, s, rep); err != nil {
+			e.errorLine("warning: " + err.Error())
+		}
+		e.imported = rep
+		for _, dr := range rep.Dirs {
+			e.syncedDirs = append(e.syncedDirs, dr.Dir)
+		}
+	}
 	return s, nil
 }
 
@@ -281,6 +309,17 @@ func (e *env) open(ctx context.Context, db string) (*store.Store, error) {
 // snapshot, which then holds what was written). The run's work is already written, so a problem with the snapshot is
 // a warning, one line on stderr; an index not brought up to date makes the run exit 1.
 func (e *env) closeStore(s *store.Store) {
+	if e.cmd != "device" {
+		// The decisions this run made, and any an earlier run could not write, go to the journals of the synced
+		// directories holding their files (a run that decided nothing finds nothing to write, and writes nothing).
+		problems, err := share.Publish(context.Background(), s, now())
+		if err != nil {
+			problems = append(problems, err.Error())
+		}
+		for _, p := range problems {
+			e.errorLine("warning: sharing this run's decisions: " + p)
+		}
+	}
 	e.refreshIndexes(context.Background(), s) // the run's change is committed: its pages follow, even after Ctrl-C
 	if err := s.Close(); err != nil {
 		for _, p := range joinedParts(err) {
@@ -341,7 +380,7 @@ func (e *env) report(ctx context.Context, dbBefore string, args []string) error 
 		return err
 	}
 	r.Render(e.view)
-	return nil
+	return e.syncedReport(ctx, s)
 }
 
 // terminal is implemented by writers that know whether they are a terminal (tests use it).

@@ -38,10 +38,14 @@ func (s *Store) Candidates(ctx context.Context, today string, f Filter) ([]Candi
 	if err != nil {
 		return nil, err
 	}
+	conflicts, err := s.ConflictedFiles(ctx)
+	if err != nil {
+		return nil, err
+	}
 	var out []Candidate
 	for _, it := range items {
-		if it.Status != StatusExpired {
-			continue
+		if it.Status != StatusExpired || decisionInConflict(conflicts[it.FileID]) {
+			continue // a file whose date or retention devices disagree on is never a candidate
 		}
 		c := Candidate{FileItem: it}
 		var ino int64
@@ -326,4 +330,14 @@ func (s *Store) DeletedByHash(ctx context.Context, hashes []string) (map[string]
 		return nil, fmt.Errorf("find deleted files: %w", err)
 	}
 	return out, nil
+}
+
+// decisionInConflict reports whether keys (a file's keys in conflict) hold its date or its retention.
+func decisionInConflict(keys []string) bool {
+	for _, k := range keys {
+		if k == "date" || k == "retention" {
+			return true
+		}
+	}
+	return false
 }

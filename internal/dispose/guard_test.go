@@ -13,12 +13,13 @@ import (
 
 // ownFiles are the only files outside package dispose that may delete, rename or make anything, each only Filo's
 // own files (CLAUDE.md, Hard rules), and each only with the calls named: the register's snapshots, its data
-// directory, an -o output file, and a tag index's pages.
+// directory, an -o output file, a tag index's pages, and a synced directory's .filo/ (the journal package).
 var ownFiles = map[string]map[string]bool{
 	"internal/store/snapshot.go": {"Remove": true, "Rename": true, "Mkdir": true},
 	"internal/store/store.go":    {"MkdirAll": true},
 	"internal/cli/output.go":     {"Remove": true, "Rename": true},
 	"internal/tagindex/write.go": {"Remove": true, "Rename": true, "Mkdir": true},
+	"internal/journal/dir.go":    {"Remove": true, "Rename": true, "Mkdir": true},
 }
 
 // TestOnlyDisposeChangesUserFiles guards the hard rule that internal/dispose is the only code that deletes, renames

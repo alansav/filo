@@ -111,6 +111,9 @@ func (r SetResult) Changed() int {
 type SetOptions struct {
 	DryRun  bool
 	Confirm func(SetResult) bool
+	// Command is the batch's command: "set" when "", CommandJournal for a decision another device made (applied
+	// here, never written to this device's journal again).
+	Command string
 }
 
 // SetFiles sets the file_date and the retention of the files, all or nothing, in one transaction, by the retention
@@ -179,7 +182,11 @@ func (s *Store) SetFiles(ctx context.Context, ids []int64, v SetValues, now time
 	}
 	var batch int64
 	if res.Changed() > 0 { // a batch holds reviews: --duplicates alone records none
-		if batch, err = newBatch(ctx, tx, now, "set", "filo set"); err != nil {
+		command, detail := "set", "filo set"
+		if opt.Command != "" {
+			command, detail = opt.Command, opt.Command
+		}
+		if batch, err = newBatch(ctx, tx, now, command, detail); err != nil {
 			return res, err
 		}
 	}

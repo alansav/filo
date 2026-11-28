@@ -34,6 +34,9 @@ type FilesItem struct {
 	FileItem
 	Tags     []tags.Tag
 	NameCell string // the name cell the CSV shows (package filecsv fills it in), recorded so an edit can be told
+	// Conflict names what devices sharing the file disagree on: "date", "retention", "tags", space-separated; "" for
+	// nothing (docs/design.md, Sharing decisions between devices).
+	Conflict string
 }
 
 // FilesItems returns every present file (regular files and symlinks) under the filter with its status and its tags,
@@ -51,9 +54,13 @@ func (s *Store) FilesItems(ctx context.Context, today string, f Filter) ([]Files
 	if err != nil {
 		return nil, err
 	}
+	conflicts, err := s.ConflictedFiles(ctx)
+	if err != nil {
+		return nil, err
+	}
 	out := make([]FilesItem, len(fs))
 	for i, it := range fs {
-		out[i] = FilesItem{FileItem: it, Tags: ts[it.FileID]}
+		out[i] = FilesItem{FileItem: it, Tags: ts[it.FileID], Conflict: conflictCell(conflicts[it.FileID])}
 	}
 	return out, nil
 }
@@ -571,4 +578,19 @@ func (s *Store) ExportKinds(ctx context.Context, ids []int64) (map[int64]string,
 		return nil, fmt.Errorf("read exports: %w", err)
 	}
 	return out, nil
+}
+
+// conflictCell names a file's keys in conflict for the CSV: "date", "retention", and "tags" once for any tag.
+func conflictCell(keys []string) string {
+	var parts []string
+	for _, k := range keys {
+		w := k
+		if strings.HasPrefix(k, "tag:") {
+			w = "tags"
+		}
+		if !slices.Contains(parts, w) {
+			parts = append(parts, w)
+		}
+	}
+	return strings.Join(parts, " ")
 }

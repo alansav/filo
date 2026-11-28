@@ -36,6 +36,9 @@ type TagIndex struct {
 	DataHash   string // the hash of the data last written in full; "" = never
 	WrittenUTC string // when its pages were last brought up to date; "" = never
 	Problem    string // why the last writing failed; "" = it did not
+	// Writer is the device that writes its pages, for an index in a synced directory that another device writes
+	// (docs/design.md, Sharing decisions between devices); "" = this one.
+	Writer string
 	// Files is every file and directory Filo wrote for it, by its path relative to Dir ('/'-separated): a file's
 	// SHA-256 as written, "" for a directory.
 	Files map[string]string
@@ -118,7 +121,7 @@ func (s *Store) AddTagIndex(ctx context.Context, rootID int64, dir, name string,
 
 const tagIndexQuery = `
 	SELECT ti.id, ti.root_id, r.path, ti.dir, ti.name, ti.added_utc, coalesce(ti.data_hash, ''),
-	       coalesce(ti.written_utc, ''), coalesce(ti.problem, '')
+	       coalesce(ti.written_utc, ''), coalesce(ti.problem, ''), coalesce(ti.writer, '')
 	FROM tag_indexes ti JOIN roots r ON r.id = ti.root_id`
 
 // TagIndexes returns every index, by root path, then directory and name, each with the files written for it.
@@ -142,7 +145,7 @@ func (s *Store) readTagIndexes(ctx context.Context, cond string, args ...any) ([
 	out, err := queryAll(ctx, s.db, func(rs *sql.Rows) (TagIndex, error) {
 		var i TagIndex
 		return i, rs.Scan(&i.ID, &i.RootID, &i.RootPath, &i.Dir, &i.Name, &i.AddedUTC, &i.DataHash, &i.WrittenUTC,
-			&i.Problem)
+			&i.Problem, &i.Writer)
 	}, tagIndexQuery+cond+` ORDER BY r.path, ti.dir, ti.name`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("read indexes: %w", err)
@@ -310,4 +313,10 @@ func (s *Store) IndexFiles(ctx context.Context, rootID int64, dir string) ([]Ind
 		out[i] = IndexFile{Rel: f.Rel, MtimeNS: f.MtimeNS, FileDate: dates[f.FileID], Tags: f.Tags}
 	}
 	return out, nil
+}
+
+// SetIndexWriter records which device writes an index's pages ("" = this one).
+func (s *Store) SetIndexWriter(ctx context.Context, id int64, writer string) error {
+	_, err := s.exec(ctx, `UPDATE tag_indexes SET writer = ? WHERE id = ?`, nullString(writer), id)
+	return err
 }

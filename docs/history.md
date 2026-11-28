@@ -1028,6 +1028,58 @@ without their counts (`6bf8945`, `0b3d47d`); CLAUDE.md's hard rule naming the se
   Gas` one argument each), since readline's quoting runs only in an interactive terminal; and the timing on a
   throwaway tree of 100,000 files: about 18 ms for a path and 3 ms for a tag, start-up included.
 
+## Sharing decisions between devices: how item 9 was built
+
+Designed with the person on 2026-11-28 in one session, topic by topic (trust, what a synced directory is, what is
+shared, conflicts, timing, identity, the journal format, commands, slices), merging roadmap items 9a, 9b and 9c, and
+built the same day on branch `sync`, in seven slices, each reviewed once (medium) with its fixes in their own commits.
+
+- **Slice 1, the device**: schema 14, a device ID, ed25519 key and name in `meta`; `filo device`, `device name`,
+  `device new`. Review: a register with part of an identity is refused, not completed; restoring a snapshot from
+  before schema 14 makes a new device (written into the design).
+- **Slice 2, the journal format** (`internal/journal`): signed, chained lines; `.filo/` reached only through the
+  directory opened; `TestOnlyJournalWritesSyncedFiles`. Review: keys limited to lower case (encoding/json matches
+  keys in any case, so `KIND` read as `kind`); an append only at the size expected (a torn append is rewritten, not
+  joined onto); non-blocking opens (a FIFO); a write refused where the number of hard links cannot be read.
+- **Slice 3, marking and trust**: schema 15; `filo synced` (add, remove, ignore, a moved directory), the join
+  prompt, `filo devices` (trust, retire); scans note marks. During the work: a retirement's cut kept per journal (each
+  synced directory's journal of a device has its own numbering); status files read from `.filo/` each run, not kept
+  (keeping them took a register snapshot every hour). Review: retirements settled before anything else read in a
+  run, whichever journal holds them; a join refuses a journal under a trusted device's ID with another key; a
+  directory whose place lost its mark while a scan found it elsewhere gets nothing written back; an unmounted place
+  is never taken for a move.
+- **Slice 4, file decisions**: schema 16; dates, retentions and tags written as they are made and applied as they
+  arrive; conflicts (the safe side, `show`, `report`, the CSV's `conflict` column, never a delete candidate). During
+  the work: shared file IDs derived from the synced directory, content and path (two devices deciding at once agreed
+  on nothing with random ones); every command reads the journals on open and writes at close. Review: cursors kept
+  when a directory cannot be reached; a tag spelled otherwise is no conflict; a tag on a file not hashed matches by
+  path.
+- **Slice 5, settings**: schema 17; policies (global), rules inside, excluded directories, contents always kept,
+  sets of records, a tag index's writer (`filo indexes take`); the copy, move or leave question for rules above.
+  Review (eight important findings, one cause): comparing what this device held with what was in effect wrote back the
+  safe side of conflicts (ending them) and carried policies between directories; schema 18 keeps the value each
+  setting last had here, and only a change from it is written.
+- **Slice 6, facts**: schema 19; moves and settled edits (seen on two scans in a row, and not a content arriving by
+  sync) and deletes by Filo; `filo delete`'s origins and last seen; the not-seen warning and retire question; the
+  update's note on a move out of a synced directory. Review: an unsettled edit no longer holds up every later fact.
+- **Slice 7, seeding and recovery**: seeding on mark and join; the restored-or-copied question (`TakeOwn`, or a new
+  ID starting its own journals); `filo devices restore`; device-name completion. Review: seeding writes only what this
+  device decided, compares settings with values not applied yet, replaces this device's own earlier lines, and goes
+  by the shared IDs the other devices gave; decisions made while a directory is blocked are written once it is not.
+- **Tests**: a fake sync service copying `.filo/` between two or three registers' trees (in `internal/share` and
+  end to end in `internal/cli`): half lines, forged, edited, reordered and replayed lines, lost and torn journals, a
+  restored and a copied register, vouching, retiring, conflicts, journals and files arriving in either order, the
+  person's decide-then-move scenario. Left on purpose: the end-to-end tests are scenarios, not table-driven.
+- **A review of the whole branch (high)**, at the person's request, found eight more, all fixed with tests:
+  leaving a synced directory failed on a foreign key once it had decisions; one directory that could not be written
+  made every other replay old decisions over newer ones (schema 20: each synced directory's own publish cursors); a
+  retirement stood after the retire line behind it stopped counting; a rejoining device's old lines were not kept as
+  its own; a directory's decision could end sets of records and contents always kept outside it; a retired device
+  started a journal on joining; a journal under this device's ID with another key was overwritten; facts that
+  disagree were counted as conflicts. No further review round, as agreed.
+- **Not done, in the roadmap**: replaying lines a newer Filo wrote after an upgrade (devices on mixed versions),
+  compacting journals, handing over a tag index beyond `take`.
+
 ## Notes on decisions
 
 Short notes taken out of `design.md` on 2026-11-17, by the section they were in.

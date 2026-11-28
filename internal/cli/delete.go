@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/alansav/filo/internal/dispose"
 	"github.com/alansav/filo/internal/report"
@@ -78,6 +79,9 @@ func (e *env) delete(ctx context.Context, dbBefore string, args []string) error 
 		return nil
 	}
 	list := buildDeleteList(f, cands)
+	if err := e.deleteOrigins(ctx, s, list, cands); err != nil {
+		return err
+	}
 	// Ask only if both the question can be seen (stdout) and answered (stdin): with stdout in a file, the list and the
 	// question would go there while filo waited on the keyboard.
 	asking := !*yes && e.canPrompt()
@@ -390,6 +394,9 @@ type deleteList struct {
 	roots   []string       // the root of each file (Heading shows each once)
 	expired []view.FileRow // past their retention
 	exBytes int64
+	// devices says, for the synced directories the files are in, when each other device was last seen there: what
+	// it decided since is not known here (docs/design.md, Sharing decisions between devices, Timing).
+	devices []string
 }
 
 // buildDeleteList gathers the candidates past their retention.
@@ -412,6 +419,9 @@ func (l *deleteList) draw(r *view.Renderer, max int) (cut bool) {
 	r.Section("Past their retention", report.Plural(int64(len(l.expired)), "file", "files"), report.Size(l.exBytes))
 	r.Files(view.FileList{Columns: []view.Column{{Header: "until"}, {Header: "size", Right: true}},
 		Rows: l.expired, ByRoot: true, Max: max, More: "files", MoreOne: "file"})
+	for _, d := range l.devices {
+		r.Count(view.Neutral, d)
+	}
 	r.Blank()
 	return max > 0 && len(l.expired) > max
 }
@@ -481,4 +491,82 @@ func (p *prompter) newline() {
 	if p.end != nil {
 		p.end()
 	}
+}
+
+// deleteOrigins notes on the list where a retention came from when another device sharing the file's synced
+// directory decided it, and when each other device was last seen in the synced directories the files are in.
+// It uses what the import at open found: importing again here could apply a decision the candidates, chosen
+// already, do not reflect.
+func (e *env) deleteOrigins(ctx context.Context, s *store.Store, l *deleteList, cands []store.Candidate) error {
+	rep := e.imported
+	if len(rep.Dirs) == 0 {
+		return nil
+	}
+	me, err := s.Device(ctx)
+	if err != nil {
+		return err
+	}
+	devs, err := s.KnownDevices(ctx)
+	if err != nil {
+		return err
+	}
+	names := map[string]string{}
+	for _, d := range devs {
+		names[d.Dev] = d.Name
+	}
+	inDir := map[int64]bool{}
+	for i, c := range cands {
+		ds, err := s.FileDecisions(ctx, c.FileID)
+		if err != nil {
+			return err
+		}
+		for _, d := range ds {
+			if d.Key == "retention" && d.Dev != me.ID {
+				l.expired[i].Note = "retention from " + names[d.Dev] + ", " + shortTime(d.Decided)
+			}
+		}
+		for _, dr := range rep.Dirs {
+			if dr.Dir.Contains(c.RootID, c.Path) {
+				inDir[dr.Dir.ID] = true
+			}
+		}
+	}
+	trusted := map[string]bool{}
+	for _, d := range devs {
+		trusted[d.Dev] = d.Trusted() && !d.Retired()
+	}
+	now := now()
+	for _, dr := range rep.Dirs {
+		if !inDir[dr.Dir.ID] {
+			continue
+		}
+		for _, j := range dr.Journals {
+			if j.Dev == me.ID || j.RetiredSeq > 0 || !trusted[j.Dev] {
+				continue
+			}
+			when := "never seen there"
+			if t, ok := lastSign(dr, j); ok {
+				when = "last seen there " + ago(now.Sub(t))
+			}
+			l.devices = append(l.devices, fmt.Sprintf("%s %s in %s: what it decided since is not known here",
+				names[j.Dev], when, e.view.Tilde(dr.Dir.Abs())))
+		}
+	}
+	return nil
+}
+
+// ago says how long ago a duration was, roughly: "within the hour", "3 hours ago", "12 days ago".
+func ago(d time.Duration) string {
+	if d < time.Hour {
+		return "within the hour"
+	}
+	return howLong(d) + " ago"
+}
+
+// howLong is a duration, roughly: "3 hours", "12 days".
+func howLong(d time.Duration) string {
+	if d < 48*time.Hour {
+		return report.Plural(int64(d/time.Hour), "hour", "hours")
+	}
+	return report.Plural(int64(d/(24*time.Hour)), "day", "days")
 }

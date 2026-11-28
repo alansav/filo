@@ -1,0 +1,27 @@
+filo devices [DIR]
+filo devices trust DEVICE [-y]
+filo devices retire DEVICE [-y]
+filo devices restore DEVICE [-y]
+
+  Lists the devices sharing decisions in each synced directory, or in DIR: each
+  one's name, key fingerprint, whether it is trusted (and who vouched for it),
+  when it last ran there, and whether it has this device's latest decisions.
+  DEVICE is a device's name, or the start of its ID.
+
+  trust trusts a device met in a journal that this device does not trust yet,
+  after showing its fingerprint and asking: its decisions are then taken in, and
+  a line in this device's journal vouches for it, so the devices that trust this
+  one trust it too.
+
+  retire is for a device that is gone (reinstalled, lost, broken): Filo cannot
+  tell by itself. Its decisions so far stay, and its journal is never deleted,
+  but anything it writes from then on is refused, here and on every device that
+  trusts this one.
+
+  restore writes back a device's journal where it is lost or cut short, from the
+  lines this register keeps of it (the same lines, so their signatures still
+  check), after asking: for a device that is gone, whose journal nobody else
+  would write back. A device's own journal is written back by every run.
+
+Flags
+  -y                       trust, retire and restore: without asking

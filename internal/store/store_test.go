@@ -654,8 +654,23 @@ func TestMigrateFromV3(t *testing.T) {
 	}
 }
 
-// dropExportNames removes the exported name cells of schema 13, for a test that rebuilds an older one.
-const dropExportNames = `ALTER TABLE export_rows DROP COLUMN name;`
+// dropSynced removes the synced directories of schema 15, for a test that rebuilds an older one. (Schema 14's device
+// identity stays: an upgrade keeps a whole one.)
+const dropSynced = dropDecisions + `DROP TABLE journal_lines; DROP TABLE journals; DROP TABLE devices;
+DROP TABLE found_marks; DROP TABLE synced_dirs;`
+
+// dropWriters removes what schema 17 added, for a test that rebuilds an older one.
+const dropWriters = `DROP TABLE dir_cursors; DROP TABLE settings_seen; ALTER TABLE tag_indexes DROP COLUMN writer; ALTER TABLE policy_changes DROP COLUMN command;
+DELETE FROM meta WHERE key IN ('publish_policy_changes_id', 'publish_events_id');`
+
+// dropDecisions removes the shared file decisions of schema 16 (and what came after), for a test that rebuilds an
+// older one.
+const dropDecisions = dropWriters + `DROP TABLE replaced; DROP TABLE decisions; DROP TABLE shared_files;
+DELETE FROM meta WHERE key IN ('publish_reviews_id', 'publish_tag_changes_id');`
+
+// dropExportNames removes the exported name cells of schema 13 (and what came after), for a test that rebuilds an
+// older one.
+const dropExportNames = dropSynced + `ALTER TABLE export_rows DROP COLUMN name;`
 
 // dropTagIndexes removes the tag indexes of schema 12 (and the exported names of 13), for a test that rebuilds an
 // older one.
