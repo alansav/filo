@@ -444,3 +444,30 @@ func (s *Store) ConflictedFiles(ctx context.Context) (map[int64][]string, error)
 	}
 	return out, rows.Err()
 }
+
+// FileValues is what a file is decided now: its file_date, its retention (its policy's name, or its own), that
+// policy's value, and its content.
+type FileValues struct {
+	FileDate, Retention, PolicyValue, Hash string
+	Policy                                 bool // Retention names a policy
+}
+
+// Values returns file fileID's values (false: no such file present).
+func (s *Store) Values(ctx context.Context, fileID int64) (FileValues, bool, error) {
+	var v FileValues
+	var policy sql.NullString
+	err := s.db.QueryRowContext(ctx, `SELECT coalesce(f.file_date, ''), coalesce(f.retention, ''), p.name,
+		coalesce(p.value, ''), coalesce(f.hash, '') FROM files f LEFT JOIN policies p ON p.id = f.policy_id
+		WHERE f.id = ? AND f.deleted_utc IS NULL`, fileID).Scan(&v.FileDate, &v.Retention, &policy, &v.PolicyValue,
+		&v.Hash)
+	if errors.Is(err, sql.ErrNoRows) {
+		return v, false, nil
+	}
+	if err != nil {
+		return v, false, err
+	}
+	if policy.Valid {
+		v.Retention, v.Policy = policy.String, true
+	}
+	return v, true, nil
+}

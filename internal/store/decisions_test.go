@@ -201,3 +201,29 @@ func TestJournalChangesAreNotPublished(t *testing.T) {
 		t.Fatal("JournalTag did not remove the tag")
 	}
 }
+
+func TestValues(t *testing.T) {
+	ctx := context.Background()
+	e := newReviewEnv(t)
+	e.apply(Changes{New: []NewFile{f("a.txt", "ha"), f("b.txt", "hb")}})
+	k := e.known()
+	now := time.Date(2026, 11, 28, 0, 0, 0, 0, time.UTC)
+	if _, err := e.s.SetFiles(ctx, []int64{k["a.txt"].FileID}, SetValues{Retention: "bills", SetRetention: true,
+		FileDate: "2026-01-01", SetFileDate: true}, now, "2026-11-28", SetOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.s.SetPolicy(ctx, "bills", "7y", now); err != nil {
+		t.Fatal(err)
+	}
+	v, ok, err := e.s.Values(ctx, k["a.txt"].FileID)
+	if err != nil || !ok || v.Retention != "bills" || !v.Policy || v.PolicyValue != "7y" || v.FileDate != "2026-01-01" ||
+		v.Hash != "ha" {
+		t.Fatalf("Values = %+v, %v, %v", v, ok, err)
+	}
+	if v, ok, _ := e.s.Values(ctx, k["b.txt"].FileID); !ok || v.Retention != "" || v.Policy {
+		t.Fatalf("Values of an undecided file = %+v, %v", v, ok)
+	}
+	if _, ok, _ := e.s.Values(ctx, 9999); ok {
+		t.Fatal("Values of no file")
+	}
+}
