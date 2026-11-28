@@ -3,7 +3,7 @@
 **The present.** Of three documents, this is the present: `design.md` (what Filo is), `roadmap.md` (the future:
 what it is not yet) and `history.md` (the past: how it got here).
 
-Filo as built: schema version 11. Last updated: 2026-11-22.
+Filo as built: schema version 13. Last updated: 2026-11-28.
 
 This file records what Filo does and why, as built. Work not done yet, ideas, open questions and ideas rejected are
 in `roadmap.md`, where designs are worked out; a design moves here, in its own commit, when work on it starts (see
@@ -69,7 +69,7 @@ Principles. These are not negotiable:
   never scanned. That is also why there is no device column. The register stays per device.
 - Driver: `modernc.org/sqlite` (pure Go, no CGO, plain `database/sql`), chosen 2026-11-11 at v1.62.0.
 - `meta.schema_version` must equal the build's version. An older database is upgraded when it is opened, one version
-  at a time, each step in its own transaction with the version bump (up to version 10); a newer version, or an older
+  at a time, each step in its own transaction with the version bump (from any version from 1 to 12); a newer version, or an older
   one with no migration, is refused, as is a SQLite file without Filo's `meta` keys. WAL mode is set only after those checks pass, so
   a foreign database is never modified.
 - One writer at a time: an `flock` on `<db>.lock`, taken before the database is opened. The kernel drops it if Filo
@@ -1582,7 +1582,8 @@ file contents (see `roadmap.md`, Rejected, "Building search"); tags add `--tag` 
 - **Exit status**: 0 when it searched, matches or none (a script tests for empty output; exit 1 means something
   went wrong, as everywhere in Filo); 1 on an error, a root that failed to scan, or a piped name changed by
   escaping; 2 on a usage error.
-- **Read-only on the files**, like every command but `filo delete`; it writes the register only through its scan.
+- **Read-only on the files**, like every command but `filo delete` and `filo update`'s renames and moves; it writes
+  the register only through its scan.
 
 ### Tags
 Roadmap item 18a, designed with the person on 2026-11-19/20 (see `roadmap.md`, Direction, the goal: finding files by
@@ -1751,8 +1752,8 @@ so files can be found by tag; a project is a tag (`project:house sale`).
     shown, `path_id`, so a file moved since is told), so the formula guard
     (`'=odd.txt`) left alone is no change. As in the tags cell, a name that starts with `'` itself is written after
     another `'` in the combined CSV, so on a change one `'` before `=`, `+`, `-`, `@`, tab, CR or `'` is dropped from
-    the new cell and the name is always read back as typed. A row of an export made before schema 13 has no exported name: a changed cell is refused,
-    "export again". The `directory` cell stays display only: moving is not a rename.
+    the new cell and the name is always read back as typed. A row of an export made before schema 13 has no
+    exported name: a changed cell is refused, "export again". A changed `directory` cell is a move (below).
   - **The new name must be one plain name the next scan sees as the same file in the same place.** A changed cell is
     refused, with one line saying why, when:
 
@@ -2056,10 +2057,10 @@ on the person's phone opens the file).
 
 ### Commands and scheduling
 - Plain names, easy to remember: `roots`, `scan`, `report`, `export`, `update`, `delete`, `duplicates` (added
-  2026-11-16, see Duplicates), `policies` and `rules` (both 2026-11-16, see Lifespan), `show` (2026-11-21, see Showing and setting a file's
-  details), `find` (2026-11-21, see Finding files), `tag`, `untag` and `tags` (2026-11-22, see Tags), `indexes`
-  (2026-11-22, see Tag index pages). No
-  themed subcommands. There is no `restore`: a file restored from a backup comes back as a new file. "Update" says
+  2026-11-16, see Duplicates), `policies` and `rules` (both 2026-11-16, see Lifespan), `show`, `set` and `get` (2026-11-21, see Showing and
+  setting a file's details), `find` (2026-11-21, see Finding files), `tag`, `untag` and `tags` (2026-11-22, see
+  Tags), `indexes` (2026-11-22, see Tag index pages), `completion` (2026-11-28, see Bash completion). No themed
+  subcommands. There is no `restore`: a file restored from a backup comes back as a new file. "Update" says
   that only existing files change; `filo review` only says it was replaced by `export` and `update`.
 - **Keep flags and options to a minimum** (2026-11-11). Prefer a safe default and clear output over a flag; prefer
   doing the obvious thing and saying what was done over asking.
@@ -2082,9 +2083,11 @@ on the person's phone opens the file).
   root) is shown as `./~/…`, so it never reads as a path in the home directory. The CSV export guards against
   spreadsheet formulas separately.
 - **Prompts only in a terminal** (2026-11-12, replacing "no interactive prompts"). A command asks only where a person
-  should look first: `filo update` before clearing dates, removing tags, creating policies or renaming files, and
-  `filo delete`. Declining, or having no
-  terminal on standard input, is always the safe choice, so Filo still works the same from a script or a timer.
+  should look first: `filo delete` and `filo indexes remove` before removing anything; `filo update` before clearing
+  retentions, removing tags, creating policies, or renaming or moving files; `filo set` before replacing a stored
+  value; `filo policies set` and `move` before putting files past their retention or leaving them without a
+  `file_date` to count from; and any command before replacing an existing `-o` file. Declining, or having no terminal
+  on standard input, is always the safe choice, so Filo still works the same from a script or a timer.
 - `filo roots` lists roots (settings, mount point, files, size, last scan); `filo roots add DIR [--include-hidden]
   [--ignore NAME]... [--no-scan]` registers one and scans it (absorbing any roots inside it on the same filesystem,
   see Roots); `filo roots set DIR [--include-hidden | --skip-hidden] [--ignore NAME]...` replaces its settings.
@@ -2133,7 +2136,8 @@ Agreed 2026-11-20, designed 2026-11-28 (roadmap 36). Tab completes Filo's comman
   <(filo completion bash)` in `.bashrc` (always current, run at each shell start), or the output saved once to
   `~/.local/share/bash-completion/completions/filo`, which the `bash-completion` package loads on the first Tab
   (written again after an upgrade that changes commands). Filo never edits `.bashrc` itself (hard rules);
-  `scripts/install.sh`, which the person runs, adds the `source` line (see Build and install). Bash only
+  `scripts/install.sh`, which the person runs, adds the `source` line (see Language and environment, "Build and
+  install"). Bash only
   (zsh can load bash completions); no framework (Cobra would be a dependency and a rewrite of every command's
   parsing).
 - **The script stays a few lines.** On Tab it runs a hidden `filo __complete LINE WORD` with the command line up to
@@ -2266,10 +2270,12 @@ command's output with them. The examples here are excerpts of them.
   grouped by root; wrapping; `… N more`), `Table`, `Groups` and `HeadedTable`, `Dup` and `Dups` (a `DupGroup`:
   `contract.pdf · 8 MB each` with its keep and delete lines and symlink notes), `Problems` (line, file, reason and
   what to do; repeats collapsed), `Ask` and `Choose` (prompts), `Item` and `ItemPath` (a select-mode item and its
-  result), `Paragraph` and `Terms` (help), `PathLines` and `RawPaths` (`filo find`'s lists for a pipe), and `Next`. Commands build the
+  result), `Paragraph` and `Terms` (help), `PathLines` and `RawPaths` (`filo find`'s lists for a pipe), `Renames` and `Moves`
+  (an update's renames and moves), `Completions` (bash completion's answer, written raw, never to a terminal), and
+  `Next`. Commands build the
   data and hand it to components; they never format output themselves or decide plain or rich, relative or full
   paths. Each component writes whole lines, one write per line.
-- **Scope: every command** (roots, scan, report, export, update, delete, help and errors).
+- **Scope: every command**, help and errors included.
 
 Examples, from the golden files (plain form, as when piped; `<root>` is the test's root directory; what the person
 typed at a prompt is not echoed):
@@ -2546,7 +2552,8 @@ Nothing exported.
   The help (`internal/cli/help.go`) is the one written list of every command's usage lines and flags: a flag added,
   changed or removed in a command is changed in its help, in the same commit (its usage lines and its flag list, with
   the placeholder word for a flag's value), as are the overview's lines when a command or subcommand changes.
-  Nothing checks this yet: it is kept by hand.
+  `TestHelpListsTheRealFlags` fails when a command's flag list differs from the flags it defines (see Bash
+  completion, "The help is the list of flags"); the descriptions are kept by hand.
 - **Errors and warnings** stay on stderr, plain (no colour, symbols or `~`: they end up in logs and get copied, and a
   full path is unambiguous there), one line each, `filo: <message>` and `filo: warning: <message>`. A usage error is
   one line too, pointing at the command's own help, `filo: roots add takes exactly one DIR (see filo help roots)`;
@@ -2840,8 +2847,9 @@ and put another in its place). From the code review of the snapshots: Ctrl-C can
 a snapshot being written (milliseconds for a register of a few MB), and every run that writes copies the whole register
 (fine at a few MB; a scan that found nothing takes none since 2026-11-21). From the code review of 2026-11-13: a snapshot is renamed
 into place after a check that the name is free, and a program not taking Filo's lock could create that name in between
-and be overwritten (the directory is private to the user; an atomic no-replace rename needs `golang.org/x/sys`); and the
-directories on a deleted file's path are checked by name, not held open, so a directory swapped in the microseconds
-after the last look is followed. `filo find -0` writes file names unescaped (see Finding files): it is refused when
+and be overwritten (the directory is private to the user; the no-replace `renameat2` that renames and moves use is
+Linux-only, and snapshots do not use it). A directory on the path of a file being deleted, renamed or
+moved that is itself moved in the instant between the last look and the call is not caught: the file acted on is
+still the one checked, in the directory checked, wherever that has just been moved to (see Disposal). `filo find -0` writes file names unescaped (see Finding files): it is refused when
 stdout is a terminal, but a pipe that ends in one (`filo find -0 | cat`) shows the raw names, as `find -print0 | cat`
 does; a list of names for `xargs -0` has to be the names.
