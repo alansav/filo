@@ -84,6 +84,14 @@ func (e *env) export(ctx context.Context, dbBefore string, args []string) error 
 	if err != nil {
 		return err
 	}
+	// Never inside a git repository, where the CSV could be committed by mistake (docs/design.md, Lifespan): refused
+	// before anything else, so it costs nothing.
+	if repo, err := gitRepoAbove(csvPath); err != nil {
+		return err
+	} else if repo != "" {
+		return fmt.Errorf("%s is inside a git repository (%s): a CSV there could be committed by mistake; write it "+
+			"outside", csvPath, repo)
+	}
 	s, err := e.open(ctx, *db)
 	if err != nil {
 		return err

@@ -152,8 +152,10 @@ var commandHelps = map[string]commandHelp{
 			"Scans first (DIR only; every root for export duplicates), then writes every file under DIR (inside a " +
 				"root), or under every root, as CSV (UTF-8) to FILE. A root that cannot be scanned stops the export. " +
 				"If FILE " +
-				"exists, filo asks before replacing it (only a regular file, and only at a terminal). Columns: id, " +
-				"export, directory, name, size, modified, file_date, retention, keep_until, tags. " +
+				"exists, filo asks before replacing it (only a regular file, and only at a terminal). FILE is never " +
+				"inside a git repository (a directory holding .git, there or above it): a CSV there could be " +
+				"committed by mistake. Columns: id, export, directory, name, size, modified, file_date, retention, " +
+				"keep_until, tags, conflict. " +
 				"Fill in retention in a spreadsheet (a period such as 7y counted from file_date, a date, forever, or " +
 				"a policy name: filo help policies) and tags (separated by ;, see filo help tag), correct a " +
 				"name to rename the file, or change its directory to move it within its root, then run filo update " +

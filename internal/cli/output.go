@@ -131,3 +131,38 @@ func stillAsked(csvPath string, asked fs.FileInfo) error {
 	}
 	return nil
 }
+
+// gitRepoAbove returns the top of the git working tree that holds csvPath's directory: the nearest directory, that
+// one or one above it, holding .git (a directory, or a file, as a worktree or a submodule has), or "" if none does
+// (docs/design.md, Lifespan, "Never inside a git repository"). The directory is resolved first (symlinks followed),
+// so a symlink into a repository is no way round it; one that does not exist yet is looked at from the nearest
+// directory above it that does. A .git that cannot be looked at is an error: the export is refused all the same.
+func gitRepoAbove(csvPath string) (string, error) {
+	dir := filepath.Dir(csvPath)
+	for {
+		resolved, err := filepath.EvalSymlinks(dir)
+		if err == nil {
+			dir = resolved
+			break
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	for {
+		_, err := os.Lstat(filepath.Join(dir, ".git"))
+		if err == nil {
+			return dir, nil
+		}
+		if !errors.Is(err, fs.ErrNotExist) {
+			return "", fmt.Errorf("cannot tell whether %s is inside a git repository: %w", csvPath, err)
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", nil
+		}
+		dir = parent
+	}
+}

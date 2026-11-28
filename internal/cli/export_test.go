@@ -318,3 +318,79 @@ func TestExportNoScanLine(t *testing.T) {
 	contains("retention holds its root", filo(ExitOK, "", false, "export", ct.in("tax"), "--no-scan",
 		"-o", csv("3.csv")).stdout, "  - not scanned first: as of the last scan, ")
 }
+
+// TestExportRefusesAGitRepository (docs/design.md, Lifespan, "Never inside a git repository"): a CSV is never written
+// inside a git working tree, however the path reaches it; nothing is written and no export is recorded.
+func TestExportRefusesAGitRepository(t *testing.T) {
+	tests := []struct {
+		name  string
+		setup func(t *testing.T, base string) string // returns the -o path
+		kind  []string                               // "duplicates" or nothing
+		ok    bool
+	}{
+		{"a .git directory where the CSV goes", func(t *testing.T, base string) string {
+			mkdir(t, filepath.Join(base, "repo", ".git"))
+			return filepath.Join(base, "repo", "files.csv")
+		}, nil, false},
+		{"a .git directory two levels up", func(t *testing.T, base string) string {
+			mkdir(t, filepath.Join(base, "repo", ".git"))
+			mkdir(t, filepath.Join(base, "repo", "a", "b"))
+			return filepath.Join(base, "repo", "a", "b", "files.csv")
+		}, nil, false},
+		{"a .git file (a worktree)", func(t *testing.T, base string) string {
+			mkdir(t, filepath.Join(base, "wt"))
+			if err := os.WriteFile(filepath.Join(base, "wt", ".git"), []byte("gitdir: /elsewhere\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			return filepath.Join(base, "wt", "files.csv")
+		}, nil, false},
+		{"a symlinked directory into a repository", func(t *testing.T, base string) string {
+			mkdir(t, filepath.Join(base, "repo", ".git"))
+			mkdir(t, filepath.Join(base, "repo", "out"))
+			if err := os.Symlink(filepath.Join(base, "repo", "out"), filepath.Join(base, "link")); err != nil {
+				t.Fatal(err)
+			}
+			return filepath.Join(base, "link", "files.csv")
+		}, nil, false},
+		{"a duplicates export", func(t *testing.T, base string) string {
+			mkdir(t, filepath.Join(base, "repo", ".git"))
+			return filepath.Join(base, "repo", "dups.csv")
+		}, []string{"duplicates"}, false},
+		{"outside any repository", func(t *testing.T, base string) string {
+			mkdir(t, filepath.Join(base, "plain"))
+			return filepath.Join(base, "plain", "files.csv")
+		}, nil, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ct := newCLITest(t)
+			ct.write("a.txt", "a")
+			ct.filo(ExitOK, "", false, "roots", "add", ct.root)
+			base := canonicalTemp(t)
+			csv := tt.setup(t, base)
+			args := append(append([]string{"export"}, tt.kind...), "-o", csv)
+			if tt.ok {
+				ct.filo(ExitOK, "", false, args...)
+				if _, err := os.Stat(csv); err != nil {
+					t.Fatalf("the CSV was not written: %v", err)
+				}
+				return
+			}
+			r := ct.filo(ExitError, "", false, args...)
+			ct.contains("refusal", r.stderr, "is inside a git repository", "could be committed by mistake")
+			if _, err := os.Lstat(csv); err == nil {
+				t.Fatal("a CSV was written inside a git repository")
+			}
+			// Nothing recorded: the next export made is the first.
+			out := ct.filo(ExitOK, "", false, "export", "-o", filepath.Join(ct.work, "after.csv")).stdout
+			ct.contains("the next export", out, "#1")
+		})
+	}
+}
+
+func mkdir(t *testing.T, p string) {
+	t.Helper()
+	if err := os.MkdirAll(p, 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
