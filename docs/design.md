@@ -3,7 +3,7 @@
 **The present.** Of three documents, this is the present: `design.md` (what Filo is), `roadmap.md` (the future:
 what it is not yet) and `history.md` (the past: how it got here).
 
-Filo as built: schema version 19. Last updated: 2026-11-28.
+Filo as built: schema version 20. Last updated: 2026-11-28.
 
 This file records what Filo does and why, as built. Work not done yet, ideas, open questions and ideas rejected are
 in `roadmap.md`, where designs are worked out; a design moves here, in its own commit, when work on it starts (see
@@ -71,7 +71,7 @@ Principles. These are not negotiable:
   2026-11-28 there was no device column, because nothing left the device).
 - Driver: `modernc.org/sqlite` (pure Go, no CGO, plain `database/sql`), chosen 2026-11-11 at v1.62.0.
 - `meta.schema_version` must equal the build's version. An older database is upgraded when it is opened, one version
-  at a time, each step in its own transaction with the version bump (from any version from 1 to 18); a newer version, or an older
+  at a time, each step in its own transaction with the version bump (from any version from 1 to 19); a newer version, or an older
   one with no migration, is refused, as is a SQLite file without Filo's `meta` keys. WAL mode is set only after those checks pass, so
   a foreign database is never modified.
 - One writer at a time: an `flock` on `<db>.lock`, taken before the database is opened. The kernel drops it if Filo
@@ -2785,7 +2785,7 @@ $ filo roots add
 filo: roots add takes exactly one DIR (see filo help roots)
 ```
 
-## 3. Data model (schema version 19)
+## 3. Data model (schema version 20)
 
 The register as `internal/store/schema.go` creates it (`schemaSQL`), with the meaning of each column. Keep the
 interval history and the partial unique index.
@@ -3030,6 +3030,11 @@ CREATE TABLE settings_seen (            -- schema 18: each setting's value this 
     synced_id INTEGER NOT NULL,         -- value here that differs is a change of its own to write (0: a policy,
     key TEXT NOT NULL, value TEXT NOT NULL,  -- which is global)
     PRIMARY KEY (synced_id, key));
+
+CREATE TABLE dir_cursors (              -- schema 20: how far this device's publishing has got in each synced
+    synced_id INTEGER PRIMARY KEY,      -- directory; none: from the register's cursors (meta). A directory that
+    reviews INTEGER NOT NULL, tag_changes INTEGER NOT NULL,  -- cannot be written is caught up on its own
+    policy_changes INTEGER NOT NULL, events INTEGER NOT NULL);
 ```
 
 "Present" means a file has a path interval with `valid_to_scan IS NULL`; there is no status column. "New" means

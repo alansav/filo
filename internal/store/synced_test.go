@@ -200,3 +200,23 @@ func TestRemoveSyncedAfterDecisions(t *testing.T) {
 		t.Fatalf("still known: %+v", d)
 	}
 }
+
+func TestDirCursors(t *testing.T) {
+	ctx := context.Background()
+	s, root := syncedTestStore(t)
+	id, _ := s.ApplySynced(ctx, SyncedChange{Add: &SyncedDir{SyncID: "s", RootID: root.ID, State: SyncedJoined,
+		AddedUTC: "t"}})
+	if _, ok, err := s.DirCursors(ctx, id); err != nil || ok {
+		t.Fatalf("a new directory's cursors: %v, %v", ok, err)
+	}
+	want := PublishCursors{1, 2, 3, 4}
+	if _, err := s.ApplySynced(ctx, SyncedChange{SyncedID: id, Cursor: &want}); err != nil {
+		t.Fatal(err)
+	}
+	if got, ok, _ := s.DirCursors(ctx, id); !ok || got != want {
+		t.Fatalf("DirCursors = %+v, %v", got, ok)
+	}
+	if err := s.RemoveSynced(ctx, id); err != nil {
+		t.Fatal(err)
+	}
+}

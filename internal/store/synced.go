@@ -115,11 +115,14 @@ type SyncedChange struct {
 	Decisions []Decision
 	Replaces  [][]LineRef
 	Shared    map[string]int64
+	// Cursor, if set, is where this device's publishing in the synced directory has got to.
+	Cursor *PublishCursors
 }
 
 // Empty reports whether the change writes nothing.
 func (c SyncedChange) Empty() bool {
-	return c.Add == nil && len(c.Devices) == 0 && len(c.Journals) == 0 && len(c.Decisions) == 0 && len(c.Shared) == 0
+	return c.Add == nil && len(c.Devices) == 0 && len(c.Journals) == 0 && len(c.Decisions) == 0 &&
+		len(c.Shared) == 0 && c.Cursor == nil
 }
 
 // ApplySynced writes c and returns the synced directory's ID. Lines already kept are not written again; a line
@@ -154,6 +157,18 @@ const (
 	metaPublishPolicies = "publish_policy_changes_id"
 	metaPublishEvents   = "publish_events_id"
 )
+
+// DirCursors returns how far this device's publishing in synced directory id has got (false: no row yet, so it
+// starts from the register's cursors).
+func (s *Store) DirCursors(ctx context.Context, id int64) (PublishCursors, bool, error) {
+	var c PublishCursors
+	err := s.db.QueryRowContext(ctx, `SELECT reviews, tag_changes, policy_changes, events FROM dir_cursors
+		WHERE synced_id = ?`, id).Scan(&c.Reviews, &c.TagChanges, &c.PolicyChanges, &c.Events)
+	if errors.Is(err, sql.ErrNoRows) {
+		return c, false, nil
+	}
+	return c, err == nil, err
+}
 
 // Cursors returns the publish cursors.
 func (s *Store) Cursors(ctx context.Context) (PublishCursors, error) {
@@ -282,6 +297,14 @@ func applySynced(ctx context.Context, tx *sql.Tx, c SyncedChange) (int64, error)
 			return 0, fmt.Errorf("record a shared file: %w", err)
 		}
 	}
+	if c.Cursor != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO dir_cursors (synced_id, reviews, tag_changes, policy_changes,
+			events) VALUES (?, ?, ?, ?, ?) ON CONFLICT (synced_id) DO UPDATE SET reviews = excluded.reviews,
+			tag_changes = excluded.tag_changes, policy_changes = excluded.policy_changes, events = excluded.events`,
+			id, c.Cursor.Reviews, c.Cursor.TagChanges, c.Cursor.PolicyChanges, c.Cursor.Events); err != nil {
+			return 0, err
+		}
+	}
 	for i := range c.Decisions {
 		c.Decisions[i].SyncedID = id
 	}
@@ -321,6 +344,7 @@ func (s *Store) RemoveSynced(ctx context.Context, id int64) error {
 	for _, q := range []string{`DELETE FROM journal_lines WHERE synced_id = ?`, `DELETE FROM journals WHERE synced_id = ?`,
 		`DELETE FROM decisions WHERE synced_id = ?`, `DELETE FROM replaced WHERE synced_id = ?`,
 		`DELETE FROM shared_files WHERE synced_id = ?`, `DELETE FROM settings_seen WHERE synced_id = ?`,
+		`DELETE FROM dir_cursors WHERE synced_id = ?`,
 		`DELETE FROM synced_dirs WHERE id = ?`} {
 		if _, err := tx.ExecContext(ctx, q, id); err != nil {
 			return err

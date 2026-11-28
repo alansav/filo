@@ -3,7 +3,7 @@ package store
 // SchemaVersion is the schema this build reads and writes. It is stored in meta.schema_version when a database is
 // created. An older database with a migration in migrations is upgraded when it is opened; any other version is
 // refused.
-const SchemaVersion = 19
+const SchemaVersion = 20
 
 // Meta keys.
 const (
@@ -90,7 +90,7 @@ CREATE TABLE events (
     other_path TEXT,
     detail TEXT
 );
-` + reviewSQL + duplicatesSQL + policiesSQL + rulesSQL + tagsSQL + tagIndexSQL + syncedSQL + decisionsSQL + writersSQL + seenSQL
+` + reviewSQL + duplicatesSQL + policiesSQL + rulesSQL + tagsSQL + tagIndexSQL + syncedSQL + decisionsSQL + writersSQL + seenSQL + dirCursorsSQL
 
 // reviewSQL is the export and review tables, as of schema version 13.
 const reviewSQL = `
@@ -261,7 +261,24 @@ ALTER TABLE export_rows ADD COLUMN name TEXT;
 	// 18 -> 19: the publish cursor for scan and delete events (docs/design.md, Sharing decisions between devices,
 	// identity facts), set past every event so far by migrate. No SQL.
 	18: ``,
+	// 19 -> 20: the publish cursors of each synced directory. A new table only: a directory with none starts from the
+	// register's cursors.
+	19: dirCursorsSQL,
 }
+
+// dirCursorsSQL is the publish cursors of each synced directory, added in schema version 20: how far this device has
+// written its decisions and facts to its journal there, so a directory that could not be written (its journal ahead,
+// left for later) is caught up on its own, and the others are never written again what they have already. A
+// directory with no row starts from the register's cursors (meta), which move on with every run.
+const dirCursorsSQL = `
+CREATE TABLE dir_cursors (
+    synced_id INTEGER PRIMARY KEY,
+    reviews INTEGER NOT NULL,
+    tag_changes INTEGER NOT NULL,
+    policy_changes INTEGER NOT NULL,
+    events INTEGER NOT NULL
+);
+`
 
 // seenSQL is the settings seen, added in schema version 18: for each setting (a policy: synced_id 0, as a policy is
 // global; the others by synced directory), the value this device last wrote to a journal or applied from one. Only a
