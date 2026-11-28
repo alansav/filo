@@ -1080,6 +1080,18 @@ built the same day on branch `sync`, in seven slices, each reviewed once (medium
 - **Not done, in the roadmap**: replaying lines a newer Filo wrote after an upgrade (devices on mixed versions),
   compacting journals, handing over a tag index beyond `take`.
 
+## Export never inside a git repository
+
+Asked for by the person on 2026-11-28, after item 9 was merged: a CSV of file names, paths and decisions written
+inside a git working tree could be committed and pushed by mistake. Designed and built the same day on branch
+`git-guard`: `filo export` and `export duplicates` refuse an `-o FILE` whose directory, resolved, or one above it
+holds `.git` (a directory or a worktree's file), before the scan; no `git` is run and `.gitignore` is not read, and
+there is no override (a home directory that is a repository is the accepted limit). The medium review found three
+nits, all fixed: a part of the path that cannot be resolved is refused rather than walked past, two more test cases,
+and the CLI tests fail clearly when the temporary directory is inside a repository. Tests: table-driven end to end
+(`.git` at or above the directory, a worktree's `.git` file, a symlink into a repository, a directory not made yet,
+one that cannot be looked into, a duplicates export, and outside any repository).
+
 ## Notes on decisions
 
 Short notes taken out of `design.md` on 2026-11-17, by the section they were in.
