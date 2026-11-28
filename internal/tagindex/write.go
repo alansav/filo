@@ -278,6 +278,22 @@ func (w *writer) open(dir string) (*os.Root, error) {
 	return r, nil
 }
 
+// stillOpen checks that dir, a directory in the index's directory, is still at its name the very directory opened.
+func (w *writer) stillOpen(dir string) error {
+	r, ok := w.dirs[dir]
+	if !ok {
+		return errDirChanged
+	}
+	fi, err := w.dirs["."].Lstat(dir)
+	if err != nil || !fi.IsDir() {
+		return errDirChanged
+	}
+	if got, err := r.Stat("."); err != nil || !os.SameFile(fi, got) {
+		return errDirChanged
+	}
+	return nil
+}
+
 // forget closes and drops the open directory dir, once it is removed.
 func (w *writer) forget(dir string) {
 	if r, ok := w.dirs[dir]; ok {
@@ -405,6 +421,10 @@ func (w *writer) removeAll(drop func(name string) bool) {
 		switch {
 		case errors.Is(err, fs.ErrNotExist):
 			delete(w.res.Files, name)
+		case errors.Is(err, errDirChanged):
+			// Its directory is not Filo's any more (the directory pass says so): nor is the file, reported once.
+			delete(w.res.Files, name)
+			w.problem(name, "is in a directory that is not Filo's any more: it stays")
 		case err != nil:
 			w.problem(name, "cannot be looked at: "+errText(err))
 		case !fi.Mode().IsRegular() || !sameIn(parent, base, h):
@@ -539,7 +559,14 @@ func (w *writer) writeFile(name string, content []byte) error {
 	if tdir == dir {
 		err = tr.Rename(tmp, base)
 	} else {
-		err = w.dirs["."].Rename(path.Join(tdir, tmp), name)
+		// By path from the index's directory, which os.Root keeps inside it: the pages directory is checked to be
+		// still the one opened just before, and again if the rename fails, so a swap says so.
+		if err := w.stillOpen(tdir); err != nil {
+			return err
+		}
+		if err = w.dirs["."].Rename(path.Join(tdir, tmp), name); err != nil && w.stillOpen(tdir) != nil {
+			err = errDirChanged
+		}
 	}
 	if err != nil {
 		return err

@@ -307,10 +307,10 @@ func TestWriteNeverFollowsASwappedDirectory(t *testing.T) {
 				t.Errorf("written outside the index: %v", entries)
 			}
 			// The pages go into the directories opened. NAME.html's temporary file is in the pages directory, and
-			// its rename into the index's directory goes by .index, now a symlink out: refused, not followed.
+			// its rename into the index's directory goes by .index, now a symlink: refused, saying why.
 			wantProblems, wantWritten := []string(nil), 3
 			if swapped == ".index" {
-				wantProblems = []string{"index.html could not be written: path escapes from parent"}
+				wantProblems = []string{"index.html could not be written: " + errDirChanged.Error()}
 				wantWritten = 2
 			}
 			check(t, "problems", problems(res), wantProblems)
@@ -327,4 +327,24 @@ func TestWriteNeverFollowsASwappedDirectory(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestWriteForgetsFilesOfADirectoryNoLongerFilos: a key's directory replaced by a symlink, and no longer needed,
+// is reported once with the page Filo wrote in it, and neither is recorded after (so not reported again).
+func TestWriteForgetsFilesOfADirectoryNoLongerFilos(t *testing.T) {
+	ix := fixture(t)
+	write(t, &ix, pages(map[string]string{"index.html": "main", ".index/a/x.html": "x"}, ".index", ".index/a"))
+	if err := os.RemoveAll(ix.Abs(".index/a")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(t.TempDir(), ix.Abs(".index/a")); err != nil {
+		t.Fatal(err)
+	}
+	res := write(t, &ix, pages(map[string]string{"index.html": "main 2"}, ".index"))
+	check(t, "problems", problems(res), []string{
+		".index/a/x.html is in a directory that is not Filo's any more: it stays",
+		".index/a is not a directory Filo made any more: it stays"})
+	check(t, "recorded", slices.Sorted(maps.Keys(ix.Files)), []string{".index", "index.html"})
+	res = write(t, &ix, pages(map[string]string{"index.html": "main 2"}, ".index"))
+	check(t, "problems the next time", problems(res), nil)
 }
