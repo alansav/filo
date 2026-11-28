@@ -2131,7 +2131,9 @@ the desktop, kept its retention on the laptop's next scan, because the move was 
     excluded".
   - A tag index inside the synced directory: shared, and written by one device only (the one that added it, until
     handed over), so two devices never rewrite the same pages.
-  - Facts, which never conflict: **identity** (the first decision about a file gives it a random shared file ID;
+  - Facts, which never conflict: **identity** (the first decision about a file gives it a shared file ID, made from
+    the synced directory's ID, the file's content and its path, so two devices deciding about the same file before
+    either has read the other give it the same ID; a random one if that ID is another file's already;
     a device's scan journals what it paired for such a file: moved, renamed, edited, returned), renames and moves
     by `filo update`, and deletes by Filo (another device closes the row as "deleted by Filo on laptop" once the
     file is gone there, so a copy restored later is a new file everywhere). Two facts that contradict each other

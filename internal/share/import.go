@@ -26,6 +26,10 @@ type DirReport struct {
 	// and the highest line it holds of each journal. A device with none, or one that does not check, is not in it.
 	Status  map[string]journal.StatusBody
 	Writing bool // this device writes there (false: retired there, or its journal is not its own)
+	// Waiting counts the other devices' decisions not applied yet: their file not found here yet, or its content
+	// not yet the one they were made on (the sync has not brought it). Conflicts counts the things decided (a file's
+	// date, retention or a tag) with current decisions of different values.
+	Waiting, Conflicts int
 }
 
 // Report is what Import found, a DirReport per joined synced directory.
@@ -201,6 +205,10 @@ func importDir(ctx context.Context, s *store.Store, me store.Device, sd store.Sy
 	// register's change for each journal read, and for each device newly retired here, from its stored state.
 	retired, notes := settle(reads, state, me.ID, devs, now)
 	dr.Problems = append(dr.Problems, notes...)
+	name := func(dev string) string { return nameOf(devs, dev) }
+	for _, r := range reads {
+		dr.Problems = append(dr.Problems, fileDecisions(r.lines, sd.ID, name, &ch)...)
+	}
 	updated := map[string]bool{}
 	for _, r := range reads {
 		if r.problem != "" {
@@ -248,6 +256,16 @@ func importDir(ctx context.Context, s *store.Store, me store.Device, sd store.Sy
 	}
 	if retired[me.ID] > 0 {
 		dr.Writing = false
+	}
+	waiting, problems, err := applyDecisions(ctx, s, sd, now)
+	if err != nil {
+		return dr, err
+	}
+	dr.Waiting, dr.Problems = waiting, append(dr.Problems, problems...)
+	if c, err := s.Conflicts(ctx, sd.ID); err != nil {
+		return dr, err
+	} else {
+		dr.Conflicts = len(c)
 	}
 	if dr.Writing && (len(ch.Journals) > 0 || statusDue(dr.Status[me.ID].Seen, now)) {
 		if err := writeStatus(ctx, s, d, sd.ID, me, now); err != nil {

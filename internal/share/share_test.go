@@ -668,4 +668,3 @@ func deviceKey(n *node) string {
 }
 
 func deviceEncode(d store.Device) string { return selfFrom(nil, d, t0).Key }
-

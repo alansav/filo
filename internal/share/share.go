@@ -456,8 +456,12 @@ func Join(ctx context.Context, s *store.Store, t Target, now time.Time) (store.S
 	}
 	devs[me.ID] = selfFrom(known, me, now)
 	retired, notes := settle(reads, map[string]store.JournalState{}, me.ID, devs, now)
+	name := func(dev string) string { return nameOf(devs, dev) }
 	for _, r := range reads {
 		ch.Journals = append(ch.Journals, r.update(store.JournalState{Dev: r.dev}, retired[r.dev]))
+		if r.dev != me.ID {
+			notes = append(notes, fileDecisions(r.lines, 0, name, &ch)...)
+		}
 	}
 	var first []byte
 	if _, here := p.results[me.ID]; !here {
@@ -490,6 +494,11 @@ func Join(ctx context.Context, s *store.Store, t Target, now time.Time) (store.S
 		if err := d.Create(journal.JournalName(me.ID), [][]byte{first}); err != nil {
 			return sd, notes, err
 		}
+	}
+	if _, problems, err := applyDecisions(ctx, s, sd, now); err != nil {
+		return sd, notes, err
+	} else {
+		notes = append(notes, problems...)
 	}
 	if retired[me.ID] > 0 {
 		return sd, notes, nil
