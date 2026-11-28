@@ -118,7 +118,7 @@ func TestCreateAppendReadReplace(t *testing.T) {
 	if err := d.Create(name, [][]byte{[]byte("again")}); err == nil {
 		t.Fatal("Create replaced a file")
 	}
-	if err := d.Append(name, [][]byte{[]byte("two"), []byte("three")}); err != nil {
+	if err := d.Append(name, 4, [][]byte{[]byte("two"), []byte("three")}); err != nil {
 		t.Fatal(err)
 	}
 	b, err := d.Read(name, 0)
@@ -145,8 +145,18 @@ func TestCreateAppendReadReplace(t *testing.T) {
 	if len(es) != 1 {
 		t.Errorf("temporary files left after Replace: %+v", es)
 	}
-	if err := d.Append("missing", [][]byte{[]byte("x")}); err == nil {
+	if err := d.Append("missing", 0, [][]byte{[]byte("x")}); err == nil {
 		t.Error("Append made a file")
+	}
+	// A torn append left part of a line at the end: the next Append refuses rather than join onto it.
+	if err := os.WriteFile(filepath.Join(top, FiloDir, name), []byte("new\npart"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Append(name, 4, [][]byte{[]byte("next")}); !errors.Is(err, ErrNotAt) {
+		t.Fatalf("Append after a torn line: %v, want ErrNotAt", err)
+	}
+	if b, _ := d.Read(name, 0); string(b) != "new\npart" {
+		t.Fatalf("a refused Append wrote: %q", b)
 	}
 }
 
@@ -168,7 +178,7 @@ func TestWritesRefuseLinks(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, name := range []string{"sym", "hard"} {
-		if err := d.Append(name, [][]byte{[]byte("x")}); err == nil {
+		if err := d.Append(name, 5, [][]byte{[]byte("x")}); err == nil {
 			t.Errorf("Append to %s succeeded", name)
 		}
 		if err := d.Replace(name, [][]byte{[]byte("x")}); err == nil {
@@ -201,6 +211,12 @@ func TestRecords(t *testing.T) {
 	if err != nil || m.ID != id || l.Dev != dev || !l.Verify(key.Public().(ed25519.PublicKey)) {
 		t.Fatalf("mark = %+v, %v", m, err)
 	}
+	if _, err := NewStatus(key, dev, map[string]int64{"bad": 2}, t0); err == nil {
+		t.Error("a status naming no device was made")
+	}
+	if _, err := NewMark(key, "", id, t0); err == nil {
+		t.Error("a mark by no device was made")
+	}
 	if _, err := ReadRecord(append(raw, '\n'), KindStatus); err == nil {
 		t.Error("a mark read as a status file")
 	}
@@ -210,7 +226,7 @@ func TestRecords(t *testing.T) {
 	if _, err := ReadRecord(append(append(raw, '\n'), append(raw, '\n')...), KindMark); err == nil {
 		t.Error("a mark of two lines read")
 	}
-	st, err := NewStatus(key, dev, map[string]int64{dev: 4, "bad": 2}, t0.Add(time.Hour))
+	st, err := NewStatus(key, dev, map[string]int64{dev: 4}, t0.Add(time.Hour))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -221,5 +237,23 @@ func TestRecords(t *testing.T) {
 	sb, err := sl.Status()
 	if err != nil || sb.Applied[dev] != 4 || len(sb.Applied) != 1 || sb.Seen != "2026-11-28T22:04:11Z" {
 		t.Fatalf("status = %+v, %v", sb, err)
+	}
+}
+
+func TestReadDoesNotWaitOnAFIFO(t *testing.T) {
+	top := t.TempDir()
+	d, err := Make(top)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	if err := mkfifo(filepath.Join(top, FiloDir, "journal.x")); err != nil {
+		t.Skip("no FIFOs here:", err)
+	}
+	if _, err := d.Read("journal.x", 0); err == nil {
+		t.Fatal("a FIFO was read")
+	}
+	if err := d.Append("journal.x", 0, [][]byte{[]byte("x")}); err == nil {
+		t.Fatal("a FIFO was appended to")
 	}
 }

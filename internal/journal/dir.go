@@ -7,6 +7,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/alansav/filo/internal/device"
@@ -52,7 +53,7 @@ func open(top string, mk bool) (*Dir, error) {
 		return nil, err
 	}
 	defer t.Close()
-	path := strings.TrimSuffix(top, "/") + "/" + FiloDir
+	path := filepath.Join(top, FiloDir)
 	fi, err := t.Lstat(FiloDir)
 	if errors.Is(err, fs.ErrNotExist) && mk {
 		if err := t.Mkdir(FiloDir, 0o700); err != nil && !errors.Is(err, fs.ErrExist) {
@@ -164,9 +165,10 @@ func isTemp(name string) bool {
 	return strings.HasPrefix(name, tempPrefix) && strings.HasSuffix(name, ".tmp")
 }
 
-// regular looks at name (not following a link) and returns it if it is a regular file of one link: a hard link to
-// another file would let a write here change that file.
-func (d *Dir) regular(name string) (fs.FileInfo, error) {
+// regular looks at name (not following a link) and returns it if it is a regular file, and, for a write, of one
+// link: a hard link to another file would let a write here change that file. Where the number of links cannot be
+// read (0), a write is refused.
+func (d *Dir) regular(name string, write bool) (fs.FileInfo, error) {
 	fi, err := d.root.Lstat(name)
 	if err != nil {
 		return nil, err
@@ -174,19 +176,21 @@ func (d *Dir) regular(name string) (fs.FileInfo, error) {
 	if !fi.Mode().IsRegular() {
 		return nil, fmt.Errorf("%s/%s is not a regular file", d.path, name)
 	}
-	if n := fsid.Links(fi); n > 1 {
-		return nil, fmt.Errorf("%s/%s has other names (hard links)", d.path, name)
+	if n := fsid.Links(fi); n > 1 || (write && n != 1) {
+		return nil, fmt.Errorf("%s has other names (hard links), or their number cannot be read",
+			filepath.Join(d.path, name))
 	}
 	return fi, nil
 }
 
-// openChecked opens name with flag and checks it is the regular file looked at, not one swapped in since.
+// openChecked opens name with flag (without blocking) and checks it is the regular file looked at, not one swapped
+// in since.
 func (d *Dir) openChecked(name string, flag int) (*os.File, error) {
-	fi, err := d.regular(name)
+	fi, err := d.regular(name, flag != os.O_RDONLY)
 	if err != nil {
 		return nil, err
 	}
-	f, err := d.root.OpenFile(name, flag, 0)
+	f, err := d.root.OpenFile(name, flag|noBlock, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -229,15 +233,27 @@ func (d *Dir) Exists(name string) (bool, error) {
 	return err == nil, err
 }
 
+// ErrNotAt is an Append to a file that is not the size it was expected to be: a torn append left part of a line at
+// its end, or it changed. Nothing is written: the caller writes the file whole again (Replace).
+var ErrNotAt = errors.New("the file is not where it was left")
+
 // Append adds lines to the end of name, each with its newline, in one write, then flushes it to the disk. name
-// must exist (Create makes a journal) and be a regular file of one link.
-func (d *Dir) Append(name string, lines [][]byte) error {
+// must exist (Create makes a journal), be a regular file of one link, and be size bytes long (ErrNotAt if not), so
+// a line is never joined onto part of one.
+func (d *Dir) Append(name string, size int64, lines [][]byte) error {
 	if len(lines) == 0 {
 		return nil
 	}
 	f, err := d.openChecked(name, os.O_WRONLY|os.O_APPEND)
 	if err != nil {
 		return err
+	}
+	if fi, err := f.Stat(); err != nil || fi.Size() != size {
+		f.Close()
+		if err != nil {
+			return err
+		}
+		return fmt.Errorf("%s: %w", filepath.Join(d.path, name), ErrNotAt)
 	}
 	if _, err := f.Write(joinLines(lines)); err != nil {
 		f.Close()
@@ -250,22 +266,23 @@ func (d *Dir) Append(name string, lines [][]byte) error {
 	return f.Close()
 }
 
-// Create makes name, which must not exist, holding lines.
+// Create makes name, which must not exist, holding lines. A file it could not write whole is removed again, so
+// a later Create can make it.
 func (d *Dir) Create(name string, lines [][]byte) error {
-	f, err := d.root.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	f, err := d.root.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL|noBlock, 0o600)
 	if err != nil {
-		return fmt.Errorf("create %s/%s: %w", d.path, name, err)
+		return fmt.Errorf("create %s: %w", filepath.Join(d.path, name), err)
 	}
-	if _, err := f.Write(joinLines(lines)); err != nil {
-		f.Close()
-		return fmt.Errorf("write %s/%s: %w", d.path, name, err)
+	_, err = f.Write(joinLines(lines))
+	if err == nil {
+		err = f.Sync()
 	}
-	if err := f.Sync(); err != nil {
-		f.Close()
-		return fmt.Errorf("write %s/%s: %w", d.path, name, err)
+	if cerr := f.Close(); err == nil {
+		err = cerr
 	}
-	if err := f.Close(); err != nil {
-		return err
+	if err != nil {
+		d.root.Remove(name) // the file just made, O_EXCL: no one else's
+		return fmt.Errorf("write %s: %w", filepath.Join(d.path, name), err)
 	}
 	return d.syncDir()
 }
@@ -274,7 +291,7 @@ func (d *Dir) Create(name string, lines [][]byte) error {
 // it is never seen half written. Whatever name was is replaced; a directory or a link there is refused.
 func (d *Dir) Replace(name string, lines [][]byte) error {
 	if _, err := d.root.Lstat(name); err == nil {
-		if _, err := d.regular(name); err != nil {
+		if _, err := d.regular(name, true); err != nil {
 			return err
 		}
 	} else if !errors.Is(err, fs.ErrNotExist) {
@@ -310,7 +327,7 @@ func (d *Dir) Replace(name string, lines [][]byte) error {
 func (d *Dir) createTemp() (string, *os.File, error) {
 	for range 10 {
 		name := tempPrefix + rand.Text()[:10] + ".tmp"
-		f, err := d.root.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+		f, err := d.root.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL|noBlock, 0o600)
 		if errors.Is(err, fs.ErrExist) {
 			continue
 		}

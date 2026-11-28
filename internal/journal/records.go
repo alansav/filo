@@ -34,6 +34,9 @@ type StatusBody struct {
 
 // NewMark makes the mark of a synced directory with the ID id, by the device dev.
 func NewMark(key ed25519.PrivateKey, dev, id string, now time.Time) ([]byte, error) {
+	if !device.ValidID(dev) {
+		return nil, errors.New("not a device ID")
+	}
 	if !device.ValidID(id) {
 		return nil, errors.New("not a synced directory's ID")
 	}
@@ -43,6 +46,14 @@ func NewMark(key ed25519.PrivateKey, dev, id string, now time.Time) ([]byte, err
 
 // NewStatus makes the status file of device dev.
 func NewStatus(key ed25519.PrivateKey, dev string, applied map[string]int64, now time.Time) ([]byte, error) {
+	if !device.ValidID(dev) {
+		return nil, errors.New("not a device ID")
+	}
+	for d, seq := range applied {
+		if !device.ValidID(d) || seq < 0 {
+			return nil, fmt.Errorf("a status naming %q at line %d", d, seq)
+		}
+	}
 	at := now.UTC().Format(timeFormat)
 	if applied == nil {
 		applied = map[string]int64{}
