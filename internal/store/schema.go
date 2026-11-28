@@ -3,7 +3,7 @@ package store
 // SchemaVersion is the schema this build reads and writes. It is stored in meta.schema_version when a database is
 // created. An older database with a migration in migrations is upgraded when it is opened; any other version is
 // refused.
-const SchemaVersion = 13
+const SchemaVersion = 14
 
 // Meta keys.
 const (
@@ -241,6 +241,9 @@ ALTER TABLE export_rows ADD COLUMN tags TEXT;
 	12: `
 ALTER TABLE export_rows ADD COLUMN name TEXT;
 `,
+	// 13 -> 14: the device's identity in meta (docs/design.md, Sharing decisions between devices). No SQL: migrate
+	// makes the random ID and key (insertDevice).
+	13: ``,
 }
 
 // tagIndexSQL is the tag index pages, added in schema version 12. An index is declared on a directory of a root

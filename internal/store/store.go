@@ -322,6 +322,9 @@ func create(ctx context.Context, db *sql.DB) error {
 			return fmt.Errorf("write meta: %w", err)
 		}
 	}
+	if err := insertDevice(ctx, tx); err != nil {
+		return err
+	}
 	return tx.Commit()
 }
 
@@ -401,8 +404,15 @@ func migrate(ctx context.Context, db *sql.DB, v int) (string, error) {
 			return fail(err)
 		}
 	}
-	if _, err := tx.ExecContext(ctx, migrations[v]); err != nil {
-		return fail(err)
+	if migrations[v] != "" {
+		if _, err := tx.ExecContext(ctx, migrations[v]); err != nil {
+			return fail(err)
+		}
+	}
+	if v == 13 {
+		if err := insertDevice(ctx, tx); err != nil {
+			return fail(err)
+		}
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE meta SET value = ? WHERE key = ?`, strconv.Itoa(v+1),
 		metaSchemaVersion); err != nil {

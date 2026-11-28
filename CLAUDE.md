@@ -16,7 +16,7 @@ done, and `design.md` only what exists.
 
 ## Current state
 
-Everything `docs/design.md` describes is built (schema 13; the newest on branch `improvements` until merged): scan,
+Everything `docs/design.md` describes is built (schema 14 on branch `sync`: the device identity of item 9; schema 13 on `main`): scan,
 register and report; retention through the CSV (`filo export`, `filo update`); `filo delete [DIR]
 [-y]`, which deletes a file only after it is re-read and found unchanged; register snapshots; duplicates (`filo delete
 FILE.csv`, `filo duplicates`); the terminal output (every command prints through `internal/view`); named retention
