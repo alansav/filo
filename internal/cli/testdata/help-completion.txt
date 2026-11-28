@@ -1,0 +1,12 @@
+filo completion bash
+
+  Prints the script that makes Tab complete filo's commands, flags, files,
+  directories, tags and policy names in bash. It writes nothing itself. Load it
+  in every new shell with this line in ~/.bashrc: source <(filo completion
+  bash). Or save it once to ~/.local/share/bash-completion/completions/filo,
+  where the bash-completion package loads it on the first Tab (save it again
+  after an upgrade that changes commands).
+
+  Completion only reads the register, never changes it, and takes no lock, so it
+  works while another filo runs; with no register it completes from the disk
+  alone.

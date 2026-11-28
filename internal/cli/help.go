@@ -60,6 +60,7 @@ var overview = struct {
 		{Name: "indexes add [DIR] [--name NAME]", Text: "write a directory's tag index, kept up to date from then on"},
 		{Name: "indexes remove [DIR] [--name NAME]", Text: "stop keeping an index, and remove its pages"},
 		{Name: "indexes refresh [DIR] [--name NAME]", Text: "write an index's pages again"},
+		{Name: "completion bash", Text: "print the script that makes Tab complete filo's commands, files and tags"},
 		{Name: "help [COMMAND]", Text: "this overview, or a command's flags and rules"},
 	},
 	after: "Every command accepts --db PATH (default: $FILO_DB, then the user data directory).",
@@ -74,6 +75,18 @@ type commandHelp struct {
 }
 
 var commandHelps = map[string]commandHelp{
+	"completion": {
+		usage: []string{"filo completion bash"},
+		before: []string{
+			"Prints the script that makes Tab complete filo's commands, flags, files, directories, tags and policy " +
+				"names in bash. It writes nothing itself. Load it in every new shell with this line in ~/.bashrc: " +
+				"source <(filo completion bash). Or save it once to ~/.local/share/bash-completion/completions/filo, " +
+				"where the bash-completion package loads it on the first Tab (save it again after an upgrade that " +
+				"changes commands).",
+			"Completion only reads the register, never changes it, and takes no lock, so it works while another " +
+				"filo runs; with no register it completes from the disk alone.",
+		},
+	},
 	"roots": {
 		usage: []string{
 			"filo roots",

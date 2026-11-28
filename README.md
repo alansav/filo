@@ -98,6 +98,26 @@ scripts/dev.sh run make build    # in the container
 scripts/install.sh               # on the host
 ```
 
+### Tab completion in bash
+
+Tab completes Filo's commands, flags, files and directories, tags (`sender:` then its values) and policy names. Add
+this line to `~/.bashrc` to load it in every new shell:
+
+```sh
+source <(filo completion bash)
+```
+
+Or save it once where the `bash-completion` package finds it, and save it again after an upgrade that changes
+commands:
+
+```sh
+filo completion bash > ~/.local/share/bash-completion/completions/filo
+```
+
+Completion only reads the register: it never changes it, takes no lock (so it works while a scan runs), and
+completes from the disk alone when there is no register. A file Filo deleted, or one gone missing, still completes
+for `filo show`.
+
 ## Quick start
 
 ```sh
@@ -663,6 +683,7 @@ Next: open ~/Documents/bills/index.html in a browser
 | `filo indexes add [DIR] [--name NAME]` | Write HTML pages of the files under `DIR` (the current directory) by tag, kept up to date from then on. |
 | `filo indexes remove [DIR] [--name NAME] [-y]` | Stop keeping an index, and remove its pages; asks first. |
 | `filo indexes refresh [DIR] [--name NAME]` | Write an index's pages again (every index's, with no `DIR`). |
+| `filo completion bash` | Print the bash completion script (see [Install](#install)). |
 | `filo help [COMMAND]` | Show usage. `-h` works on every command. |
 
 Options for `filo roots add` and `filo roots set`, which every scan of the root then uses:
